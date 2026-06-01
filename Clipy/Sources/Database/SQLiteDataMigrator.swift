@@ -26,8 +26,17 @@ extension DatabaseMigrator {
                   "id" TEXT PRIMARY KEY NOT NULL ON CONFLICT REPLACE DEFAULT (uuid()),
                   "title" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
                   "pasteboardTypes" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '[]',
+                  "deviceID" TEXT,
                   "updateAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT (unixepoch())
                 ) STRICT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                CREATE INDEX "index_pasteboardHistories_on_updateAt"
+                ON "pasteboardHistories" ("updateAt")
                 """
             )
             .execute(database)
@@ -59,6 +68,7 @@ extension DatabaseMigrator {
                 """
                 CREATE TABLE "pasteboardHistoryThumbnailAssets" (
                   "pasteboardHistoryID" TEXT PRIMARY KEY NOT NULL,
+                  "kind" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
                   "data" BLOB NOT NULL,
                   FOREIGN KEY ("pasteboardHistoryID")
                     REFERENCES "pasteboardHistories" ("id")
