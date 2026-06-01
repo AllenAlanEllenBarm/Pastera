@@ -48,6 +48,8 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.loginItem)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.suppressAlertForLoginItem)
         defaultValues.updateValue(NSNumber(value: 30), forKey: Constants.UserDefaults.maxHistorySize)
+        defaultValues.updateValue(NSNumber(value: 1000), forKey: Constants.UserDefaults.storedHistoryLimit)
+        defaultValues.updateValue(NSNumber(value: 10 * 1024 * 1024), forKey: Constants.UserDefaults.maxSyncedAssetBytes)
         defaultValues.updateValue(NSNumber(value: 1), forKey: Constants.UserDefaults.showStatusItem)
         let storeTypes = PasteboardAvailableType.allCases.reduce(into: [:]) { $0[$1.rawValue] = NSNumber(value: true) }
         defaultValues.updateValue(storeTypes, forKey: Constants.UserDefaults.storeTypes)

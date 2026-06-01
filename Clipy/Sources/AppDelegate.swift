@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     private(set) var updaterController: SPUStandardUpdaterController?
     private let screenshotObserver = ScreenShotObserver()
     private let disposeBag = DisposeBag()
+    private var historySearchWindowController: HistorySearchWindowController?
 
     @Dependency(\.context)
     var context
@@ -62,6 +63,15 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     @objc func showSnippetEditorWindow() {
         NSApp.activate(ignoringOtherApps: true)
         CPYSnippetsEditorWindowController.sharedController.showWindow(self)
+    }
+
+    @objc func showHistorySearchWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if historySearchWindowController == nil {
+            historySearchWindowController = HistorySearchWindowController()
+        }
+        historySearchWindowController?.showWindow(self)
+        historySearchWindowController?.window?.makeKeyAndOrderFront(self)
     }
 
     @objc func terminate() {
@@ -198,8 +208,7 @@ extension AppDelegate: NSApplicationDelegate {
         // Clean datas every 30 minutes
         Observable<Int>.interval(.seconds(60 * 30), scheduler: MainScheduler.asyncInstance)
             .subscribe(onNext: { [weak self] _ in
-                let maxHistorySize = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.maxHistorySize)
-                self?.pasteboardHistoryRepository.deleteOverflowingHistories(maxHistorySize: maxHistorySize)
+                self?.pasteboardHistoryRepository.pruneHistories(settings: HistoryRetentionSettings.current())
             })
             .disposed(by: disposeBag)
     }
@@ -241,5 +250,222 @@ extension AppDelegate: ScreenShotObserverDelegate {
         guard let path = item.value(forAttribute: NSMetadataItemPathKey) as? String else { return }
         guard let image = NSImage(contentsOfFile: path) else { return }
         AppEnvironment.current.clipService.create(with: image)
+    }
+}
+
+private final class HistorySearchWindowController: NSWindowController, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    @Dependency(\.pasteboardHistoryRepository)
+    private var pasteboardHistoryRepository
+
+    private let searchField = NSSearchField()
+    private let typePopUpButton = NSPopUpButton()
+    private let regexButton = NSButton(checkboxWithTitle: "Regex", target: nil, action: nil)
+    private let caseButton = NSButton(checkboxWithTitle: "Aa", target: nil, action: nil)
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let tableView = NSTableView()
+    private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
+    private var historyDetails = [PasteboardHistoryDetail]()
+    private var pendingSearch: DispatchWorkItem?
+    private var searchGeneration = 0
+    private let pageLimit = 50
+
+    init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Search History"
+        super.init(window: window)
+        setupContent()
+        reloadSearch()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        scheduleSearch()
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        historyDetails.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let identifier = NSUserInterfaceItemIdentifier("HistorySearchCell")
+        let textField: NSTextField
+        if let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField {
+            textField = cell
+        } else {
+            textField = NSTextField(labelWithString: "")
+            textField.identifier = identifier
+            textField.lineBreakMode = .byTruncatingTail
+        }
+        textField.stringValue = displayTitle(for: historyDetails[row].history)
+        return textField
+    }
+
+    @objc private func optionChanged(_ sender: NSButton) {
+        scheduleSearch()
+    }
+
+    @objc private func typeChanged(_ sender: NSPopUpButton) {
+        scheduleSearch()
+    }
+
+    @objc private func loadMore(_ sender: NSButton) {
+        reloadSearch(appending: true)
+    }
+
+    @objc private func pasteSelectedHistory(_ sender: Any?) {
+        let selectedRow = tableView.selectedRow
+        guard historyDetails.indices.contains(selectedRow) else { return }
+        AppEnvironment.current.pasteService.paste(with: historyDetails[selectedRow].history)
+    }
+
+    private func setupContent() {
+        guard let contentView = window?.contentView else { return }
+        searchField.delegate = self
+        typePopUpButton.addItems(withTitles: ["All", "Text", "Images", "Files", "PDF"])
+        typePopUpButton.target = self
+        typePopUpButton.action = #selector(typeChanged(_:))
+        regexButton.target = self
+        regexButton.action = #selector(optionChanged(_:))
+        caseButton.target = self
+        caseButton.action = #selector(optionChanged(_:))
+        loadMoreButton.target = self
+        loadMoreButton.action = #selector(loadMore(_:))
+        loadMoreButton.isEnabled = false
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("History"))
+        column.title = "History"
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.doubleAction = #selector(pasteSelectedHistory(_:))
+        tableView.target = self
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+
+        [searchField, typePopUpButton, regexButton, caseButton, statusLabel, scrollView, loadMoreButton].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview($0)
+        }
+
+        NSLayoutConstraint.activate([
+            searchField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            searchField.trailingAnchor.constraint(equalTo: typePopUpButton.leadingAnchor, constant: -8),
+            typePopUpButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            typePopUpButton.widthAnchor.constraint(equalToConstant: 96),
+            typePopUpButton.trailingAnchor.constraint(equalTo: regexButton.leadingAnchor, constant: -8),
+            regexButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            regexButton.trailingAnchor.constraint(equalTo: caseButton.leadingAnchor, constant: -8),
+            caseButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            caseButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+
+            statusLabel.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
+            statusLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            statusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+
+            scrollView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: loadMoreButton.topAnchor, constant: -8),
+
+            loadMoreButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            loadMoreButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)
+        ])
+    }
+
+    private func scheduleSearch() {
+        pendingSearch?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.reloadSearch()
+        }
+        pendingSearch = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
+    private func reloadSearch(appending: Bool = false) {
+        searchGeneration += 1
+        let generation = searchGeneration
+        let offset = appending ? historyDetails.count : 0
+        let query = HistorySearchQuery(
+            text: searchField.stringValue,
+            mode: regexButton.state == .on ? .regex : .plain,
+            caseSensitive: caseButton.state == .on,
+            types: selectedTypes,
+            sortOrder: .newestFirst
+        )
+        statusLabel.stringValue = appending ? "Loading..." : "Searching..."
+        loadMoreButton.isEnabled = false
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                let results = try self.pasteboardHistoryRepository.searchHistoryDetails(
+                    query: query,
+                    includesThumbnailAsset: false,
+                    limit: self.pageLimit,
+                    offset: offset
+                )
+                DispatchQueue.main.async {
+                    guard generation == self.searchGeneration else { return }
+                    if appending {
+                        self.historyDetails.append(contentsOf: results)
+                    } else {
+                        self.historyDetails = results
+                    }
+                    self.statusLabel.stringValue = "\(self.historyDetails.count) results"
+                    self.loadMoreButton.isEnabled = results.count == self.pageLimit
+                    self.tableView.reloadData()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard generation == self.searchGeneration else { return }
+                    self.historyDetails = []
+                    self.statusLabel.stringValue = "Invalid search pattern"
+                    self.loadMoreButton.isEnabled = false
+                    self.tableView.reloadData()
+                }
+            }
+        }
+    }
+
+    private var selectedTypes: Set<NSPasteboard.PasteboardType> {
+        switch typePopUpButton.indexOfSelectedItem {
+        case 1:
+            return [.string, .deprecatedString]
+        case 2:
+            return [.tiff, .deprecatedTIFF]
+        case 3:
+            return [.fileURL]
+        case 4:
+            return [.pdf, .deprecatedPDF]
+        default:
+            return []
+        }
+    }
+
+    private func displayTitle(for history: PasteboardHistory) -> String {
+        if !history.title.isEmpty {
+            return history.title
+        }
+        switch history.primaryType {
+        case .tiff, .deprecatedTIFF:
+            return "(Image)"
+        case .pdf, .deprecatedPDF:
+            return "(PDF)"
+        case .fileURL:
+            return "(Files)"
+        default:
+            return "(Untitled)"
+        }
     }
 }

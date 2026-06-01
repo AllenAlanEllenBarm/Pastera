@@ -189,6 +189,7 @@ private extension MenuManager {
             clipMenu?.addItem(NSMenuItem(title: String(localized: "Clear History"), action: #selector(AppDelegate.clearAllHistory)))
         }
 
+        clipMenu?.addItem(NSMenuItem(title: String(localized: "Search History"), action: #selector(AppDelegate.showHistorySearchWindow)))
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Edit Snippets"), action: #selector(AppDelegate.showSnippetEditorWindow)))
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Preferences"), action: #selector(AppDelegate.showPreferenceWindow)))
         clipMenu?.addItem(NSMenuItem.separator())

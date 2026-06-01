@@ -114,5 +114,6 @@ extension ClipService {
 
         let unixTime = Int(Date().timeIntervalSince1970)
         pasteboardHistoryRepository.save(id: .init(rawValue: savedHash), content: content, updateAt: unixTime)
+        pasteboardHistoryRepository.pruneHistories(settings: HistoryRetentionSettings.current())
     }
 }

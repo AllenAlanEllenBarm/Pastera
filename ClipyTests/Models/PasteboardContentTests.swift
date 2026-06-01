@@ -142,4 +142,128 @@ struct PasteboardContentTests {
         #expect(content.hash != changedDataContent.hash)
         #expect(content.hash != changedOrderContent.hash)
     }
+
+    @Test
+    func pasteboardInitializerPreservesMultipleImageItems() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteboardContentTests.images"))
+        pasteboard.clearContents()
+        let firstImage = try #require(NSImage.create(with: .red, size: NSSize(width: 10, height: 10)).tiffRepresentation)
+        let secondImage = try #require(NSImage.create(with: .blue, size: NSSize(width: 20, height: 20)).tiffRepresentation)
+        let firstItem = NSPasteboardItem()
+        firstItem.setData(firstImage, forType: .tiff)
+        let secondItem = NSPasteboardItem()
+        secondItem.setData(secondImage, forType: .tiff)
+        pasteboard.writeObjects([firstItem, secondItem])
+
+        let content = try #require(PasteboardContent(pasteboard: pasteboard, types: [.tiff]))
+
+        #expect(content.assets.map(\.type) == [.tiff, .tiff])
+        #expect(content.assets.map(\.data) == [firstImage, secondImage])
+    }
+
+    @Test
+    func syncRecordJSONRoundTripsEncryptedPayload() throws {
+        let payload = Data("history payload".utf8)
+        let sealedPayload = try SyncPayloadCipher.seal(payload, passphrase: "sync-passphrase", salt: Data("salt".utf8))
+        let record = SyncRecord(
+            id: "history-1",
+            kind: .history,
+            deviceID: "device-a",
+            updatedAt: 10,
+            deletedAt: nil,
+            payload: sealedPayload,
+            schemaVersion: 1
+        )
+
+        let data = try JSONEncoder().encode(record)
+        let decoded = try JSONDecoder().decode(SyncRecord.self, from: data)
+
+        #expect(decoded == record)
+        #expect(try SyncPayloadCipher.open(decoded.payload, passphrase: "sync-passphrase", salt: Data("salt".utf8)) == payload)
+        #expect(throws: Error.self) {
+            _ = try SyncPayloadCipher.open(decoded.payload, passphrase: "wrong", salt: Data("salt".utf8))
+        }
+    }
+
+    @Test
+    func syncConflictPolicyChoosesNewestRecordAndDeleteTombstones() {
+        let oldRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 1, deletedAt: nil)
+        let newRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 2, deletedAt: nil)
+        let deleteRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 3, deletedAt: 3)
+
+        #expect(SyncConflictPolicy.lastWriteWins.resolve(local: oldRecord, remote: newRecord) == newRecord)
+        #expect(SyncConflictPolicy.lastWriteWins.resolve(local: newRecord, remote: deleteRecord) == deleteRecord)
+    }
+
+    @Test
+    func syncManifestJSONRoundTripsRecordMetadata() throws {
+        let manifest = SyncManifest(
+            schemaVersion: 1,
+            deviceID: "device-a",
+            updatedAt: 10,
+            records: [
+                SyncManifestRecord(id: "history-1", kind: .history, updatedAt: 8, deletedAt: nil),
+                SyncManifestRecord(id: "snippet-1", kind: .snippet, updatedAt: 9, deletedAt: 9)
+            ]
+        )
+
+        let data = try JSONEncoder().encode(manifest)
+        let decoded = try JSONDecoder().decode(SyncManifest.self, from: data)
+
+        #expect(decoded == manifest)
+    }
+
+    @Test
+    func syncServiceMergesRecordsAndPersistsWinners() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let service = SyncService(provider: provider)
+        let local = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
+        let remote = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 2, deletedAt: nil)
+        let snippet = SyncRecord.plaintextFixture(id: "snippet-1", kind: .snippet, updatedAt: 1, deletedAt: nil)
+
+        let merged = service.merge(local: [local, snippet], remote: [remote])
+        try service.push(merged)
+
+        #expect(merged == [remote, snippet])
+        #expect(try service.pull(kind: .history) == [remote])
+        #expect(try service.pull(kind: .snippet) == [snippet])
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderWritesRecordsAtomically() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let history = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
+        let snippet = SyncRecord.plaintextFixture(id: "snippet-1", kind: .snippet, updatedAt: 2, deletedAt: nil)
+
+        try provider.save(history)
+        try provider.save(snippet)
+
+        #expect(try provider.loadRecords(kind: .history) == [history])
+        #expect(try provider.loadRecords(kind: .snippet) == [snippet])
+    }
+}
+
+private extension SyncRecord {
+    static func plaintextFixture(
+        id: String,
+        kind: SyncRecord.Kind = .history,
+        updatedAt: Int,
+        deletedAt: Int?
+    ) -> SyncRecord {
+        SyncRecord(
+            id: id,
+            kind: kind,
+            deviceID: "device",
+            updatedAt: updatedAt,
+            deletedAt: deletedAt,
+            payload: EncryptedSyncPayload(nonce: Data(), ciphertext: Data("payload".utf8), tag: Data()),
+            schemaVersion: 1
+        )
+    }
 }

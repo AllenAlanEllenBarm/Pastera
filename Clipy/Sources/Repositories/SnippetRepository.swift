@@ -12,15 +12,76 @@
 
 import Combine
 import Dependencies
+import Foundation
 import SQLiteData
+
+struct SnippetFolderSyncPayload: Codable, Equatable {
+    let id: String
+    let title: String
+    let index: Int
+    let isEnabled: Bool
+
+    init(id: String, title: String, index: Int, isEnabled: Bool) {
+        self.id = id
+        self.title = title
+        self.index = index
+        self.isEnabled = isEnabled
+    }
+
+    init(folder: SnippetFolder) {
+        self.init(
+            id: folder.id.rawValue.uuidString,
+            title: folder.title,
+            index: folder.index,
+            isEnabled: folder.isEnabled
+        )
+    }
+}
+
+struct SnippetSyncPayload: Codable, Equatable {
+    let id: String
+    let folderID: String
+    let title: String
+    let content: String
+    let index: Int
+    let isEnabled: Bool
+
+    init(id: String, folderID: String, title: String, content: String, index: Int, isEnabled: Bool) {
+        self.id = id
+        self.folderID = folderID
+        self.title = title
+        self.content = content
+        self.index = index
+        self.isEnabled = isEnabled
+    }
+
+    init(snippet: Snippet) {
+        self.init(
+            id: snippet.id.rawValue.uuidString,
+            folderID: snippet.folderID.rawValue.uuidString,
+            title: snippet.title,
+            content: snippet.content,
+            index: snippet.index,
+            isEnabled: snippet.isEnabled
+        )
+    }
+}
+
+struct SnippetSyncSnapshot: Codable, Equatable {
+    let folders: [SnippetFolderSyncPayload]
+    let snippets: [SnippetSyncPayload]
+}
 
 protocol SnippetRepositoryProtocol {
     func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never>
     func fetchFolderDetails() -> [SnippetFolderDetail]
     func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail?
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot
 
     func insertFolder() -> SnippetFolder?
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]?
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot)
+    func mergeSyncTombstones(_ records: [SyncRecord])
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String)
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool)
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID])
@@ -75,6 +136,20 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         }
     }
 
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot {
+        withErrorReporting {
+            try database.read { database in
+                let folders = try SnippetFolder.all.order(by: \.index)
+                    .fetchAll(database)
+                    .map(SnippetFolderSyncPayload.init(folder:))
+                let snippets = try Snippet.all.order(by: \.index)
+                    .fetchAll(database)
+                    .map(SnippetSyncPayload.init(snippet:))
+                return SnippetSyncSnapshot(folders: folders, snippets: snippets)
+            }
+        } ?? SnippetSyncSnapshot(folders: [], snippets: [])
+    }
+
     func insertFolder() -> SnippetFolder? {
         withErrorReporting {
             return try database.write { database in
@@ -120,6 +195,45 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                     details.append(SnippetFolderDetail(folder: insertedFolder, snippets: insertedSnippets))
                 }
                 return details
+            }
+        }
+    }
+
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {
+        withErrorReporting {
+            try database.write { database in
+                try snapshot.folders
+                    .compactMap(\.snippetFolder)
+                    .forEach { folder in
+                        try SnippetFolder.upsert { folder }.execute(database)
+                    }
+                try snapshot.snippets
+                    .compactMap(\.snippet)
+                    .forEach { snippet in
+                        try Snippet.upsert { snippet }.execute(database)
+                    }
+            }
+        }
+    }
+
+    func mergeSyncTombstones(_ records: [SyncRecord]) {
+        let tombstones = records.filter { $0.deletedAt != nil }
+        guard !tombstones.isEmpty else { return }
+
+        withErrorReporting {
+            try database.write { database in
+                try tombstones
+                    .filter { $0.kind == .snippet }
+                    .compactMap { Snippet.ID(uuidString: $0.id) }
+                    .forEach { id in
+                        try Snippet.delete().where { $0.id.eq(id) }.execute(database)
+                    }
+                try tombstones
+                    .filter { $0.kind == .snippetFolder }
+                    .compactMap { SnippetFolder.ID(uuidString: $0.id) }
+                    .forEach { id in
+                        try SnippetFolder.delete().where { $0.id.eq(id) }.execute(database)
+                    }
             }
         }
     }
@@ -254,6 +368,48 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                 try Snippet.delete().where { $0.id.eq(id) }.execute(database)
             }
         }
+    }
+}
+
+private extension SnippetFolderSyncPayload {
+    var snippetFolder: SnippetFolder? {
+        guard let id = SnippetFolder.ID(uuidString: id) else { return nil }
+        return SnippetFolder(
+            id: id,
+            title: title,
+            index: index,
+            isEnabled: isEnabled
+        )
+    }
+}
+
+private extension SnippetSyncPayload {
+    var snippet: Snippet? {
+        guard let id = Snippet.ID(uuidString: id), let folderID = SnippetFolder.ID(uuidString: folderID) else {
+            return nil
+        }
+        return Snippet(
+            id: id,
+            folderID: folderID,
+            title: title,
+            content: content,
+            index: index,
+            isEnabled: isEnabled
+        )
+    }
+}
+
+private extension SnippetFolder.ID {
+    init?(uuidString: String) {
+        guard let uuid = UUID(uuidString: uuidString) else { return nil }
+        self.init(rawValue: uuid)
+    }
+}
+
+private extension Snippet.ID {
+    init?(uuidString: String) {
+        guard let uuid = UUID(uuidString: uuidString) else { return nil }
+        self.init(rawValue: uuid)
     }
 }
 

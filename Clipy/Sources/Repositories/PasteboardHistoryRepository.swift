@@ -15,6 +15,63 @@ import Combine
 import Dependencies
 import SQLiteData
 
+enum HistorySearchError: Error, Equatable {
+    case invalidRegularExpression(String)
+}
+
+struct HistoryRetentionSettings: Equatable {
+    static let defaultStoredHistoryLimit = 1000
+    static let defaultMaxSyncedAssetBytes = 10 * 1024 * 1024
+
+    let menuDisplayLimit: Int
+    let storedHistoryLimit: Int
+    let maxSyncedAssetBytes: Int
+
+    static func current(defaults: UserDefaults = AppEnvironment.current.defaults) -> HistoryRetentionSettings {
+        let menuDisplayLimit = defaults.integer(forKey: Constants.UserDefaults.maxHistorySize)
+        let storedHistoryLimit = defaults.integer(forKey: Constants.UserDefaults.storedHistoryLimit)
+        let maxSyncedAssetBytes = defaults.integer(forKey: Constants.UserDefaults.maxSyncedAssetBytes)
+
+        return HistoryRetentionSettings(
+            menuDisplayLimit: max(0, menuDisplayLimit),
+            storedHistoryLimit: storedHistoryLimit > 0 ? storedHistoryLimit : defaultStoredHistoryLimit,
+            maxSyncedAssetBytes: maxSyncedAssetBytes > 0 ? maxSyncedAssetBytes : defaultMaxSyncedAssetBytes
+        )
+    }
+}
+
+struct HistorySearchQuery: Equatable {
+    enum Mode: Equatable {
+        case plain
+        case regex
+    }
+
+    enum SortOrder: Equatable {
+        case newestFirst
+        case oldestFirst
+    }
+
+    let text: String
+    let mode: Mode
+    let caseSensitive: Bool
+    let types: Set<NSPasteboard.PasteboardType>
+    let sortOrder: SortOrder
+
+    init(
+        text: String,
+        mode: Mode = .plain,
+        caseSensitive: Bool = false,
+        types: Set<NSPasteboard.PasteboardType> = [],
+        sortOrder: SortOrder = .newestFirst
+    ) {
+        self.text = text
+        self.mode = mode
+        self.caseSensitive = caseSensitive
+        self.types = types
+        self.sortOrder = sortOrder
+    }
+}
+
 protocol PasteboardHistoryRepositoryProtocol {
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never>
     func hasHistories() -> Bool
@@ -23,6 +80,12 @@ protocol PasteboardHistoryRepositoryProtocol {
         includesThumbnailAsset: Bool,
         limit: Int,
     ) -> [PasteboardHistoryDetail]
+    func searchHistoryDetails(
+        query: HistorySearchQuery,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) throws -> [PasteboardHistoryDetail]
     func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory?
     func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent?
 
@@ -30,6 +93,7 @@ protocol PasteboardHistoryRepositoryProtocol {
     func deleteHistory(id: PasteboardHistory.ID)
     func deleteAll()
     func deleteOverflowingHistories(maxHistorySize: Int)
+    func pruneHistories(settings: HistoryRetentionSettings)
 }
 
 final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
@@ -84,6 +148,27 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                     .fetchAll(database)
             }
         } ?? []
+    }
+
+    func searchHistoryDetails(
+        query: HistorySearchQuery,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) throws -> [PasteboardHistoryDetail] {
+        guard limit > 0 else { return [] }
+        let matcher = try makeMatcher(for: query)
+        let details = fetchAllHistoryDetails(
+            ascending: query.sortOrder == .oldestFirst,
+            includesThumbnailAsset: includesThumbnailAsset
+        )
+        let filteredDetails = details.filter { detail in
+            if !query.types.isEmpty && Set(detail.history.pasteboardTypes).isDisjoint(with: query.types) {
+                return false
+            }
+            return matcher(detail.history.title)
+        }
+        return Array(filteredDetails.dropFirst(max(0, offset)).prefix(limit))
     }
 
     func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? {
@@ -179,9 +264,69 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
             }
         }
     }
+
+    func pruneHistories(settings: HistoryRetentionSettings) {
+        deleteOverflowingHistories(maxHistorySize: settings.storedHistoryLimit)
+    }
 }
 
 private extension PasteboardHistoryRepository {
+    func fetchAllHistoryDetails(
+        ascending: Bool,
+        includesThumbnailAsset: Bool
+    ) -> [PasteboardHistoryDetail] {
+        withErrorReporting {
+            try database.read { database in
+                let histories = PasteboardHistory
+                    .all
+                    .order { columns in
+                        if ascending {
+                            columns.updateAt
+                        } else {
+                            columns.updateAt.desc()
+                        }
+                    }
+
+                guard includesThumbnailAsset else {
+                    return try histories
+                        .fetchAll(database)
+                        .map { PasteboardHistoryDetail(history: $0, thumbnailAsset: nil) }
+                }
+
+                return try histories
+                    .leftJoin(PasteboardHistoryThumbnailAsset.all) { $0.id.eq($1.pasteboardHistoryID) }
+                    .select { PasteboardHistoryDetail.Columns(history: $0, thumbnailAsset: $1) }
+                    .fetchAll(database)
+            }
+        } ?? []
+    }
+
+    func makeMatcher(for query: HistorySearchQuery) throws -> (String) -> Bool {
+        guard !query.text.isEmpty else { return { _ in true } }
+
+        switch query.mode {
+        case .plain:
+            return { value in
+                if query.caseSensitive {
+                    return value.contains(query.text)
+                }
+                return value.range(of: query.text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            }
+        case .regex:
+            let options: NSRegularExpression.Options = query.caseSensitive ? [] : [.caseInsensitive]
+            let regularExpression: NSRegularExpression
+            do {
+                regularExpression = try NSRegularExpression(pattern: query.text, options: options)
+            } catch {
+                throw HistorySearchError.invalidRegularExpression(query.text)
+            }
+            return { value in
+                let range = NSRange(value.startIndex..., in: value)
+                return regularExpression.firstMatch(in: value, options: [], range: range) != nil
+            }
+        }
+    }
+
     func thumbnailAsset(from content: PasteboardContent, id: PasteboardHistory.ID) -> PasteboardHistoryThumbnailAsset? {
         var asset: PasteboardHistoryThumbnailAsset?
         if let thumbnailImage = content.thumbnailImage, let thumbnailData = thumbnailImage.tiffRepresentation {

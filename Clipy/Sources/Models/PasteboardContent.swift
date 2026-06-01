@@ -100,3 +100,189 @@ private extension Data {
         append(value)
     }
 }
+
+struct EncryptedSyncPayload: Codable, Equatable {
+    let nonce: Data
+    let ciphertext: Data
+    let tag: Data
+}
+
+enum SyncPayloadCipher {
+    static func seal(_ payload: Data, passphrase: String, salt: Data) throws -> EncryptedSyncPayload {
+        let sealedBox = try AES.GCM.seal(payload, using: key(passphrase: passphrase, salt: salt))
+        return EncryptedSyncPayload(
+            nonce: sealedBox.nonce.data,
+            ciphertext: sealedBox.ciphertext,
+            tag: sealedBox.tag
+        )
+    }
+
+    static func open(_ payload: EncryptedSyncPayload, passphrase: String, salt: Data) throws -> Data {
+        let nonce = try AES.GCM.Nonce(data: payload.nonce)
+        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: payload.ciphertext, tag: payload.tag)
+        return try AES.GCM.open(sealedBox, using: key(passphrase: passphrase, salt: salt))
+    }
+
+    private static func key(passphrase: String, salt: Data) -> SymmetricKey {
+        var keyMaterial = Data()
+        keyMaterial.append(salt)
+        keyMaterial.append(Data(passphrase.utf8))
+        let digest = SHA256.hash(data: keyMaterial)
+        return SymmetricKey(data: digest)
+    }
+}
+
+struct SyncRecord: Codable, Equatable {
+    enum Kind: String, Codable {
+        case history
+        case snippet
+        case snippetFolder
+    }
+
+    let id: String
+    let kind: Kind
+    let deviceID: String
+    let updatedAt: Int
+    let deletedAt: Int?
+    let payload: EncryptedSyncPayload
+    let schemaVersion: Int
+}
+
+struct SyncManifestRecord: Codable, Equatable {
+    let id: String
+    let kind: SyncRecord.Kind
+    let updatedAt: Int
+    let deletedAt: Int?
+}
+
+struct SyncManifest: Codable, Equatable {
+    let schemaVersion: Int
+    let deviceID: String
+    let updatedAt: Int
+    let records: [SyncManifestRecord]
+}
+
+enum SyncConflictPolicy {
+    case lastWriteWins
+
+    func resolve(local: SyncRecord, remote: SyncRecord) -> SyncRecord {
+        switch self {
+        case .lastWriteWins:
+            if remote.updatedAt > local.updatedAt {
+                return remote
+            }
+            if remote.updatedAt == local.updatedAt, remote.deletedAt != nil, local.deletedAt == nil {
+                return remote
+            }
+            return local
+        }
+    }
+}
+
+protocol SyncProvider {
+    func save(_ record: SyncRecord) throws
+    func loadRecords(kind: SyncRecord.Kind) throws -> [SyncRecord]
+}
+
+final class SyncService {
+    private let provider: SyncProvider
+    private let conflictPolicy: SyncConflictPolicy
+
+    init(provider: SyncProvider, conflictPolicy: SyncConflictPolicy = .lastWriteWins) {
+        self.provider = provider
+        self.conflictPolicy = conflictPolicy
+    }
+
+    func push(_ records: [SyncRecord]) throws {
+        try records.forEach(provider.save)
+    }
+
+    func pull(kind: SyncRecord.Kind) throws -> [SyncRecord] {
+        try provider.loadRecords(kind: kind)
+    }
+
+    func merge(local: [SyncRecord], remote: [SyncRecord]) -> [SyncRecord] {
+        var merged = [String: SyncRecord]()
+        local.forEach { record in
+            merged[record.syncIdentity] = record
+        }
+        remote.forEach { record in
+            if let existingRecord = merged[record.syncIdentity] {
+                merged[record.syncIdentity] = conflictPolicy.resolve(local: existingRecord, remote: record)
+            } else {
+                merged[record.syncIdentity] = record
+            }
+        }
+        return merged.values.sorted { lhs, rhs in
+            if lhs.kind.rawValue == rhs.kind.rawValue {
+                return lhs.id < rhs.id
+            }
+            return lhs.kind.rawValue < rhs.kind.rawValue
+        }
+    }
+}
+
+final class OneDriveFolderSyncProvider: SyncProvider {
+    private let rootURL: URL
+    private let fileManager: FileManager
+
+    init(rootURL: URL, fileManager: FileManager = .default) {
+        self.rootURL = rootURL
+        self.fileManager = fileManager
+    }
+
+    func save(_ record: SyncRecord) throws {
+        let directoryURL = directory(for: record.kind)
+        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let destinationURL = directoryURL.appendingPathComponent(fileName(for: record.id))
+        let temporaryURL = directoryURL.appendingPathComponent(".\(UUID().uuidString).tmp")
+        let data = try JSONEncoder().encode(record)
+
+        try data.write(to: temporaryURL, options: .atomic)
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+    }
+
+    func loadRecords(kind: SyncRecord.Kind) throws -> [SyncRecord] {
+        let directoryURL = directory(for: kind)
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
+
+        return try fileManager
+            .contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .map { try JSONDecoder().decode(SyncRecord.self, from: Data(contentsOf: $0)) }
+    }
+
+    private func directory(for kind: SyncRecord.Kind) -> URL {
+        switch kind {
+        case .history:
+            return rootURL.appendingPathComponent("ClipySync/histories", isDirectory: true)
+        case .snippet:
+            return rootURL.appendingPathComponent("ClipySync/snippets/items", isDirectory: true)
+        case .snippetFolder:
+            return rootURL.appendingPathComponent("ClipySync/snippets/folders", isDirectory: true)
+        }
+    }
+
+    private func fileName(for id: String) -> String {
+        var allowedCharacters = CharacterSet.alphanumerics
+        allowedCharacters.insert(charactersIn: "-_.")
+        let encodedID = id.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? UUID().uuidString
+        return "\(encodedID).json"
+    }
+}
+
+private extension SyncRecord {
+    var syncIdentity: String {
+        "\(kind.rawValue):\(id)"
+    }
+}
+
+private extension AES.GCM.Nonce {
+    var data: Data {
+        Data(self)
+    }
+}

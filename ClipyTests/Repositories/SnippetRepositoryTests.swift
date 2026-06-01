@@ -12,6 +12,7 @@
 
 import Combine
 import DependenciesTestSupport
+import Foundation
 import SQLiteData
 import Testing
 @testable import Clipy
@@ -208,6 +209,84 @@ struct SnippetRepositoryTests {
         #expect(repository.fetchFolderDetail(id: folder.id) == SnippetFolderDetail(folder: folder, snippets: []))
         #expect(repository.fetchSnippet(id: snippet.id) == nil)
     }
+
+    @Test
+    func syncSnapshotExportsStableFoldersAndSnippets() throws {
+        let folder = try #require(repository.insertFolder())
+        repository.updateFolderTitle(folder.id, title: "Remote folder")
+        repository.updateFolderIsEnabled(folder.id, isEnabled: false)
+        let snippet = try #require(repository.insertSnippet(to: folder.id))
+        repository.updateSnippetTitle(snippet.id, title: "Remote snippet")
+        repository.updateSnippetContent(snippet.id, content: "payload")
+
+        let snapshot = repository.fetchSyncSnapshot()
+
+        #expect(snapshot.folders == [
+            SnippetFolderSyncPayload(
+                id: folder.id.rawValue.uuidString,
+                title: "Remote folder",
+                index: 0,
+                isEnabled: false
+            )
+        ])
+        #expect(snapshot.snippets == [
+            SnippetSyncPayload(
+                id: snippet.id.rawValue.uuidString,
+                folderID: folder.id.rawValue.uuidString,
+                title: "Remote snippet",
+                content: "payload",
+                index: 0,
+                isEnabled: true
+            )
+        ])
+    }
+
+    @Test
+    func syncUpsertAndTombstonesMergeIntoExistingStore() throws {
+        let folder = try #require(repository.insertFolder())
+        let snippet = try #require(repository.insertSnippet(to: folder.id))
+
+        repository.upsertSyncSnapshot(
+            SnippetSyncSnapshot(
+                folders: [
+                    SnippetFolderSyncPayload(
+                        id: folder.id.rawValue.uuidString,
+                        title: "Synced folder",
+                        index: 3,
+                        isEnabled: false
+                    )
+                ],
+                snippets: [
+                    SnippetSyncPayload(
+                        id: snippet.id.rawValue.uuidString,
+                        folderID: folder.id.rawValue.uuidString,
+                        title: "Synced snippet",
+                        content: "synced content",
+                        index: 4,
+                        isEnabled: false
+                    )
+                ]
+            )
+        )
+
+        let syncedFolder = try #require(repository.fetchFolderDetail(id: folder.id)?.folder)
+        let syncedSnippet = try #require(repository.fetchSnippet(id: snippet.id))
+        #expect(syncedFolder.title == "Synced folder")
+        #expect(syncedFolder.index == 3)
+        #expect(syncedFolder.isEnabled == false)
+        #expect(syncedSnippet.title == "Synced snippet")
+        #expect(syncedSnippet.content == "synced content")
+        #expect(syncedSnippet.index == 4)
+        #expect(syncedSnippet.isEnabled == false)
+
+        repository.mergeSyncTombstones([
+            SyncRecord.plaintextFixture(id: snippet.id.rawValue.uuidString, kind: .snippet, deletedAt: 20),
+            SyncRecord.plaintextFixture(id: folder.id.rawValue.uuidString, kind: .snippetFolder, deletedAt: 21)
+        ])
+
+        #expect(repository.fetchSnippet(id: snippet.id) == nil)
+        #expect(repository.fetchFolderDetail(id: folder.id) == nil)
+    }
 }
 
 private func waitUntil(condition: @escaping @MainActor () async -> Bool) async throws {
@@ -220,5 +299,30 @@ private func waitUntil(condition: @escaping @MainActor () async -> Bool) async t
                 try await Task.sleep(for: .seconds(0.01))
             }
         }
+    }
+}
+
+private extension SyncRecord {
+    static func plaintextFixture(
+        id: String,
+        kind: SyncRecord.Kind,
+        updatedAt: Int = 10,
+        deletedAt: Int? = nil,
+        payload: Data = Data("{}".utf8)
+    ) -> SyncRecord {
+        let encryptedPayload = try! SyncPayloadCipher.seal(
+            payload,
+            passphrase: "test-passphrase",
+            salt: Data("test-salt".utf8)
+        )
+        return SyncRecord(
+            id: id,
+            kind: kind,
+            deviceID: "device-a",
+            updatedAt: updatedAt,
+            deletedAt: deletedAt,
+            payload: encryptedPayload,
+            schemaVersion: 1
+        )
     }
 }

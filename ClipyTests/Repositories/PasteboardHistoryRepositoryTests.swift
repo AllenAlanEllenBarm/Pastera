@@ -218,6 +218,104 @@ struct PasteboardHistoryRepositoryTests {
         repository.deleteOverflowingHistories(maxHistorySize: 0)
         #expect(!repository.hasHistories())
     }
+
+    @Test
+    func retentionSettingsSeparateMenuDisplayFromStoredHistory() throws {
+        let settings = HistoryRetentionSettings(menuDisplayLimit: 1, storedHistoryLimit: 2, maxSyncedAssetBytes: 1024)
+        let first = PasteboardContent("First")
+        let second = PasteboardContent("Second")
+        let third = PasteboardContent("Third")
+        let firstID = PasteboardHistory.ID(rawValue: first.hash)
+        let secondID = PasteboardHistory.ID(rawValue: second.hash)
+        let thirdID = PasteboardHistory.ID(rawValue: third.hash)
+
+        repository.save(id: firstID, content: first, updateAt: 1)
+        repository.save(id: secondID, content: second, updateAt: 2)
+        repository.save(id: thirdID, content: third, updateAt: 3)
+
+        #expect(
+            repository
+                .fetchHistoryDetails(ascending: false, includesThumbnailAsset: false, limit: settings.menuDisplayLimit)
+                .map(\.history.id) == [thirdID]
+        )
+
+        repository.pruneHistories(settings: settings)
+
+        #expect(repository.fetchHistory(id: thirdID) != nil)
+        #expect(repository.fetchHistory(id: secondID) != nil)
+        #expect(repository.fetchHistory(id: firstID) == nil)
+    }
+
+    @Test
+    func plainSearchIsCaseInsensitiveAndPaginates() throws {
+        let first = PasteboardContent("alpha")
+        let second = PasteboardContent("Beta")
+        let third = PasteboardContent("ALPINE")
+        let firstID = PasteboardHistory.ID(rawValue: first.hash)
+        let secondID = PasteboardHistory.ID(rawValue: second.hash)
+        let thirdID = PasteboardHistory.ID(rawValue: third.hash)
+
+        repository.save(id: firstID, content: first, updateAt: 1)
+        repository.save(id: secondID, content: second, updateAt: 2)
+        repository.save(id: thirdID, content: third, updateAt: 3)
+
+        let firstPage = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "alp", mode: .plain, caseSensitive: false, sortOrder: .newestFirst),
+            includesThumbnailAsset: false,
+            limit: 1,
+            offset: 0
+        )
+        let secondPage = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "alp", mode: .plain, caseSensitive: false, sortOrder: .newestFirst),
+            includesThumbnailAsset: false,
+            limit: 1,
+            offset: 1
+        )
+
+        #expect(firstPage.map(\.history.id) == [thirdID])
+        #expect(secondPage.map(\.history.id) == [firstID])
+        #expect(repository.fetchHistory(id: secondID) != nil)
+    }
+
+    @Test
+    func regexSearchFiltersByTypeAndReportsInvalidPatterns() throws {
+        let text = PasteboardContent("ticket-123")
+        let pdf = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .pdf, data: Data("ticket-456".utf8))
+            ]
+        )
+        let textID = PasteboardHistory.ID(rawValue: text.hash)
+        let pdfID = PasteboardHistory.ID(rawValue: pdf.hash)
+
+        repository.save(id: textID, content: text, updateAt: 1)
+        repository.save(id: pdfID, content: pdf, updateAt: 2)
+
+        let matches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(
+                text: #"ticket-\d+"#,
+                mode: .regex,
+                caseSensitive: true,
+                types: [.string],
+                sortOrder: .oldestFirst
+            ),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+
+        #expect(matches.map(\.history.id) == [textID])
+
+        #expect(throws: HistorySearchError.invalidRegularExpression("["))
+        {
+            _ = try repository.searchHistoryDetails(
+                query: HistorySearchQuery(text: "[", mode: .regex),
+                includesThumbnailAsset: false,
+                limit: 10,
+                offset: 0
+            )
+        }
+    }
 }
 
 private extension PasteboardContent {
