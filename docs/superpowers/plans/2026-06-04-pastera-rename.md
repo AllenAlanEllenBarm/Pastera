@@ -4,7 +4,7 @@
 
 **Goal:** Rename the fork's user-facing product from Clipy to Pastera and prepare GitHub repository rename.
 
-**Architecture:** Keep the Xcode project, target, scheme, source directory, and Swift module named `Clipy` for upstream merge compatibility. Rename the produced app bundle, executable, user-facing strings, documentation, sync folder naming, and GitHub repository metadata to `Pastera`.
+**Architecture:** Use lowercase `pastera` for the Xcode project, scheme, target, and source directory while keeping the produced app bundle, executable, user-facing strings, documentation, sync folder naming, and GitHub repository metadata branded as `Pastera`.
 
 **Tech Stack:** Xcode project settings, AppKit/macOS bundle metadata, Swift string catalogs, Markdown documentation, GitHub CLI.
 
@@ -13,14 +13,14 @@
 ### Task 1: Local Product Branding
 
 **Files:**
-- Modify: `Clipy.xcodeproj/project.pbxproj`
-- Modify: `Clipy.xcodeproj/xcshareddata/xcschemes/Clipy.xcscheme`
-- Modify: `Clipy/Supporting Files/Info.plist`
-- Modify: `Clipy/Sources/Constants.swift`
-- Modify: `Clipy/Resources/Localizable.xcstrings`
-- Modify: `Clipy/Sources/Snippets/*/CPYSnippetsEditorWindowController.strings`
+- Modify: `pastera.xcodeproj/project.pbxproj`
+- Modify: `pastera.xcodeproj/xcshareddata/xcschemes/pastera.xcscheme`
+- Modify: `pastera/Supporting Files/Info.plist`
+- Modify: `pastera/Sources/Constants.swift`
+- Modify: `pastera/Resources/Localizable.xcstrings`
+- Modify: `pastera/Sources/Snippets/*/CPYSnippetsEditorWindowController.strings`
 
-- [x] Set app product output to `Pastera.app` while keeping `PRODUCT_MODULE_NAME = Clipy`.
+- [x] Set app product output to `Pastera.app` while using `PRODUCT_MODULE_NAME = Pastera`.
 - [x] Point test host at `Pastera.app/Contents/MacOS/Pastera`.
 - [x] Change app bundle identifiers to `com.pastera-app.Pastera` and `com.pastera-app.Pastera.debug`.
 - [x] Change `Constants.Application.name` to `Pastera` / `PasteraDEBUG`.
@@ -37,7 +37,7 @@
 - Modify: `docs/sync/ONEDRIVE_SYNC.md`
 
 - [x] Replace product branding with `Pastera`.
-- [x] Keep factual project paths and build commands as `Clipy.xcodeproj` / `-scheme Clipy`.
+- [x] Use lowercase project paths and build commands as `pastera.xcodeproj` / `-scheme pastera`.
 - [x] Replace OneDrive sync directory naming and code paths with `PasteraSync/`.
 - [x] Preserve upstream attribution and MIT license notice.
 
@@ -50,8 +50,8 @@
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-  -scheme Clipy \
-  -project Clipy.xcodeproj \
+  -scheme pastera \
+  -project pastera.xcodeproj \
   -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
   -packageCachePath "$PWD/.spm-cache/PackageCache" \
   -skipPackagePluginValidation \

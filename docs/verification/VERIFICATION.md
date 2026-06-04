@@ -6,8 +6,8 @@ Run from the repository root:
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-  -scheme Clipy \
-  -project Clipy.xcodeproj \
+  -scheme pastera \
+  -project pastera.xcodeproj \
   -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
   -packageCachePath "$PWD/.spm-cache/PackageCache" \
   -skipPackagePluginValidation \

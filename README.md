@@ -12,13 +12,13 @@ pasteboard handling, pinned menus, and optional folder-based sync.
 
 ## Build
 
-The Xcode project and scheme are still named `Clipy` to keep upstream merges and
-the existing Swift module stable. The built app product is `Pastera.app`.
+The Xcode project, scheme, and source directory use lowercase `pastera`.
+The built app product is `Pastera.app`.
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-  -scheme Clipy \
-  -project Clipy.xcodeproj \
+  -scheme pastera \
+  -project pastera.xcodeproj \
   -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
   -packageCachePath "$PWD/.spm-cache/PackageCache" \
   -skipPackagePluginValidation \

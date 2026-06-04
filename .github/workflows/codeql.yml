@@ -54,8 +54,8 @@ jobs:
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
-          -project Clipy.xcodeproj \
-          -scheme Clipy \
+          -project pastera.xcodeproj \
+          -scheme pastera \
           -clonedSourcePackagesDirPath "$GITHUB_WORKSPACE/.spm-cache/SourcePackages" \
           -packageCachePath "$GITHUB_WORKSPACE/.spm-cache/PackageCache" \
           -skipPackagePluginValidation \

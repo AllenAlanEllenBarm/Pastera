@@ -12,14 +12,14 @@ SwiftGen, or BartyCrouch without an explicit upstream-alignment reason.
 
 ## Architecture Boundaries
 
-- Runtime entrypoint is `Clipy/Sources/AppDelegate.swift`; menu behavior is in
-  `Clipy/Sources/Managers/MenuManager.swift`.
+- Runtime entrypoint is `pastera/Sources/AppDelegate.swift`; menu behavior is in
+  `pastera/Sources/Managers/MenuManager.swift`.
 - Clipboard capture, pasteback, history cleanup, and app filtering live under
-  `Clipy/Sources/Services/`.
+  `pastera/Sources/Services/`.
 - SQLiteData schema, database bootstrap, and migrations live under
-  `Clipy/Sources/Database/`.
+  `pastera/Sources/Database/`.
 - Snippet persistence already uses SQLiteData via
-  `Clipy/Sources/Repositories/SnippetRepository.swift`.
+  `pastera/Sources/Repositories/SnippetRepository.swift`.
 - Pasteboard history work should follow the upstream SQLiteData direction
   described in `docs/development/PASTERA_FORK_PLAN.md`; avoid adding new
   Realm-backed history behavior.
@@ -40,8 +40,8 @@ Use this command for the default regression pass:
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-  -scheme Clipy \
-  -project Clipy.xcodeproj \
+  -scheme pastera \
+  -project pastera.xcodeproj \
   -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
   -packageCachePath "$PWD/.spm-cache/PackageCache" \
   -skipPackagePluginValidation \
