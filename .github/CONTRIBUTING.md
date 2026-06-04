@@ -1,6 +1,6 @@
-# Contributing to Clipy
+# Contributing to Pastera
 
-:tada: Thank you for contributing to Clipy :tada:
+:tada: Thank you for contributing to Pastera :tada:
 
 ## Localization
 

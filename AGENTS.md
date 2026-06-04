@@ -1,8 +1,8 @@
-# Clipy
+# Pastera
 
 ## Project Context
 
-Clipy is a macOS clipboard extension app. This fork tracks
+Pastera is a macOS clipboard extension app. This fork tracks
 `upstream` (`https://github.com/Clipy/Clipy.git`) for the original project
 and keeps local development on `codex/*` branches before pushing to `origin`.
 
@@ -21,7 +21,7 @@ SwiftGen, or BartyCrouch without an explicit upstream-alignment reason.
 - Snippet persistence already uses SQLiteData via
   `Clipy/Sources/Repositories/SnippetRepository.swift`.
 - Pasteboard history work should follow the upstream SQLiteData direction
-  described in `docs/development/CLIPY_FORK_PLAN.md`; avoid adding new
+  described in `docs/development/PASTERA_FORK_PLAN.md`; avoid adding new
   Realm-backed history behavior.
 
 ## Local Development
@@ -54,7 +54,7 @@ is tracked in `docs/verification/VERIFICATION.md`.
 
 ## Documentation Boundaries
 
-- Fork roadmap and upstream alignment: `docs/development/CLIPY_FORK_PLAN.md`.
+- Fork roadmap and upstream alignment: `docs/development/PASTERA_FORK_PLAN.md`.
 - Verification matrix and known manual checks:
   `docs/verification/VERIFICATION.md`.
 - OneDrive folder-sync protocol and credential boundaries:

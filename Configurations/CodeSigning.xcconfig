@@ -17,4 +17,4 @@ DEVELOPMENT_TEAM = BBCHAJ584H
 PROVISIONING_PROFILE_SPECIFIER[config=Debug] = ClipyDevelopment
 PROVISIONING_PROFILE_SPECIFIER[config=Release] = ClipyDistribution
 
-// #include "Configurations/CodeSigning-AdHoc.xcconfig"
+#include "Configurations/CodeSigning-AdHoc.xcconfig"

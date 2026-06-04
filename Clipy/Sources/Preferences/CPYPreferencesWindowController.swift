@@ -42,22 +42,26 @@ final class CPYPreferencesWindowController: NSWindowController {
     @IBOutlet private weak var updatesButton: NSButton!
     @IBOutlet private weak var betaButton: NSButton!
     // ViewController
-    private let viewController = [NSViewController(nibName: "CPYGeneralPreferenceViewController", bundle: nil),
+    private let viewController = [CPYGeneralPreferenceViewController(nibName: "CPYGeneralPreferenceViewController", bundle: nil),
                                   NSViewController(nibName: "CPYMenuPreferenceViewController", bundle: nil),
                                   CPYTypePreferenceViewController(nibName: "CPYTypePreferenceViewController", bundle: nil),
                                   CPYExcludeAppPreferenceViewController(nibName: "CPYExcludeAppPreferenceViewController", bundle: nil),
                                   CPYShortcutsPreferenceViewController(nibName: "CPYShortcutsPreferenceViewController", bundle: nil),
                                   CPYUpdatesPreferenceViewController(nibName: "CPYUpdatesPreferenceViewController", bundle: nil),
                                   CPYBetaPreferenceViewController(nibName: "CPYBetaPreferenceViewController", bundle: nil)]
+    private var selectedView: NSView?
+    private var selectedTabIndex = -1
+    private var paneSizes = [Int: NSSize]()
+    private var didPreloadPaneViews = false
+    private var defaultsObserver: NSObjectProtocol?
 
     // MARK: - Window Life Cycle
     override func windowDidLoad() {
         super.windowDidLoad()
         self.window?.collectionBehavior = .canJoinAllSpaces
-        self.window?.backgroundColor = NSColor(white: 0.99, alpha: 1)
-        if #available(OSX 10.10, *) {
-            self.window?.titlebarAppearsTransparent = true
-        }
+        CPYWindowAppearance.apply(to: window)
+        installOpacityObserver()
+        preloadPaneViews()
         toolBarItemTapped(generalButton)
         generalButton.sendAction(on: .leftMouseDown)
         menuButton.sendAction(on: .leftMouseDown)
@@ -70,7 +74,14 @@ final class CPYPreferencesWindowController: NSWindowController {
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        CPYWindowAppearance.apply(to: window)
         window?.makeKeyAndOrderFront(self)
+    }
+
+    deinit {
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+        }
     }
 }
 
@@ -146,20 +157,54 @@ private extension CPYPreferencesWindowController {
     }
 
     func switchView(_ index: Int) {
+        guard viewController.indices.contains(index) else { return }
+        if index == selectedTabIndex, selectedView?.superview != nil { return }
+
         let newView = viewController[index].view
-        // Remove current views without toolbar
-        window?.contentView?.subviews.forEach { view in
-            if view != toolBar {
-                view.removeFromSuperview()
+        CPYWindowAppearance.apply(to: newView)
+
+        if let selectedView {
+            selectedView.removeFromSuperview()
+        } else {
+            window?.contentView?.subviews.forEach { view in
+                if view != toolBar {
+                    view.removeFromSuperview()
+                }
             }
         }
+
         // Resize view
         let frame = window!.frame
-        var newFrame = window!.frameRect(forContentRect: newView.frame)
+        let paneSize = paneSizes[index] ?? newView.frame.size
+        var newFrame = window!.frameRect(forContentRect: NSRect(origin: .zero, size: paneSize))
         newFrame.origin = frame.origin
         newFrame.origin.y += frame.height - newFrame.height - toolBar.frame.height
         newFrame.size.height += toolBar.frame.height
         window?.setFrame(newFrame, display: true)
+        newView.frame = NSRect(origin: .zero, size: paneSize)
         window?.contentView?.addSubview(newView)
+        selectedView = newView
+        selectedTabIndex = index
+        CPYWindowAppearance.apply(to: window)
+    }
+
+    func preloadPaneViews() {
+        guard !didPreloadPaneViews else { return }
+        didPreloadPaneViews = true
+        viewController.enumerated().forEach { index, viewController in
+            let paneView = viewController.view
+            CPYWindowAppearance.apply(to: paneView)
+            paneSizes[index] = paneView.frame.size
+        }
+    }
+
+    func installOpacityObserver() {
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: AppEnvironment.current.defaults,
+            queue: .main
+        ) { [weak self] _ in
+            CPYWindowAppearance.apply(to: self?.window)
+        }
     }
 }

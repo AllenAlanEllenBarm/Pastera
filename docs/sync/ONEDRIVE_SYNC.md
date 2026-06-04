@@ -2,15 +2,15 @@
 
 ## V1 Model
 
-Clipy v1 sync uses a user-selected local OneDrive folder. Clipy writes and
-reads files under `ClipySync/`; the OneDrive desktop client handles cloud
+Pastera v1 sync uses a user-selected local OneDrive folder. Pastera writes and
+reads files under `PasteraSync/`; the OneDrive desktop client handles cloud
 transport. The app does not call Microsoft Graph and does not store OAuth
 tokens.
 
 ## Directory Layout
 
 ```text
-ClipySync/
+PasteraSync/
   manifest.json
   histories/
     <history-id>.json

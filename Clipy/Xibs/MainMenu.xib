@@ -15,8 +15,8 @@
         <customObject id="IQ9-Br-n8g" userLabel="AppDelegate" customClass="AppDelegate" customModule="Clipy" customModuleProvider="target"/>
         <menu title="MainMenu" systemMenu="main" id="jeR-OB-GsD" userLabel="MainMenu">
             <items>
-                <menuItem title="Clipy" id="Zat-vi-KS9">
-                    <menu key="submenu" title="Clipy" systemMenu="apple" id="VBj-p9-ODY">
+                <menuItem title="Pastera" id="Zat-vi-KS9">
+                    <menu key="submenu" title="Pastera" systemMenu="apple" id="VBj-p9-ODY">
                         <items>
                             <menuItem title="About ClipMenu" id="Pr1-7V-tJO">
                                 <modifierMask key="keyEquivalentModifierMask"/>

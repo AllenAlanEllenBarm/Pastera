@@ -1,4 +1,4 @@
-# Clipy Fork Development Plan
+# Pastera Fork Development Plan
 
 ## Upstream Direction
 
@@ -43,6 +43,6 @@ untracked.
 ## Not In Scope For V1
 
 - Microsoft Graph or OneDrive OAuth integration.
-- Background network upload/download code inside Clipy.
+- Background network upload/download code inside Pastera.
 - Reintroducing Realm-backed pasteboard history features.
 - Syncing secrets, OAuth tokens, or plaintext passphrases.

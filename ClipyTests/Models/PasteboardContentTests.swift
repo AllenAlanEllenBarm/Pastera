@@ -111,6 +111,38 @@ struct PasteboardContentTests {
     }
 
     @Test
+    func thumbnailImageIsCreatedFromStoredPNGData() throws {
+        let defaults = UserDefaults.standard
+        let previousWidth = defaults.object(forKey: Constants.UserDefaults.thumbnailWidth)
+        let previousHeight = defaults.object(forKey: Constants.UserDefaults.thumbnailHeight)
+        defer {
+            if let previousWidth {
+                defaults.set(previousWidth, forKey: Constants.UserDefaults.thumbnailWidth)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.thumbnailWidth)
+            }
+            if let previousHeight {
+                defaults.set(previousHeight, forKey: Constants.UserDefaults.thumbnailHeight)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.thumbnailHeight)
+            }
+        }
+        defaults.set(8, forKey: Constants.UserDefaults.thumbnailWidth)
+        defaults.set(6, forKey: Constants.UserDefaults.thumbnailHeight)
+
+        let image = NSImage.create(with: .blue, size: NSSize(width: 20, height: 10))
+        let tiffData = try #require(image.tiffRepresentation)
+        let pngData = try #require(NSBitmapImageRep(data: tiffData)?.representation(using: .png, properties: [:]))
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .png, data: pngData)
+            ]
+        )
+
+        #expect(content.thumbnailImage?.size == NSSize(width: 8, height: 4))
+    }
+
+    @Test
     func contentHashIsStableAndContentBased() {
         let content = PasteboardContent(
             assets: [

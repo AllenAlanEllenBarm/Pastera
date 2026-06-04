@@ -8,8 +8,8 @@
 /* Class = "NSTextFieldCell"; title = "Delete"; ObjectID = "Lxb-5c-zOc"; */
 "Lxb-5c-zOc.title" = "删除";
 
-/* Class = "NSWindow"; title = "Clipy - Snippets Editor"; ObjectID = "QvC-M9-y7g"; */
-"QvC-M9-y7g.title" = "Clipy - 片断编辑器";
+/* Class = "NSWindow"; title = "Pastera - Snippets Editor"; ObjectID = "QvC-M9-y7g"; */
+"QvC-M9-y7g.title" = "Pastera - 片断编辑器";
 
 /* Class = "NSTextFieldCell"; title = "Export"; ObjectID = "Uqj-Zh-vde"; */
 "Uqj-Zh-vde.title" = "导出";

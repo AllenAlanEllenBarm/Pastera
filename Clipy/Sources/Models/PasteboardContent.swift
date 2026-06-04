@@ -43,10 +43,10 @@ struct PasteboardContent: Equatable {
 
         let imageURL = assets.filter { $0.type == .fileURL }
             .compactMap { URL(dataRepresentation: $0.data, relativeTo: nil) }
-            .first(where: { ["jpg", "jpeg", "png", "bmp", "tiff"].contains($0.pathExtension.lowercased()) })
+            .first(where: { ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "heic", "webp"].contains($0.pathExtension.lowercased()) })
         if let imageURL {
             return NSImage(contentsOf: imageURL)?.resizeImage(CGFloat(width), CGFloat(height))
-        } else if let data = data(for: .tiff) ?? data(for: .deprecatedTIFF) {
+        } else if let data = assets.first(where: { $0.type.isClipyImageType })?.data {
             return NSImage(data: data)?.resizeImage(CGFloat(width), CGFloat(height))
         }
         return nil
@@ -259,11 +259,11 @@ final class OneDriveFolderSyncProvider: SyncProvider {
     private func directory(for kind: SyncRecord.Kind) -> URL {
         switch kind {
         case .history:
-            return rootURL.appendingPathComponent("ClipySync/histories", isDirectory: true)
+            return rootURL.appendingPathComponent("PasteraSync/histories", isDirectory: true)
         case .snippet:
-            return rootURL.appendingPathComponent("ClipySync/snippets/items", isDirectory: true)
+            return rootURL.appendingPathComponent("PasteraSync/snippets/items", isDirectory: true)
         case .snippetFolder:
-            return rootURL.appendingPathComponent("ClipySync/snippets/folders", isDirectory: true)
+            return rootURL.appendingPathComponent("PasteraSync/snippets/folders", isDirectory: true)
         }
     }
 

@@ -16,9 +16,9 @@ struct Constants {
 
     struct Application {
         #if DEBUG
-            static let name = "ClipyDEBUG"
+            static let name = "PasteraDEBUG"
         #else
-            static let name = "Clipy"
+            static let name = "Pastera"
         #endif
     }
 
@@ -43,6 +43,7 @@ struct Constants {
         static let maxHistorySize = "kCPYPrefMaxHistorySizeKey"
         static let storedHistoryLimit = "kCPYPrefStoredHistoryLimitKey"
         static let maxSyncedAssetBytes = "kCPYPrefMaxSyncedAssetBytesKey"
+        static let windowBackgroundOpacity = "kCPYPrefWindowBackgroundOpacityKey"
         static let storeTypes = "kCPYPrefStoreTypesKey"
         static let inputPasteCommand = "kCPYPrefInputPasteCommandKey"
         static let showIconInTheMenu = "kCPYPrefShowIconInTheMenuKey"

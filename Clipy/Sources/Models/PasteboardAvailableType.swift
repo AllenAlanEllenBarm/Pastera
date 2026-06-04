@@ -55,7 +55,7 @@ private extension NSPasteboard.PasteboardType {
             return .filenames
         case .URL, .deprecatedURL:
             return .url
-        case .tiff, .deprecatedTIFF:
+        case .tiff, .deprecatedTIFF, .png, .clipyApplePNG, .clipySnipastePNG:
             return .tiff
         default:
             return nil
@@ -76,8 +76,23 @@ private extension NSPasteboard.PasteboardType {
             return .URL
         case .deprecatedTIFF:
             return .tiff
+        case .clipyApplePNG, .clipySnipastePNG:
+            return .png
         default:
             return nil
         }
+    }
+}
+
+extension NSPasteboard.PasteboardType {
+    static let clipyApplePNG = NSPasteboard.PasteboardType(rawValue: "Apple PNG pasteboard type")
+    static let clipySnipastePNG = NSPasteboard.PasteboardType(rawValue: "com.trolltech.anymime.image--png")
+
+    static var clipyImageTypes: Set<NSPasteboard.PasteboardType> {
+        [.tiff, .deprecatedTIFF, .png, .clipyApplePNG, .clipySnipastePNG]
+    }
+
+    var isClipyImageType: Bool {
+        NSPasteboard.PasteboardType.clipyImageTypes.contains(self)
     }
 }

@@ -26,11 +26,11 @@ Expected result: `** TEST SUCCEEDED **`.
   typed error without blocking the UI.
 - Pagination: verify limit/offset does not duplicate or skip sorted results.
 - Image pasteboard: copy an image from Preview or a screenshot, select it from
-  Clipy, and paste it into Notes and Preview.
+  Pastera, and paste it into Notes and Preview.
 - File pasteboard: copy one or more files in Finder, select the history item,
   and paste into Finder or a text target that accepts file URLs.
-- OneDrive sync simulation: use two temporary folders or two local Clipy
-  profiles that point at the same `ClipySync/` directory, then verify history
+- OneDrive sync simulation: use two temporary folders or two local Pastera
+  profiles that point at the same `PasteraSync/` directory, then verify history
   and snippet records converge after import/export.
 
 ## Performance Checks

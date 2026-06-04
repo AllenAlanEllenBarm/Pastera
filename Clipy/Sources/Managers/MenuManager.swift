@@ -16,6 +16,23 @@ import Dependencies
 import RxCocoa
 import RxSwift
 
+private final class HistoryBrowserMenu: NSMenu {
+    weak var headerView: HistoryMenuHeaderView?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if headerView?.handleMenuTrackingKeyDown(event) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+private struct HistoryItemPresentation {
+    let title: String
+    let image: NSImage?
+    let toolTip: String?
+}
+
 final class MenuManager: NSObject {
 
     // MARK: - Properties
@@ -33,6 +50,10 @@ final class MenuManager: NSObject {
     fileprivate let notificationCenter = NotificationCenter.default
     fileprivate let kMaxKeyEquivalents = 10
     fileprivate let shortenSymbol = "..."
+    fileprivate var historyMenuState = HistoryMenuPaginationState()
+    fileprivate var historyPanelController: HistoryBrowserPanelController?
+    fileprivate var mainMenuPanelController: MainMenuPanelController?
+    fileprivate var isMainMenuPinned = false
 
     @Dependency(\.pasteboardHistoryRepository)
     private var pasteboardHistoryRepository
@@ -65,6 +86,16 @@ final class MenuManager: NSObject {
 // MARK: - Popup Menu
 extension MenuManager {
     func popUpMenu(_ type: MenuType) {
+        if type == .main {
+            showMainMenuPanel(at: NSEvent.mouseLocation)
+            return
+        }
+
+        if type == .history {
+            showHistoryBrowserPanel(at: NSEvent.mouseLocation)
+            return
+        }
+
         let menu: NSMenu?
         switch type {
         case .main:
@@ -174,11 +205,11 @@ private extension MenuManager {
 private extension MenuManager {
      func createClipMenu() {
         clipMenu = NSMenu(title: Constants.Application.name)
-        historyMenu = NSMenu(title: Constants.Menu.history)
+        historyMenu = HistoryBrowserMenu(title: Constants.Menu.history)
         snippetMenu = NSMenu(title: Constants.Menu.snippet)
 
-        addHistoryItems(clipMenu!)
-        addHistoryItems(historyMenu!)
+        addHistoryItems(clipMenu!, asSubmenu: true)
+        addHistoryItems(historyMenu!, asSubmenu: false)
 
         addSnippetItems(clipMenu!, separateMenu: true)
         addSnippetItems(snippetMenu!, separateMenu: false)
@@ -189,30 +220,16 @@ private extension MenuManager {
             clipMenu?.addItem(NSMenuItem(title: String(localized: "Clear History"), action: #selector(AppDelegate.clearAllHistory)))
         }
 
-        clipMenu?.addItem(NSMenuItem(title: String(localized: "Search History"), action: #selector(AppDelegate.showHistorySearchWindow)))
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Edit Snippets"), action: #selector(AppDelegate.showSnippetEditorWindow)))
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Preferences"), action: #selector(AppDelegate.showPreferenceWindow)))
         clipMenu?.addItem(NSMenuItem.separator())
-        clipMenu?.addItem(NSMenuItem(title: String(localized: "Quit Clipy"), action: #selector(AppDelegate.terminate)))
+        clipMenu?.addItem(NSMenuItem(title: String(localized: "Quit Pastera"), action: #selector(AppDelegate.terminate)))
 
-        statusItem?.menu = clipMenu
+        statusItem?.menu = nil
     }
 
     func menuItemTitle(_ title: String, listNumber: NSInteger, isMarkWithNumber: Bool) -> String {
         return (isMarkWithNumber) ? "\(listNumber). \(title)" : title
-    }
-
-    func makeSubmenuItem(_ count: Int, start: Int, end: Int, numberOfItems: Int) -> NSMenuItem {
-        var count = count
-        if start == 0 {
-            count -= 1
-        }
-        var lastNumber = count + numberOfItems
-        if end < lastNumber {
-            lastNumber = end
-        }
-        let menuItemTitle = "\(count + 1) - \(lastNumber)"
-        return makeSubmenuItem(menuItemTitle)
     }
 
     func makeSubmenuItem(_ title: String) -> NSMenuItem {
@@ -221,14 +238,6 @@ private extension MenuManager {
         subMenuItem.submenu = subMenu
         subMenuItem.image = (AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu)) ? folderIcon : nil
         return subMenuItem
-    }
-
-    func incrementListNumber(_ listNumber: NSInteger, max: NSInteger, start: NSInteger) -> NSInteger {
-        var listNumber = listNumber + 1
-        if listNumber == max && max == 10 && start == 1 {
-            listNumber = 0
-        }
-        return listNumber
     }
 
     func trimTitle(_ title: String?) -> String {
@@ -256,68 +265,259 @@ private extension MenuManager {
 
 // MARK: - Clips
 private extension MenuManager {
-    func addHistoryItems(_ menu: NSMenu) {
-        let placeInLine = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.numberOfItemsPlaceInline)
-        let placeInsideFolder = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.numberOfItemsPlaceInsideFolder)
-        let maxHistory = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.maxHistorySize)
+    func addHistoryItems(_ menu: NSMenu, asSubmenu: Bool) {
+        if asSubmenu {
+            menu.addItem(makeHistoryBrowserMenuItem())
+        } else {
+            configureHistoryBrowserMenu(menu)
+        }
+    }
 
-        // History title
-        let labelItem = NSMenuItem(title: String(localized: "History"), action: nil)
-        labelItem.isEnabled = false
-        menu.addItem(labelItem)
+    func makeHistoryBrowserMenuItem() -> NSMenuItem {
+        let historyItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        let itemView = MainMenuHeaderItemView(
+            title: String(localized: "History"),
+            image: AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu) ? folderIcon : nil,
+            isPinned: isMainMenuPinned
+        )
+        itemView.onOpen = { [weak self, weak historyItem] in
+            historyItem?.menu?.cancelTracking()
+            DispatchQueue.main.async { [weak self] in
+                self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation)
+            }
+        }
+        itemView.onPinnedChange = { [weak self, weak historyItem, weak itemView] pinned, menuFrame in
+            historyItem?.menu?.cancelTracking()
+            self?.setMainMenuPinned(pinned)
+            itemView?.setPinned(pinned)
+            DispatchQueue.main.async { [weak self] in
+                if pinned {
+                    self?.showMainMenuPanel(anchoredTo: menuFrame, fallbackPoint: NSEvent.mouseLocation)
+                }
+            }
+        }
+        historyItem.view = itemView
+        return historyItem
+    }
 
-        // History
+    @objc func openHistoryBrowserPanelFromMenuItem(_ sender: NSMenuItem) {
+        DispatchQueue.main.async { [weak self] in
+            self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation)
+        }
+    }
+
+    func showHistoryBrowserPanel(at screenPoint: NSPoint) {
+        let panelController = historyPanelController ?? makeHistoryPanelController()
+        historyPanelController = panelController
+        if let mainMenuFrame = mainMenuPanelController?.visibleFrame {
+            panelController.setPinned(true)
+            panelController.show(attachedTo: mainMenuFrame)
+        } else {
+            panelController.setPinned(false)
+            panelController.show(at: screenPoint)
+        }
+    }
+
+    func showMainMenuPanel(at screenPoint: NSPoint) {
+        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
+        mainMenuPanelController = panelController
+        panelController.show(at: screenPoint, pinned: isMainMenuPinned)
+    }
+
+    func showMainMenuPanel(anchoredTo menuFrame: NSRect?, fallbackPoint: NSPoint) {
+        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
+        mainMenuPanelController = panelController
+        if let menuFrame {
+            panelController.show(anchoredTo: menuFrame, pinned: true)
+        } else {
+            panelController.show(at: fallbackPoint, pinned: true)
+        }
+    }
+
+    func showMainMenuPanel(attachedToStatusItemFrame statusItemFrame: NSRect) {
+        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
+        mainMenuPanelController = panelController
+        panelController.show(attachedToStatusItemFrame: statusItemFrame, pinned: isMainMenuPinned)
+    }
+
+    func setMainMenuPinned(_ pinned: Bool) {
+        isMainMenuPinned = pinned
+        if !pinned {
+            mainMenuPanelController?.close()
+        }
+        createClipMenu()
+    }
+
+    func makeHistoryPanelController() -> HistoryBrowserPanelController {
+        HistoryBrowserPanelController(
+            currentState: { [weak self] in
+                self?.historyMenuState ?? HistoryMenuPaginationState()
+            },
+            updateState: { [weak self] update in
+                guard let self else { return }
+                update(&self.historyMenuState)
+            },
+            fetchPage: { [weak self] in
+                self?.fetchHistoryMenuPage() ?? HistoryMenuPage()
+            },
+            makeRowView: { [weak self] detail, index, onConfirm in
+                self?.makeHistoryRowView(detail, index: index, onConfirm: onConfirm)
+                    ?? HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+            },
+            selectHistory: { [weak self] historyID, application in
+                self?.selectHistory(historyID, restoring: application)
+            }
+        )
+    }
+
+    func makeMainMenuPanelController() -> MainMenuPanelController {
+        MainMenuPanelController(
+            historyTitle: String(localized: "History"),
+            historyImage: AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu) ? folderIcon : nil,
+            itemsProvider: { [weak self] in self?.makeMainMenuPanelItems() ?? [] },
+            onOpenHistory: { [weak self] in self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation) },
+            onPinnedChange: { [weak self] pinned in self?.setMainMenuPinned(pinned) }
+        )
+    }
+
+    func makeMainMenuPanelItems() -> [MainMenuPanelItem] {
+        var items = [MainMenuPanelItem]()
+
+        if AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addClearHistoryMenuItem) {
+            items.append(.action(title: String(localized: "Clear History"), image: nil) {
+                NSApp.sendAction(#selector(AppDelegate.clearAllHistory), to: nil, from: nil)
+            })
+        }
+
+        items.append(.action(title: String(localized: "Edit Snippets"), image: nil) {
+            NSApp.sendAction(#selector(AppDelegate.showSnippetEditorWindow), to: nil, from: nil)
+        })
+        items.append(.action(title: String(localized: "Preferences"), image: nil) {
+            NSApp.sendAction(#selector(AppDelegate.showPreferenceWindow), to: nil, from: nil)
+        })
+        items.append(.separator)
+        items.append(.action(title: String(localized: "Quit Pastera"), image: nil) {
+            NSApp.sendAction(#selector(AppDelegate.terminate), to: nil, from: nil)
+        })
+
+        return items
+    }
+
+    func makeHistoryBrowserMenu() -> NSMenu {
+        let menu = HistoryBrowserMenu(title: String(localized: "History"))
+        configureHistoryBrowserMenu(menu)
+        return menu
+    }
+
+    func configureHistoryBrowserMenu(_ menu: NSMenu) {
+        menu.autoenablesItems = false
+        while menu.numberOfItems > 0 {
+            menu.removeItem(at: 0)
+        }
+
+        let headerView = HistoryMenuHeaderView()
+        let headerItem = NSMenuItem()
+        headerItem.view = headerView
+        (menu as? HistoryBrowserMenu)?.headerView = headerView
+        menu.addItem(headerItem)
+        menu.addItem(NSMenuItem.separator())
+
+        let updateMenu = { [weak self, weak menu, weak headerView] (update: (inout HistoryMenuPaginationState) -> Void) in
+            self?.updateHistoryBrowserMenu(menu, headerView: headerView, update: update)
+        }
+        headerView.onQueryChange = { query in updateMenu { $0.updateQuery(query) } }
+        headerView.onModeChange = { mode in updateMenu { $0.updateMode(mode) } }
+        headerView.onCaseSensitiveChange = { caseSensitive in updateMenu { $0.updateCaseSensitive(caseSensitive) } }
+        headerView.onTypeFilterChange = { typeFilter in updateMenu { $0.updateTypeFilter(typeFilter) } }
+        headerView.onPreviousPage = { updateMenu { $0.goToPreviousPage() } }
+        headerView.onNextPage = { [weak self, weak menu, weak headerView] in
+            guard let self = self else { return }
+            let page = self.fetchHistoryMenuPage()
+            self.updateHistoryBrowserMenu(menu, headerView: headerView) { $0.goToNextPage(if: page.hasNextPage) }
+        }
+
+        reloadHistoryBrowserResults(in: menu, headerView: headerView)
+    }
+
+    func updateHistoryBrowserMenu(_ menu: NSMenu?, headerView: HistoryMenuHeaderView?, update: (inout HistoryMenuPaginationState) -> Void) {
+        update(&historyMenuState)
+        guard let menu = menu else { return }
+        reloadHistoryBrowserResults(in: menu, headerView: headerView)
+    }
+
+    func reloadHistoryBrowserResults(in menu: NSMenu, headerView: HistoryMenuHeaderView?) {
+        HistoryMenuRowView.hideImagePreview()
+        while menu.numberOfItems > 2 {
+            menu.removeItem(at: 2)
+        }
+
+        var page = fetchHistoryMenuPage()
+        if page.details.isEmpty && page.error == nil && historyMenuState.pageIndex > 0 {
+            historyMenuState.resetPage()
+            page = fetchHistoryMenuPage()
+        }
+
+        headerView?.configure(state: historyMenuState, hasNextPage: page.hasNextPage)
+
+        if let error = page.error {
+            let errorItem = NSMenuItem(title: error.historyMenuTitle, action: nil)
+            errorItem.isEnabled = false
+            menu.addItem(errorItem)
+            headerView?.connectKeyboardNavigation(to: [])
+            return
+        }
+
+        guard !page.details.isEmpty else {
+            let title = historyMenuState.hasActiveSearchOptions ? String(localized: "No Results") : String(localized: "No History")
+            let emptyItem = NSMenuItem(title: title, action: nil)
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+            headerView?.connectKeyboardNavigation(to: [])
+            return
+        }
+
         let firstIndex = firstIndexOfMenuItems()
-        var listNumber = firstIndex
-        var subMenuCount = placeInLine
-        var subMenuIndex = 1 + placeInLine
+        var historyRowViews = [HistoryMenuRowView]()
+        for (index, historyDetail) in page.details.enumerated() {
+            let listNumber = (firstIndex + index) % kMaxKeyEquivalents
+            let menuItem = makeClipMenuItem(historyDetail, index: index, listNumber: listNumber)
+            menu.addItem(menuItem)
+            if let rowView = menuItem.view as? HistoryMenuRowView {
+                historyRowViews.append(rowView)
+            }
+        }
+        headerView?.connectKeyboardNavigation(to: historyRowViews)
+    }
 
+    func fetchHistoryMenuPage() -> HistoryMenuPage {
         let ascending = !AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting)
         let isShowImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showImageInTheMenu)
         let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
-        let historyDetails = pasteboardHistoryRepository.fetchHistoryDetails(
-            ascending: ascending,
-            includesThumbnailAsset: isShowImage || isShowColorCode,
-            limit: maxHistory
+        let limit = historyMenuState.pageSize + 1
+        let query = HistorySearchQuery(
+            text: historyMenuState.query,
+            mode: historyMenuState.mode,
+            caseSensitive: historyMenuState.caseSensitive,
+            types: historyMenuState.selectedTypes,
+            sortOrder: ascending ? .oldestFirst : .newestFirst
         )
-        let currentSize = historyDetails.count
-        var i = 0
-        historyDetails.forEach { historyDetail in
-            if placeInLine < 1 || placeInLine - 1 < i {
-                // Folder
-                if i == subMenuCount {
-                    let subMenuItem = makeSubmenuItem(subMenuCount, start: firstIndex, end: currentSize, numberOfItems: placeInsideFolder)
-                    menu.addItem(subMenuItem)
-                    listNumber = firstIndex
-                }
-
-                // Clip
-                if let subMenu = menu.item(at: subMenuIndex)?.submenu {
-                    let menuItem = makeClipMenuItem(historyDetail, index: i, listNumber: listNumber)
-                    subMenu.addItem(menuItem)
-                    listNumber = incrementListNumber(listNumber, max: placeInsideFolder, start: firstIndex)
-                }
-            } else {
-                // Clip
-                let menuItem = makeClipMenuItem(historyDetail, index: i, listNumber: listNumber)
-                menu.addItem(menuItem)
-                listNumber = incrementListNumber(listNumber, max: placeInLine, start: firstIndex)
-            }
-
-            i += 1
-            if i == subMenuCount + placeInsideFolder {
-                subMenuCount += placeInsideFolder
-                subMenuIndex += 1
-            }
+        do {
+            let details = try pasteboardHistoryRepository.searchHistoryDetails(
+                query: query,
+                includesThumbnailAsset: isShowImage || isShowColorCode,
+                limit: limit,
+                offset: historyMenuState.offset
+            )
+            return .result(details, pageSize: historyMenuState.pageSize)
+        } catch let error as HistorySearchError {
+            return HistoryMenuPage(error: error)
+        } catch {
+            return HistoryMenuPage()
         }
     }
 
     func makeClipMenuItem(_ historyDetail: PasteboardHistoryDetail, index: Int, listNumber: Int) -> NSMenuItem {
         let history = historyDetail.history
-        let isMarkWithNumber = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsAreMarkedWithNumbers)
-        let isShowToolTip = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showToolTipOnMenuItem)
-        let isShowImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showImageInTheMenu)
-        let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
         let addNumbericKeyEquivalents = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents)
 
         var keyEquivalent = ""
@@ -332,36 +532,85 @@ private extension MenuManager {
             keyEquivalent = "\(shortCutNumber)"
         }
 
-        let primaryPboardType = history.primaryType
-        let clipString = history.title
-        let title = trimTitle(clipString)
-        let titleWithMark = menuItemTitle(title, listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+        let presentation = makeHistoryItemPresentation(historyDetail, listNumber: listNumber)
 
-        let menuItem = NSMenuItem(title: titleWithMark, action: #selector(AppDelegate.selectClipMenuItem(_:)), keyEquivalent: keyEquivalent)
+        let menuItem = NSMenuItem(title: presentation.title, action: #selector(AppDelegate.selectClipMenuItem(_:)), keyEquivalent: keyEquivalent)
         menuItem.representedObject = history.id
 
-        if isShowToolTip {
-            let maxLengthOfToolTip = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.maxLengthOfToolTip)
-            let toIndex = (clipString.count < maxLengthOfToolTip) ? clipString.count : maxLengthOfToolTip
-            menuItem.toolTip = (clipString as NSString).substring(to: toIndex)
+        if let toolTip = presentation.toolTip {
+            menuItem.toolTip = toolTip
         }
 
-        if primaryPboardType == .tiff || primaryPboardType == .deprecatedTIFF {
-            menuItem.title = menuItemTitle("(Image)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
-        } else if primaryPboardType == .pdf || primaryPboardType == .deprecatedPDF {
-            menuItem.title = menuItemTitle("(PDF)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
-        } else if primaryPboardType == .fileURL {
-            menuItem.title = menuItemTitle("(Files)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
-        }
+        menuItem.image = presentation.image
 
-        if isShowImage || isShowColorCode,
-           let thumbnailAsset = historyDetail.thumbnailAsset,
-           let image = NSImage(data: thumbnailAsset.data),
-           (thumbnailAsset.kind == .image && isShowImage) || (thumbnailAsset.kind == .colorCode && isShowColorCode) {
-            menuItem.image = image
+        menuItem.view = HistoryMenuRowView(title: menuItem.title, image: menuItem.image) { [weak menuItem] in
+            guard let menuItem else { return }
+            menuItem.menu?.cancelTracking()
+            DispatchQueue.main.async {
+                NSApp.sendAction(#selector(AppDelegate.selectClipMenuItem(_:)), to: nil, from: menuItem)
+            }
         }
 
         return menuItem
+    }
+
+    func makeHistoryRowView(_ historyDetail: PasteboardHistoryDetail, index: Int, onConfirm: @escaping () -> Void) -> HistoryMenuRowView {
+        let listNumber = (firstIndexOfMenuItems() + index) % kMaxKeyEquivalents
+        let presentation = makeHistoryItemPresentation(historyDetail, listNumber: listNumber)
+        return HistoryMenuRowView(title: presentation.title, image: presentation.image, onConfirm: onConfirm)
+    }
+
+    func makeHistoryItemPresentation(_ historyDetail: PasteboardHistoryDetail, listNumber: Int) -> HistoryItemPresentation {
+        let history = historyDetail.history
+        let isMarkWithNumber = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsAreMarkedWithNumbers)
+        let isShowToolTip = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showToolTipOnMenuItem)
+        let isShowImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showImageInTheMenu)
+        let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
+        let primaryPboardType = history.primaryType
+        let clipString = history.title
+        var title = menuItemTitle(trimTitle(clipString), listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+
+        if primaryPboardType?.isClipyImageType == true {
+            title = menuItemTitle("(Image)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+        } else if primaryPboardType == .pdf || primaryPboardType == .deprecatedPDF {
+            title = menuItemTitle("(PDF)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+        } else if primaryPboardType == .fileURL {
+            title = menuItemTitle("(Files)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+        }
+
+        let toolTip: String?
+        if isShowToolTip {
+            let maxLengthOfToolTip = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.maxLengthOfToolTip)
+            let toIndex = (clipString.count < maxLengthOfToolTip) ? clipString.count : maxLengthOfToolTip
+            toolTip = (clipString as NSString).substring(to: toIndex)
+        } else {
+            toolTip = nil
+        }
+
+        let image: NSImage?
+        if isShowImage || isShowColorCode,
+           let thumbnailAsset = historyDetail.thumbnailAsset,
+           let thumbnailImage = NSImage(data: thumbnailAsset.data),
+           (thumbnailAsset.kind == .image && isShowImage) || (thumbnailAsset.kind == .colorCode && isShowColorCode) {
+            image = thumbnailImage
+        } else {
+            image = nil
+        }
+
+        return HistoryItemPresentation(title: title, image: image, toolTip: toolTip)
+    }
+
+    func selectHistory(_ historyID: PasteboardHistory.ID, restoring application: NSRunningApplication?) {
+        let menuItem = NSMenuItem(title: "", action: #selector(AppDelegate.selectClipMenuItem(_:)), keyEquivalent: "")
+        menuItem.representedObject = historyID
+
+        if application?.isTerminated == false {
+            application?.activate(options: [.activateIgnoringOtherApps])
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            NSApp.sendAction(#selector(AppDelegate.selectClipMenuItem(_:)), to: nil, from: menuItem)
+        }
     }
 }
 
@@ -436,10 +685,13 @@ private extension MenuManager {
         image?.isTemplate = true
 
         statusItem = NSStatusBar.system.statusItem(withLength: -1)
-        statusItem?.image = image
-        statusItem?.highlightMode = true
         statusItem?.toolTip = "\(Constants.Application.name)\(Bundle.main.appVersion ?? "")"
-        statusItem?.menu = clipMenu
+        statusItem?.menu = nil
+        statusItem?.button?.image = image
+        statusItem?.button?.imagePosition = .imageOnly
+        statusItem?.button?.target = self
+        statusItem?.button?.action = #selector(statusItemButtonClicked(_:))
+        statusItem?.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     func removeStatusItem() {
@@ -447,6 +699,14 @@ private extension MenuManager {
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
         }
+    }
+
+    @objc func statusItemButtonClicked(_ sender: NSStatusBarButton) {
+        guard let frame = sender.window?.frame else {
+            showMainMenuPanel(at: NSEvent.mouseLocation)
+            return
+        }
+        showMainMenuPanel(attachedToStatusItemFrame: frame)
     }
 }
 
@@ -456,3 +716,32 @@ private extension MenuManager {
         return AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero) ? 0 : 1
     }
 }
+
+#if DEBUG
+extension MenuManager {
+    var isMainMenuPanelVisibleForTesting: Bool {
+        mainMenuPanelController?.isVisibleForTesting == true
+    }
+
+    var mainMenuPanelFrameForTesting: NSRect? {
+        mainMenuPanelController?.visibleFrame
+    }
+
+    var historyBrowserPanelFrameForTesting: NSRect? {
+        historyPanelController?.visibleFrame
+    }
+
+    func showMainMenuPanelForTesting(at screenPoint: NSPoint) {
+        isMainMenuPinned = true
+        showMainMenuPanel(at: screenPoint)
+    }
+
+    func showHistoryBrowserPanelForTesting(at screenPoint: NSPoint) {
+        showHistoryBrowserPanel(at: screenPoint)
+    }
+
+    func closeHistoryBrowserPanelForTesting() {
+        historyPanelController?.close()
+    }
+}
+#endif

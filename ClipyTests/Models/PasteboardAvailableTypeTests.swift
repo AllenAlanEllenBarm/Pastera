@@ -36,6 +36,18 @@ struct PasteboardAvailableTypeTests {
     }
 
     @Test
+    func availableTypesAcceptsSnipastePNGAsImage() {
+        let availableTypes = PasteboardAvailableType.availableTypes(
+            from: [
+                .png,
+                NSPasteboard.PasteboardType(rawValue: "com.trolltech.anymime.image--png")
+            ],
+            storeAvailableTypes: [.tiff]
+        )
+        #expect(availableTypes == [.png])
+    }
+
+    @Test
     func availableTypesFiltersDeprecatedTypesForDisabledStoreTypes() {
         let availableTypes = PasteboardAvailableType.availableTypes(
             from: [.deprecatedString, .deprecatedPDF, .deprecatedURL],

@@ -128,7 +128,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     // MARK: - Login Item Methods
     private func promptToAddLoginItems() {
         let alert = NSAlert()
-        alert.messageText = String(localized: "Launch Clipy on system startup?")
+        alert.messageText = String(localized: "Launch Pastera on system startup?")
         alert.informativeText = String(localized: "You can change this setting in the Preferences if you want")
         alert.addButton(withTitle: String(localized: "Launch on system startup"))
         alert.addButton(withTitle: String(localized: "Don't Launch"))
@@ -159,6 +159,152 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     private func reflectLoginItemState() {
         let isInLoginItems = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.loginItem)
         toggleAddingToLoginItems(isInLoginItems)
+    }
+}
+
+private final class HistorySearchCellView: NSTableCellView {
+    private let indexLabel = NSTextField(labelWithString: "")
+    private let iconImageView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let metadataLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func configure(with detail: PasteboardHistoryDetail, index: Int) {
+        let history = detail.history
+        indexLabel.stringValue = "\(index)"
+        titleLabel.stringValue = displayTitle(for: history)
+        metadataLabel.stringValue = [
+            displayType(for: history.primaryType),
+            displayDate(for: history.updateAt)
+        ].joined(separator: "  |  ")
+
+        if let thumbnailAsset = detail.thumbnailAsset,
+           thumbnailAsset.kind == .image,
+           let image = NSImage(data: thumbnailAsset.data) {
+            iconImageView.image = image
+            iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        } else {
+            iconImageView.image = icon(for: history.primaryType)
+            iconImageView.imageScaling = .scaleProportionallyDown
+        }
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        indexLabel.alignment = .right
+        indexLabel.textColor = .secondaryLabelColor
+        indexLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+
+        iconImageView.wantsLayer = true
+        iconImageView.layer?.cornerRadius = 5
+        iconImageView.layer?.masksToBounds = true
+
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
+
+        metadataLabel.lineBreakMode = .byTruncatingTail
+        metadataLabel.maximumNumberOfLines = 1
+        metadataLabel.textColor = .secondaryLabelColor
+        metadataLabel.font = .systemFont(ofSize: 11)
+
+        [indexLabel, iconImageView, titleLabel, metadataLabel].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            addSubview($0)
+        }
+
+        NSLayoutConstraint.activate([
+            indexLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            indexLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            indexLabel.widthAnchor.constraint(equalToConstant: 28),
+
+            iconImageView.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 10),
+            iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconImageView.widthAnchor.constraint(equalToConstant: 36),
+            iconImageView.heightAnchor.constraint(equalToConstant: 36),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+
+            metadataLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            metadataLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            metadataLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4)
+        ])
+    }
+
+    private func displayTitle(for history: PasteboardHistory) -> String {
+        if !history.title.isEmpty {
+            return history.title
+        }
+        if history.primaryType?.isClipyImageType == true {
+            return "(Image)"
+        }
+        switch history.primaryType {
+        case .pdf, .deprecatedPDF:
+            return "(PDF)"
+        case .fileURL:
+            return "(Files)"
+        default:
+            return "(Untitled)"
+        }
+    }
+
+    private func displayType(for type: NSPasteboard.PasteboardType?) -> String {
+        guard let type else { return "Clipboard" }
+        if type.isClipyImageType {
+            return "Image"
+        }
+        switch type {
+        case .string, .deprecatedString:
+            return "Text"
+        case .rtf, .deprecatedRTF:
+            return "RTF"
+        case .rtfd, .deprecatedRTFD:
+            return "RTFD"
+        case .pdf, .deprecatedPDF:
+            return "PDF"
+        case .fileURL:
+            return "Files"
+        case .URL, .deprecatedURL:
+            return "URL"
+        default:
+            return type.rawValue
+        }
+    }
+
+    private func displayDate(for updateAt: Int) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(updateAt))
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func icon(for type: NSPasteboard.PasteboardType?) -> NSImage? {
+        if type?.isClipyImageType == true {
+            return NSImage(systemSymbolName: "photo", accessibilityDescription: "Image")
+        }
+        switch type {
+        case .pdf, .deprecatedPDF:
+            return NSImage(systemSymbolName: "doc.richtext", accessibilityDescription: "PDF")
+        case .fileURL:
+            return NSImage(systemSymbolName: "folder", accessibilityDescription: "Files")
+        case .URL, .deprecatedURL:
+            return NSImage(systemSymbolName: "link", accessibilityDescription: "URL")
+        default:
+            return NSImage(systemSymbolName: "doc.text", accessibilityDescription: "Text")
+        }
     }
 }
 
@@ -258,7 +404,12 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
     private var pasteboardHistoryRepository
 
     private let searchField = NSSearchField()
-    private let typePopUpButton = NSPopUpButton()
+    private let typeSegmentedControl = NSSegmentedControl(
+        labels: ["All", "Text", "Images", "Files", "PDF"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
     private let regexButton = NSButton(checkboxWithTitle: "Regex", target: nil, action: nil)
     private let caseButton = NSButton(checkboxWithTitle: "Aa", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "")
@@ -271,12 +422,15 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
-            styleMask: [.titled, .closable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 520),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "Search History"
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        CPYWindowAppearance.apply(to: window)
         super.init(window: window)
         setupContent()
         reloadSearch()
@@ -296,23 +450,26 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let identifier = NSUserInterfaceItemIdentifier("HistorySearchCell")
-        let textField: NSTextField
-        if let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField {
-            textField = cell
+        let cell: HistorySearchCellView
+        if let reusedCell = tableView.makeView(withIdentifier: identifier, owner: self) as? HistorySearchCellView {
+            cell = reusedCell
         } else {
-            textField = NSTextField(labelWithString: "")
-            textField.identifier = identifier
-            textField.lineBreakMode = .byTruncatingTail
+            cell = HistorySearchCellView()
+            cell.identifier = identifier
         }
-        textField.stringValue = displayTitle(for: historyDetails[row].history)
-        return textField
+        cell.configure(with: historyDetails[row], index: row + 1)
+        return cell
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        62
     }
 
     @objc private func optionChanged(_ sender: NSButton) {
         scheduleSearch()
     }
 
-    @objc private func typeChanged(_ sender: NSPopUpButton) {
+    @objc private func typeChanged(_ sender: Any) {
         scheduleSearch()
     }
 
@@ -327,60 +484,103 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
     }
 
     private func setupContent() {
-        guard let contentView = window?.contentView else { return }
+        guard let window else { return }
+        let contentView = NSView()
+        contentView.wantsLayer = true
+        contentView.layer?.cornerRadius = 14
+        contentView.layer?.masksToBounds = true
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        window.contentView = contentView
+        CPYWindowAppearance.apply(to: window)
+
         searchField.delegate = self
-        typePopUpButton.addItems(withTitles: ["All", "Text", "Images", "Files", "PDF"])
-        typePopUpButton.target = self
-        typePopUpButton.action = #selector(typeChanged(_:))
+        searchField.placeholderString = "Search clipboard history"
+        searchField.controlSize = .large
+        searchField.font = .systemFont(ofSize: 15)
+
+        typeSegmentedControl.selectedSegment = 0
+        typeSegmentedControl.segmentStyle = .rounded
+        typeSegmentedControl.target = self
+        typeSegmentedControl.action = #selector(typeChanged(_:))
+        typeSegmentedControl.setWidth(58, forSegment: 0)
+        typeSegmentedControl.setWidth(58, forSegment: 1)
+        typeSegmentedControl.setWidth(72, forSegment: 2)
+        typeSegmentedControl.setWidth(62, forSegment: 3)
+        typeSegmentedControl.setWidth(52, forSegment: 4)
+
         regexButton.target = self
         regexButton.action = #selector(optionChanged(_:))
+        regexButton.controlSize = .small
         caseButton.target = self
         caseButton.action = #selector(optionChanged(_:))
+        caseButton.controlSize = .small
+        caseButton.toolTip = "Case sensitive"
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.font = .systemFont(ofSize: 12)
         loadMoreButton.target = self
         loadMoreButton.action = #selector(loadMore(_:))
         loadMoreButton.isEnabled = false
+        loadMoreButton.bezelStyle = .rounded
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("History"))
         column.title = "History"
+        column.resizingMask = .autoresizingMask
+        column.width = 640
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.delegate = self
         tableView.dataSource = self
         tableView.doubleAction = #selector(pasteSelectedHistory(_:))
         tableView.target = self
+        tableView.rowHeight = 62
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.gridStyleMask = []
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
+        tableView.selectionHighlightStyle = .regular
+        tableView.backgroundColor = .clear
+        tableView.enclosingScrollView?.drawsBackground = false
 
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.wantsLayer = true
+        scrollView.layer?.cornerRadius = 8
 
-        [searchField, typePopUpButton, regexButton, caseButton, statusLabel, scrollView, loadMoreButton].forEach {
+        let optionsStackView = NSStackView(views: [regexButton, caseButton])
+        optionsStackView.orientation = .horizontal
+        optionsStackView.alignment = .centerY
+        optionsStackView.spacing = 8
+
+        [searchField, typeSegmentedControl, optionsStackView, statusLabel, scrollView, loadMoreButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview($0)
         }
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            searchField.trailingAnchor.constraint(equalTo: typePopUpButton.leadingAnchor, constant: -8),
-            typePopUpButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            typePopUpButton.widthAnchor.constraint(equalToConstant: 96),
-            typePopUpButton.trailingAnchor.constraint(equalTo: regexButton.leadingAnchor, constant: -8),
-            regexButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            regexButton.trailingAnchor.constraint(equalTo: caseButton.leadingAnchor, constant: -8),
-            caseButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            caseButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            searchField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
+            searchField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            searchField.trailingAnchor.constraint(equalTo: optionsStackView.leadingAnchor, constant: -12),
+            searchField.heightAnchor.constraint(equalToConstant: 32),
 
-            statusLabel.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
-            statusLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            statusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            optionsStackView.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            optionsStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
 
-            scrollView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            scrollView.bottomAnchor.constraint(equalTo: loadMoreButton.topAnchor, constant: -8),
+            typeSegmentedControl.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 12),
+            typeSegmentedControl.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
 
-            loadMoreButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            loadMoreButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)
+            statusLabel.centerYAnchor.constraint(equalTo: typeSegmentedControl.centerYAnchor),
+            statusLabel.leadingAnchor.constraint(equalTo: typeSegmentedControl.trailingAnchor, constant: 12),
+            statusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
+
+            scrollView.topAnchor.constraint(equalTo: typeSegmentedControl.bottomAnchor, constant: 14),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+            scrollView.bottomAnchor.constraint(equalTo: loadMoreButton.topAnchor, constant: -10),
+
+            loadMoreButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
+            loadMoreButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -14)
         ])
     }
 
@@ -411,7 +611,7 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
             do {
                 let results = try self.pasteboardHistoryRepository.searchHistoryDetails(
                     query: query,
-                    includesThumbnailAsset: false,
+                    includesThumbnailAsset: true,
                     limit: self.pageLimit,
                     offset: offset
                 )
@@ -439,11 +639,11 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
     }
 
     private var selectedTypes: Set<NSPasteboard.PasteboardType> {
-        switch typePopUpButton.indexOfSelectedItem {
+        switch typeSegmentedControl.selectedSegment {
         case 1:
             return [.string, .deprecatedString]
         case 2:
-            return [.tiff, .deprecatedTIFF]
+            return NSPasteboard.PasteboardType.clipyImageTypes
         case 3:
             return [.fileURL]
         case 4:
@@ -457,9 +657,10 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
         if !history.title.isEmpty {
             return history.title
         }
-        switch history.primaryType {
-        case .tiff, .deprecatedTIFF:
+        if history.primaryType?.isClipyImageType == true {
             return "(Image)"
+        }
+        switch history.primaryType {
         case .pdf, .deprecatedPDF:
             return "(PDF)"
         case .fileURL:

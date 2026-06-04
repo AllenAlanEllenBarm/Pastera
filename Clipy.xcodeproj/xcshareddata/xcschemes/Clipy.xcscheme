@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "FAC43DC51B35D8B100C06102"
-               BuildableName = "Clipy.app"
+               BuildableName = "Pastera.app"
                BlueprintName = "Clipy"
                ReferencedContainer = "container:Clipy.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FAC43DC51B35D8B100C06102"
-            BuildableName = "Clipy.app"
+            BuildableName = "Pastera.app"
             BlueprintName = "Clipy"
             ReferencedContainer = "container:Clipy.xcodeproj">
          </BuildableReference>
@@ -78,7 +78,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FAC43DC51B35D8B100C06102"
-            BuildableName = "Clipy.app"
+            BuildableName = "Pastera.app"
             BlueprintName = "Clipy"
             ReferencedContainer = "container:Clipy.xcodeproj">
          </BuildableReference>
@@ -95,7 +95,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FAC43DC51B35D8B100C06102"
-            BuildableName = "Clipy.app"
+            BuildableName = "Pastera.app"
             BlueprintName = "Clipy"
             ReferencedContainer = "container:Clipy.xcodeproj">
          </BuildableReference>

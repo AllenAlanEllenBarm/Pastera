@@ -294,30 +294,30 @@
         }
       }
     },
-    "Launch Clipy on system startup?" : {
+    "Launch Pastera on system startup?" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clipy beim Starten öffnen?"
+            "value" : "Pastera beim Starten öffnen?"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vuoi avviare Clipy al login?"
+            "value" : "Vuoi avviare Pastera al login?"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "システム起動時にClipyを起動しますか?"
+            "value" : "システム起動時にPasteraを起動しますか?"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "系统启动时打开 Clipy?"
+            "value" : "系统启动时打开 Pastera?"
           }
         }
       }
@@ -333,7 +333,7 @@
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Avvia Clipy al login"
+            "value" : "Avvia Pastera al login"
           }
         },
         "ja" : {
@@ -509,30 +509,30 @@
         }
       }
     },
-    "Quit Clipy" : {
+    "Quit Pastera" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clipy beenden"
+            "value" : "Pastera beenden"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Esci da Clipy"
+            "value" : "Esci da Pastera"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clipyを終了"
+            "value" : "Pasteraを終了"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "退出 Clipy"
+            "value" : "退出 Pastera"
           }
         }
       }
@@ -623,7 +623,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この動作を行うためにはシステム環境設定の\"セキュリティとプライバシー\"環境設定で、Clipyへのアクセシビリティのアクセスを許可してください。"
+            "value" : "この動作を行うためにはシステム環境設定の\"セキュリティとプライバシー\"環境設定で、Pasteraへのアクセシビリティのアクセスを許可してください。"
           }
         },
         "zh-Hans" : {

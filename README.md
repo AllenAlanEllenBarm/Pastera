@@ -1,69 +1,41 @@
-<div align="center">
-  <img src="./Resources/clipy_logo.png" width="400">
-</div>
+# Pastera
 
-<br>
+Pastera is a macOS clipboard manager forked from
+[Clipy](https://github.com/Clipy/Clipy). It keeps the lightweight menu-bar
+workflow and adds fork-specific work around searchable history, image
+pasteboard handling, pinned menus, and optional folder-based sync.
 
-![CI](https://github.com/Clipy/Clipy/workflows/CI/badge.svg)
-[![Release version](https://img.shields.io/github/release/Clipy/Clipy.svg)](https://github.com/Clipy/Clipy/releases/latest)
-[![OpenCollective](https://opencollective.com/clipy/backers/badge.svg)](#backers)
-[![OpenCollective](https://opencollective.com/clipy/sponsors/badge.svg)](#sponsors)
+## Requirements
 
-Clipy is a Clipboard extension app for macOS.
+- macOS 13 Ventura or later
+- Xcode 26.5 for local development
 
----
+## Build
 
-__Requirement__: macOS 13 Ventura or later
+The Xcode project and scheme are still named `Clipy` to keep upstream merges and
+the existing Swift module stable. The built app product is `Pastera.app`.
 
-__Distribution Site__ : <https://clipy-app.com>
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme Clipy \
+  -project Clipy.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
+  build
+```
 
-<img src="http://clipy-app.com/img/screenshot1.png" width="400">
+Local builds may use ad-hoc signing through
+`Configurations/CodeSigning.xcconfig` because the upstream maintainer signing
+certificates are not available for this fork.
 
-### Development Environment
-* macOS 26 Tahoe
-* Xcode 26.5
+## Upstream Attribution
 
-### How to Build
-macOS checks Accessibility permission by the app's code signature. If Clipy is built without a stable signing certificate, macOS may ask for Accessibility permission again for every build.
+Pastera is derived from Clipy and keeps the original MIT license terms. The
+fork uses a different product name in line with the upstream distribution
+request not to ship derived work as `Clipy` or `ClipMenu`.
 
-For this reason, the default signing settings use the Clipy signing certificate. This certificate is available only to the maintainer, so local builds require switching to ad-hoc signing before building.
+## License
 
-#### Build for ad-hoc usage
-
-1. Open `Clipy.xcodeproj` in Xcode.
-2. Switch to ad-hoc build mode:
-    1. Open `Configurations/CodeSigning.xcconfig`.
-    2. Uncomment `#include "Configurations/CodeSigning-AdHoc.xcconfig"`.
-3. Build the `Clipy` scheme.
-
-### Localization Contributors
-Clipy is looking for localization contributors.  
-If you can contribute, please see [CONTRIBUTING.md](https://github.com/Clipy/Clipy/blob/master/.github/CONTRIBUTING.md)
-
-### Distribution
-If you distribute derived work, especially in the Mac App Store, I ask you to follow two rules:
-
-1. Don't use `Clipy` and `ClipMenu` as your product name.
-2. Follow the MIT license terms.
-
-Thank you for your cooperation.
-
-### Backers
-
-Support us with a monthly donation and help us continue our activities. [[Become a backer](https://opencollective.com/clipy#backer)]
-
-<a href="https://opencollective.com/clipy#backers"><img src="https://opencollective.com/clipy/backers.svg?avatarHeight=36&width=600" /></a>
-
-### Sponsors
-
-Become a sponsor and get your logo on our README on Github with a link to your site. [[Become a sponsor](https://opencollective.com/clipy#sponsor)]
-
-<a href="https://opencollective.com/clipy#sponsors"><img src="https://opencollective.com/clipy/sponsors.svg?avatarHeight=36&width=600" /></a>
-
-### Licence
-Clipy is available under the MIT license. See the LICENSE file for more info.
-
-Icons are copyrighted by their respective authors.
-
-### Special Thanks
-__Thank you for [@naotaka](https://github.com/naotaka) who have published [ClipMenu](https://github.com/naotaka/ClipMenu) as OSS.__
+MIT. See `LICENSE` for details.

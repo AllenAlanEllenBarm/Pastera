@@ -204,6 +204,13 @@ final class HotKeyServiceTests {
     }
 
     @Test
+    func remoteSessionPolicySuspendsLocalHotkeysForScreenSharing() {
+        #expect(RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"))
+        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.finder"))
+        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: nil))
+    }
+
+    @Test
     func addAndRemoveClearHistoryHotkey() throws {
         let service = HotKeyService()
 

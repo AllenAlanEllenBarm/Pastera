@@ -79,6 +79,7 @@ protocol PasteboardHistoryRepositoryProtocol {
         ascending: Bool,
         includesThumbnailAsset: Bool,
         limit: Int,
+        offset: Int
     ) -> [PasteboardHistoryDetail]
     func searchHistoryDetails(
         query: HistorySearchQuery,
@@ -94,6 +95,21 @@ protocol PasteboardHistoryRepositoryProtocol {
     func deleteAll()
     func deleteOverflowingHistories(maxHistorySize: Int)
     func pruneHistories(settings: HistoryRetentionSettings)
+}
+
+extension PasteboardHistoryRepositoryProtocol {
+    func fetchHistoryDetails(
+        ascending: Bool,
+        includesThumbnailAsset: Bool,
+        limit: Int
+    ) -> [PasteboardHistoryDetail] {
+        fetchHistoryDetails(
+            ascending: ascending,
+            includesThumbnailAsset: includesThumbnailAsset,
+            limit: limit,
+            offset: 0
+        )
+    }
 }
 
 final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
@@ -121,9 +137,11 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     func fetchHistoryDetails(
         ascending: Bool,
         includesThumbnailAsset: Bool,
-        limit: Int
+        limit: Int,
+        offset: Int = 0
     ) -> [PasteboardHistoryDetail] {
-        withErrorReporting {
+        guard limit > 0 else { return [] }
+        return withErrorReporting {
             try database.read { database in
                 let histories = PasteboardHistory
                     .all
@@ -134,7 +152,7 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                             columns.updateAt.desc()
                         }
                     }
-                    .limit(limit)
+                    .limit(limit, offset: max(0, offset))
 
                 guard includesThumbnailAsset else {
                     return try histories
@@ -157,6 +175,15 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
         offset: Int
     ) throws -> [PasteboardHistoryDetail] {
         guard limit > 0 else { return [] }
+        if query.text.isEmpty && query.types.isEmpty {
+            return fetchHistoryDetails(
+                ascending: query.sortOrder == .oldestFirst,
+                includesThumbnailAsset: includesThumbnailAsset,
+                limit: limit,
+                offset: offset
+            )
+        }
+
         let matcher = try makeMatcher(for: query)
         let details = fetchAllHistoryDetails(
             ascending: query.sortOrder == .oldestFirst,

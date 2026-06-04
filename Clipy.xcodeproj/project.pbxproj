@@ -7,6 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
+		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
+		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
+		C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */; };
+		C5A901002FD0B00000B7C0DE /* HistoryMenuPaginationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */; };
+		C5A903002FD0C10000B7C0DE /* HistoryMenuSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */; };
+		C5A904002FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */; };
+		C5A905002FD0C30000B7C0DE /* HistoryBrowserPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */; };
+		C5A906002FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */; };
+		C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */; };
+		C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */; };
+		C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */; };
 		C522FB952FCBD6AA00E61800 /* PasteboardAvailableType.swift in Sources */ = {isa = PBXBuildFile; fileRef = C522FB942FCBD69A00E61800 /* PasteboardAvailableType.swift */; };
 		C522FB992FCC019100E61800 /* PasteboardAvailableTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C522FB982FCC019100E61800 /* PasteboardAvailableTypeTests.swift */; };
 		C53FC6C02FCCA1C400219A25 /* Collections in Frameworks */ = {isa = PBXBuildFile; productRef = C53FC6BF2FCCA1C400219A25 /* Collections */; };
@@ -163,6 +175,18 @@
 		C57100062FCEB02000C8F965 /* PasteboardContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardContent.swift; sourceTree = "<group>"; };
 		C571000B2FCEB03000C8F965 /* PasteboardContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardContentTests.swift; sourceTree = "<group>"; };
 		C576AD7B2FBD345000B71213 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYWindowAppearance.swift; sourceTree = "<group>"; };
+		C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYGeneralPreferenceViewController.swift; sourceTree = "<group>"; };
+		C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYWindowAppearanceTests.swift; sourceTree = "<group>"; };
+		C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuPaginationState.swift; sourceTree = "<group>"; };
+		C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuKeyEquivalentTests.swift; sourceTree = "<group>"; };
+		C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuSearchField.swift; sourceTree = "<group>"; };
+		C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuImagePreviewController.swift; sourceTree = "<group>"; };
+		C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryBrowserPanelController.swift; sourceTree = "<group>"; };
+		C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuFocusableControls.swift; sourceTree = "<group>"; };
+		C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuHeaderItemView.swift; sourceTree = "<group>"; };
+		C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuPanelController.swift; sourceTree = "<group>"; };
+		C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuRowView.swift; sourceTree = "<group>"; };
 		C5F1B7321FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSPasteboard+Deprecated.swift"; sourceTree = "<group>"; };
 		FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
 		FA0D5CE71DDCC61600AC9052 /* ClipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ClipService.swift; sourceTree = "<group>"; };
@@ -223,7 +247,7 @@
 		FAAA888E1E6862D90088FB34 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/CPYUpdatesPreferenceViewController.strings; sourceTree = "<group>"; };
 		FAC0DCEE1DE3255E00309C49 /* NSImage+NSColor.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "NSImage+NSColor.swift"; sourceTree = "<group>"; };
 		FAC0DCF01DE576F300309C49 /* PasteService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PasteService.swift; sourceTree = "<group>"; };
-		FAC43DC61B35D8B100C06102 /* Clipy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FAC43DC61B35D8B100C06102 /* Pastera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pastera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAC43DD81B35D8B100C06102 /* ClipyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClipyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAC43DDD1B35D8B100C06102 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FAC43E221B35DFC800C06102 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
@@ -428,6 +452,14 @@
 			isa = PBXGroup;
 			children = (
 				FA1DB4C31DDCB460007F95C8 /* MenuManager.swift */,
+				C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */,
+				C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */,
+				C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */,
+				C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */,
+				C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */,
+				C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */,
+				C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */,
+				C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -452,6 +484,7 @@
 			isa = PBXGroup;
 			children = (
 				FA1DB4D91DDCB49C007F95C8 /* CPYUtilities.swift */,
+				C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */,
 			);
 			path = Utility;
 			sourceTree = "<group>";
@@ -513,6 +546,7 @@
 		FA1DB4F11DDCB4C0007F95C8 /* Panels */ = {
 			isa = PBXGroup;
 			children = (
+				C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */,
 				FA1DB4F21DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.swift */,
 				FA1DB4F31DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.swift */,
 				FA1DB4F41DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.swift */,
@@ -561,7 +595,7 @@
 		FAC43DC71B35D8B100C06102 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FAC43DC61B35D8B100C06102 /* Clipy.app */,
+				FAC43DC61B35D8B100C06102 /* Pastera.app */,
 				FAC43DD81B35D8B100C06102 /* ClipyTests.xctest */,
 			);
 			name = Products;
@@ -584,6 +618,8 @@
 				C5700B472FC5C0DB00C8F965 /* Database */,
 				C571000C2FCEB03000C8F965 /* Models */,
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
+				C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */,
+				C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */,
 				FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */,
 				FA6167931D3ACCB90049FA14 /* DraggedDataTests.swift */,
 				FAC43DDC1B35D8B100C06102 /* Supporting Files */,
@@ -621,7 +657,7 @@
 				C53FC6BF2FCCA1C400219A25 /* Collections */,
 			);
 			productName = Clipy;
-			productReference = FAC43DC61B35D8B100C06102 /* Clipy.app */;
+			productReference = FAC43DC61B35D8B100C06102 /* Pastera.app */;
 			productType = "com.apple.product-type.application";
 		};
 		FAC43DD71B35D8B100C06102 /* ClipyTests */ = {
@@ -656,7 +692,7 @@
 				CLASSPREFIX = CPY;
 				LastSwiftUpdateCheck = 0700;
 				LastUpgradeCheck = 2650;
-				ORGANIZATIONNAME = "Clipy Project";
+				ORGANIZATIONNAME = "Pastera Group";
 				TargetAttributes = {
 					FAC43DC51B35D8B100C06102 = {
 						CreatedOnToolsVersion = 6.3.2;
@@ -748,6 +784,7 @@
 				FA1DB4A61DDCB443007F95C8 /* MenuType.swift in Sources */,
 				C54C29D52FC3E20000EF30FB /* SQLiteDataDatabase.swift in Sources */,
 				FA1DB4B31DDCB452007F95C8 /* Array+Remove.swift in Sources */,
+				C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */,
 				FA3778931F3B691A003B5BAB /* AppEnvironment.swift in Sources */,
 				FAC0DCF11DE576F300309C49 /* PasteService.swift in Sources */,
 				FA1DB4E51DDCB49C007F95C8 /* CPYUtilities.swift in Sources */,
@@ -764,6 +801,7 @@
 				FA1DB5171DDCB4C0007F95C8 /* CPYTypePreferenceViewController.swift in Sources */,
 				FA1DB4A21DDCB433007F95C8 /* AppDelegate.swift in Sources */,
 				FA1DB5141DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.swift in Sources */,
+				C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */,
 				FA1DB4BC1DDCB452007F95C8 /* Realm+NoCatch.swift in Sources */,
 				C522FB952FCBD6AA00E61800 /* PasteboardAvailableType.swift in Sources */,
 				C5700B462FC40BBF00C8F965 /* SnippetRepository.swift in Sources */,
@@ -771,6 +809,14 @@
 				FA1DB4B91DDCB452007F95C8 /* NSMenuItem+Initialize.swift in Sources */,
 				FA0D5CE81DDCC61600AC9052 /* ClipService.swift in Sources */,
 				FA1DB4C91DDCB460007F95C8 /* MenuManager.swift in Sources */,
+				C5A901002FD0B00000B7C0DE /* HistoryMenuPaginationState.swift in Sources */,
+				C5A906002FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift in Sources */,
+				C5A903002FD0C10000B7C0DE /* HistoryMenuSearchField.swift in Sources */,
+				C5A904002FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift in Sources */,
+				C5A905002FD0C30000B7C0DE /* HistoryBrowserPanelController.swift in Sources */,
+				C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */,
+				C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */,
+				C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
 				FA1DB4BD1DDCB452007F95C8 /* String+Substring.swift in Sources */,
 				FA1189331E4CD58C00244F12 /* ExcludeAppService.swift in Sources */,
 				FA1DB4E91DDCB49C007F95C8 /* CPYSplitView.swift in Sources */,
@@ -804,6 +850,8 @@
 				FA08EDF81D1FED7D000D1D13 /* HotKeyServiceTests.swift in Sources */,
 				FA6167941D3ACCB90049FA14 /* DraggedDataTests.swift in Sources */,
 				C571000A2FCEB03000C8F965 /* PasteboardContentTests.swift in Sources */,
+				C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */,
+				C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */,
 				C57100052FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift in Sources */,
 				C522FB992FCC019100E61800 /* PasteboardAvailableTypeTests.swift in Sources */,
 				C57100012FCAE00000C8F965 /* SnippetRepositoryTests.swift in Sources */,
@@ -1077,21 +1125,25 @@
 		FAC43DE31B35D8B100C06102 /* Debug configuration for PBXNativeTarget "Clipy" */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C5208B882FC6E7FF00BC4568 /* Clipy.xcconfig */;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				INFOPLIST_FILE = "Clipy/Supporting Files/Info.plist";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.clipy-app.Clipy.debug";
-			};
+				buildSettings = {
+					ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+					INFOPLIST_FILE = "Clipy/Supporting Files/Info.plist";
+					PRODUCT_MODULE_NAME = Clipy;
+					PRODUCT_NAME = Pastera;
+					PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.Pastera.debug";
+				};
 			name = Debug;
 		};
 		FAC43DE41B35D8B100C06102 /* Release configuration for PBXNativeTarget "Clipy" */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C5208B882FC6E7FF00BC4568 /* Clipy.xcconfig */;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				INFOPLIST_FILE = "Clipy/Supporting Files/Info.plist";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.clipy-app.Clipy";
-			};
+				buildSettings = {
+					ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+					INFOPLIST_FILE = "Clipy/Supporting Files/Info.plist";
+					PRODUCT_MODULE_NAME = Clipy;
+					PRODUCT_NAME = Pastera;
+					PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.Pastera";
+				};
 			name = Release;
 		};
 		FAC43DE61B35D8B100C06102 /* Debug configuration for PBXNativeTarget "ClipyTests" */ = {
@@ -1103,8 +1155,8 @@
 					"$(inherited)",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.clipyapp.$(PRODUCT_NAME:rfc1034identifier)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Clipy.app/Contents/MacOS/Clipy";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.$(PRODUCT_NAME:rfc1034identifier)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pastera.app/Contents/MacOS/Pastera";
 			};
 			name = Debug;
 		};
@@ -1117,8 +1169,8 @@
 					"$(inherited)",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.clipyapp.$(PRODUCT_NAME:rfc1034identifier)";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Clipy.app/Contents/MacOS/Clipy";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.$(PRODUCT_NAME:rfc1034identifier)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pastera.app/Contents/MacOS/Pastera";
 			};
 			name = Release;
 		};

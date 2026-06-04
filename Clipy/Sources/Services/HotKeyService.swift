@@ -15,6 +15,18 @@ import Dependencies
 import Foundation
 import Magnet
 
+struct RemoteSessionHotKeyPolicy {
+    private static let remoteSessionBundleIdentifiers: Set<String> = [
+        "com.apple.ScreenSharing",
+        "com.apple.RemoteDesktop"
+    ]
+
+    static func shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return remoteSessionBundleIdentifiers.contains(bundleIdentifier)
+    }
+}
+
 final class HotKeyService: NSObject {
     // MARK: - Properties
     static var defaultKeyCombos: [String: Any] = {
@@ -30,9 +42,17 @@ final class HotKeyService: NSObject {
     fileprivate(set) var historyKeyCombo: KeyCombo?
     fileprivate(set) var snippetKeyCombo: KeyCombo?
     fileprivate(set) var clearHistoryKeyCombo: KeyCombo?
+    fileprivate(set) var isSuspendedForRemoteSession = false
+    private var remoteSessionObserver: NSObjectProtocol?
 
     @Dependency(\.snippetRepository)
     private var snippetRepository
+
+    deinit {
+        if let remoteSessionObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(remoteSessionObserver)
+        }
+    }
 }
 
 // MARK: - Actions
@@ -75,6 +95,10 @@ extension HotKeyService {
         change(with: .snippet, keyCombo: savedKeyCombo(forKey: Constants.HotKey.snippetKeyCombo))
         // Clear History
         changeClearHistoryKeyCombo(savedKeyCombo(forKey: Constants.HotKey.clearHistoryKeyCombo))
+        startMonitoringRemoteSessionApplications()
+        updateRemoteSessionHotKeyState(
+            frontmostApplicationBundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        )
     }
 
     func change(with type: MenuType, keyCombo: KeyCombo?) {
@@ -96,7 +120,7 @@ extension HotKeyService {
         // Reset hotkey
         HotKeyCenter.shared.unregisterHotKey(with: "ClearHistory")
         // Register new hotkey
-        guard let keyCombo = keyCombo else { return }
+        guard !isSuspendedForRemoteSession, let keyCombo else { return }
         let hotkey = HotKey(identifier: "ClearHistory", keyCombo: keyCombo, target: self, action: #selector(HotKeyService.popUpClearHistoryAlert))
         hotkey.register()
     }
@@ -115,7 +139,7 @@ private extension HotKeyService {
         // Reset hotkey
         HotKeyCenter.shared.unregisterHotKey(with: type.rawValue)
         // Register new hotkey
-        guard let keyCombo = keyCombo else { return }
+        guard !isSuspendedForRemoteSession, let keyCombo else { return }
         let hotKey = HotKey(identifier: type.rawValue, keyCombo: keyCombo, target: self, action: type.hotKeySelector)
         hotKey.register()
     }
@@ -123,6 +147,54 @@ private extension HotKeyService {
     func save(with type: MenuType, keyCombo: KeyCombo?) {
         AppEnvironment.current.defaults.set(keyCombo?.archive(), forKey: type.userDefaultsKey)
         AppEnvironment.current.defaults.synchronize()
+    }
+}
+
+// MARK: - Remote Sessions
+extension HotKeyService {
+    func startMonitoringRemoteSessionApplications() {
+        guard remoteSessionObserver == nil else { return }
+        remoteSessionObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            self?.updateRemoteSessionHotKeyState(
+                frontmostApplicationBundleIdentifier: application?.bundleIdentifier
+            )
+        }
+    }
+
+    func updateRemoteSessionHotKeyState(frontmostApplicationBundleIdentifier bundleIdentifier: String?) {
+        let shouldSuspend = RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(
+            frontmostApplicationBundleIdentifier: bundleIdentifier
+        )
+        guard shouldSuspend != isSuspendedForRemoteSession else { return }
+        isSuspendedForRemoteSession = shouldSuspend
+
+        if shouldSuspend {
+            unregisterAllRegisteredHotKeys()
+        } else {
+            restoreRegisteredHotKeys()
+        }
+    }
+
+    private func unregisterAllRegisteredHotKeys() {
+        [MenuType.main.rawValue, MenuType.history.rawValue, MenuType.snippet.rawValue, "ClearHistory"].forEach {
+            HotKeyCenter.shared.unregisterHotKey(with: $0)
+        }
+        folderKeyCombos?.keys.forEach {
+            HotKeyCenter.shared.unregisterHotKey(with: $0)
+        }
+    }
+
+    private func restoreRegisteredHotKeys() {
+        register(with: .main, keyCombo: mainKeyCombo)
+        register(with: .history, keyCombo: historyKeyCombo)
+        register(with: .snippet, keyCombo: snippetKeyCombo)
+        changeClearHistoryKeyCombo(clearHistoryKeyCombo)
+        setupSnippetHotKeys()
     }
 }
 
@@ -186,13 +258,14 @@ extension HotKeyService {
     func registerSnippetHotKey(with identifier: String, keyCombo: KeyCombo) {
         // Reset hotkey
         unregisterSnippetHotKey(with: identifier)
-        // Register new hotkey
-        let hotKey = HotKey(identifier: identifier, keyCombo: keyCombo, target: self, action: #selector(HotKeyService.popupSnippetFolder(_:)))
-        hotKey.register()
         // Save key combos
         var keyCombos = folderKeyCombos ?? [String: KeyCombo]()
         keyCombos[identifier] = keyCombo
         folderKeyCombos = keyCombos
+        // Register new hotkey
+        guard !isSuspendedForRemoteSession else { return }
+        let hotKey = HotKey(identifier: identifier, keyCombo: keyCombo, target: self, action: #selector(HotKeyService.popupSnippetFolder(_:)))
+        hotKey.register()
     }
 
     func unregisterSnippetHotKey(with identifier: String) {
@@ -217,6 +290,7 @@ extension HotKeyService {
     }
 
     fileprivate func setupSnippetHotKeys() {
+        guard !isSuspendedForRemoteSession else { return }
         folderKeyCombos?.forEach {
             let hotKey = HotKey(identifier: $0, keyCombo: $1, target: self, action: #selector(HotKeyService.popupSnippetFolder(_:)))
             hotKey.register()

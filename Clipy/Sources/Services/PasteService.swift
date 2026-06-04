@@ -18,7 +18,7 @@ import Sauce
 final class PasteService {
 
     // MARK: - Properties
-    fileprivate let lock = NSRecursiveLock(name: "com.clipy-app.Clipy.Pastable")
+    fileprivate let lock = NSRecursiveLock(name: "com.pastera-app.Pastera.Pastable")
 
     @Dependency(\.pasteboardHistoryRepository)
     private var pasteboardHistoryRepository

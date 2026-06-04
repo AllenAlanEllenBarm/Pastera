@@ -23,7 +23,7 @@ final class ClipService {
     fileprivate var cachedChangeCount = BehaviorRelay<Int>(value: 0)
     fileprivate var storeTypes = [String: NSNumber]()
     fileprivate let scheduler = SerialDispatchQueueScheduler(qos: .userInteractive)
-    fileprivate let lock = NSRecursiveLock(name: "com.clipy-app.Clipy.ClipUpdatable")
+    fileprivate let lock = NSRecursiveLock(name: "com.pastera-app.Pastera.ClipUpdatable")
     fileprivate var disposeBag = DisposeBag()
 
     @Dependency(\.pasteboardHistoryRepository)
@@ -96,21 +96,21 @@ extension ClipService {
         lock.lock(); defer { lock.unlock() }
 
         guard let content = PasteboardContent(image: image) else { return }
-        save(content)
+        save(content, allowDuplicateContent: true)
     }
 
-    private func save(_ content: PasteboardContent) {
+    private func save(_ content: PasteboardContent, allowDuplicateContent: Bool = false) {
         // Copy already copied history
         let isCopySameHistory = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.copySameHistory)
         let historyID = PasteboardHistory.ID(rawValue: content.hash)
-        if pasteboardHistoryRepository.fetchHistory(id: historyID) != nil, !isCopySameHistory { return }
+        if !allowDuplicateContent, pasteboardHistoryRepository.fetchHistory(id: historyID) != nil, !isCopySameHistory { return }
 
         // Don't save empty string history
         if content.isOnlyStringType && content.stringValue.isEmpty { return }
 
         // Overwrite same history
         let isOverwriteHistory = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.overwriteSameHistory)
-        let savedHash = (isOverwriteHistory) ? content.hash : UUID().uuidString
+        let savedHash = (isOverwriteHistory && !allowDuplicateContent) ? content.hash : UUID().uuidString
 
         let unixTime = Int(Date().timeIntervalSince1970)
         pasteboardHistoryRepository.save(id: .init(rawValue: savedHash), content: content, updateAt: unixTime)
