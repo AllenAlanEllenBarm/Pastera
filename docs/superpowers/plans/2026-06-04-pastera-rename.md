@@ -68,8 +68,8 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 - Local git remote URL.
 
 - [x] Install GitHub CLI under `~/.local/bin/gh`.
-- [ ] Authenticate GitHub CLI with `gh auth login`.
-- [ ] Rename repository from `Clipy` to `Pastera`:
+- [x] Authenticate GitHub CLI with `gh auth login`.
+- [x] Rename repository from `Clipy` to `Pastera`:
 
 ```bash
 gh repo rename Pastera --repo AllenAlanEllenBarm/Clipy --yes
@@ -77,4 +77,4 @@ git remote set-url origin https://github.com/AllenAlanEllenBarm/Pastera.git
 ```
 
 - [ ] If a GitHub organization named `pastera` is intended as the group/owner, transfer the repository after the organization exists and the authenticated user has owner permissions.
-- [ ] Push the current branch to the renamed origin.
+- [x] Push the current branch to the renamed origin.
