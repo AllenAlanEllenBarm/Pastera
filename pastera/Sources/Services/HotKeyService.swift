@@ -55,6 +55,26 @@ final class HotKeyService: NSObject {
     }
 }
 
+enum PasteraShortcutFormatter {
+    static func string(for keyCombo: KeyCombo?) -> String? {
+        guard let keyCombo else { return nil }
+        let modifiers = keyCombo.keyEquivalentModifierMaskString
+
+        if keyCombo.doubledModifiers {
+            guard !modifiers.isEmpty else { return nil }
+            return modifiers + modifiers
+        }
+
+        let key = keyCombo.keyEquivalent.uppercased()
+        let text = modifiers + key
+        return text.isEmpty ? nil : text
+    }
+
+    static func numericString(forRowIndex index: Int, startsAtZero: Bool) -> String? {
+        HistoryMenuNumberShortcutMapper.shortcutText(forRowIndex: index, startsAtZero: startsAtZero)
+    }
+}
+
 // MARK: - Actions
 extension HotKeyService {
     @objc func popupMainMenu() {

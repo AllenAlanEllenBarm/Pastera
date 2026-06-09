@@ -10,6 +10,12 @@ pasteboard handling, pinned menus, and optional folder-based sync.
 - macOS 13 Ventura or later
 - Xcode 26.5 for local development
 
+## Latest Beta: 1.2.2beta
+
+- 增加历史搜索功能
+- 优化 UI
+- 修复部分截图软件无法成功纳入历史的问题
+
 ## Build
 
 The Xcode project, scheme, and source directory use lowercase `pastera`.
@@ -29,6 +35,22 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 Local builds may use ad-hoc signing through
 `Configurations/CodeSigning.xcconfig` because the upstream maintainer signing
 certificates are not available for this fork.
+
+## Local Install
+
+For manual testing, build and replace the local app with:
+
+```bash
+./script/install_local.sh
+```
+
+The script installs to `/Applications/Pastera.app` by default and launches the
+fresh build. Set `PASTERA_INSTALL_DIR="$HOME/Applications"` if `/Applications`
+is not writable.
+
+Codex local development also uses `.codex/hooks.json`: the Stop hook runs
+`script/codex_stop_install_if_changed.sh`, which reinstalls only when
+build-relevant app paths changed since the last local install.
 
 ## Upstream Attribution
 

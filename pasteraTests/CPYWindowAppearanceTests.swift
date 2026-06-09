@@ -5,15 +5,51 @@
 //
 
 import Cocoa
+import Carbon
+import Combine
+import Dependencies
+import Magnet
 import Testing
 @testable import Pastera
 
-@Suite
+@Suite(.serialized)
 struct CPYWindowAppearanceTests {
     @Test
+    func designTokensExposeReadableNativePalette() {
+        let lightTokens = PasteraDesignTokens.colors(for: NSAppearance(named: .aqua))
+        let darkTokens = PasteraDesignTokens.colors(for: NSAppearance(named: .darkAqua))
+
+        #expect(lightTokens.panelBackground.alphaComponent >= 0.94)
+        #expect(lightTokens.separator.alphaComponent <= 0.18)
+        #expect(lightTokens.selectedRow != lightTokens.hoveredRow)
+        #expect(darkTokens.panelBackground != lightTokens.panelBackground)
+        #expect(PasteraDesignTokens.Metrics.panelCornerRadius == 16)
+        #expect(PasteraDesignTokens.Motion.standardDuration <= 0.16)
+    }
+
+    @Test
+    func confirmationOptionsPreserveDestructiveAndSuppressionSemantics() {
+        let options = PasteraConfirmationOptions(
+            title: "Clear History",
+            message: "Are you sure you want to clear your clipboard history?",
+            confirmTitle: "Clear History",
+            cancelTitle: "Cancel",
+            isDestructive: true,
+            suppressionTitle: "Don't ask again"
+        )
+
+        #expect(options.isDestructive)
+        #expect(options.confirmTitle == "Clear History")
+        #expect(options.cancelTitle == "Cancel")
+        #expect(options.suppressionTitle == "Don't ask again")
+    }
+
+    @Test
     func normalizedOpacityClampsToSupportedRange() {
+        #expect(CPYWindowAppearance.defaultOpacity == 0.94)
+        #expect(CPYWindowAppearance.minimumOpacity == 0.78)
         #expect(CPYWindowAppearance.normalizedOpacity(0.1) == CPYWindowAppearance.minimumOpacity)
-        #expect(CPYWindowAppearance.normalizedOpacity(0.5) == 0.5)
+        #expect(CPYWindowAppearance.normalizedOpacity(0.82) == 0.82)
         #expect(CPYWindowAppearance.normalizedOpacity(2.0) == CPYWindowAppearance.maximumOpacity)
     }
 
@@ -42,7 +78,7 @@ struct CPYWindowAppearanceTests {
         #expect(CPYWindowAppearance.opacity(defaults: defaults) == CPYWindowAppearance.minimumOpacity)
 
         defaults.set(0.72, forKey: Constants.UserDefaults.windowBackgroundOpacity)
-        #expect(CPYWindowAppearance.opacity(defaults: defaults) == 0.72)
+        #expect(CPYWindowAppearance.opacity(defaults: defaults) == CPYWindowAppearance.minimumOpacity)
     }
 
     @Test @MainActor
@@ -53,6 +89,7 @@ struct CPYWindowAppearanceTests {
             backing: .buffered,
             defer: false
         )
+        defer { retainWindowForAppKitTest(window) }
 
         window.titlebarAppearsTransparent = false
         CPYWindowAppearance.apply(to: window)
@@ -71,6 +108,8 @@ struct CPYWindowAppearanceTests {
             backing: .buffered,
             defer: false
         )
+        defer { retainWindowForAppKitTest(window) }
+
         let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
         let paneView = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 184))
         let navigationView = NSView(frame: NSRect(x: 0, y: 184, width: 320, height: 56))
@@ -93,6 +132,8 @@ struct CPYWindowAppearanceTests {
             backing: .buffered,
             defer: false
         )
+        defer { retainWindowForAppKitTest(window) }
+
         let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
         let navigationView = NSView(frame: NSRect(x: 0, y: 184, width: 320, height: 56))
         let navigationItemView = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 56))
@@ -125,8 +166,8 @@ struct CPYWindowAppearanceTests {
             defer: false
         )
         defer {
-            managedWindow.close()
-            unmanagedWindow.close()
+            retainWindowForAppKitTest(managedWindow)
+            retainWindowForAppKitTest(unmanagedWindow)
         }
 
         defaults.set(0.9, forKey: Constants.UserDefaults.windowBackgroundOpacity)
@@ -139,7 +180,8 @@ struct CPYWindowAppearanceTests {
         defaults.set(0.45, forKey: Constants.UserDefaults.windowBackgroundOpacity)
         CPYWindowAppearance.applyToVisibleWindows(defaults: defaults)
 
-        #expect(managedWindow.backgroundColor.alphaComponent == 0.45)
+        let managedAlpha = Double(managedWindow.backgroundColor.alphaComponent)
+        #expect(abs(managedAlpha - CPYWindowAppearance.minimumOpacity) < 0.001)
         #expect(unmanagedWindow.backgroundColor == .systemRed)
         #expect(unmanagedWindow.isOpaque)
     }
@@ -161,4 +203,189 @@ struct CPYWindowAppearanceTests {
         #expect(Int((textFieldMaxY ?? 0).rounded()) == 247)
     }
 
+    @Test @MainActor
+    func snippetEditorUsesCompactWorkbenchMetrics() {
+        #expect(CPYSnippetsEditorWindowController.Layout.defaultWindowSize == NSSize(width: 680, height: 400))
+        #expect(CPYSnippetsEditorWindowController.Layout.minimumWindowSize == NSSize(width: 600, height: 340))
+        #expect(CPYSnippetsEditorWindowController.Layout.toolbarHeight == 48)
+        #expect(CPYSnippetsEditorWindowController.Layout.leftPaneWidth == 220)
+        #expect(CPYSnippetsEditorWindowController.Layout.detailInset == 8)
+    }
+
+    @Test @MainActor
+    func snippetEditorMovesNameEditingIntoOutline() {
+        let controller = CPYSnippetsEditorWindowController()
+        defer { controller.close() }
+
+        #expect(controller.usesOutlineDoubleClickEditingForTests)
+        #expect(!controller.showsFolderTitleFieldForTesting)
+        #expect(controller.showsSnippetContentEditorOnlyForTesting)
+    }
+
+    @Test @MainActor
+    func snippetEditorCellAllowsInlineTitleEditing() {
+        let cell = CPYSnippetsEditorCell(textCell: "AI Prompt")
+
+        #expect(cell.isEditable)
+        #expect(cell.isSelectable)
+        #expect(cell.sendsActionOnEndEditing)
+    }
+
+    @Test @MainActor
+    func snippetEditorCellReservesTrailingSpaceForShortcutBadge() {
+        let cell = CPYSnippetsEditorCell(textCell: "AI Prompt")
+        let bounds = NSRect(x: 0, y: 0, width: 180, height: 28)
+        let titleRectWithoutShortcut = cell.titleRect(forBounds: bounds)
+
+        cell.shortcutText = "⇧⌘B"
+        let titleRectWithShortcut = cell.titleRect(forBounds: bounds)
+
+        #expect(cell.shortcutTextForTesting == "⇧⌘B")
+        #expect(titleRectWithShortcut.width < titleRectWithoutShortcut.width)
+        #expect(cell.shortcutBadgeRectForTesting(in: bounds).maxX <= bounds.maxX - CPYSnippetsEditorCell.Metrics.shortcutTrailingInset)
+    }
+
+    @Test @MainActor
+    func snippetEditorCellUsesCompactItemNumberShortcutBadgeMetrics() {
+        #expect(CPYSnippetsEditorCell.Metrics.shortcutHeight == 16)
+        #expect(CPYSnippetsEditorCell.Metrics.shortcutMinWidth == 22)
+        #expect(CPYSnippetsEditorCell.Metrics.shortcutCornerRadius == 4)
+    }
+
+    @Test @MainActor
+    func snippetEditorOutlineDisplaysFolderAndNumericShortcutBadges() throws {
+        try withSnippetEditorNumericShortcutDefaults(enabled: true, startsAtZero: false) {
+            let folderID = SnippetFolder.ID(rawValue: UUID())
+            let firstSnippetID = Snippet.ID(rawValue: UUID())
+            let disabledSnippetID = Snippet.ID(rawValue: UUID())
+            let secondSnippetID = Snippet.ID(rawValue: UUID())
+            let keyCombo = try #require(KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey))
+            let hotKeyService = AppEnvironment.current.hotKeyService
+            let previousFolderCombo = hotKeyService.snippetKeyCombo(forIdentifier: folderID.uuidString)
+            hotKeyService.registerSnippetHotKey(with: folderID.uuidString, keyCombo: keyCombo)
+            defer {
+                if let previousFolderCombo {
+                    hotKeyService.registerSnippetHotKey(with: folderID.uuidString, keyCombo: previousFolderCombo)
+                } else {
+                    hotKeyService.unregisterSnippetHotKey(with: folderID.uuidString)
+                }
+            }
+
+            let detail = SnippetFolderDetail(
+                folder: SnippetFolder(id: folderID, title: "AI Prompt", index: 0, isEnabled: true),
+                snippets: [
+                    Snippet(
+                        id: firstSnippetID,
+                        folderID: folderID,
+                        title: "First",
+                        content: "One",
+                        index: 0,
+                        isEnabled: true
+                    ),
+                    Snippet(
+                        id: disabledSnippetID,
+                        folderID: folderID,
+                        title: "Disabled",
+                        content: "Hidden",
+                        index: 1,
+                        isEnabled: false
+                    ),
+                    Snippet(
+                        id: secondSnippetID,
+                        folderID: folderID,
+                        title: "Second",
+                        content: "Two",
+                        index: 2,
+                        isEnabled: true
+                    )
+                ]
+            )
+
+            withDependencies {
+                $0.snippetRepository = SnippetEditorStaticSnippetRepository(details: [detail])
+            } operation: {
+                let controller = CPYSnippetsEditorWindowController()
+                defer { controller.close() }
+
+                #expect(controller.outlineShortcutTextsForTesting == ["⇧⌘B", "1", "2"])
+            }
+        }
+    }
+}
+
+@MainActor
+private func retainWindowForAppKitTest(_ window: NSWindow) {
+    window.makeFirstResponder(nil)
+    let retainedContentView = window.contentView
+    window.contentView = nil
+    window.orderOut(nil)
+    CPYWindowAppearanceTestWindowRetainer.retain(window: window, contentView: retainedContentView)
+}
+
+private enum CPYWindowAppearanceTestWindowRetainer {
+    private static var windows = [NSWindow]()
+    private static var contentViews = [NSView]()
+
+    static func retain(window: NSWindow, contentView: NSView?) {
+        windows.append(window)
+        if let contentView {
+            contentViews.append(contentView)
+        }
+    }
+}
+
+private func withSnippetEditorNumericShortcutDefaults(
+    enabled: Bool,
+    startsAtZero: Bool,
+    operation: () throws -> Void
+) rethrows {
+    let defaults = AppEnvironment.current.defaults
+    let shortcutKey = Constants.UserDefaults.addNumericKeyEquivalents
+    let startKey = Constants.UserDefaults.menuItemsTitleStartWithZero
+    let previousShortcutValue = defaults.object(forKey: shortcutKey)
+    let previousStartValue = defaults.object(forKey: startKey)
+    defaults.set(enabled, forKey: shortcutKey)
+    defaults.set(startsAtZero, forKey: startKey)
+    defer {
+        restoreSnippetEditorDefault(previousShortcutValue, forKey: shortcutKey)
+        restoreSnippetEditorDefault(previousStartValue, forKey: startKey)
+    }
+    try operation()
+}
+
+private func restoreSnippetEditorDefault(_ value: Any?, forKey key: String) {
+    let defaults = AppEnvironment.current.defaults
+    if let value {
+        defaults.set(value, forKey: key)
+    } else {
+        defaults.removeObject(forKey: key)
+    }
+}
+
+private struct SnippetEditorStaticSnippetRepository: SnippetRepositoryProtocol {
+    let details: [SnippetFolderDetail]
+
+    func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
+        Just(details).eraseToAnyPublisher()
+    }
+
+    func fetchFolderDetails() -> [SnippetFolderDetail] { details }
+    func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail? { details.first { $0.folder.id == id } }
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
+    func insertFolder() -> SnippetFolder? { nil }
+    func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {}
+    func mergeSyncTombstones(_ records: [SyncRecord]) {}
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
+    func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
+    func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
+    func deleteFolder(_ id: SnippetFolder.ID) {}
+    func fetchSnippet(id: Snippet.ID) -> Snippet? { nil }
+    func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
+    func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) {}
+    func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
+    func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
+    func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
+    func deleteSnippet(_ id: Snippet.ID) {}
 }

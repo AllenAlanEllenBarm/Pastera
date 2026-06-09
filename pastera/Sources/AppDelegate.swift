@@ -81,19 +81,17 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     @objc func clearAllHistory() {
         let isShowAlert = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showAlertBeforeClearHistory)
         if isShowAlert {
-            let alert = NSAlert()
-            alert.messageText = String(localized: "Clear History")
-            alert.informativeText = String(localized: "Are you sure you want to clear your clipboard history?")
-            alert.addButton(withTitle: String(localized: "Clear History"))
-            alert.addButton(withTitle: String(localized: "Cancel"))
-            alert.showsSuppressionButton = true
+            let result = PasteraConfirmationController.runModal(options: PasteraConfirmationOptions(
+                title: String(localized: "Clear History"),
+                message: String(localized: "Are you sure you want to clear your clipboard history?"),
+                confirmTitle: String(localized: "Clear History"),
+                cancelTitle: String(localized: "Cancel"),
+                isDestructive: true,
+                suppressionTitle: String(localized: "Don't ask again")
+            ))
+            guard result.confirmed else { return }
 
-            NSApp.activate(ignoringOtherApps: true)
-
-            let result = alert.runModal()
-            if result != NSApplication.ModalResponse.alertFirstButtonReturn { return }
-
-            if alert.suppressionButton?.state == NSControl.StateValue.on {
+            if result.suppressionChecked {
                 AppEnvironment.current.defaults.set(false, forKey: Constants.UserDefaults.showAlertBeforeClearHistory)
             }
             AppEnvironment.current.defaults.synchronize()

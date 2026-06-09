@@ -13,7 +13,8 @@
 import Cocoa
 
 enum HistoryBrowserLayout {
-    static let width: CGFloat = 315
+    static let width: CGFloat = 352
+    static let minimumTitlePreviewLength = 60
 }
 
 enum HistoryMenuTypeFilter: Int, CaseIterable, Equatable {
@@ -60,6 +61,8 @@ enum HistoryMenuSelectionDirection {
 }
 
 enum HistoryMenuNumberShortcutMapper {
+    static let maximumShortcutRowCount = 10
+
     static func rowIndex(for event: NSEvent, startsAtZero: Bool, rowCount: Int) -> Int? {
         guard event.type == .keyDown, rowCount > 0 else { return nil }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
@@ -78,6 +81,15 @@ enum HistoryMenuNumberShortcutMapper {
         }
         guard (0..<rowCount).contains(index) else { return nil }
         return index
+    }
+
+    static func shortcutText(forRowIndex index: Int, startsAtZero: Bool) -> String? {
+        guard (0..<maximumShortcutRowCount).contains(index) else { return nil }
+        var shortcutNumber = startsAtZero ? index : index + 1
+        if shortcutNumber == maximumShortcutRowCount {
+            shortcutNumber = 0
+        }
+        return "\(shortcutNumber)"
     }
 }
 
@@ -217,12 +229,14 @@ extension NSView {
 final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     private enum Metrics {
         static let width: CGFloat = HistoryBrowserLayout.width
-        static let height: CGFloat = 58
-        static let inset: CGFloat = 9
-        static let searchHeight: CGFloat = 24
-        static let filterHeight: CGFloat = 20
-        static let buttonSize: CGFloat = 22
-        static let pinButtonSize: CGFloat = 22
+        static let height: CGFloat = 64
+        static let inset: CGFloat = 10
+        static let searchTopInset: CGFloat = 7
+        static let searchHeight: CGFloat = 28
+        static let filterTopSpacing: CGFloat = 5
+        static let filterHeight: CGFloat = 22
+        static let buttonSize: CGFloat = 24
+        static let pinButtonSize: CGFloat = 24
         static let pageWidth: CGFloat = 28
     }
 
@@ -370,9 +384,9 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         searchField.action = #selector(searchFieldChanged(_:))
         searchField.toolTip = "Keyword"
 
-        configureButton(previousButton, symbolName: "chevron.left", action: #selector(previousPage(_:)))
-        configureButton(nextButton, symbolName: "chevron.right", action: #selector(nextPage(_:)))
-        configureButton(pinButton, symbolName: "pin", action: #selector(pinOptionChanged(_:)))
+        configureButton(previousButton, symbolName: "chevron.left", accessibilityLabel: "Previous Page", action: #selector(previousPage(_:)))
+        configureButton(nextButton, symbolName: "chevron.right", accessibilityLabel: "Next Page", action: #selector(nextPage(_:)))
+        configureButton(pinButton, symbolName: "pin", accessibilityLabel: "Pin History", action: #selector(pinOptionChanged(_:)))
         pinButton.identifier = NSUserInterfaceItemIdentifier("historyPinButton")
         pinButton.isHidden = true
         pinButton.isEnabled = false
@@ -423,8 +437,8 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
 
         NSLayoutConstraint.activate([
             searchField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.inset),
-            searchField.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            searchField.trailingAnchor.constraint(equalTo: previousButton.leadingAnchor, constant: -8),
+            searchField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.searchTopInset),
+            searchField.trailingAnchor.constraint(equalTo: previousButton.leadingAnchor, constant: -10),
             searchField.heightAnchor.constraint(equalToConstant: Metrics.searchHeight),
 
             previousButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
@@ -447,7 +461,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
             pinButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.inset),
 
             regexOptionControl.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
-            regexOptionControl.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 5),
+            regexOptionControl.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.filterTopSpacing),
             regexOptionControl.heightAnchor.constraint(equalToConstant: Metrics.filterHeight),
 
             caseSensitiveOptionControl.leadingAnchor.constraint(equalTo: regexOptionControl.trailingAnchor, constant: 2),
@@ -504,12 +518,15 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         emitQueryChangeIfReady()
     }
 
-    private func configureButton(_ button: NSButton, symbolName: String, action: Selector) {
+    private func configureButton(_ button: NSButton, symbolName: String, accessibilityLabel: String, action: Selector) {
         button.setButtonType(.momentaryPushIn)
         button.bezelStyle = .inline
         button.isBordered = false
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
         button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = accessibilityLabel
+        button.setAccessibilityLabel(accessibilityLabel)
         button.target = self
         button.action = action
     }
@@ -517,15 +534,15 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     private func segmentWidth(for filter: HistoryMenuTypeFilter) -> CGFloat {
         switch filter {
         case .all:
-            return 36
-        case .text:
             return 40
+        case .text:
+            return 44
         case .images:
-            return 48
+            return 54
         case .files:
-            return 36
+            return 44
         case .pdf:
-            return 38
+            return 44
         }
     }
 

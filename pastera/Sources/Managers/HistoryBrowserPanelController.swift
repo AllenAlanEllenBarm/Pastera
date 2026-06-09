@@ -53,11 +53,11 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
 
     private enum Metrics {
         static let width: CGFloat = HistoryBrowserLayout.width
-        static let headerHeight: CGFloat = 58
+        static let headerHeight: CGFloat = 64
         static let separatorHeight: CGFloat = 1
-        static let bottomInset: CGFloat = 6
+        static let bottomInset: CGFloat = 8
         static let emptyRowHeight: CGFloat = 36
-        static let cornerRadius: CGFloat = 14
+        static let cornerRadius: CGFloat = PasteraDesignTokens.Metrics.panelCornerRadius
         static let horizontalOffset: CGFloat = 8
     }
 
@@ -75,6 +75,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     private var sourceApplication: NSRunningApplication?
     private var activationObserver: Any?
     private var isPinned = false
+    var onClose: (() -> Void)?
 
     init(
         currentState: @escaping () -> HistoryMenuPaginationState,
@@ -127,6 +128,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     func close() {
         panel?.orderOut(nil)
         HistoryMenuRowView.hideImagePreview()
+        onClose?()
     }
 
     var visibleFrame: NSRect? {
@@ -161,7 +163,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
             self.updateAndReload { $0.goToNextPage(if: page.hasNextPage) }
         }
         separatorView.wantsLayer = true
-        separatorView.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+        separatorView.layer?.backgroundColor = PasteraDesignTokens.colors().separator.cgColor
 
         contentView.addSubview(headerView)
         contentView.addSubview(separatorView)
@@ -177,6 +179,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
             defer: false
         )
         panel.isFloatingPanel = true
+        panel.animationBehavior = .none
         panel.isMovableByWindowBackground = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -289,9 +292,9 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
             height: Metrics.headerHeight
         )
         separatorView.frame = NSRect(
-            x: 9,
+            x: 10,
             y: height - Metrics.headerHeight - Metrics.separatorHeight,
-            width: Metrics.width - 18,
+            width: Metrics.width - 20,
             height: Metrics.separatorHeight
         )
 
@@ -347,3 +350,12 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
         HistoryMenuRowView.hideImagePreview()
     }
 }
+
+#if DEBUG
+extension HistoryBrowserPanelController {
+    func confirmFirstHistoryForTesting() {
+        guard let firstRow = rowViews.first as? HistoryMenuRowView else { return }
+        firstRow.confirmForTesting()
+    }
+}
+#endif

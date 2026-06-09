@@ -14,16 +14,20 @@ import Cocoa
 
 enum MainMenuPanelLayout {
     static let width: CGFloat = 168
-    static let topInset: CGFloat = 4
-    static let bottomInset: CGFloat = 4
-    static let rowHeight: CGFloat = 30
-    static let headerHeight: CGFloat = 38
+    static let topInset: CGFloat = 6
+    static let bottomInset: CGFloat = 6
+    static let rowHeight: CGFloat = 26
+    static let snippetFolderRowHeight: CGFloat = 26
+    static let headerHeight: CGFloat = 32
     static let separatorHeight: CGFloat = 1
     static let separatorHorizontalInset: CGFloat = 10
-    static let separatorVerticalInset: CGFloat = 4
-    static let separatorAlpha: CGFloat = 0.22
-    static let cornerRadius: CGFloat = 14
+    static let separatorVerticalInset: CGFloat = 5
+    static let separatorAlpha: CGFloat = 0.16
+    static let pinButtonSize: CGFloat = 18
+    static let pinTrailingInset: CGFloat = 10
+    static let cornerRadius: CGFloat = PasteraDesignTokens.Metrics.panelCornerRadius
     static let screenPadding: CGFloat = 8
+    static let folderHoverOpenDelay: TimeInterval = 0.45
 }
 
 struct MainMenuPanelBehavior {
@@ -43,7 +47,8 @@ struct MainMenuPanelBehavior {
 
 enum MainMenuPanelItem {
     case separator
-    case action(title: String, image: NSImage?, onSelect: () -> Void)
+    case snippetFolder(title: String, image: NSImage?, shortcutText: String? = nil, onOpen: (NSRect?) -> Void)
+    case action(title: String, image: NSImage?, shortcutText: String? = nil, onSelect: () -> Void)
 }
 
 private final class MainMenuPanel: NSPanel {
@@ -68,25 +73,38 @@ private final class MainMenuPanel: NSPanel {
 final class MainMenuPanelController: NSObject, NSWindowDelegate {
     private let historyTitle: String
     private let historyImage: NSImage?
+    private let historyShortcutText: String?
+    private let snippetTitle: String
+    private let snippetImage: NSImage?
     private let itemsProvider: () -> [MainMenuPanelItem]
     private let onOpenHistory: () -> Void
+    private let onOpenSnippets: () -> Void
     private let onPinnedChange: (Bool) -> Void
 
     private let contentView = NSView()
     private var panel: MainMenuPanel?
     private var isPinned = true
+    private var keepsVisibleWhileChildPanelOpen = false
 
     init(
         historyTitle: String,
         historyImage: NSImage?,
+        historyShortcutText: String? = nil,
+        snippetTitle: String,
+        snippetImage: NSImage?,
         itemsProvider: @escaping () -> [MainMenuPanelItem],
         onOpenHistory: @escaping () -> Void,
+        onOpenSnippets: @escaping () -> Void,
         onPinnedChange: @escaping (Bool) -> Void
     ) {
         self.historyTitle = historyTitle
         self.historyImage = historyImage
+        self.historyShortcutText = historyShortcutText
+        self.snippetTitle = snippetTitle
+        self.snippetImage = snippetImage
         self.itemsProvider = itemsProvider
         self.onOpenHistory = onOpenHistory
+        self.onOpenSnippets = onOpenSnippets
         self.onPinnedChange = onPinnedChange
         super.init()
     }
@@ -124,6 +142,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     }
 
     func close() {
+        keepsVisibleWhileChildPanelOpen = false
         panel?.orderOut(nil)
     }
 
@@ -140,6 +159,24 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         onOpenHistory()
     }
 
+    func openSnippetsFromPinnedMenu() {
+        onOpenSnippets()
+    }
+
+    func beginChildPanelPresentation() {
+        keepsVisibleWhileChildPanelOpen = true
+        if let panel {
+            panel.hidesOnDeactivate = false
+        }
+    }
+
+    func endChildPanelPresentation() {
+        keepsVisibleWhileChildPanelOpen = false
+        if let panel {
+            applyBehavior(to: panel)
+        }
+    }
+
     private func makePanelIfNeeded() -> MainMenuPanel {
         if let panel { return panel }
 
@@ -150,6 +187,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
             defer: false
         )
         panel.isFloatingPanel = true
+        panel.animationBehavior = .none
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -171,7 +209,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        guard !isPinned else { return }
+        guard !isPinned, !keepsVisibleWhileChildPanelOpen else { return }
         panel?.orderOut(nil)
     }
 
@@ -188,16 +226,24 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel?.setContentSize(NSSize(width: MainMenuPanelLayout.width, height: height))
 
         var currentY = height - MainMenuPanelLayout.topInset - MainMenuPanelLayout.headerHeight
-        let headerView = MainMenuHeaderItemView(title: historyTitle, image: historyImage, isPinned: isPinned)
+        let headerView = MainMenuHeaderItemView(
+            title: historyTitle,
+            image: historyImage,
+            isPinned: isPinned,
+            showsPin: false,
+            shortcutText: historyShortcutText
+        )
         headerView.allowsWindowDrag = isPinned
         headerView.frame = NSRect(x: 0, y: currentY, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.headerHeight)
         headerView.onOpen = { [weak self] in self?.openHistoryFromPinnedMenu() }
-        headerView.onPinnedChange = { [weak self] pinned, _ in self?.updatePinnedState(pinned) }
+        headerView.onHoverOpen = { [weak self] in self?.openHistoryFromPinnedMenu() }
         contentView.addSubview(headerView)
 
         currentY -= MainMenuPanelLayout.separatorVerticalInset + MainMenuPanelLayout.separatorHeight
         addSeparator(at: currentY)
         currentY -= MainMenuPanelLayout.separatorVerticalInset
+
+        var pinCenterY: CGFloat?
 
         for item in items {
             switch item {
@@ -205,9 +251,33 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
                 currentY -= MainMenuPanelLayout.separatorVerticalInset
                 addSeparator(at: currentY)
                 currentY -= MainMenuPanelLayout.separatorVerticalInset
-            case let .action(title, image, onSelect):
+            case let .snippetFolder(title, image, shortcutText, onOpen):
+                currentY -= MainMenuPanelLayout.snippetFolderRowHeight
+                let rowView = MainMenuPanelRowView(
+                    title: title,
+                    image: image,
+                    shortcutText: shortcutText,
+                    rowKind: .snippetFolder,
+                    rowHeight: MainMenuPanelLayout.snippetFolderRowHeight,
+                    showsChevron: true,
+                    onHoverOpen: onOpen,
+                    onConfirm: onOpen
+                )
+                rowView.frame = NSRect(
+                    x: 0,
+                    y: currentY,
+                    width: MainMenuPanelLayout.width,
+                    height: MainMenuPanelLayout.snippetFolderRowHeight
+                )
+                contentView.addSubview(rowView)
+            case let .action(title, image, shortcutText, onSelect):
                 currentY -= MainMenuPanelLayout.rowHeight
-                let rowView = MainMenuPanelRowView(title: title, image: image, onConfirm: onSelect)
+                let rowView = MainMenuPanelRowView(
+                    title: title,
+                    image: image,
+                    shortcutText: shortcutText,
+                    rowKind: .action
+                ) { _ in onSelect() }
                 rowView.frame = NSRect(
                     x: 0,
                     y: currentY,
@@ -215,8 +285,11 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
                     height: MainMenuPanelLayout.rowHeight
                 )
                 contentView.addSubview(rowView)
+                pinCenterY = rowView.frame.midY
             }
         }
+
+        addPinButton(centerY: pinCenterY ?? MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.pinButtonSize / 2)
     }
 
     private func preferredHeight(for items: [MainMenuPanelItem]) -> CGFloat {
@@ -224,6 +297,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
             switch item {
             case .separator:
                 return total + MainMenuPanelLayout.separatorHeight + MainMenuPanelLayout.separatorVerticalInset * 2
+            case .snippetFolder:
+                return total + MainMenuPanelLayout.snippetFolderRowHeight
             case .action:
                 return total + MainMenuPanelLayout.rowHeight
             }
@@ -234,6 +309,32 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
             + MainMenuPanelLayout.separatorVerticalInset * 2
             + rowHeights
             + MainMenuPanelLayout.bottomInset
+    }
+
+    private func addPinButton(centerY: CGFloat) {
+        let pinButton = HistoryMenuPinButton(frame: NSRect(
+            x: MainMenuPanelLayout.width - MainMenuPanelLayout.pinTrailingInset - MainMenuPanelLayout.pinButtonSize,
+            y: centerY - MainMenuPanelLayout.pinButtonSize / 2,
+            width: MainMenuPanelLayout.pinButtonSize,
+            height: MainMenuPanelLayout.pinButtonSize
+        ))
+        pinButton.identifier = NSUserInterfaceItemIdentifier("mainMenuPinButton")
+        pinButton.setButtonType(.momentaryPushIn)
+        pinButton.bezelStyle = .inline
+        pinButton.isBordered = false
+        pinButton.imagePosition = .imageOnly
+        pinButton.target = self
+        pinButton.action = #selector(togglePinnedFromPinButton(_:))
+        updatePinButtonAppearance(pinButton)
+        contentView.addSubview(pinButton)
+    }
+
+    private func updatePinButtonAppearance(_ pinButton: HistoryMenuPinButton) {
+        let symbolName = isPinned ? "pin.fill" : "pin"
+        pinButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
+        pinButton.toolTip = isPinned ? "Unpin Menu" : "Pin Menu"
+        pinButton.setAccessibilityLabel(pinButton.toolTip)
     }
 
     private func addSeparator(at verticalPosition: CGFloat) {
@@ -299,26 +400,58 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel.setFrameTopLeftPoint(topLeftPoint)
         panel.makeKeyAndOrderFront(nil)
     }
+
+    @objc private func togglePinnedFromPinButton(_ sender: HistoryMenuPinButton) {
+        updatePinnedState(!isPinned)
+    }
 }
 
 private final class MainMenuPanelRowView: NSControl {
+    enum RowKind {
+        case snippetFolder
+        case action
+    }
+
     private enum Metrics {
-        static let horizontalInset: CGFloat = 32
-        static let iconSize: CGFloat = 17
-        static let iconSpacing: CGFloat = 8
+        static let horizontalInset: CGFloat = 6
+        static let iconSize: CGFloat = 16
+        static let iconSpacing: CGFloat = 4
+        static let titleAccessorySpacing: CGFloat = 1
+        static let accessoryChevronSpacing: CGFloat = 0
+        static let chevronSize: CGFloat = 5
     }
 
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let onConfirm: () -> Void
+    private let shortcutBadge = PasteraShortcutBadgeView()
+    private let chevronView = NSImageView()
+    private let showsChevron: Bool
+    private let rowKind: RowKind
+    private let rowTitle: String
+    private let onHoverOpen: ((NSRect?) -> Void)?
+    private let onConfirm: (NSRect?) -> Void
     private var trackingArea: NSTrackingArea?
+    private var hoverOpenWorkItem: DispatchWorkItem?
     private var isMouseInside = false
     private var didDragWindow = false
 
-    init(title: String, image: NSImage?, onConfirm: @escaping () -> Void) {
+    init(
+        title: String,
+        image: NSImage?,
+        shortcutText: String? = nil,
+        rowKind: RowKind = .action,
+        rowHeight: CGFloat = MainMenuPanelLayout.rowHeight,
+        showsChevron: Bool = false,
+        onHoverOpen: ((NSRect?) -> Void)? = nil,
+        onConfirm: @escaping (NSRect?) -> Void
+    ) {
+        self.rowTitle = title
+        self.rowKind = rowKind
+        self.showsChevron = showsChevron
+        self.onHoverOpen = onHoverOpen
         self.onConfirm = onConfirm
-        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.rowHeight))
-        setup(title: title, image: image)
+        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: rowHeight))
+        setup(title: title, image: image, shortcutText: shortcutText)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -331,15 +464,18 @@ private final class MainMenuPanelRowView: NSControl {
     override func mouseEntered(with event: NSEvent) {
         isMouseInside = true
         updateAppearance()
+        scheduleHoverOpenIfNeeded()
     }
 
     override func mouseExited(with event: NSEvent) {
         isMouseInside = false
+        cancelHoverOpen()
         updateAppearance()
     }
 
     override func mouseDragged(with event: NSEvent) {
         didDragWindow = true
+        cancelHoverOpen()
         window?.performDrag(with: event)
     }
 
@@ -348,24 +484,33 @@ private final class MainMenuPanelRowView: NSControl {
             didDragWindow = false
             return
         }
-        onConfirm()
+        cancelHoverOpen()
+        onConfirm(screenFrame)
     }
 
-    private func setup(title: String, image: NSImage?) {
+    private func setup(title: String, image: NSImage?, shortcutText: String?) {
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = PasteraDesignTokens.Metrics.compactRowCornerRadius
         layer?.masksToBounds = true
 
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyDown
         imageView.isHidden = image == nil
+        imageView.contentTintColor = .secondaryLabelColor
 
         titleLabel.stringValue = title
-        titleLabel.font = .systemFont(ofSize: 15)
+        titleLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        [imageView, titleLabel].forEach {
+        shortcutBadge.shortcutText = shortcutText
+
+        chevronView.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        chevronView.imageScaling = .scaleProportionallyDown
+        chevronView.contentTintColor = .tertiaryLabelColor
+        chevronView.isHidden = !showsChevron
+
+        [imageView, titleLabel, shortcutBadge, chevronView].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
@@ -380,17 +525,156 @@ private final class MainMenuPanelRowView: NSControl {
                 equalTo: image == nil ? leadingAnchor : imageView.trailingAnchor,
                 constant: image == nil ? Metrics.horizontalInset : Metrics.iconSpacing
             ),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: shortcutBadge.leadingAnchor,
+                constant: -Metrics.titleAccessorySpacing
+            ),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            shortcutBadge.trailingAnchor.constraint(
+                equalTo: showsChevron ? chevronView.leadingAnchor : trailingAnchor,
+                constant: showsChevron ? -Metrics.accessoryChevronSpacing : -Metrics.horizontalInset
+            ),
+            shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            chevronView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
+            chevronView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevronView.widthAnchor.constraint(equalToConstant: showsChevron ? Metrics.chevronSize : 0),
+            chevronView.heightAnchor.constraint(equalToConstant: showsChevron ? Metrics.chevronSize : 0)
         ])
 
         updateAppearance()
     }
 
+    private var screenFrame: NSRect? {
+        guard let window else { return nil }
+        return window.convertToScreen(convert(bounds, to: nil))
+    }
+
+    private func scheduleHoverOpenIfNeeded() {
+        guard let onHoverOpen else { return }
+        cancelHoverOpen()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.isMouseInside else { return }
+            onHoverOpen(self.screenFrame)
+        }
+        hoverOpenWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + MainMenuPanelLayout.folderHoverOpenDelay, execute: workItem)
+    }
+
+    private func cancelHoverOpen() {
+        hoverOpenWorkItem?.cancel()
+        hoverOpenWorkItem = nil
+    }
+
     private func updateAppearance() {
         layer?.backgroundColor = isMouseInside
-            ? NSColor.selectedContentBackgroundColor.cgColor
+            ? PasteraDesignTokens.colors().hoveredRow.cgColor
             : NSColor.clear.cgColor
-        titleLabel.textColor = isMouseInside ? .selectedMenuItemTextColor : .labelColor
+        titleLabel.textColor = .labelColor
+        imageView.contentTintColor = isMouseInside ? .labelColor : .secondaryLabelColor
+        shortcutBadge.setState(isEmphasized: isMouseInside)
+        chevronView.contentTintColor = isMouseInside ? .secondaryLabelColor : .tertiaryLabelColor
     }
 }
+
+#if DEBUG
+extension MainMenuPanelController {
+    var mainMenuPinButtonFramesForTesting: [NSRect] {
+        contentView.layoutSubtreeIfNeeded()
+        return mainMenuPinButtonsForTesting.map { button in
+            button.superview?.convert(button.frame, to: contentView) ?? .zero
+        }
+    }
+
+    func mainMenuActionRowFrameForTesting(title: String) -> NSRect? {
+        rowViewsForTesting
+            .first { $0.rowKindForTesting == .action && $0.rowTitleForTesting == title }
+            .map { $0.superview?.convert($0.frame, to: contentView) ?? .zero }
+    }
+
+    func mainMenuSnippetRowFrameForTesting(title: String) -> NSRect? {
+        rowViewsForTesting
+            .first { $0.rowKindForTesting == .snippetFolder && $0.rowTitleForTesting == title }
+            .map { $0.superview?.convert($0.frame, to: contentView) ?? .zero }
+    }
+
+    func mainMenuSnippetTitleFrameForTesting(title: String) -> NSRect? {
+        guard let row = rowViewsForTesting.first(where: {
+            $0.rowKindForTesting == .snippetFolder && $0.rowTitleForTesting == title
+        }) else {
+            return nil
+        }
+        row.layoutSubtreeIfNeeded()
+        return row.titleFrameForTesting
+    }
+
+    func mainMenuSnippetTitleAvailableWidthForTesting(title: String) -> CGFloat? {
+        guard let row = rowViewsForTesting.first(where: {
+            $0.rowKindForTesting == .snippetFolder && $0.rowTitleForTesting == title
+        }) else {
+            return nil
+        }
+        row.layoutSubtreeIfNeeded()
+        return row.titleAvailableWidthForTesting
+    }
+
+    func mainMenuActionTitleAvailableWidthForTesting(title: String) -> CGFloat? {
+        guard let row = rowViewsForTesting.first(where: {
+            $0.rowKindForTesting == .action && $0.rowTitleForTesting == title
+        }) else {
+            return nil
+        }
+        row.layoutSubtreeIfNeeded()
+        return row.titleAvailableWidthForTesting
+    }
+
+    func performMainMenuPinClickForTesting() {
+        mainMenuPinButtonsForTesting.first?.performClick(nil)
+    }
+
+    private var rowViewsForTesting: [MainMenuPanelRowView] {
+        contentView.layoutSubtreeIfNeeded()
+        return contentView.subviews.compactMap { $0 as? MainMenuPanelRowView }
+    }
+
+    private var mainMenuPinButtonsForTesting: [NSButton] {
+        func collectButtons(in view: NSView) -> [NSButton] {
+            var buttons = view.subviews
+                .compactMap { $0 as? NSButton }
+                .filter { $0.identifier?.rawValue == "mainMenuPinButton" && !$0.isHidden }
+            for subview in view.subviews {
+                buttons.append(contentsOf: collectButtons(in: subview))
+            }
+            return buttons
+        }
+        return collectButtons(in: contentView)
+    }
+}
+
+private extension MainMenuPanelRowView {
+    var rowTitleForTesting: String {
+        rowTitle
+    }
+
+    var rowKindForTesting: RowKind {
+        rowKind
+    }
+
+    var titleFrameForTesting: NSRect {
+        titleLabel.frame
+    }
+
+    var titleAvailableWidthForTesting: CGFloat {
+        let trailingLimit: CGFloat
+        if !shortcutBadge.isHidden {
+            trailingLimit = shortcutBadge.frame.minX - Metrics.titleAccessorySpacing
+        } else if !chevronView.isHidden {
+            trailingLimit = chevronView.frame.minX - Metrics.titleAccessorySpacing
+        } else {
+            trailingLimit = bounds.maxX - Metrics.horizontalInset
+        }
+        return max(0, trailingLimit - titleLabel.frame.minX)
+    }
+}
+#endif

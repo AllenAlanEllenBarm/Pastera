@@ -7,8 +7,8 @@
 import Cocoa
 
 enum CPYWindowAppearance {
-    static let defaultOpacity = 0.82
-    static let minimumOpacity = 0.35
+    static let defaultOpacity = 0.94
+    static let minimumOpacity = 0.78
     static let maximumOpacity = 1.0
     private static let topNavigationMinimumHeight: CGFloat = 40
     private static let topNavigationMaximumHeight: CGFloat = 90
@@ -28,7 +28,7 @@ enum CPYWindowAppearance {
     }
 
     static func backgroundColor(defaults: UserDefaults = AppEnvironment.current.defaults) -> NSColor {
-        NSColor.windowBackgroundColor.withAlphaComponent(CGFloat(opacity(defaults: defaults)))
+        PasteraDesignTokens.colors(opacity: CGFloat(opacity(defaults: defaults))).panelBackground
     }
 
     static func apply(to window: NSWindow?, defaults: UserDefaults = AppEnvironment.current.defaults) {

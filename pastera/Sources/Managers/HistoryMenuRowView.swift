@@ -15,11 +15,11 @@ import Cocoa
 final class HistoryMenuRowView: NSControl {
     private enum Metrics {
         static let width: CGFloat = HistoryBrowserLayout.width
-        static let textRowHeight: CGFloat = 30
+        static let textRowHeight: CGFloat = 28
         static let imageRowHeight: CGFloat = 42
         static let horizontalInset: CGFloat = 10
-        static let imageWidth: CGFloat = 48
-        static let imageHeight: CGFloat = 30
+        static let imageWidth: CGFloat = 52
+        static let imageHeight: CGFloat = 32
         static let textSpacing: CGFloat = 10
     }
 
@@ -27,6 +27,7 @@ final class HistoryMenuRowView: NSControl {
 
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
+    private let shortcutBadge = PasteraShortcutBadgeView()
     private let onConfirm: () -> Void
     private let previewImage: NSImage?
     private var trackingArea: NSTrackingArea?
@@ -35,12 +36,12 @@ final class HistoryMenuRowView: NSControl {
     var onLogicalFocusChange: (() -> Void)?
     var onKeyboardEvent: ((NSEvent) -> Bool)?
 
-    init(title: String, image: NSImage?, onConfirm: @escaping () -> Void) {
+    init(title: String, image: NSImage?, shortcutText: String? = nil, onConfirm: @escaping () -> Void) {
         self.onConfirm = onConfirm
         self.previewImage = image
         let height = image == nil ? Metrics.textRowHeight : Metrics.imageRowHeight
         super.init(frame: NSRect(x: 0, y: 0, width: Metrics.width, height: height))
-        setup(title: title, image: image)
+        setup(title: title, image: image, shortcutText: shortcutText)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -127,9 +128,9 @@ final class HistoryMenuRowView: NSControl {
         imagePreviewController.hide()
     }
 
-    private func setup(title: String, image: NSImage?) {
+    private func setup(title: String, image: NSImage?, shortcutText: String?) {
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = PasteraDesignTokens.Metrics.compactRowCornerRadius
         layer?.masksToBounds = true
 
         let hasImage = image != nil
@@ -138,18 +139,21 @@ final class HistoryMenuRowView: NSControl {
         imageView.imageScaling = .scaleProportionallyDown
         imageView.isHidden = !hasImage
         imageView.wantsLayer = true
-        imageView.layer?.cornerRadius = 4
+        imageView.layer?.cornerRadius = 5
         imageView.layer?.masksToBounds = true
-        imageView.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.2).cgColor
-        imageView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+        imageView.layer?.backgroundColor = PasteraDesignTokens.colors().surface.cgColor
+        imageView.layer?.borderColor = PasteraDesignTokens.colors().separator.cgColor
         imageView.layer?.borderWidth = hasImage ? 0.5 : 0
 
         titleLabel.stringValue = title
-        titleLabel.font = .systemFont(ofSize: 14)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .regular)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.textColor = .labelColor
 
-        [imageView, titleLabel].forEach {
+        shortcutBadge.style = .itemNumber
+        shortcutBadge.shortcutText = shortcutText
+
+        [imageView, titleLabel, shortcutBadge].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
@@ -161,18 +165,23 @@ final class HistoryMenuRowView: NSControl {
             imageView.heightAnchor.constraint(equalToConstant: hasImage ? Metrics.imageHeight : 0),
 
             titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: hasImage ? Metrics.textSpacing : 0),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            shortcutBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
+            shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
         updateAppearance()
     }
 
     private func updateAppearance() {
+        let tokens = PasteraDesignTokens.colors()
         let backgroundColor: NSColor = isFocused
-            ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.9)
-            : isMouseInside ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.16) : .clear
+            ? tokens.selectedRow
+            : isMouseInside ? tokens.hoveredRow : .clear
         layer?.backgroundColor = backgroundColor.cgColor
         titleLabel.textColor = isFocused ? .selectedMenuItemTextColor : .labelColor
+        shortcutBadge.setState(isEmphasized: isFocused || isMouseInside)
         updatePreviewVisibility(isFocused: isFocused)
     }
 
@@ -194,3 +203,28 @@ final class HistoryMenuRowView: NSControl {
         onConfirm()
     }
 }
+
+#if DEBUG
+extension HistoryMenuRowView {
+    var textValuesForTesting: [String] {
+        collectTextValues(in: self)
+    }
+
+    func confirmForTesting() {
+        confirm()
+    }
+
+    private func collectTextValues(in view: NSView) -> [String] {
+        var values = [String]()
+        for subview in view.subviews {
+            if let label = subview as? NSTextField {
+                values.append(label.stringValue)
+            } else if let badge = subview as? PasteraShortcutBadgeView {
+                values.append(badge.shortcutTextForTesting)
+            }
+            values.append(contentsOf: collectTextValues(in: subview))
+        }
+        return values
+    }
+}
+#endif

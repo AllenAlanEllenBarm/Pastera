@@ -52,6 +52,23 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 Manual clipboard verification for image, file, rich text, and app paste targets
 is tracked in `docs/verification/VERIFICATION.md`.
 
+After a development task changes app behavior, UI, packaging, or tests and the
+requested verification has passed, reinstall the latest local build for manual
+testing unless the user explicitly asks not to:
+
+```bash
+./script/install_local.sh
+```
+
+The script builds ad-hoc signed `Pastera.app`, replaces the local app under
+`/Applications` by default, and launches it. Use `PASTERA_INSTALL_DIR` only when
+`/Applications` is not writable.
+
+The project also has a Codex Stop hook in `.codex/hooks.json` that runs
+`script/codex_stop_install_if_changed.sh`. It only reinstalls when build-relevant
+paths (`Configurations`, `pastera`, or `pastera.xcodeproj`) changed since the
+last local install.
+
 ## Documentation Boundaries
 
 - Fork roadmap and upstream alignment: `docs/development/PASTERA_FORK_PLAN.md`.

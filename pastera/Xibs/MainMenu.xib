@@ -24,7 +24,7 @@
                             <menuItem isSeparatorItem="YES" id="I6z-OO-O1g">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
-                            <menuItem title="Preferences…" keyEquivalent="," id="TJk-sW-Fty"/>
+                            <menuItem title="Preferences" keyEquivalent="," id="TJk-sW-Fty"/>
                             <menuItem isSeparatorItem="YES" id="bfS-on-cGN">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>

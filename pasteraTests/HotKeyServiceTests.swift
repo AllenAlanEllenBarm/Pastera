@@ -60,6 +60,29 @@ final class HotKeyServiceTests {
     }
 
     @Test
+    func shortcutFormatterUsesCompactMacSymbols() throws {
+        let mainKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
+        let historyKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey))
+        let snippetKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey))
+        let doubleCommandCombo = try #require(KeyCombo(doubledCocoaModifiers: .command))
+
+        #expect(PasteraShortcutFormatter.string(for: mainKeyCombo) == "⇧⌘V")
+        #expect(PasteraShortcutFormatter.string(for: historyKeyCombo) == "⌃⌘V")
+        #expect(PasteraShortcutFormatter.string(for: snippetKeyCombo) == "⇧⌘B")
+        #expect(PasteraShortcutFormatter.string(for: doubleCommandCombo) == "⌘⌘")
+        #expect(PasteraShortcutFormatter.string(for: nil) == nil)
+    }
+
+    @Test
+    func shortcutFormatterUsesNumericShortcutText() {
+        #expect(PasteraShortcutFormatter.numericString(forRowIndex: 0, startsAtZero: false) == "1")
+        #expect(PasteraShortcutFormatter.numericString(forRowIndex: 8, startsAtZero: false) == "9")
+        #expect(PasteraShortcutFormatter.numericString(forRowIndex: 9, startsAtZero: false) == "0")
+        #expect(PasteraShortcutFormatter.numericString(forRowIndex: 0, startsAtZero: true) == "0")
+        #expect(PasteraShortcutFormatter.numericString(forRowIndex: 10, startsAtZero: false) == nil)
+    }
+
+    @Test
     func migrateCustomizeSettings() throws {
         let service = HotKeyService()
         #expect(service.mainKeyCombo == nil)

@@ -459,8 +459,21 @@ private func makeHistoryMenuTestWindow(width: CGFloat, height: CGFloat) -> NSWin
 
 @MainActor
 private func closeHistoryMenuTestWindow(_ window: NSWindow) {
+    window.makeFirstResponder(nil)
+    let retainedContentView = window.contentView
+    window.contentView = nil
     window.orderOut(nil)
-    window.close()
+    HistoryMenuTestWindowRetainer.retain(window: window, contentView: retainedContentView)
+}
+
+private enum HistoryMenuTestWindowRetainer {
+    private static var windows = [NSWindow]()
+    private static var contentViews = [NSView]()
+
+    static func retain(window: NSWindow, contentView: NSView?) {
+        windows.append(window)
+        if let contentView { contentViews.append(contentView) }
+    }
 }
 
 struct HistoryMenuPaginationStateTests {
@@ -520,7 +533,7 @@ struct HistoryMenuPaginationStateTests {
 @Suite(.serialized)
 struct HistoryMenuHeaderViewTests {
     @Test @MainActor
-    func headerUsesCompactLayoutAndKeyViewLoop() throws {
+    func headerUsesReadableTwoRowLayoutAndKeyViewLoop() throws {
         let headerView = HistoryMenuHeaderView()
         let searchField = try #require(headerView.subviews.compactMap { $0 as? NSSearchField }.first)
         let controls = headerView.subviews.compactMap { $0 as? NSControl }
@@ -529,7 +542,7 @@ struct HistoryMenuHeaderViewTests {
             return control.isEnabled && segmentedControl.segmentCount > 1
         }
 
-        #expect(headerView.frame.height <= 60)
+        #expect(headerView.frame.height == 64)
         #expect(controls.count >= 5)
         #expect(searchField.nextKeyView != nil)
         #expect(tabChainControls.allSatisfy { $0.nextKeyView != nil })
@@ -934,15 +947,15 @@ struct HistoryMenuHeaderViewTests {
         let imageView = try #require(row.subviews.compactMap { $0 as? NSImageView }.first)
         #expect(imageView.imageScaling == .scaleProportionallyDown)
         #expect(row.frame.height == 42)
-        #expect(imageView.frame.width == 48)
-        #expect(imageView.frame.height == 30)
+        #expect(imageView.frame.width == 52)
+        #expect(imageView.frame.height == 32)
     }
 
     @Test @MainActor
     func historyRowWithoutImageKeepsCompactHeight() {
         let row = HistoryMenuRowView(title: "1. Text", image: nil) {}
 
-        #expect(row.frame.height == 30)
+        #expect(row.frame.height == 28)
     }
 
     @Test @MainActor

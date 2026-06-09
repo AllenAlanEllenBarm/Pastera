@@ -12,6 +12,7 @@
 
 import AppKit
 import Combine
+import CombineSchedulers
 import Dependencies
 import Testing
 @testable import Pastera
@@ -90,22 +91,11 @@ struct HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func pinnedMainMenuPanelUsesNarrowMenuWidth() {
-        #expect(MainMenuPanelLayout.width <= 168)
-        #expect(MainMenuHeaderItemView.Metrics.width == MainMenuPanelLayout.width)
-    }
-
-    @Test
-    func historyBrowserPanelIsNarrowedByOneQuarter() {
-        #expect(HistoryBrowserLayout.width == 315)
-    }
-
-    @Test
-    func pinnedMainMenuPanelUsesCompactMenuMetrics() {
-        #expect(MainMenuPanelLayout.rowHeight <= 30)
-        #expect(MainMenuPanelLayout.separatorVerticalInset <= 4)
-        #expect(MainMenuPanelLayout.topInset <= 4)
-        #expect(MainMenuPanelLayout.bottomInset <= 4)
+    func pinnedMainMenuPanelUsesComfortableMenuMetrics() {
+        #expect(MainMenuPanelLayout.rowHeight == 26)
+        #expect(MainMenuPanelLayout.separatorVerticalInset == 5)
+        #expect(MainMenuPanelLayout.topInset == 6)
+        #expect(MainMenuPanelLayout.bottomInset == 6)
     }
 
     @Test
@@ -119,8 +109,11 @@ struct HistoryMenuKeyEquivalentTests {
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
             itemsProvider: { [] },
             onOpenHistory: {},
+            onOpenSnippets: {},
             onPinnedChange: { _ in }
         )
         let menuFrame = NSRect(x: 240, y: 360, width: 168, height: 220)
@@ -138,6 +131,8 @@ struct HistoryMenuKeyEquivalentTests {
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
             itemsProvider: {
                 [
                     .action(title: "Clear History", image: nil) {},
@@ -148,6 +143,7 @@ struct HistoryMenuKeyEquivalentTests {
                 ]
             },
             onOpenHistory: {},
+            onOpenSnippets: {},
             onPinnedChange: { _ in }
         )
         let menuFrame = NSRect(x: 96, y: 420, width: 168, height: 332)
@@ -166,11 +162,15 @@ struct HistoryMenuKeyEquivalentTests {
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
             itemsProvider: { [] },
             onOpenHistory: { didOpenHistory = true },
+            onOpenSnippets: {},
             onPinnedChange: { _ in }
         )
         controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
         #expect(controller.isVisibleForTesting)
 
         controller.openHistoryFromPinnedMenu()
@@ -185,8 +185,13 @@ struct HistoryMenuKeyEquivalentTests {
 
         let result = withDependencies {
             $0.pasteboardHistoryRepository = EmptyPasteboardHistoryRepository()
+            $0.snippetRepository = EmptySnippetRepository()
         } operation: {
             manager.showMainMenuPanelForTesting(at: NSPoint(x: 100, y: 500))
+            defer {
+                manager.closeHistoryBrowserPanelForTesting()
+                manager.closeMainMenuPanelForTesting()
+            }
             #expect(manager.isMainMenuPanelVisibleForTesting)
             let mainMenuFrame = manager.mainMenuPanelFrameForTesting
 
@@ -194,7 +199,6 @@ struct HistoryMenuKeyEquivalentTests {
 
             let isMainMenuVisible = manager.isMainMenuPanelVisibleForTesting
             let historyFrame = manager.historyBrowserPanelFrameForTesting
-            manager.closeHistoryBrowserPanelForTesting()
             return (isMainMenuVisible, mainMenuFrame, historyFrame)
         }
 
@@ -728,12 +732,111 @@ extension HistoryMenuKeyEquivalentTests {
 
 extension HistoryMenuKeyEquivalentTests {
     @Test
+    func pinnedMainMenuPanelUsesPremiumMenuWidth() {
+        #expect(MainMenuPanelLayout.width == 168)
+        #expect(MainMenuHeaderItemView.Metrics.width == MainMenuPanelLayout.width)
+    }
+
+    @Test
+    func historyBrowserPanelUsesReadableSearchWidth() {
+        #expect(HistoryBrowserLayout.width == 352)
+    }
+
+    @Test
+    func snippetBrowserPanelUsesCompactWidth() {
+        #expect(SnippetBrowserLayout.width == 260)
+    }
+
+    @Test
+    func mainMenuExpandableHeaderRequiresStableHoverBeforeOpening() async throws {
+        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false)
+        var hoverOpenCount = 0
+        menuItemView.onHoverOpen = { hoverOpenCount += 1 }
+
+        menuItemView.mouseEntered(with: try makeMouseEnteredEvent())
+        #expect(hoverOpenCount == 0)
+
+        menuItemView.mouseExited(with: try makeMouseExitedEvent())
+        try await Task.sleep(for: .seconds(0.4))
+        #expect(hoverOpenCount == 0)
+
+        menuItemView.mouseEntered(with: try makeMouseEnteredEvent())
+        try await Task.sleep(for: .seconds(0.4))
+        #expect(hoverOpenCount == 0)
+
+        menuItemView.mouseEntered(with: try makeMouseEnteredEvent())
+        try await Task.sleep(for: .seconds(0.3))
+        #expect(hoverOpenCount == 1)
+
+        menuItemView.mouseExited(with: try makeMouseExitedEvent())
+        menuItemView.mouseEntered(with: try makeMouseEnteredEvent())
+        try await Task.sleep(for: .seconds(0.6))
+        #expect(hoverOpenCount == 2)
+    }
+
+    @Test
+    func openingSnippetsFromPinnedMenuKeepsPinnedMenuVisible() {
+        var didOpenSnippets = false
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: { didOpenSnippets = true },
+            onPinnedChange: { _ in }
+        )
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+        #expect(controller.isVisibleForTesting)
+
+        controller.openSnippetsFromPinnedMenu()
+
+        #expect(controller.isVisibleForTesting)
+        #expect(didOpenSnippets)
+    }
+
+    @Test
     func unpinnedMainMenuPopupUsesUnifiedPanelController() {
-        let manager = MenuManager()
+        withDependencies {
+            $0.snippetRepository = EmptySnippetRepository()
+        } operation: {
+            let manager = MenuManager()
+            manager.popUpMenu(.main)
+            defer { manager.closeMainMenuPanelForTesting() }
 
-        manager.popUpMenu(.main)
+            #expect(manager.isMainMenuPanelVisibleForTesting)
+        }
+    }
 
-        #expect(manager.isMainMenuPanelVisibleForTesting)
+    @Test
+    func legacyMainMenuAlwaysShowsSnippetHeaderWhenSnippetsAreEmpty() {
+        let titles = withDependencies {
+            $0.mainQueue = .immediate
+            $0.pasteboardHistoryRepository = EmptyPasteboardHistoryRepository()
+            $0.snippetRepository = EmptySnippetRepository()
+        } operation: {
+            let manager = MenuManager()
+            manager.setup()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            return legacyMainMenuHeaderTitles(from: manager)
+        }
+
+        #expect(titles == [String(localized: "History"), String(localized: "Snippet")])
+    }
+
+    @Test
+    func mainMenuActionTitlesDoNotUseEllipsis() {
+        let titles = withDependencies {
+            $0.snippetRepository = EmptySnippetRepository()
+        } operation: {
+            MenuManager().mainMenuPanelActionTitlesForTesting
+        }
+
+        #expect(titles.contains(String(localized: "Edit Snippets")))
+        #expect(titles.contains(String(localized: "Preferences")))
+        #expect(titles.allSatisfy { !$0.hasSuffix("...") && !$0.hasSuffix("…") })
     }
 
     @Test
@@ -748,8 +851,11 @@ extension HistoryMenuKeyEquivalentTests {
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
             itemsProvider: { items },
             onOpenHistory: {},
+            onOpenSnippets: {},
             onPinnedChange: { _ in }
         )
 
@@ -787,6 +893,37 @@ private enum TestWindowRetainer {
         if let contentView {
             contentViews.append(contentView)
         }
+    }
+}
+
+private func makeMouseEnteredEvent() throws -> NSEvent {
+    try makeHoverEvent()
+}
+
+private func makeMouseExitedEvent() throws -> NSEvent {
+    try makeHoverEvent()
+}
+
+private func makeHoverEvent() throws -> NSEvent {
+    try #require(NSEvent.mouseEvent(
+        with: .mouseMoved,
+        location: NSPoint(x: 12, y: 12),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 0,
+        pressure: 0
+    ))
+}
+
+private func legacyMainMenuHeaderTitles(from manager: MenuManager) -> [String] {
+    guard let menu = Mirror(reflecting: manager).descendant("clipMenu") as? NSMenu else { return [] }
+    return menu.items.compactMap { item in
+        item.view?.subviews
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+            .first
     }
 }
 
@@ -830,4 +967,30 @@ private struct EmptyPasteboardHistoryRepository: PasteboardHistoryRepositoryProt
     func deleteAll() {}
     func deleteOverflowingHistories(maxHistorySize: Int) {}
     func pruneHistories(settings: HistoryRetentionSettings) {}
+}
+
+private struct EmptySnippetRepository: SnippetRepositoryProtocol {
+    func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func fetchFolderDetails() -> [SnippetFolderDetail] { [] }
+    func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail? { nil }
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
+    func insertFolder() -> SnippetFolder? { nil }
+    func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {}
+    func mergeSyncTombstones(_ records: [SyncRecord]) {}
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
+    func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
+    func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
+    func deleteFolder(_ id: SnippetFolder.ID) {}
+    func fetchSnippet(id: Snippet.ID) -> Snippet? { nil }
+    func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
+    func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) {}
+    func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
+    func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
+    func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
+    func deleteSnippet(_ id: Snippet.ID) {}
 }

@@ -202,31 +202,31 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Snippets bearbeiten..."
+            "value" : "Snippets bearbeiten"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Edit Snippets..."
+            "value" : "Edit Snippets"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Modifica snippet..."
+            "value" : "Modifica snippet"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "スニペットを編集..."
+            "value" : "スニペットを編集"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "编辑片断..."
+            "value" : "编辑片段"
           }
         }
       }
@@ -480,31 +480,31 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Einstellungen..."
+            "value" : "Einstellungen"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Preferences..."
+            "value" : "Preferences"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Preferenze..."
+            "value" : "Preferenze"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "環境設定..."
+            "value" : "環境設定"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "偏好设置..."
+            "value" : "偏好设置"
           }
         }
       }
@@ -572,6 +572,40 @@
         }
       }
     },
+    "No Snippets" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Snippets"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Snippets"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nessuno snippet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スニペットなし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无片段"
+          }
+        }
+      }
+    },
     "Snippet" : {
       "localizations" : {
         "de" : {
@@ -595,7 +629,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "片断"
+            "value" : "片段"
           }
         }
       }

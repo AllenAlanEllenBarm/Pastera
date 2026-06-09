@@ -19,55 +19,69 @@ import AEXML
 final class CPYSnippetsEditorWindowController: NSWindowController {
 
     // MARK: - Properties
-    static let sharedController = CPYSnippetsEditorWindowController(windowNibName: "CPYSnippetsEditorWindowController")
-    @IBOutlet private weak var splitView: CPYSplitView!
-    @IBOutlet private weak var folderSettingView: NSView!
-    @IBOutlet private weak var folderTitleTextField: NSTextField!
-    @IBOutlet private weak var folderShortcutRecordView: RecordView! {
-        didSet {
-            folderShortcutRecordView.delegate = self
-        }
+    static let sharedController = CPYSnippetsEditorWindowController()
+
+    enum Layout {
+        static let defaultWindowSize = NSSize(width: 680, height: 400)
+        static let minimumWindowSize = NSSize(width: 600, height: 340)
+        static let toolbarHeight: CGFloat = 48
+        static let toolbarInset: CGFloat = 12
+        static let splitInset: CGFloat = 8
+        static let leftPaneWidth: CGFloat = 220
+        static let detailInset: CGFloat = 8
+        static let outlineRowHeight: CGFloat = 25
+        static let folderShortcutHeight: CGFloat = 42
     }
-    @IBOutlet private var textView: CPYPlaceHolderTextView! {
-        didSet {
-            textView.font = NSFont.systemFont(ofSize: 14)
-            textView.isAutomaticQuoteSubstitutionEnabled = false
-            textView.enabledTextCheckingTypes = 0
-            textView.isRichText = false
-            textView.placeHolderText = String(localized: "Please fill in the contents of the snippet")
-        }
-    }
-    @IBOutlet private weak var outlineView: NSOutlineView! {
-        didSet {
-            // Enable Drag and Drop
-            outlineView.registerForDraggedTypes([NSPasteboard.PasteboardType(rawValue: Constants.Common.draggedDataType)])
-        }
-    }
+
+    private let rootView = NSView()
+    private let toolbarView = NSView()
+    private let toolbarStackView = NSStackView()
+    private let splitView = CPYSplitView()
+    private let outlineView = NSOutlineView()
+    private let outlineScrollView = NSScrollView()
+    private let folderSettingView = NSView()
+    private let folderTitleTextField = NSTextField()
+    private let folderShortcutRecordView = RecordView(frame: .zero)
+    private let textView = CPYPlaceHolderTextView(frame: .zero)
+    private let textScrollView = NSScrollView()
+    private let emptyStateLabel = NSTextField(labelWithString: "")
 
     @Dependency(\.snippetRepository)
     private var snippetRepository
     private var folders = [EditorSnippetFolder]()
+    private var didLoadFolders = false
+    private var hasShownWindow = false
     private var selectedFolder: EditorSnippetFolder? {
         guard let item = outlineView.item(atRow: outlineView.selectedRow) else { return nil }
         return item as? EditorSnippetFolder ?? outlineView.parent(forItem: item) as? EditorSnippetFolder
     }
 
     // MARK: - Window Life Cycle
-    override func windowDidLoad() {
-        super.windowDidLoad()
-        self.window?.collectionBehavior = NSWindow.CollectionBehavior.canJoinAllSpaces
-        CPYWindowAppearance.apply(to: window)
-        folders = snippetRepository.fetchFolderDetails().map(EditorSnippetFolder.init)
-        outlineView.reloadData()
-        // Select first folder
-        if let folder = folders.first {
-            outlineView.selectRowIndexes(IndexSet(integer: outlineView.row(forItem: folder)), byExtendingSelection: false)
-            changeItemFocus()
-        }
+    init() {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Layout.defaultWindowSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = String(localized: "Pastera - Snippet Editor")
+        window.minSize = Layout.minimumWindowSize
+        super.init(window: window)
+        setupWindow()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
     }
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        loadFoldersIfNeeded()
+        if !hasShownWindow {
+            window?.center()
+            hasShownWindow = true
+        }
+        CPYWindowAppearance.apply(to: window)
         window?.makeKeyAndOrderFront(self)
     }
 }
@@ -85,6 +99,7 @@ extension CPYSnippetsEditorWindowController {
         outlineView.expandItem(folder)
         outlineView.selectRowIndexes(IndexSet(integer: outlineView.row(forItem: editorSnippet)), byExtendingSelection: false)
         changeItemFocus()
+        beginEditingSelectedOutlineTitleOnNextRunLoop()
     }
 
     @IBAction private func addFolderButtonTapped(_ sender: AnyObject) {
@@ -97,6 +112,7 @@ extension CPYSnippetsEditorWindowController {
         outlineView.reloadData()
         outlineView.selectRowIndexes(IndexSet(integer: outlineView.row(forItem: editorFolder)), byExtendingSelection: false)
         changeItemFocus()
+        beginEditingSelectedOutlineTitleOnNextRunLoop()
     }
 
     @IBAction private func deleteButtonTapped(_ sender: AnyObject) {
@@ -105,14 +121,14 @@ extension CPYSnippetsEditorWindowController {
             return
         }
 
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Delete Item")
-        alert.informativeText = String(localized: "Are you sure want to delete this item?")
-        alert.addButton(withTitle: String(localized: "Delete Item"))
-        alert.addButton(withTitle: String(localized: "Cancel"))
-        NSApp.activate(ignoringOtherApps: true)
-        let result = alert.runModal()
-        if result != NSApplication.ModalResponse.alertFirstButtonReturn { return }
+        let result = PasteraConfirmationController.runModal(options: PasteraConfirmationOptions(
+            title: String(localized: "Delete Item"),
+            message: String(localized: "Are you sure want to delete this item?"),
+            confirmTitle: String(localized: "Delete Item"),
+            cancelTitle: String(localized: "Cancel"),
+            isDestructive: true
+        ))
+        guard result.confirmed else { return }
 
         if let folder = item as? EditorSnippetFolder {
             folders.removeAll(where: { $0.id == folder.id })
@@ -221,29 +237,302 @@ extension CPYSnippetsEditorWindowController {
 
 // MARK: - Item Selected
 private extension CPYSnippetsEditorWindowController {
+    struct ToolbarItem {
+        let title: String
+        let symbolName: String
+        let action: Selector
+    }
+
+    func setupWindow() {
+        window?.collectionBehavior = .canJoinAllSpaces
+        CPYWindowAppearance.apply(to: window)
+        setupRootView()
+        setupToolbar()
+        setupSplitView()
+        setupOutlineView()
+        setupDetailViews()
+    }
+
+    func setupRootView() {
+        let tokens = PasteraDesignTokens.colors()
+        rootView.wantsLayer = true
+        rootView.layer?.backgroundColor = tokens.panelBackground.cgColor
+        window?.contentView = rootView
+
+        toolbarView.wantsLayer = true
+        toolbarView.layer?.backgroundColor = tokens.surface.cgColor
+        splitView.separatorColor = tokens.separator
+
+        [toolbarView, splitView].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            rootView.addSubview($0)
+        }
+
+        NSLayoutConstraint.activate([
+            toolbarView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            toolbarView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
+            toolbarView.topAnchor.constraint(equalTo: rootView.topAnchor),
+            toolbarView.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
+
+            splitView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor, constant: Layout.splitInset),
+            splitView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor, constant: -Layout.splitInset),
+            splitView.topAnchor.constraint(equalTo: toolbarView.bottomAnchor, constant: Layout.splitInset),
+            splitView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor, constant: -Layout.splitInset)
+        ])
+    }
+
+    func setupToolbar() {
+        toolbarStackView.orientation = .horizontal
+        toolbarStackView.spacing = 7
+        toolbarStackView.alignment = .centerY
+        toolbarStackView.translatesAutoresizingMaskIntoConstraints = false
+        toolbarView.addSubview(toolbarStackView)
+
+        let buttons = [
+            ToolbarItem(title: String(localized: "Add Snippet"), symbolName: "doc.badge.plus", action: #selector(addSnippetButtonTapped(_:))),
+            ToolbarItem(title: String(localized: "Add Folder"), symbolName: "folder.badge.plus", action: #selector(addFolderButtonTapped(_:))),
+            ToolbarItem(title: String(localized: "Delete"), symbolName: "trash", action: #selector(deleteButtonTapped(_:))),
+            ToolbarItem(title: String(localized: "Enable/Disable"), symbolName: "power", action: #selector(changeStatusButtonTapped(_:))),
+            ToolbarItem(title: String(localized: "Import"), symbolName: "square.and.arrow.down", action: #selector(importSnippetButtonTapped(_:))),
+            ToolbarItem(title: String(localized: "Export"), symbolName: "square.and.arrow.up", action: #selector(exportSnippetButtonTapped(_:)))
+        ]
+
+        buttons.forEach { item in
+            let button = PasteraToolbarButton(title: item.title, symbolName: item.symbolName, target: self, action: item.action)
+            toolbarStackView.addArrangedSubview(button)
+        }
+
+        NSLayoutConstraint.activate([
+            toolbarStackView.leadingAnchor.constraint(equalTo: toolbarView.leadingAnchor, constant: Layout.toolbarInset),
+            toolbarStackView.centerYAnchor.constraint(equalTo: toolbarView.centerYAnchor),
+            toolbarStackView.trailingAnchor.constraint(lessThanOrEqualTo: toolbarView.trailingAnchor, constant: -Layout.toolbarInset)
+        ])
+    }
+
+    func setupSplitView() {
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+
+        let leftPane = NSView()
+        let rightPane = NSView()
+        [leftPane, rightPane].forEach {
+            $0.wantsLayer = true
+            $0.layer?.backgroundColor = NSColor.clear.cgColor
+            splitView.addArrangedSubview($0)
+        }
+
+        leftPane.translatesAutoresizingMaskIntoConstraints = false
+        leftPane.widthAnchor.constraint(equalToConstant: Layout.leftPaneWidth).isActive = true
+    }
+
+    func setupOutlineView() {
+        guard let leftPane = splitView.arrangedSubviews.first else { return }
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("snippet"))
+        column.title = ""
+        column.isEditable = true
+        column.dataCell = CPYSnippetsEditorCell(textCell: "")
+
+        outlineView.addTableColumn(column)
+        outlineView.outlineTableColumn = column
+        outlineView.headerView = nil
+        outlineView.frame = NSRect(x: 0, y: 0, width: Layout.leftPaneWidth - 6, height: 320)
+        outlineView.rowHeight = Layout.outlineRowHeight
+        outlineView.intercellSpacing = NSSize(width: 0, height: 1)
+        outlineView.allowsEmptySelection = false
+        outlineView.allowsMultipleSelection = false
+        outlineView.dataSource = self
+        outlineView.delegate = self
+        outlineView.target = self
+        outlineView.doubleAction = #selector(outlineItemDoubleClicked(_:))
+        outlineView.registerForDraggedTypes([NSPasteboard.PasteboardType(rawValue: Constants.Common.draggedDataType)])
+
+        outlineScrollView.translatesAutoresizingMaskIntoConstraints = false
+        outlineScrollView.drawsBackground = false
+        outlineScrollView.borderType = .noBorder
+        outlineScrollView.hasVerticalScroller = true
+        outlineScrollView.documentView = outlineView
+        leftPane.addSubview(outlineScrollView)
+
+        NSLayoutConstraint.activate([
+            outlineScrollView.leadingAnchor.constraint(equalTo: leftPane.leadingAnchor),
+            outlineScrollView.trailingAnchor.constraint(equalTo: leftPane.trailingAnchor, constant: -6),
+            outlineScrollView.topAnchor.constraint(equalTo: leftPane.topAnchor),
+            outlineScrollView.bottomAnchor.constraint(equalTo: leftPane.bottomAnchor)
+        ])
+    }
+
+    func setupDetailViews() {
+        guard splitView.arrangedSubviews.count > 1 else { return }
+        let detailPane = splitView.arrangedSubviews[1]
+        setupFolderSettingView()
+        setupTextEditor()
+
+        emptyStateLabel.stringValue = String(localized: "Select a snippet or folder")
+        emptyStateLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        emptyStateLabel.textColor = .secondaryLabelColor
+        emptyStateLabel.alignment = .center
+
+        [folderSettingView, textScrollView, emptyStateLabel].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            detailPane.addSubview($0)
+        }
+
+        NSLayoutConstraint.activate([
+            folderSettingView.leadingAnchor.constraint(equalTo: detailPane.leadingAnchor, constant: Layout.detailInset),
+            folderSettingView.trailingAnchor.constraint(lessThanOrEqualTo: detailPane.trailingAnchor, constant: -Layout.detailInset),
+            folderSettingView.topAnchor.constraint(equalTo: detailPane.topAnchor),
+            folderSettingView.heightAnchor.constraint(equalToConstant: Layout.folderShortcutHeight),
+
+            textScrollView.leadingAnchor.constraint(equalTo: detailPane.leadingAnchor, constant: Layout.detailInset),
+            textScrollView.trailingAnchor.constraint(equalTo: detailPane.trailingAnchor, constant: -Layout.detailInset),
+            textScrollView.topAnchor.constraint(equalTo: detailPane.topAnchor),
+            textScrollView.bottomAnchor.constraint(equalTo: detailPane.bottomAnchor),
+
+            emptyStateLabel.leadingAnchor.constraint(equalTo: detailPane.leadingAnchor, constant: Layout.detailInset),
+            emptyStateLabel.trailingAnchor.constraint(equalTo: detailPane.trailingAnchor, constant: -Layout.detailInset),
+            emptyStateLabel.centerYAnchor.constraint(equalTo: detailPane.centerYAnchor)
+        ])
+        changeItemFocus()
+    }
+
+    func setupFolderSettingView() {
+        let tokens = PasteraDesignTokens.colors()
+        folderSettingView.wantsLayer = true
+        folderSettingView.layer?.cornerRadius = PasteraDesignTokens.Metrics.compactRowCornerRadius
+        folderSettingView.layer?.backgroundColor = tokens.surface.cgColor
+        folderSettingView.layer?.borderColor = tokens.separator.cgColor
+        folderSettingView.layer?.borderWidth = PasteraDesignTokens.Metrics.hairlineWidth
+
+        let shortcutLabel = NSTextField(labelWithString: String(localized: "Shortcut"))
+        shortcutLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        shortcutLabel.textColor = .secondaryLabelColor
+
+        folderShortcutRecordView.delegate = self
+        folderShortcutRecordView.backgroundColor = .textBackgroundColor.withAlphaComponent(0.85)
+        folderShortcutRecordView.borderColor = PasteraDesignTokens.colors().separator
+        folderShortcutRecordView.borderWidth = 1
+        folderShortcutRecordView.cornerRadius = PasteraDesignTokens.Metrics.controlCornerRadius
+
+        [shortcutLabel, folderShortcutRecordView].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            folderSettingView.addSubview($0)
+        }
+
+        NSLayoutConstraint.activate([
+            shortcutLabel.leadingAnchor.constraint(equalTo: folderSettingView.leadingAnchor, constant: 10),
+            shortcutLabel.centerYAnchor.constraint(equalTo: folderSettingView.centerYAnchor),
+
+            folderShortcutRecordView.leadingAnchor.constraint(equalTo: shortcutLabel.trailingAnchor, constant: 8),
+            folderShortcutRecordView.trailingAnchor.constraint(equalTo: folderSettingView.trailingAnchor, constant: -8),
+            folderShortcutRecordView.centerYAnchor.constraint(equalTo: folderSettingView.centerYAnchor),
+            folderShortcutRecordView.widthAnchor.constraint(equalToConstant: 210),
+            folderShortcutRecordView.heightAnchor.constraint(equalToConstant: 28)
+        ])
+    }
+
+    func setupTextEditor() {
+        textView.font = NSFont.systemFont(ofSize: 13.5)
+        textView.frame = NSRect(x: 0, y: 0, width: 420, height: 320)
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.enabledTextCheckingTypes = 0
+        textView.isRichText = false
+        textView.delegate = self
+        textView.placeHolderText = String(localized: "Please fill in the contents of the snippet")
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+
+        textScrollView.drawsBackground = true
+        textScrollView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.86)
+        textScrollView.borderType = .lineBorder
+        textScrollView.hasVerticalScroller = true
+        textScrollView.documentView = textView
+    }
+
+    func loadFoldersIfNeeded() {
+        guard !didLoadFolders else { return }
+        didLoadFolders = true
+        folders = snippetRepository.fetchFolderDetails().map(EditorSnippetFolder.init)
+        outlineView.reloadData()
+        if let folder = folders.first {
+            outlineView.expandItem(folder)
+            outlineView.selectRowIndexes(IndexSet(integer: outlineView.row(forItem: folder)), byExtendingSelection: false)
+        }
+        changeItemFocus()
+    }
+
     func changeItemFocus() {
         // Reset TextView Undo/Redo history
         textView.undoManager?.removeAllActions()
         guard let item = outlineView.item(atRow: outlineView.selectedRow) else {
             folderSettingView.isHidden = true
-            textView.isHidden = true
+            textScrollView.isHidden = true
+            emptyStateLabel.isHidden = false
             folderShortcutRecordView.keyCombo = nil
-            folderTitleTextField.stringValue = ""
             return
         }
         if let folder = item as? EditorSnippetFolder {
             textView.string = ""
-            folderTitleTextField.stringValue = folder.title
             folderShortcutRecordView.keyCombo = AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folder.id.uuidString)
             folderSettingView.isHidden = false
-            textView.isHidden = true
+            textScrollView.isHidden = true
+            emptyStateLabel.isHidden = true
         } else if let snippet = item as? EditorSnippet {
             textView.string = snippet.content
-            folderTitleTextField.stringValue = ""
             folderShortcutRecordView.keyCombo = nil
             folderSettingView.isHidden = true
-            textView.isHidden = false
+            textScrollView.isHidden = false
+            emptyStateLabel.isHidden = true
         }
+    }
+
+    @objc func outlineItemDoubleClicked(_ sender: NSOutlineView) {
+        beginEditingOutlineTitle(at: sender.clickedRow)
+    }
+
+    func beginEditingSelectedOutlineTitleOnNextRunLoop() {
+        DispatchQueue.main.async { [weak self] in
+            self?.beginEditingOutlineTitle(at: self?.outlineView.selectedRow ?? -1)
+        }
+    }
+
+    func beginEditingOutlineTitle(at row: Int) {
+        guard row >= 0, row < outlineView.numberOfRows else { return }
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        outlineView.editColumn(0, row: row, with: nil, select: true)
+    }
+
+    func shortcutText(for item: Any) -> String? {
+        if let folder = item as? EditorSnippetFolder {
+            return PasteraShortcutFormatter.string(
+                for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folder.id.uuidString)
+            )
+        }
+
+        guard let snippet = item as? EditorSnippet,
+              snippet.isEnabled,
+              let folder = folders.first(where: { $0.id == snippet.folderID }) else {
+            return nil
+        }
+
+        let enabledSnippets = folder.snippets.filter(\.isEnabled)
+        guard let shortcutIndex = enabledSnippets.firstIndex(where: { $0.id == snippet.id }) else {
+            return nil
+        }
+        return numericShortcutText(forRowIndex: shortcutIndex)
+    }
+
+    func numericShortcutText(forRowIndex index: Int) -> String? {
+        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
+            return nil
+        }
+        let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
+        return PasteraShortcutFormatter.numericString(forRowIndex: index, startsAtZero: startsAtZero)
     }
 }
 
@@ -371,10 +660,13 @@ extension CPYSnippetsEditorWindowController: NSOutlineViewDelegate {
         if let folder = item as? EditorSnippetFolder {
             cell.iconType = .folder
             cell.isItemEnabled = folder.isEnabled
+            cell.shortcutStyle = .command
         } else if let snippet = item as? EditorSnippet {
             cell.iconType = .none
             cell.isItemEnabled = snippet.isEnabled
+            cell.shortcutStyle = .itemNumber
         }
+        cell.shortcutText = shortcutText(for: item)
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -382,7 +674,7 @@ extension CPYSnippetsEditorWindowController: NSOutlineViewDelegate {
     }
 
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
-        let text = fieldEditor.string
+        let text = fieldEditor.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return false }
         guard let outlineView = control as? NSOutlineView else { return false }
         guard let item = outlineView.item(atRow: outlineView.selectedRow) else { return false }
@@ -393,10 +685,40 @@ extension CPYSnippetsEditorWindowController: NSOutlineViewDelegate {
             snippet.title = text
             snippetRepository.updateSnippetTitle(snippet.id, title: text)
         }
+        outlineView.reloadItem(item)
         changeItemFocus()
         return true
     }
 }
+
+#if DEBUG
+extension CPYSnippetsEditorWindowController {
+    var usesOutlineDoubleClickEditingForTests: Bool {
+        (outlineView.target as AnyObject?) === self
+            && outlineView.doubleAction == #selector(outlineItemDoubleClicked(_:))
+    }
+
+    var showsFolderTitleFieldForTesting: Bool {
+        folderTitleTextField.superview != nil
+    }
+
+    var showsSnippetContentEditorOnlyForTesting: Bool {
+        folderTitleTextField.superview == nil && textScrollView.superview != nil
+    }
+
+    var outlineShortcutTextsForTesting: [String] {
+        loadFoldersIfNeeded()
+        return folders.flatMap { folder -> [String] in
+            var values = [String]()
+            if let folderShortcutText = shortcutText(for: folder) {
+                values.append(folderShortcutText)
+            }
+            values.append(contentsOf: folder.snippets.compactMap { shortcutText(for: $0) })
+            return values
+        }
+    }
+}
+#endif
 
 // MARK: - NSTextView Delegate
 extension CPYSnippetsEditorWindowController: NSTextViewDelegate {
@@ -428,9 +750,11 @@ extension CPYSnippetsEditorWindowController: RecordViewDelegate {
         guard let selectedFolder = selectedFolder else { return }
         guard let keyCombo = keyCombo else {
             AppEnvironment.current.hotKeyService.unregisterSnippetHotKey(with: selectedFolder.id.uuidString)
+            outlineView.reloadItem(selectedFolder)
             return
         }
         AppEnvironment.current.hotKeyService.registerSnippetHotKey(with: selectedFolder.id.uuidString, keyCombo: keyCombo)
+        outlineView.reloadItem(selectedFolder)
     }
 
     func recordViewDidEndRecording(_ recordView: RecordView) {}

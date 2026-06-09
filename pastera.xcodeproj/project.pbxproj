@@ -19,6 +19,17 @@
 		C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */; };
 		C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */; };
 		C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */; };
+		C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */; };
+		C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */; };
+		C5A90B002FD1400000B7C0DE /* SnippetBrowserPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */; };
+		C5A90D002FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90D012FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift */; };
+		C5A90E002FD1420000B7C0DE /* DefaultNumericShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90E012FD1420000B7C0DE /* DefaultNumericShortcutTests.swift */; };
+		C5A90F002FD1430000B7C0DE /* SnippetEditorCellLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90F012FD1430000B7C0DE /* SnippetEditorCellLayoutTests.swift */; };
+		C5A910002FD1440000B7C0DE /* MainMenuPinFooterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A910012FD1440000B7C0DE /* MainMenuPinFooterTests.swift */; };
+		C5A911002FD1640000B7C0DE /* HistoryDisplayContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */; };
+		C5A912002FD1800000B7C0DE /* SparkleUpdateFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */; };
+		C5AA10002FD1200000B7C0DE /* PasteraDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */; };
+		C5AA10022FD1200000B7C0DE /* PasteraConfirmationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */; };
 		C522FB952FCBD6AA00E61800 /* PasteboardAvailableType.swift in Sources */ = {isa = PBXBuildFile; fileRef = C522FB942FCBD69A00E61800 /* PasteboardAvailableType.swift */; };
 		C522FB992FCC019100E61800 /* PasteboardAvailableTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C522FB982FCC019100E61800 /* PasteboardAvailableTypeTests.swift */; };
 		C53FC6C02FCCA1C400219A25 /* Collections in Frameworks */ = {isa = PBXBuildFile; productRef = C53FC6BF2FCCA1C400219A25 /* Collections */; };
@@ -187,6 +198,17 @@
 		C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuHeaderItemView.swift; sourceTree = "<group>"; };
 		C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuPanelController.swift; sourceTree = "<group>"; };
 		C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuRowView.swift; sourceTree = "<group>"; };
+		C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetBrowserPanelController.swift; sourceTree = "<group>"; };
+		C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuManagerPanelDismissal.swift; sourceTree = "<group>"; };
+		C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetBrowserPanelTests.swift; sourceTree = "<group>"; };
+		C5A90D012FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPanelSelectionDismissalTests.swift; sourceTree = "<group>"; };
+		C5A90E012FD1420000B7C0DE /* DefaultNumericShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultNumericShortcutTests.swift; sourceTree = "<group>"; };
+		C5A90F012FD1430000B7C0DE /* SnippetEditorCellLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetEditorCellLayoutTests.swift; sourceTree = "<group>"; };
+		C5A910012FD1440000B7C0DE /* MainMenuPinFooterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuPinFooterTests.swift; sourceTree = "<group>"; };
+		C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryDisplayContentTests.swift; sourceTree = "<group>"; };
+		C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleUpdateFeedTests.swift; sourceTree = "<group>"; };
+		C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraDesignSystem.swift; sourceTree = "<group>"; };
+		C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraConfirmationController.swift; sourceTree = "<group>"; };
 		C5F1B7321FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSPasteboard+Deprecated.swift"; sourceTree = "<group>"; };
 		FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
 		FA0D5CE71DDCC61600AC9052 /* ClipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ClipService.swift; sourceTree = "<group>"; };
@@ -460,6 +482,8 @@
 				C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */,
 				C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */,
 				C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */,
+				C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */,
+				C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -485,6 +509,8 @@
 			children = (
 				FA1DB4D91DDCB49C007F95C8 /* CPYUtilities.swift */,
 				C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */,
+				C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */,
+				C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */,
 			);
 			path = Utility;
 			sourceTree = "<group>";
@@ -620,6 +646,13 @@
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
 				C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */,
 				C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */,
+				C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */,
+				C5A90D012FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift */,
+				C5A90E012FD1420000B7C0DE /* DefaultNumericShortcutTests.swift */,
+				C5A90F012FD1430000B7C0DE /* SnippetEditorCellLayoutTests.swift */,
+				C5A910012FD1440000B7C0DE /* MainMenuPinFooterTests.swift */,
+				C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */,
+				C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */,
 				FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */,
 				FA6167931D3ACCB90049FA14 /* DraggedDataTests.swift */,
 				FAC43DDC1B35D8B100C06102 /* Supporting Files */,
@@ -785,6 +818,8 @@
 				C54C29D52FC3E20000EF30FB /* SQLiteDataDatabase.swift in Sources */,
 				FA1DB4B31DDCB452007F95C8 /* Array+Remove.swift in Sources */,
 				C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */,
+				C5AA10002FD1200000B7C0DE /* PasteraDesignSystem.swift in Sources */,
+				C5AA10022FD1200000B7C0DE /* PasteraConfirmationController.swift in Sources */,
 				FA3778931F3B691A003B5BAB /* AppEnvironment.swift in Sources */,
 				FAC0DCF11DE576F300309C49 /* PasteService.swift in Sources */,
 				FA1DB4E51DDCB49C007F95C8 /* CPYUtilities.swift in Sources */,
@@ -817,6 +852,8 @@
 				C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */,
 				C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */,
 				C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
+				C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */,
+				C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */,
 				FA1DB4BD1DDCB452007F95C8 /* String+Substring.swift in Sources */,
 				FA1189331E4CD58C00244F12 /* ExcludeAppService.swift in Sources */,
 				FA1DB4E91DDCB49C007F95C8 /* CPYSplitView.swift in Sources */,
@@ -852,6 +889,13 @@
 				C571000A2FCEB03000C8F965 /* PasteboardContentTests.swift in Sources */,
 				C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */,
 				C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */,
+				C5A90B002FD1400000B7C0DE /* SnippetBrowserPanelTests.swift in Sources */,
+				C5A90D002FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift in Sources */,
+				C5A90E002FD1420000B7C0DE /* DefaultNumericShortcutTests.swift in Sources */,
+				C5A90F002FD1430000B7C0DE /* SnippetEditorCellLayoutTests.swift in Sources */,
+				C5A910002FD1440000B7C0DE /* MainMenuPinFooterTests.swift in Sources */,
+				C5A911002FD1640000B7C0DE /* HistoryDisplayContentTests.swift in Sources */,
+				C5A912002FD1800000B7C0DE /* SparkleUpdateFeedTests.swift in Sources */,
 				C57100052FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift in Sources */,
 				C522FB992FCC019100E61800 /* PasteboardAvailableTypeTests.swift in Sources */,
 				C57100012FCAE00000C8F965 /* SnippetRepositoryTests.swift in Sources */,
