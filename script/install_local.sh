@@ -5,12 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Pastera"
 APP_BUNDLE="${APP_NAME}.app"
 SCHEME="pastera"
+APP_TARGET="pastera"
 PROJECT_PATH="${ROOT_DIR}/pastera.xcodeproj"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-${ROOT_DIR}/.build/xcode-derived-data}"
 INSTALL_DIR="${PASTERA_INSTALL_DIR:-/Applications}"
 DEST_APP="${INSTALL_DIR}/${APP_BUNDLE}"
-BUILT_APP="${DERIVED_DATA_PATH}/Build/Products/${CONFIGURATION}/${APP_BUNDLE}"
+TARGET_BUILD_ROOT="${DERIVED_DATA_PATH}/AppTargetBuild"
+TARGET_PRODUCTS_DIR="${TARGET_BUILD_ROOT}/Products"
+TARGET_OBJROOT="${TARGET_BUILD_ROOT}/Intermediates.noindex"
+BUILT_APP="${TARGET_PRODUCTS_DIR}/${CONFIGURATION}/${APP_BUNDLE}"
 
 SHOULD_BUILD=1
 SHOULD_LAUNCH=1
@@ -62,18 +66,27 @@ XCODEBUILD_ARGS=(
     CODE_SIGN_IDENTITY=-
     CODE_SIGNING_REQUIRED=NO
     CODE_SIGNING_ALLOWED=NO
-    -scheme "${SCHEME}"
     -project "${PROJECT_PATH}"
     -configuration "${CONFIGURATION}"
-    -derivedDataPath "${DERIVED_DATA_PATH}"
     -clonedSourcePackagesDirPath "${ROOT_DIR}/.spm-cache/SourcePackages"
     -packageCachePath "${ROOT_DIR}/.spm-cache/PackageCache"
     -skipPackagePluginValidation
     -skipMacroValidation
 )
 
-run_xcodebuild() {
-    (cd "${ROOT_DIR}" && xcodebuild "${XCODEBUILD_ARGS[@]}" "$@")
+run_app_target_build() {
+    (cd "${ROOT_DIR}" && xcodebuild "${XCODEBUILD_ARGS[@]}" \
+        -target "${APP_TARGET}" \
+        SYMROOT="${TARGET_PRODUCTS_DIR}" \
+        OBJROOT="${TARGET_OBJROOT}" \
+        "$@")
+}
+
+run_scheme_tests() {
+    (cd "${ROOT_DIR}" && xcodebuild "${XCODEBUILD_ARGS[@]}" \
+        -scheme "${SCHEME}" \
+        -derivedDataPath "${DERIVED_DATA_PATH}" \
+        "$@")
 }
 
 quit_running_app() {
@@ -108,18 +121,19 @@ install_app() {
     quit_running_app
     rm -rf "${DEST_APP}"
     /usr/bin/ditto "${BUILT_APP}" "${DEST_APP}"
+    /usr/bin/codesign --force --deep --sign - "${DEST_APP}"
 }
 
 if [[ "${SHOULD_CLEAN}" == "1" ]]; then
-    run_xcodebuild clean
+    run_app_target_build clean
 fi
 
 if [[ "${SHOULD_BUILD}" == "1" ]]; then
-    run_xcodebuild build
+    run_app_target_build build
 fi
 
 if [[ "${SHOULD_TEST}" == "1" ]]; then
-    run_xcodebuild test
+    run_scheme_tests test
 fi
 
 install_app
