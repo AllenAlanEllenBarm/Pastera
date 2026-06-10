@@ -86,15 +86,38 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         showCurrentMode(attachedTo: anchorFrame)
     }
 
+    func show(at screenPoint: NSPoint) {
+        contentMode = .folders
+        showCurrentMode(near: screenPoint)
+    }
+
+    func show(folderID: SnippetFolder.ID, at screenPoint: NSPoint) {
+        contentMode = .snippets(folderID)
+        showCurrentMode(near: screenPoint)
+    }
+
     private func showCurrentMode(attachedTo anchorFrame: NSRect) {
-        sourceApplication = NSWorkspace.shared.frontmostApplication.flatMap { application in
-            application.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : application
-        }
+        captureSourceApplication()
         let panel = makePanelIfNeeded()
         reloadRows()
         position(panel, attachedTo: anchorFrame)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func showCurrentMode(near screenPoint: NSPoint) {
+        captureSourceApplication()
+        let panel = makePanelIfNeeded()
+        reloadRows()
+        position(panel, near: screenPoint)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func captureSourceApplication() {
+        sourceApplication = NSWorkspace.shared.frontmostApplication.flatMap { application in
+            application.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : application
+        }
     }
 
     func close() {
@@ -206,6 +229,23 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         let preferredY = anchorFrame.maxY - size.height
         let originY = min(max(preferredY, visibleFrame.minY), visibleFrame.maxY - size.height)
         panel.setFrameOrigin(NSPoint(x: originX, y: originY))
+    }
+
+    private func position(_ panel: NSPanel, near screenPoint: NSPoint) {
+        let screen = NSScreen.screens.first { NSMouseInRect(screenPoint, $0.frame, false) } ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else {
+            panel.setFrameOrigin(screenPoint)
+            return
+        }
+
+        let size = panel.frame.size
+        var origin = NSPoint(
+            x: screenPoint.x + SnippetBrowserLayout.horizontalOffset,
+            y: screenPoint.y - size.height + SnippetBrowserLayout.horizontalOffset
+        )
+        origin.x = min(max(origin.x, visibleFrame.minX), visibleFrame.maxX - size.width)
+        origin.y = min(max(origin.y, visibleFrame.minY), visibleFrame.maxY - size.height)
+        panel.setFrameOrigin(origin)
     }
 
     private func makeFolderRows() -> [NSView] {

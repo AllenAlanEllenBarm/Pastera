@@ -444,6 +444,7 @@ struct SnippetBrowserPanelTests {
 
             #expect(item.title == "Ask GPT")
             #expect(item.keyEquivalent == "1")
+            #expect(item.keyEquivalentModifierMask.isEmpty)
         }
     }
 

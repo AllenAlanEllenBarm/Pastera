@@ -28,6 +28,7 @@
 		C5A910002FD1440000B7C0DE /* MainMenuPinFooterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A910012FD1440000B7C0DE /* MainMenuPinFooterTests.swift */; };
 		C5A911002FD1640000B7C0DE /* HistoryDisplayContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */; };
 		C5A912002FD1800000B7C0DE /* SparkleUpdateFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */; };
+		C5A914002FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A914012FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift */; };
 		C5A913002FD1900000B7C0DE /* PasteraAppIconProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A913012FD1900000B7C0DE /* PasteraAppIconProvider.swift */; };
 		C5AA10002FD1200000B7C0DE /* PasteraDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */; };
 		C5AA10022FD1200000B7C0DE /* PasteraConfirmationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */; };
@@ -208,6 +209,7 @@
 		C5A910012FD1440000B7C0DE /* MainMenuPinFooterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuPinFooterTests.swift; sourceTree = "<group>"; };
 		C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryDisplayContentTests.swift; sourceTree = "<group>"; };
 		C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleUpdateFeedTests.swift; sourceTree = "<group>"; };
+		C5A914012FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetHotkeyPanelEntrypointTests.swift; sourceTree = "<group>"; };
 		C5A913012FD1900000B7C0DE /* PasteraAppIconProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraAppIconProvider.swift; sourceTree = "<group>"; };
 		C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraDesignSystem.swift; sourceTree = "<group>"; };
 		C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraConfirmationController.swift; sourceTree = "<group>"; };
@@ -656,6 +658,7 @@
 				C5A910012FD1440000B7C0DE /* MainMenuPinFooterTests.swift */,
 				C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */,
 				C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */,
+				C5A914012FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift */,
 				FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */,
 				FA6167931D3ACCB90049FA14 /* DraggedDataTests.swift */,
 				FAC43DDC1B35D8B100C06102 /* Supporting Files */,
@@ -900,6 +903,7 @@
 				C5A910002FD1440000B7C0DE /* MainMenuPinFooterTests.swift in Sources */,
 				C5A911002FD1640000B7C0DE /* HistoryDisplayContentTests.swift in Sources */,
 				C5A912002FD1800000B7C0DE /* SparkleUpdateFeedTests.swift in Sources */,
+				C5A914002FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift in Sources */,
 				C57100052FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift in Sources */,
 				C522FB992FCC019100E61800 /* PasteboardAvailableTypeTests.swift in Sources */,
 				C57100012FCAE00000C8F965 /* SnippetRepositoryTests.swift in Sources */,

@@ -108,6 +108,11 @@ extension MenuManager {
             return
         }
 
+        if type == .snippet {
+            showSnippetBrowserPanel(at: NSEvent.mouseLocation)
+            return
+        }
+
         let menu: NSMenu?
         switch type {
         case .main:
@@ -121,21 +126,7 @@ extension MenuManager {
     }
 
     func popUpSnippetFolder(_ folderDetail: SnippetFolderDetail) {
-        let folderMenu = NSMenu(title: folderDetail.folder.title)
-        // Folder title
-        let labelItem = NSMenuItem(title: folderDetail.folder.title, action: nil)
-        labelItem.isEnabled = false
-        folderMenu.addItem(labelItem)
-        // Snippets
-        let firstIndex = firstIndexOfMenuItems()
-        folderDetail.snippets
-            .filter { $0.isEnabled }
-            .enumerated()
-            .forEach { rowIndex, snippet in
-                let subMenuItem = makeSnippetMenuItem(snippet, listNumber: firstIndex + rowIndex, rowIndex: rowIndex)
-                folderMenu.addItem(subMenuItem)
-            }
-        folderMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        showSnippetFolderPanel(folderDetail.folder.id, at: NSEvent.mouseLocation)
     }
 }
 
@@ -507,7 +498,7 @@ private extension MenuManager {
     func showSnippetBrowserPanel() {
         historyPanelController?.close()
         guard let mainMenuFrame = mainMenuPanelController?.visibleFrame else {
-            popUpMenu(.snippet)
+            showSnippetBrowserPanel(at: NSEvent.mouseLocation)
             return
         }
 
@@ -518,12 +509,18 @@ private extension MenuManager {
         installPanelDismissMonitorsIfNeeded()
     }
 
+    func showSnippetBrowserPanel(at screenPoint: NSPoint) {
+        historyPanelController?.close()
+        let panelController = snippetPanelController ?? makeSnippetPanelController()
+        snippetPanelController = panelController
+        panelController.show(at: screenPoint)
+        installPanelDismissMonitorsIfNeeded()
+    }
+
     func showSnippetFolderPanel(_ folderID: SnippetFolder.ID, attachedTo anchorFrame: NSRect?) {
         historyPanelController?.close()
         guard let anchorFrame = anchorFrame ?? mainMenuPanelController?.visibleFrame else {
-            if let detail = snippetRepository.fetchFolderDetail(id: folderID) {
-                popUpSnippetFolder(detail)
-            }
+            showSnippetFolderPanel(folderID, at: NSEvent.mouseLocation)
             return
         }
 
@@ -531,6 +528,14 @@ private extension MenuManager {
         snippetPanelController = panelController
         mainMenuPanelController?.beginChildPanelPresentation()
         panelController.show(folderID: folderID, attachedTo: anchorFrame)
+        installPanelDismissMonitorsIfNeeded()
+    }
+
+    func showSnippetFolderPanel(_ folderID: SnippetFolder.ID, at screenPoint: NSPoint) {
+        historyPanelController?.close()
+        let panelController = snippetPanelController ?? makeSnippetPanelController()
+        snippetPanelController = panelController
+        panelController.show(folderID: folderID, at: screenPoint)
         installPanelDismissMonitorsIfNeeded()
     }
 
@@ -815,6 +820,7 @@ private extension MenuManager {
         menuItem.representedObject = snippet.id
         menuItem.toolTip = snippet.content
         menuItem.image = (isShowIcon) ? snippetIcon : nil
+        menuItem.keyEquivalentModifierMask = []
 
         return menuItem
     }
@@ -898,9 +904,9 @@ extension MenuManager {
         historyPanelController?.visibleFrame
     }
 
-    var snippetBrowserPanelFrameForTesting: NSRect? {
-        snippetPanelController?.visibleFrame
-    }
+    var snippetBrowserPanelFrameForTesting: NSRect? { snippetPanelController?.visibleFrame }
+    var snippetBrowserRowTitlesForTesting: [String] { snippetPanelController?.rowTitlesForTesting ?? [] }
+    var snippetBrowserShortcutTextsForTesting: [String] { snippetPanelController?.rowShortcutTextsForTesting ?? [] }
 
     var mainMenuPanelActionTitlesForTesting: [String] {
         makeMainMenuPanelItems().compactMap { item in
@@ -957,6 +963,8 @@ extension MenuManager {
     func showSnippetFolderPanelForTesting(_ folderID: SnippetFolder.ID) {
         showSnippetFolderPanel(folderID, attachedTo: nil)
     }
+
+    func showSnippetFolderPanelForTesting(_ folderID: SnippetFolder.ID, at screenPoint: NSPoint) { showSnippetFolderPanel(folderID, at: screenPoint) }
 
     func handlePanelDismissMouseDownForTesting(at screenPoint: NSPoint) {
         handlePanelDismissMouseDown(at: screenPoint)
