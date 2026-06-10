@@ -314,6 +314,7 @@ extension AppDelegate: NSApplicationDelegate {
         AppEnvironment.replaceCurrent(environment: AppEnvironment.fromStorage())
         // UserDefaults
         CPYUtilities.registerUserDefaultKeys()
+        PasteraAppIconProvider.installApplicationIcon()
 
         guard context != .test else { return }
 

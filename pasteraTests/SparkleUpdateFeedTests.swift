@@ -4,6 +4,7 @@
 //  Clipy
 //
 
+import AppKit
 import Foundation
 import Testing
 
@@ -15,6 +16,33 @@ struct SparkleUpdateFeedTests {
 
         #expect(feedURL == "https://raw.githubusercontent.com/AllenAlanEllenBarm/Pastera/develop/appcast.xml")
         #expect(!feedURL.hasSuffix("/releases"))
+    }
+
+    @Test
+    func sourceInfoPlistDeclaresAppIcon() throws {
+        #expect(try infoPlistValue(forKey: "CFBundleIconFile") == "AppIcon")
+        #expect(try infoPlistValue(forKey: "CFBundleIconName") == "AppIcon")
+    }
+
+    @Test
+    func legacyClipyLogoAssetIsReplaced() throws {
+        let root = projectRoot()
+        let legacyLogoPath = root.appendingPathComponent("Resources/clipy_logo.png").path
+        let pasteraLogoPath = root.appendingPathComponent("Resources/pastera_logo.png").path
+
+        #expect(!FileManager.default.fileExists(atPath: legacyLogoPath))
+        #expect(FileManager.default.fileExists(atPath: pasteraLogoPath))
+    }
+
+    @Test
+    func appIconAssetsPreserveTransparentEdges() throws {
+        let iconURL = projectRoot().appendingPathComponent("pastera/Resources/Assets.xcassets/AppIcon.appiconset/512@2x.png")
+        let data = try Data(contentsOf: iconURL)
+        let image = try #require(NSBitmapImageRep(data: data))
+
+        #expect(image.pixelsWide == 1024)
+        #expect(image.pixelsHigh == 1024)
+        #expect(image.hasAlpha)
     }
 
     @Test
