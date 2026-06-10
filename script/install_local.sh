@@ -89,6 +89,42 @@ run_scheme_tests() {
         "$@")
 }
 
+canonical_path() {
+    local path="$1"
+    local dir
+    dir="$(cd "$(dirname "${path}")" && pwd -P)"
+    printf '%s/%s\n' "${dir}" "$(basename "${path}")"
+}
+
+refresh_app_registration() {
+    local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    local bundle_id
+    local dest_canonical
+
+    if [[ ! -x "${lsregister}" ]]; then
+        return
+    fi
+
+    bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${DEST_APP}/Contents/Info.plist" 2>/dev/null || true)"
+    dest_canonical="$(canonical_path "${DEST_APP}")"
+
+    if [[ -n "${bundle_id}" ]]; then
+        while IFS= read -r candidate; do
+            [[ -d "${candidate}" && "${candidate}" == *.app ]] || continue
+
+            local candidate_canonical
+            candidate_canonical="$(canonical_path "${candidate}" 2>/dev/null || printf '%s\n' "${candidate}")"
+            if [[ "${candidate_canonical}" != "${dest_canonical}" ]]; then
+                "${lsregister}" -u "${candidate}" >/dev/null 2>&1 || true
+            fi
+        done < <(/usr/bin/mdfind "kMDItemCFBundleIdentifier == '${bundle_id}'" 2>/dev/null || true)
+    fi
+
+    "${lsregister}" -f -R "${DEST_APP}" >/dev/null 2>&1 || true
+    /usr/bin/killall iconservicesagent >/dev/null 2>&1 || true
+    /usr/bin/killall iconservicesd >/dev/null 2>&1 || true
+}
+
 quit_running_app() {
     if ! pgrep -x "${APP_NAME}" >/dev/null; then
         return
@@ -122,6 +158,7 @@ install_app() {
     rm -rf "${DEST_APP}"
     /usr/bin/ditto "${BUILT_APP}" "${DEST_APP}"
     /usr/bin/codesign --force --deep --sign - "${DEST_APP}"
+    refresh_app_registration
 }
 
 if [[ "${SHOULD_CLEAN}" == "1" ]]; then
