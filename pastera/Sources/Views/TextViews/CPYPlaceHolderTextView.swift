@@ -29,6 +29,18 @@ class CPYPlaceHolderTextView: NSTextView {
         return NSPoint(x: 0, y: 7)
     }
 
+    override func insertTab(_ sender: Any?) {
+        window?.selectKeyView(following: self)
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        window?.selectKeyView(preceding: self)
+    }
+
+    override func insertTabIgnoringFieldEditor(_ sender: Any?) {
+        insertText("\t", replacementRange: selectedRange())
+    }
+
     // MARK: - Draw
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)

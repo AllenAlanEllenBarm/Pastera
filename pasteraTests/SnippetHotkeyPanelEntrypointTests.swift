@@ -11,8 +11,10 @@
 //
 
 import AppKit
+import Carbon
 import Combine
 import Dependencies
+import Magnet
 import Testing
 @testable import Pastera
 
@@ -27,7 +29,8 @@ struct SnippetHotkeyPanelEntrypointTests {
             snippets: []
         )
         let controller = SnippetBrowserPanelController(
-            fetchDetails: { [detail] },
+            fetchFolders: { [detail.folder] },
+            fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
             selectSnippet: { _, _ in }
         )
 
@@ -57,7 +60,8 @@ struct SnippetHotkeyPanelEntrypointTests {
                 ]
             )
             let controller = SnippetBrowserPanelController(
-                fetchDetails: { [detail] },
+                fetchFolders: { [detail.folder] },
+                fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
                 selectSnippet: { _, _ in }
             )
 
@@ -69,6 +73,113 @@ struct SnippetHotkeyPanelEntrypointTests {
             #expect(controller.rowShortcutStylesForTesting == [.itemNumber])
             #expect(!controller.rowTextValuesForTesting.flatMap { $0 }.contains("Summarize this"))
             #expect(controller.isVisibleForTesting)
+        }
+    }
+
+    @Test
+    func folderHotkeyPanelConfirmsThirdSnippetWithTriggerModifiedNumberShortcut() throws {
+        try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
+            let folderID = SnippetFolder.ID(rawValue: UUID())
+            let snippets = (1...3).map { index in
+                Snippet(
+                    id: Snippet.ID(rawValue: UUID()),
+                    folderID: folderID,
+                    title: "Snippet \(index)",
+                    content: "Content \(index)",
+                    index: index,
+                    isEnabled: true
+                )
+            }
+            let detail = SnippetFolderDetail(
+                folder: SnippetFolder(id: folderID, title: "AI Prompt", index: 0, isEnabled: true),
+                snippets: snippets
+            )
+            var selectedIDs = [Snippet.ID]()
+            let controller = SnippetBrowserPanelController(
+                fetchFolders: { [detail.folder] },
+                fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
+                selectSnippet: { id, _ in selectedIDs.append(id) }
+            )
+            let triggerKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 12, carbonModifiers: cmdKey | optionKey))
+
+            controller.show(
+                folderID: folderID,
+                at: NSPoint(x: 120, y: 420),
+                triggerKeyCombo: triggerKeyCombo
+            )
+            defer { controller.close() }
+
+            let event = try makeDigitEvent("3", keyCode: 20, modifierFlags: [.command, .option])
+            #expect(controller.handleNumberShortcutForTesting(event))
+            #expect(selectedIDs == [snippets[2].id])
+        }
+    }
+
+    @Test
+    func numberShortcutMapperAcceptsAllowedTriggerModifiers() throws {
+        let thirdEvent = try makeDigitEvent("3", keyCode: 20, modifierFlags: [.command, .option])
+        let tenthEvent = try makeDigitEvent("0", keyCode: 29, modifierFlags: [.command, .option])
+        let mismatchedEvent = try makeDigitEvent("3", keyCode: 20, modifierFlags: [.control])
+
+        #expect(HistoryMenuNumberShortcutMapper.rowIndex(
+            for: thirdEvent,
+            startsAtZero: false,
+            rowCount: 10,
+            allowedModifierFlags: [.command, .option]
+        ) == 2)
+        #expect(HistoryMenuNumberShortcutMapper.rowIndex(
+            for: tenthEvent,
+            startsAtZero: false,
+            rowCount: 10,
+            allowedModifierFlags: [.command, .option]
+        ) == 9)
+        #expect(HistoryMenuNumberShortcutMapper.rowIndex(
+            for: mismatchedEvent,
+            startsAtZero: false,
+            rowCount: 10,
+            allowedModifierFlags: [.command, .option]
+        ) == nil)
+    }
+
+    @Test
+    func historyPanelConfirmsThirdRowWithTriggerModifiedNumberShortcut() throws {
+        try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
+            let histories = (1...3).map { index in
+                PasteboardHistory(
+                    id: PasteboardHistory.ID("history-\(index)"),
+                    title: "History \(index)",
+                    pasteboardTypes: [.string],
+                    updateAt: index,
+                    deviceID: CPYUtilities.deviceID
+                )
+            }
+            var selectedIDs = [PasteboardHistory.ID]()
+            var state = HistoryMenuPaginationState()
+            let controller = HistoryBrowserPanelController(
+                currentState: { state },
+                updateState: { update in update(&state) },
+                fetchPage: {
+                    HistoryMenuPage(
+                        details: histories.map { PasteboardHistoryDetail(history: $0, thumbnailAsset: nil) },
+                        hasNextPage: false
+                    )
+                },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, shortcutText: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { id, _ in selectedIDs.append(id) }
+            )
+            let triggerKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
+
+            controller.show(
+                at: NSPoint(x: 120, y: 420),
+                triggerKeyCombo: triggerKeyCombo
+            )
+            defer { controller.close() }
+
+            let event = try makeDigitEvent("3", keyCode: 20, modifierFlags: [.command, .option])
+            #expect(controller.handleNumberShortcutForTesting(event))
+            #expect(selectedIDs == [PasteboardHistory.ID("history-3")])
         }
     }
 
@@ -150,6 +261,25 @@ struct SnippetHotkeyPanelEntrypointTests {
         } else {
             defaults.removeObject(forKey: key)
         }
+    }
+
+    private func makeDigitEvent(
+        _ text: String,
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifierFlags,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: text,
+            charactersIgnoringModifiers: text,
+            isARepeat: false,
+            keyCode: keyCode
+        ))
     }
 }
 

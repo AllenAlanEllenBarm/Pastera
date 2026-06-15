@@ -74,7 +74,8 @@ struct DefaultNumericShortcutTests {
                 snippets: snippets
             )
             let controller = SnippetBrowserPanelController(
-                fetchDetails: { [detail] },
+                fetchFolders: { [detail.folder] },
+                fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
                 selectSnippet: { _, _ in }
             )
 

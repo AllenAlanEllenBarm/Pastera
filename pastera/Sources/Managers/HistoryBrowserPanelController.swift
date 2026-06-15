@@ -11,6 +11,7 @@
 //
 
 import Cocoa
+import Magnet
 
 struct HistoryBrowserPanelBehavior {
     let isPinned: Bool
@@ -30,6 +31,7 @@ struct HistoryBrowserPanelBehavior {
 
 private final class HistoryBrowserPanel: NSPanel {
     var onCancel: (() -> Void)?
+    var onKeyDown: ((NSEvent) -> Bool)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -39,11 +41,21 @@ private final class HistoryBrowserPanel: NSPanel {
     }
 
     override func keyDown(with event: NSEvent) {
+        if onKeyDown?(event) == true {
+            return
+        }
         guard event.keyCode == 53 else {
             super.keyDown(with: event)
             return
         }
         onCancel?()
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onKeyDown?(event) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
@@ -65,24 +77,26 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     private let updateState: (StateUpdate) -> Void
     private let fetchPage: () -> HistoryMenuPage
     private let makeRowView: RowBuilder
-    private let selectHistory: (PasteboardHistory.ID, NSRunningApplication?) -> Void
+    private let selectHistory: (PasteboardHistory.ID, PasteTargetContext?) -> Void
 
     private let contentView = NSView()
     private let headerView = HistoryMenuHeaderView()
     private let separatorView = NSView()
     private var rowViews = [NSView]()
     private var panel: HistoryBrowserPanel?
-    private var sourceApplication: NSRunningApplication?
+    private var pasteTargetContext: PasteTargetContext?
+    private var numberShortcutModifierFlags: NSEvent.ModifierFlags = []
     private var activationObserver: Any?
     private var isPinned = false
     var onClose: (() -> Void)?
+    var onMainMenuNavigationKeyDown: ((NSEvent) -> Bool)?
 
     init(
         currentState: @escaping () -> HistoryMenuPaginationState,
         updateState: @escaping (StateUpdate) -> Void,
         fetchPage: @escaping () -> HistoryMenuPage,
         makeRowView: @escaping RowBuilder,
-        selectHistory: @escaping (PasteboardHistory.ID, NSRunningApplication?) -> Void
+        selectHistory: @escaping (PasteboardHistory.ID, PasteTargetContext?) -> Void
     ) {
         self.currentState = currentState
         self.updateState = updateState
@@ -99,10 +113,13 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    func show(at screenPoint: NSPoint) {
-        sourceApplication = NSWorkspace.shared.frontmostApplication.flatMap { application in
-            application.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : application
-        }
+    func show(
+        at screenPoint: NSPoint,
+        pasteTargetContext: PasteTargetContext? = nil,
+        triggerKeyCombo: KeyCombo? = nil
+    ) {
+        self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
+        numberShortcutModifierFlags = triggerKeyCombo.numberShortcutModifierFlags
         let panel = makePanelIfNeeded()
         reloadResults()
         if !isPinned || !panel.isVisible {
@@ -113,10 +130,13 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
         headerView.focusDefaultHistoryBrowserItem()
     }
 
-    func show(attachedTo anchorFrame: NSRect) {
-        sourceApplication = NSWorkspace.shared.frontmostApplication.flatMap { application in
-            application.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : application
-        }
+    func show(
+        attachedTo anchorFrame: NSRect,
+        pasteTargetContext: PasteTargetContext? = nil,
+        triggerKeyCombo: KeyCombo? = nil
+    ) {
+        self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
+        numberShortcutModifierFlags = triggerKeyCombo.numberShortcutModifierFlags
         let panel = makePanelIfNeeded()
         reloadResults()
         position(panel, attachedTo: anchorFrame)
@@ -126,6 +146,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     func close() {
+        panel?.makeFirstResponder(nil)
         panel?.orderOut(nil)
         HistoryMenuRowView.hideImagePreview()
         onClose?()
@@ -136,12 +157,25 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
         return panel?.frame
     }
 
+    func reloadResultsIfVisible() {
+        guard panel?.isVisible == true else { return }
+        reloadResults()
+    }
+
+    func refreshAppearanceIfVisible() {
+        guard panel?.isVisible == true else { return }
+        contentView.layer?.backgroundColor = CPYWindowAppearance.backgroundColor(for: panel?.effectiveAppearance).cgColor
+    }
+
     private func setupContent() {
         contentView.wantsLayer = true
         contentView.layer?.cornerRadius = Metrics.cornerRadius
         contentView.layer?.masksToBounds = true
 
         headerView.usesMenuTrackingKeyMonitor = false
+        headerView.onPanelShortcutKeyDown = { [weak self] event in
+            self?.handleHistoryPanelShortcut(event) == true
+        }
         headerView.onQueryChange = { [weak self] query in
             self?.updateAndReload { $0.updateQuery(query) }
         }
@@ -186,6 +220,15 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.onCancel = { [weak self] in self?.close() }
+        panel.onKeyDown = { [weak self] event in
+            if self?.handleHistoryPanelShortcut(event) == true {
+                return true
+            }
+            if self?.onMainMenuNavigationKeyDown?(event) == true {
+                return true
+            }
+            return self?.confirmHistoryForNumberShortcut(event) ?? false
+        }
         panel.delegate = self
         panel.contentView = contentView
         self.panel = panel
@@ -225,7 +268,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
             return
         }
         guard application.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-        sourceApplication = application
+        pasteTargetContext = PasteTargetContext.capture(from: application)
     }
 
     private func updateAndReload(_ update: StateUpdate) {
@@ -341,9 +384,49 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     private func confirmSelection(historyID: PasteboardHistory.ID) {
-        let application = sourceApplication
+        let targetContext = pasteTargetContext
         close()
-        selectHistory(historyID, application)
+        selectHistory(historyID, targetContext)
+    }
+
+    private func handleHistoryPanelShortcut(_ event: NSEvent) -> Bool {
+        guard !headerView.shouldPreserveSearchFieldEditingCommand(event) else {
+            return false
+        }
+        guard let shortcut = HistoryPanelShortcut.matching(event, hotKeyService: AppEnvironment.current.hotKeyService) else {
+            return false
+        }
+
+        switch shortcut {
+        case .search:
+            headerView.focusSearchFieldFromShortcut()
+        case .previousPage:
+            guard currentState().pageIndex > 0 else { return true }
+            updateAndReload { $0.goToPreviousPage() }
+        case .nextPage:
+            let page = fetchPage()
+            guard page.hasNextPage else { return true }
+            updateAndReload { $0.goToNextPage(if: page.hasNextPage) }
+        }
+        return true
+    }
+
+    private func confirmHistoryForNumberShortcut(_ event: NSEvent) -> Bool {
+        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
+            return false
+        }
+        let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
+        guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
+            for: event,
+            startsAtZero: startsAtZero,
+            rowCount: rowViews.count,
+            allowedModifierFlags: numberShortcutModifierFlags
+        ),
+            let rowView = rowViews[rowIndex] as? HistoryMenuRowView else {
+            return false
+        }
+        rowView.confirmFromKeyboard()
+        return true
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -353,9 +436,63 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
 
 #if DEBUG
 extension HistoryBrowserPanelController {
+    var pasteTargetProcessIdentifierForTesting: pid_t? {
+        pasteTargetContext?.processIdentifier
+    }
+
     func confirmFirstHistoryForTesting() {
         guard let firstRow = rowViews.first as? HistoryMenuRowView else { return }
         firstRow.confirmForTesting()
     }
+
+    func focusFirstHistoryForTesting() {
+        guard let firstRow = rowViews.first as? HistoryMenuRowView else { return }
+        panel?.makeFirstResponder(firstRow)
+    }
+
+    func handleNumberShortcutForTesting(_ event: NSEvent) -> Bool {
+        confirmHistoryForNumberShortcut(event)
+    }
+
+    func handleHistoryPanelKeyDownForTesting(_ event: NSEvent) -> Bool {
+        handleHistoryPanelShortcut(event)
+    }
+
+    func dispatchHistoryPanelKeyDownForTesting(_ event: NSEvent) -> Bool {
+        panel?.onKeyDown?(event) ?? false
+    }
+
+    func dispatchHistoryHeaderMenuTrackingKeyDownForTesting(_ event: NSEvent) -> Bool {
+        headerView.handleMenuTrackingKeyDown(event)
+    }
+
+    func dispatchFirstHistoryRowKeyDownForTesting(_ event: NSEvent) -> Bool {
+        guard let firstRow = rowViews.first as? HistoryMenuRowView else { return false }
+        firstRow.keyDown(with: event)
+        return true
+    }
+
+    func dispatchSearchFieldKeyEquivalentForTesting(_ event: NSEvent) -> Bool {
+        headerView.dispatchSearchFieldKeyEquivalentForTesting(event)
+    }
+
+    func focusSearchFieldForTesting() {
+        headerView.focusSearchFieldFromShortcut()
+    }
+
+    var isSearchFieldFocusedForTesting: Bool {
+        headerView.isSearchFieldFocusedForTesting
+    }
+
+    var contentBackgroundAlphaForTesting: CGFloat {
+        CGFloat(contentView.layer?.backgroundColor?.alpha ?? 0)
+    }
 }
 #endif
+
+private extension Optional where Wrapped == KeyCombo {
+    var numberShortcutModifierFlags: NSEvent.ModifierFlags {
+        guard let keyCombo = self, !keyCombo.doubledModifiers else { return [] }
+        return keyCombo.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask)
+    }
+}

@@ -56,12 +56,12 @@ struct PasteboardContent: Equatable {
     init(assets: [Asset]) {
         self.types = assets.map(\.type)
         self.assets = assets
-        var data = Data()
+        var hasher = SHA256()
         assets.forEach { asset in
-            data.append(value: Data(asset.type.rawValue.utf8))
-            data.append(value: asset.data)
+            hasher.update(lengthPrefixed: Data(asset.type.rawValue.utf8))
+            hasher.update(lengthPrefixed: asset.data)
         }
-        self.hash = SHA256.hash(data: data)
+        self.hash = hasher.finalize()
             .map { String(format: "%02x", $0) }
             .joined()
     }
@@ -83,6 +83,22 @@ struct PasteboardContent: Equatable {
         guard let data = image.tiffRepresentation else { return nil }
         self.init(assets: [Asset(type: .tiff, data: data)])
     }
+
+    init?(imageFileURL url: URL) {
+        guard let sourceData = try? Data(contentsOf: url),
+              let image = NSImage(data: sourceData)
+        else { return nil }
+
+        if url.pathExtension.lowercased() == "png" {
+            self.init(assets: [Asset(type: .png, data: sourceData)])
+        } else if let pngData = PasteraImageEncoding.pngData(from: image) {
+            self.init(assets: [Asset(type: .png, data: pngData)])
+        } else if let tiffData = image.tiffRepresentation {
+            self.init(assets: [Asset(type: .tiff, data: tiffData)])
+        } else {
+            return nil
+        }
+    }
 }
 
 private extension PasteboardContent {
@@ -91,13 +107,21 @@ private extension PasteboardContent {
     }
 }
 
-private extension Data {
-    mutating func append(value: Data) {
-        var length = UInt64(value.count).bigEndian
-        Swift.withUnsafeBytes(of: &length) {
-            append(contentsOf: $0)
-        }
-        append(value)
+private extension SHA256 {
+    mutating func update(lengthPrefixed data: Data) {
+        var length = UInt64(data.count).bigEndian
+        let lengthData = Swift.withUnsafeBytes(of: &length) { Data($0) }
+        update(data: lengthData)
+        update(data: data)
+    }
+}
+
+enum PasteraImageEncoding {
+    static func pngData(from image: NSImage) -> Data? {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData)
+        else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
     }
 }
 

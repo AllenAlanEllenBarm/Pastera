@@ -47,8 +47,9 @@ struct CPYWindowAppearanceTests {
     @Test
     func normalizedOpacityClampsToSupportedRange() {
         #expect(CPYWindowAppearance.defaultOpacity == 0.94)
-        #expect(CPYWindowAppearance.minimumOpacity == 0.78)
-        #expect(CPYWindowAppearance.normalizedOpacity(0.1) == CPYWindowAppearance.minimumOpacity)
+        #expect(CPYWindowAppearance.minimumOpacity == 0)
+        #expect(CPYWindowAppearance.normalizedOpacity(-0.1) == CPYWindowAppearance.minimumOpacity)
+        #expect(CPYWindowAppearance.normalizedOpacity(0.1) == 0.1)
         #expect(CPYWindowAppearance.normalizedOpacity(0.82) == 0.82)
         #expect(CPYWindowAppearance.normalizedOpacity(2.0) == CPYWindowAppearance.maximumOpacity)
     }
@@ -75,9 +76,12 @@ struct CPYWindowAppearanceTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         defaults.set(0.2, forKey: Constants.UserDefaults.windowBackgroundOpacity)
-        #expect(CPYWindowAppearance.opacity(defaults: defaults) == CPYWindowAppearance.minimumOpacity)
+        #expect(CPYWindowAppearance.opacity(defaults: defaults) == 0.2)
 
         defaults.set(0.72, forKey: Constants.UserDefaults.windowBackgroundOpacity)
+        #expect(CPYWindowAppearance.opacity(defaults: defaults) == 0.72)
+
+        defaults.set(-0.2, forKey: Constants.UserDefaults.windowBackgroundOpacity)
         #expect(CPYWindowAppearance.opacity(defaults: defaults) == CPYWindowAppearance.minimumOpacity)
     }
 
@@ -101,6 +105,54 @@ struct CPYWindowAppearanceTests {
     }
 
     @Test @MainActor
+    func applyingWindowAppearanceUsesOpacityForStandardWindows() throws {
+        let suiteName = "CPYWindowAppearanceTests.opaque.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { retainWindowForAppKitTest(window) }
+
+        defaults.set(0, forKey: Constants.UserDefaults.windowBackgroundOpacity)
+        window.contentView = NSView(frame: window.contentView?.bounds ?? .zero)
+
+        CPYWindowAppearance.apply(to: window, defaults: defaults)
+
+        #expect(window.isOpaque == false)
+        #expect(abs(window.backgroundColor.alphaComponent - 0) < 0.001)
+        #expect(abs(Double(window.contentView?.layer?.backgroundColor?.alpha ?? 0) - 0) < 0.001)
+    }
+
+    @Test @MainActor
+    func applyingWindowAppearanceKeepsPanelsTranslucent() throws {
+        let suiteName = "CPYWindowAppearanceTests.panel.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 160),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        defer { retainWindowForAppKitTest(panel) }
+
+        defaults.set(0.82, forKey: Constants.UserDefaults.windowBackgroundOpacity)
+        panel.contentView = NSView(frame: panel.contentView?.bounds ?? .zero)
+
+        CPYWindowAppearance.apply(to: panel, defaults: defaults)
+
+        #expect(panel.isOpaque == false)
+        #expect(abs(panel.backgroundColor.alphaComponent - 0.82) < 0.001)
+        #expect(panel.contentView?.layer?.backgroundColor == NSColor.clear.cgColor)
+    }
+
+    @Test @MainActor
     func applyingWindowAppearanceKeepsTopNavigationBackgroundOpaque() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
@@ -119,9 +171,10 @@ struct CPYWindowAppearanceTests {
 
         CPYWindowAppearance.apply(to: window)
 
-        #expect(contentView.layer?.backgroundColor == NSColor.clear.cgColor)
+        #expect((contentView.layer?.backgroundColor?.alpha ?? 0) < 1)
+        #expect((contentView.layer?.backgroundColor?.alpha ?? 0) >= CGFloat(CPYWindowAppearance.minimumOpacity))
         #expect(paneView.layer?.backgroundColor == nil)
-        #expect(navigationView.layer?.backgroundColor?.alpha == 1)
+        #expect(navigationView.layer?.backgroundColor?.alpha ?? 0 < 1)
     }
 
     @Test @MainActor
@@ -143,8 +196,8 @@ struct CPYWindowAppearanceTests {
 
         CPYWindowAppearance.apply(to: window)
 
-        #expect(navigationView.layer?.backgroundColor?.alpha == 1)
-        #expect(navigationItemView.layer?.backgroundColor?.alpha == 1)
+        #expect(navigationView.layer?.backgroundColor?.alpha ?? 0 < 1)
+        #expect(navigationItemView.layer?.backgroundColor?.alpha ?? 0 < 1)
     }
 
     @Test @MainActor
@@ -181,7 +234,7 @@ struct CPYWindowAppearanceTests {
         CPYWindowAppearance.applyToVisibleWindows(defaults: defaults)
 
         let managedAlpha = Double(managedWindow.backgroundColor.alphaComponent)
-        #expect(abs(managedAlpha - CPYWindowAppearance.minimumOpacity) < 0.001)
+        #expect(abs(managedAlpha - 0.45) < 0.001)
         #expect(unmanagedWindow.backgroundColor == .systemRed)
         #expect(unmanagedWindow.isOpaque)
     }
@@ -201,6 +254,72 @@ struct CPYWindowAppearanceTests {
 
         #expect(Int(paneView.frame.height.rounded()) == 259)
         #expect(Int((textFieldMaxY ?? 0).rounded()) == 247)
+    }
+
+    @Test @MainActor
+    func preferenceWindowKeepsLegacyPaneTextReadableInDarkMode() throws {
+        let controller = CPYPreferencesWindowController()
+        defer { controller.close() }
+
+        let darkAppearance = try #require(NSAppearance(named: .darkAqua))
+        controller.window?.appearance = darkAppearance
+        controller.showWindow(nil)
+
+        let labels = enabledLabelTextFields(in: try #require(controller.window?.contentView))
+        #expect(labels.count >= 4)
+
+        for label in labels {
+            let brightness = perceivedBrightness(label.textColor, appearance: darkAppearance)
+            #expect(
+                brightness >= 0.50,
+                "Expected readable text for '\(label.stringValue)', brightness: \(brightness)"
+            )
+        }
+    }
+
+    @Test @MainActor
+    func preferenceWindowUsesDarkTranslucentSidebarColors() throws {
+        let suiteName = "CPYWindowAppearanceTests.preferenceDark.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(0.82, forKey: Constants.UserDefaults.windowBackgroundOpacity)
+        AppEnvironment.push(defaults: defaults)
+        defer { _ = AppEnvironment.popLast() }
+
+        let controller = CPYPreferencesWindowController()
+        defer { controller.close() }
+
+        let darkAppearance = try #require(NSAppearance(named: .darkAqua))
+        controller.window?.appearance = darkAppearance
+        controller.showWindow(nil)
+
+        #expect(abs(controller.rootBackgroundAlphaForTesting - 0.82) < 0.001)
+        #expect(controller.sidebarBackgroundBrightnessForTesting < 0.35)
+    }
+
+    @Test @MainActor
+    func snippetEditorUsesDarkTranslucentWorkbenchColors() throws {
+        let suiteName = "CPYWindowAppearanceTests.snippetDark.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(0.82, forKey: Constants.UserDefaults.windowBackgroundOpacity)
+        AppEnvironment.push(defaults: defaults)
+        defer { _ = AppEnvironment.popLast() }
+
+        try withDependencies {
+            $0.snippetRepository = SnippetEditorStaticSnippetRepository(details: [])
+        } operation: {
+            let controller = CPYSnippetsEditorWindowController()
+            defer { controller.close() }
+
+            let darkAppearance = try #require(NSAppearance(named: .darkAqua))
+            controller.window?.appearance = darkAppearance
+            controller.showWindow(nil)
+
+            #expect(abs(controller.rootBackgroundAlphaForTesting - 0.82) < 0.001)
+            #expect(controller.toolbarBackgroundBrightnessForTesting < 0.35)
+            #expect(controller.textEditorBackgroundBrightnessForTesting < 0.35)
+        }
     }
 
     @Test @MainActor
@@ -229,6 +348,19 @@ struct CPYWindowAppearanceTests {
         #expect(cell.isEditable)
         #expect(cell.isSelectable)
         #expect(cell.sendsActionOnEndEditing)
+    }
+
+    @Test @MainActor
+    func snippetEditorCellUsesSemanticTitleColors() {
+        let cell = CPYSnippetsEditorCell(textCell: "AI Prompt")
+
+        cell.isItemEnabled = true
+        #expect(cell.titleTextColorForTesting(isHighlighted: false) == .labelColor)
+        #expect(cell.titleTextColorForTesting(isHighlighted: true) == .selectedMenuItemTextColor)
+
+        cell.isItemEnabled = false
+        #expect(cell.titleTextColorForTesting(isHighlighted: false) == .disabledControlTextColor)
+        #expect(cell.titleTextColorForTesting(isHighlighted: true) == .disabledControlTextColor)
     }
 
     @Test @MainActor
@@ -311,6 +443,30 @@ struct CPYWindowAppearanceTests {
             }
         }
     }
+
+    @Test @MainActor
+    func snippetEditorAssignsDefaultShortcutWhenAddingFolder() throws {
+        try withSnippetEditorTemporaryFolderHotKeys {
+            let folderID = SnippetFolder.ID(rawValue: UUID())
+            let folder = SnippetFolder(id: folderID, title: "untitled folder", index: 0, isEnabled: true)
+            defer { AppEnvironment.current.hotKeyService.unregisterSnippetHotKey(with: folderID.uuidString) }
+
+            withDependencies {
+                $0.snippetRepository = SnippetEditorInsertingSnippetRepository(folder: folder)
+            } operation: {
+                let controller = CPYSnippetsEditorWindowController()
+                defer { controller.close() }
+
+                controller.addFolderForTesting()
+            }
+
+            let keyCombo = try #require(AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folderID.uuidString))
+            #expect(keyCombo.QWERTYKeyCode == 12)
+            #expect(keyCombo.modifiers == cmdKey | optionKey)
+            #expect(keyCombo.keyEquivalent.uppercased() == "Q")
+        }
+    }
+
 }
 
 @MainActor
@@ -332,6 +488,34 @@ private enum CPYWindowAppearanceTestWindowRetainer {
             contentViews.append(contentView)
         }
     }
+}
+
+private func enabledLabelTextFields(in view: NSView) -> [NSTextField] {
+    var fields = [NSTextField]()
+    collectEnabledLabelTextFields(in: view, into: &fields)
+    return fields
+}
+
+private func collectEnabledLabelTextFields(in view: NSView, into fields: inout [NSTextField]) {
+    guard !view.isHidden else { return }
+    if let textField = view as? NSTextField,
+       !textField.isEditable,
+       textField.isEnabled,
+       !textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        fields.append(textField)
+    }
+    view.subviews.forEach { collectEnabledLabelTextFields(in: $0, into: &fields) }
+}
+
+private func perceivedBrightness(_ color: NSColor?, appearance: NSAppearance) -> CGFloat {
+    var rgbColor: NSColor?
+    appearance.performAsCurrentDrawingAppearance {
+        rgbColor = color?.usingColorSpace(.deviceRGB)
+    }
+    guard let rgbColor else { return 0 }
+    return 0.299 * rgbColor.redComponent
+        + 0.587 * rgbColor.greenComponent
+        + 0.114 * rgbColor.blueComponent
 }
 
 private func withSnippetEditorNumericShortcutDefaults(
@@ -360,6 +544,45 @@ private func restoreSnippetEditorDefault(_ value: Any?, forKey key: String) {
     } else {
         defaults.removeObject(forKey: key)
     }
+}
+
+private func withSnippetEditorTemporaryFolderHotKeys(operation: () throws -> Void) rethrows {
+    let defaults = AppEnvironment.current.defaults
+    let key = Constants.HotKey.folderKeyCombos
+    let previousValue = defaults.object(forKey: key)
+    defaults.removeObject(forKey: key)
+    defer {
+        restoreSnippetEditorDefault(previousValue, forKey: key)
+    }
+    try operation()
+}
+
+private struct SnippetEditorInsertingSnippetRepository: SnippetRepositoryProtocol {
+    let folder: SnippetFolder
+
+    func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func fetchFolderDetails() -> [SnippetFolderDetail] { [] }
+    func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail? { nil }
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
+    func insertFolder() -> SnippetFolder? { folder }
+    func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {}
+    func mergeSyncTombstones(_ records: [SyncRecord]) {}
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
+    func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
+    func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
+    func deleteFolder(_ id: SnippetFolder.ID) {}
+    func fetchSnippet(id: Snippet.ID) -> Snippet? { nil }
+    func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
+    func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) {}
+    func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
+    func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
+    func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
+    func deleteSnippet(_ id: Snippet.ID) {}
 }
 
 private struct SnippetEditorStaticSnippetRepository: SnippetRepositoryProtocol {

@@ -15,6 +15,7 @@ import Cocoa
 final class HistoryMenuSearchField: NSSearchField {
     private var trackingArea: NSTrackingArea?
     var onMouseEntered: (() -> Void)?
+    var onPanelShortcutKeyDown: ((NSEvent) -> Bool)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -30,6 +31,7 @@ final class HistoryMenuSearchField: NSSearchField {
     override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self); super.mouseDown(with: event) }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onPanelShortcutKeyDown?(event) == true { return true }
         if moveHistoryMenuFocus(with: event) { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.command),

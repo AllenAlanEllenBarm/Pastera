@@ -49,7 +49,8 @@ struct SnippetBrowserPanelTests {
         )
         var selectedSnippetID: Snippet.ID?
         let controller = SnippetBrowserPanelController(
-            fetchDetails: { [detail] },
+            fetchFolders: { [detail.folder] },
+            fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
             selectSnippet: { snippetID, _ in selectedSnippetID = snippetID }
         )
 
@@ -84,7 +85,8 @@ struct SnippetBrowserPanelTests {
             )
             var selectedSnippetID: Snippet.ID?
             let controller = SnippetBrowserPanelController(
-                fetchDetails: { [detail] },
+                fetchFolders: { [detail.folder] },
+                fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
                 selectSnippet: { snippetID, _ in selectedSnippetID = snippetID }
             )
 
@@ -186,14 +188,10 @@ struct SnippetBrowserPanelTests {
     func mainMenuItemsExposeConfiguredShortcutTexts() throws {
         let folderID = SnippetFolder.ID(rawValue: UUID())
         let folderKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey))
-        let clearHistoryKeyCombo = try #require(KeyCombo(doubledCocoaModifiers: .command))
         let hotKeyService = AppEnvironment.current.hotKeyService
-        let previousClearHistoryCombo = hotKeyService.clearHistoryKeyCombo
         let previousFolderCombo = hotKeyService.snippetKeyCombo(forIdentifier: folderID.uuidString)
-        hotKeyService.changeClearHistoryKeyCombo(clearHistoryKeyCombo)
         hotKeyService.registerSnippetHotKey(with: folderID.uuidString, keyCombo: folderKeyCombo)
         defer {
-            hotKeyService.changeClearHistoryKeyCombo(previousClearHistoryCombo)
             if let previousFolderCombo {
                 hotKeyService.registerSnippetHotKey(with: folderID.uuidString, keyCombo: previousFolderCombo)
             } else {
@@ -212,7 +210,7 @@ struct SnippetBrowserPanelTests {
             MenuManager().mainMenuPanelShortcutTextsForTesting
         }
 
-        #expect(shortcuts[String(localized: "Clear History")] == "⌘⌘")
+        #expect(shortcuts[String(localized: "Clear History")] == nil)
         #expect(shortcuts["AI Prompt"] == "⇧⌘B")
         #expect(shortcuts[String(localized: "Edit Snippets")] == nil)
         #expect(shortcuts[String(localized: "Preferences")] == nil)
@@ -378,7 +376,8 @@ struct SnippetBrowserPanelTests {
             snippets: []
         )
         let controller = SnippetBrowserPanelController(
-            fetchDetails: { [detail] },
+            fetchFolders: { [detail.folder] },
+            fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
             selectSnippet: { _, _ in }
         )
 
@@ -416,7 +415,8 @@ struct SnippetBrowserPanelTests {
                 ]
             )
             let controller = SnippetBrowserPanelController(
-                fetchDetails: { [detail] },
+                fetchFolders: { [detail.folder] },
+                fetchFolderDetail: { id in id == detail.folder.id ? detail : nil },
                 selectSnippet: { _, _ in }
             )
 
@@ -475,6 +475,7 @@ struct SnippetBrowserPanelTests {
             defaults.removeObject(forKey: key)
         }
     }
+
 }
 
 @MainActor

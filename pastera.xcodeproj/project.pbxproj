@@ -11,6 +11,7 @@
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
 		C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */; };
+		C5A921002FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A921012FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift */; };
 		C5A901002FD0B00000B7C0DE /* HistoryMenuPaginationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */; };
 		C5A903002FD0C10000B7C0DE /* HistoryMenuSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */; };
 		C5A904002FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */; };
@@ -29,6 +30,19 @@
 		C5A911002FD1640000B7C0DE /* HistoryDisplayContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */; };
 		C5A912002FD1800000B7C0DE /* SparkleUpdateFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */; };
 		C5A914002FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A914012FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift */; };
+		C5A915002FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A915012FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift */; };
+		C5A916002FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A916012FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift */; };
+		C5A917002FD1B1000B7C0DE /* MenuManagerTestingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A917012FD1B1000B7C0DE /* MenuManagerTestingSupport.swift */; };
+		C5A918002FD1B2000B7C0DE /* MenuManagerStatusItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A918012FD1B2000B7C0DE /* MenuManagerStatusItem.swift */; };
+		C5A919002FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A919012FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift */; };
+		C5A91A002FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */; };
+		C5A91B002FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */; };
+		C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */; };
+		C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */; };
+		C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */; };
+		C5A91C002FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */; };
+		C5A91E002FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */; };
+		C5A91F002FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */; };
 		C5A913002FD1900000B7C0DE /* PasteraAppIconProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A913012FD1900000B7C0DE /* PasteraAppIconProvider.swift */; };
 		C5AA10002FD1200000B7C0DE /* PasteraDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */; };
 		C5AA10022FD1200000B7C0DE /* PasteraConfirmationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */; };
@@ -193,6 +207,7 @@
 		C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYWindowAppearanceTests.swift; sourceTree = "<group>"; };
 		C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuPaginationState.swift; sourceTree = "<group>"; };
 		C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuKeyEquivalentTests.swift; sourceTree = "<group>"; };
+		C5A921012FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryBrowserPanelShortcutTests.swift; sourceTree = "<group>"; };
 		C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuSearchField.swift; sourceTree = "<group>"; };
 		C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuImagePreviewController.swift; sourceTree = "<group>"; };
 		C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryBrowserPanelController.swift; sourceTree = "<group>"; };
@@ -210,6 +225,19 @@
 		C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryDisplayContentTests.swift; sourceTree = "<group>"; };
 		C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleUpdateFeedTests.swift; sourceTree = "<group>"; };
 		C5A914012FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetHotkeyPanelEntrypointTests.swift; sourceTree = "<group>"; };
+		C5A915012FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardHistorySearchPerformanceTests.swift; sourceTree = "<group>"; };
+		C5A916012FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuManagerStatusItemTests.swift; sourceTree = "<group>"; };
+		C5A917012FD1B1000B7C0DE /* MenuManagerTestingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuManagerTestingSupport.swift; sourceTree = "<group>"; };
+		C5A918012FD1B2000B7C0DE /* MenuManagerStatusItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuManagerStatusItem.swift; sourceTree = "<group>"; };
+		C5A919012FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetBrowserHotPathPerformanceTests.swift; sourceTree = "<group>"; };
+		C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuChildNavigationTests.swift; sourceTree = "<group>"; };
+		C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessibilityTests.swift; sourceTree = "<group>"; };
+		C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencePaneAlignmentTests.swift; sourceTree = "<group>"; };
+		C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPreferenceRecordingTests.swift; sourceTree = "<group>"; };
+		C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpacityPreferenceTests.swift; sourceTree = "<group>"; };
+		C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSnippetsEditorModels.swift; sourceTree = "<group>"; };
+		C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraPreferencePaneAlignmentAdapter.swift; sourceTree = "<group>"; };
+		C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraPreferencePaneLayoutNormalizer.swift; sourceTree = "<group>"; };
 		C5A913012FD1900000B7C0DE /* PasteraAppIconProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraAppIconProvider.swift; sourceTree = "<group>"; };
 		C5AA10012FD1200000B7C0DE /* PasteraDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraDesignSystem.swift; sourceTree = "<group>"; };
 		C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraConfirmationController.swift; sourceTree = "<group>"; };
@@ -373,6 +401,7 @@
 			isa = PBXGroup;
 			children = (
 				C57100042FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift */,
+				C5A915012FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift */,
 				C57100002FCAE00000C8F965 /* SnippetRepositoryTests.swift */,
 			);
 			path = Repositories;
@@ -488,6 +517,8 @@
 				C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */,
 				C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */,
 				C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */,
+				C5A918012FD1B2000B7C0DE /* MenuManagerStatusItem.swift */,
+				C5A917012FD1B1000B7C0DE /* MenuManagerTestingSupport.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -567,9 +598,11 @@
 		FA1DB4EC1DDCB4C0007F95C8 /* Preferences */ = {
 			isa = PBXGroup;
 			children = (
-				FA1DB4ED1DDCB4C0007F95C8 /* CPYPreferencesWindowController.swift */,
-				FA1DB4EE1DDCB4C0007F95C8 /* CPYPreferencesWindowController.xib */,
-				FA1DB4F11DDCB4C0007F95C8 /* Panels */,
+					FA1DB4ED1DDCB4C0007F95C8 /* CPYPreferencesWindowController.swift */,
+					C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */,
+					C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */,
+					FA1DB4EE1DDCB4C0007F95C8 /* CPYPreferencesWindowController.xib */,
+					FA1DB4F11DDCB4C0007F95C8 /* Panels */,
 			);
 			path = Preferences;
 			sourceTree = "<group>";
@@ -597,6 +630,7 @@
 		FA1DB50C1DDCB4C0007F95C8 /* Snippets */ = {
 			isa = PBXGroup;
 			children = (
+				C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */,
 				FA1DB50D1DDCB4C0007F95C8 /* CPYSnippetsEditorWindowController.swift */,
 				FA1DB50F1DDCB4C0007F95C8 /* CPYSnippetsEditorWindowController.xib */,
 			);
@@ -651,6 +685,7 @@
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
 				C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */,
 				C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */,
+				C5A921012FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift */,
 				C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */,
 				C5A90D012FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift */,
 				C5A90E012FD1420000B7C0DE /* DefaultNumericShortcutTests.swift */,
@@ -659,6 +694,13 @@
 				C5A911012FD1640000B7C0DE /* HistoryDisplayContentTests.swift */,
 				C5A912012FD1800000B7C0DE /* SparkleUpdateFeedTests.swift */,
 				C5A914012FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift */,
+				C5A919012FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift */,
+				C5A916012FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift */,
+				C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */,
+				C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */,
+				C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */,
+				C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */,
+				C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */,
 				FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */,
 				FA6167931D3ACCB90049FA14 /* DraggedDataTests.swift */,
 				FAC43DDC1B35D8B100C06102 /* Supporting Files */,
@@ -861,6 +903,8 @@
 				C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
 				C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */,
 				C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */,
+				C5A918002FD1B2000B7C0DE /* MenuManagerStatusItem.swift in Sources */,
+				C5A917002FD1B1000B7C0DE /* MenuManagerTestingSupport.swift in Sources */,
 				FA1DB4BD1DDCB452007F95C8 /* String+Substring.swift in Sources */,
 				FA1189331E4CD58C00244F12 /* ExcludeAppService.swift in Sources */,
 				FA1DB4E91DDCB49C007F95C8 /* CPYSplitView.swift in Sources */,
@@ -878,11 +922,14 @@
 				FA1DB4D21DDCB479007F95C8 /* CPYAppInfo.swift in Sources */,
 				FAE911B91DE045E2008A4BEC /* HotKeyService.swift in Sources */,
 				FA1DB4D71DDCB479007F95C8 /* CPYSnippet.swift in Sources */,
+				C5A91C002FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift in Sources */,
 				FA1DB5201DDCB4C0007F95C8 /* CPYSnippetsEditorWindowController.swift in Sources */,
 				FA1DB4EB1DDCB49C007F95C8 /* CPYPlaceHolderTextView.swift in Sources */,
 				FA1DB4BB1DDCB452007F95C8 /* Realm+Migration.swift in Sources */,
-				FA1DB5121DDCB4C0007F95C8 /* CPYPreferencesWindowController.swift in Sources */,
-				FAE911BB1DE054F1008A4BEC /* NSCoding+Archive.swift in Sources */,
+					FA1DB5121DDCB4C0007F95C8 /* CPYPreferencesWindowController.swift in Sources */,
+					C5A91E002FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift in Sources */,
+					C5A91F002FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift in Sources */,
+					FAE911BB1DE054F1008A4BEC /* NSCoding+Archive.swift in Sources */,
 				C54C29D72FC3E21400EF30FB /* SQLiteDataMigrator.swift in Sources */,
 				FA3778951F3B6920003B5BAB /* Environment.swift in Sources */,
 			);
@@ -896,6 +943,7 @@
 				C571000A2FCEB03000C8F965 /* PasteboardContentTests.swift in Sources */,
 				C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */,
 				C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */,
+				C5A921002FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift in Sources */,
 				C5A90B002FD1400000B7C0DE /* SnippetBrowserPanelTests.swift in Sources */,
 				C5A90D002FD1410000B7C0DE /* MenuPanelSelectionDismissalTests.swift in Sources */,
 				C5A90E002FD1420000B7C0DE /* DefaultNumericShortcutTests.swift in Sources */,
@@ -904,6 +952,14 @@
 				C5A911002FD1640000B7C0DE /* HistoryDisplayContentTests.swift in Sources */,
 				C5A912002FD1800000B7C0DE /* SparkleUpdateFeedTests.swift in Sources */,
 				C5A914002FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift in Sources */,
+				C5A919002FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift in Sources */,
+				C5A91A002FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift in Sources */,
+				C5A91B002FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift in Sources */,
+				C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */,
+				C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */,
+				C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */,
+				C5A915002FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift in Sources */,
+				C5A916002FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift in Sources */,
 				C57100052FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift in Sources */,
 				C522FB992FCC019100E61800 /* PasteboardAvailableTypeTests.swift in Sources */,
 				C57100012FCAE00000C8F965 /* SnippetRepositoryTests.swift in Sources */,

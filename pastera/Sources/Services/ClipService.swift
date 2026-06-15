@@ -99,6 +99,13 @@ extension ClipService {
         save(content, allowDuplicateContent: true)
     }
 
+    func createScreenshot(from url: URL) {
+        lock.lock(); defer { lock.unlock() }
+
+        guard let content = PasteboardContent(imageFileURL: url) else { return }
+        save(content, allowDuplicateContent: true)
+    }
+
     private func save(_ content: PasteboardContent, allowDuplicateContent: Bool = false) {
         // Copy already copied history
         let isCopySameHistory = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.copySameHistory)

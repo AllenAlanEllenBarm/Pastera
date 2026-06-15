@@ -77,7 +77,7 @@ final class CPYSnippetsEditorCell: NSTextFieldCell {
             drawFolderIcon(in: cellFrame)
         }
 
-        textColor = (!isItemEnabled) ? .lightGray : (isHighlighted) ? .white : NSColor(resource: .title)
+        textColor = titleTextColor(isHighlighted: isHighlighted)
 
         super.draw(withFrame: titleRect(forBounds: cellFrame), in: controlView)
         drawShortcutBadgeIfNeeded(in: cellFrame)
@@ -86,7 +86,7 @@ final class CPYSnippetsEditorCell: NSTextFieldCell {
     // MARK: - Frame
     override func select(withFrame aRect: NSRect, in controlView: NSView, editor textObj: NSText, delegate anObject: Any?, start selStart: Int, length selLength: Int) {
         let textFrame = titleRect(forBounds: aRect)
-        textColor = NSColor(resource: .title)
+        textColor = .textColor
         super.select(withFrame: textFrame, in: controlView, editor: textObj, delegate: anObject, start: selStart, length: selLength)
     }
 
@@ -119,6 +119,11 @@ final class CPYSnippetsEditorCell: NSTextFieldCell {
         isEditable = true
         isSelectable = true
         sendsActionOnEndEditing = true
+    }
+
+    private func titleTextColor(isHighlighted: Bool) -> NSColor {
+        guard isItemEnabled else { return .disabledControlTextColor }
+        return isHighlighted ? .selectedMenuItemTextColor : .labelColor
     }
 
     private var normalizedShortcutText: String? {
@@ -278,6 +283,10 @@ extension CPYSnippetsEditorCell {
 
     func folderIconRectForTesting(in bounds: NSRect) -> NSRect {
         folderIconRect(forBounds: bounds)
+    }
+
+    func titleTextColorForTesting(isHighlighted: Bool) -> NSColor {
+        titleTextColor(isHighlighted: isHighlighted)
     }
 }
 #endif

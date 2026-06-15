@@ -11,6 +11,7 @@
 //
 
 import AppKit
+import CryptoKit
 import Testing
 @testable import Pastera
 
@@ -176,6 +177,60 @@ struct PasteboardContentTests {
     }
 
     @Test
+    func contentHashMatchesLegacyLengthPrefixedConcatenation() {
+        let assets = [
+            PasteboardContent.Asset(type: .string, data: Data("Hello".utf8)),
+            PasteboardContent.Asset(type: .rtf, data: Data(repeating: 0x2A, count: 64)),
+            PasteboardContent.Asset(type: .pdf, data: Data("pdf-data".utf8))
+        ]
+
+        let content = PasteboardContent(assets: assets)
+
+        #expect(content.hash == legacyLengthPrefixedHash(for: assets))
+    }
+
+    @Test
+    func imageFileInitializerPreservesPNGBytes() throws {
+        let image = NSImage.create(with: .red, size: NSSize(width: 18, height: 12))
+        let pngData = try makeImageData(image, type: .png)
+        let url = try writeTemporaryImage(data: pngData, extension: "png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let content = try #require(PasteboardContent(imageFileURL: url))
+
+        #expect(content.types == [.png])
+        #expect(content.assets.count == 1)
+        #expect(content.assets.first?.type == .png)
+        #expect(content.assets.first?.data == pngData)
+    }
+
+    @Test
+    func imageFileInitializerReencodesNonPNGImagesAsPNG() throws {
+        let image = NSImage.create(with: .green, size: NSSize(width: 18, height: 12))
+        let jpegData = try makeImageData(image, type: .jpeg)
+        let url = try writeTemporaryImage(data: jpegData, extension: "jpg")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let content = try #require(PasteboardContent(imageFileURL: url))
+
+        #expect(content.types == [.png])
+        #expect(content.assets.count == 1)
+        let asset = try #require(content.assets.first)
+        #expect(asset.type == .png)
+        #expect(asset.data != jpegData)
+        #expect(asset.data.starts(with: pngSignature))
+        #expect(NSImage(data: asset.data) != nil)
+    }
+
+    @Test
+    func imageFileInitializerRejectsInvalidImageFiles() throws {
+        let url = try writeTemporaryImage(data: Data("not an image".utf8), extension: "png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(PasteboardContent(imageFileURL: url) == nil)
+    }
+
+    @Test
     func pasteboardInitializerPreservesMultipleImageItems() throws {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteboardContentTests.images"))
         pasteboard.clearContents()
@@ -191,6 +246,91 @@ struct PasteboardContentTests {
 
         #expect(content.assets.map(\.type) == [.tiff, .tiff])
         #expect(content.assets.map(\.data) == [firstImage, secondImage])
+    }
+
+    @Test
+    func pasteServiceWritesSnipasteImageWithStandardPNGType() throws {
+        let image = NSImage.create(with: .red, size: NSSize(width: 18, height: 12))
+        let pngData = try makeImageData(image, type: .png)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .clipySnipastePNG, data: pngData)
+            ]
+        )
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteboardContentTests.snipastePNG"))
+        defer { pasteboard.clearContents() }
+
+        PasteService().copyContentToPasteboard(content, to: pasteboard)
+
+        let item = try #require(pasteboard.pasteboardItems?.first)
+        #expect(item.types.contains(.clipySnipastePNG))
+        #expect(item.types.contains(.png))
+        #expect(item.data(forType: .clipySnipastePNG) == pngData)
+        #expect(item.data(forType: .png) == pngData)
+    }
+
+    @Test
+    func pasteServiceWritesDeprecatedTIFFAsStandardTIFFType() throws {
+        let image = NSImage.create(with: .blue, size: NSSize(width: 18, height: 12))
+        let tiffData = try #require(image.tiffRepresentation)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .deprecatedTIFF, data: tiffData)
+            ]
+        )
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteboardContentTests.deprecatedTIFF"))
+        defer { pasteboard.clearContents() }
+
+        PasteService().copyContentToPasteboard(content, to: pasteboard)
+
+        let item = try #require(pasteboard.pasteboardItems?.first)
+        #expect(item.types.contains(.tiff))
+        #expect(item.data(forType: .tiff) == tiffData)
+    }
+
+    @Test
+    func pasteServiceKeepsMultipleImageItemsSeparateWhenAddingCompatibleTypes() throws {
+        let firstImage = NSImage.create(with: .red, size: NSSize(width: 12, height: 12))
+        let secondImage = NSImage.create(with: .green, size: NSSize(width: 16, height: 16))
+        let firstData = try makeImageData(firstImage, type: .png)
+        let secondData = try makeImageData(secondImage, type: .png)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .clipySnipastePNG, data: firstData),
+                PasteboardContent.Asset(type: .clipyApplePNG, data: secondData)
+            ]
+        )
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteboardContentTests.multiImage"))
+        defer { pasteboard.clearContents() }
+
+        PasteService().copyContentToPasteboard(content, to: pasteboard)
+
+        let items = try #require(pasteboard.pasteboardItems)
+        #expect(items.count == 2)
+        #expect(items[0].types.contains(.clipySnipastePNG))
+        #expect(items[0].types.contains(.png))
+        #expect(items[0].data(forType: .png) == firstData)
+        #expect(items[1].types.contains(.png))
+        #expect(items[1].data(forType: .png) == secondData)
+    }
+
+    @Test
+    func pasteServiceDoesNotDuplicateStandardPNGType() throws {
+        let image = NSImage.create(with: .orange, size: NSSize(width: 18, height: 12))
+        let pngData = try makeImageData(image, type: .png)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .png, data: pngData)
+            ]
+        )
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("PasteboardContentTests.standardPNG"))
+        defer { pasteboard.clearContents() }
+
+        PasteService().copyContentToPasteboard(content, to: pasteboard)
+
+        let item = try #require(pasteboard.pasteboardItems?.first)
+        #expect(item.types.filter { $0 == .png }.count == 1)
+        #expect(item.data(forType: .png) == pngData)
     }
 
     @Test
@@ -278,6 +418,44 @@ struct PasteboardContentTests {
 
         #expect(try provider.loadRecords(kind: .history) == [history])
         #expect(try provider.loadRecords(kind: .snippet) == [snippet])
+    }
+}
+
+private let pngSignature = Data([0x89, 0x50, 0x4E, 0x47])
+
+private func legacyLengthPrefixedHash(for assets: [PasteboardContent.Asset]) -> String {
+    var data = Data()
+    assets.forEach { asset in
+        data.append(lengthPrefixed: Data(asset.type.rawValue.utf8))
+        data.append(lengthPrefixed: asset.data)
+    }
+    return SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
+private func makeImageData(_ image: NSImage, type: NSBitmapImageRep.FileType) throws -> Data {
+    let tiffData = try #require(image.tiffRepresentation)
+    let bitmap = try #require(NSBitmapImageRep(data: tiffData))
+    return try #require(bitmap.representation(using: type, properties: [:]))
+}
+
+private func writeTemporaryImage(data: Data, extension pathExtension: String) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent("image").appendingPathExtension(pathExtension)
+    try data.write(to: url)
+    return url
+}
+
+private extension Data {
+    mutating func append(lengthPrefixed value: Data) {
+        var length = UInt64(value.count).bigEndian
+        Swift.withUnsafeBytes(of: &length) {
+            append(contentsOf: $0)
+        }
+        append(value)
     }
 }
 

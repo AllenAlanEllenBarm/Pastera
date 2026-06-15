@@ -13,6 +13,7 @@
 import Cocoa
 import Combine
 import Dependencies
+import Magnet
 import RxCocoa
 import RxSwift
 
@@ -27,7 +28,7 @@ private final class HistoryBrowserMenu: NSMenu {
     }
 }
 
-private struct HistoryItemPresentation {
+struct HistoryItemPresentation {
     let title: String
     let image: NSImage?
     let toolTip: String?
@@ -41,7 +42,7 @@ final class MenuManager: NSObject {
     fileprivate var historyMenu: NSMenu?
     fileprivate var snippetMenu: NSMenu?
     // StatusMenu
-    fileprivate var statusItem: NSStatusItem?
+    var statusItem: NSStatusItem?
     // Icon Cache
     fileprivate let folderIcon = NSImage(resource: .iconFolder)
     fileprivate let snippetIcon = NSImage(resource: .iconText)
@@ -62,6 +63,14 @@ final class MenuManager: NSObject {
         .rightMouseDown,
         .otherMouseDown
     ]
+
+    private enum SelectionActionMetrics {
+        static let delay: TimeInterval = 0.05
+    }
+
+    var selectionActionScheduler: (TimeInterval, @escaping () -> Void) -> Void = { delay, work in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
 
     @Dependency(\.pasteboardHistoryRepository)
     private var pasteboardHistoryRepository
@@ -87,9 +96,12 @@ final class MenuManager: NSObject {
 
     deinit {
         removePanelDismissMonitors()
+        removeStatusItem()
     }
 
     func setup() {
+        createClipMenu()
+        configureStatusItemFromDefaults()
         bind()
     }
 
@@ -97,19 +109,25 @@ final class MenuManager: NSObject {
 
 // MARK: - Popup Menu
 extension MenuManager {
-    func popUpMenu(_ type: MenuType) {
+    func popUpMenu(_ type: MenuType, triggerKeyCombo: KeyCombo? = nil) {
         if type == .main {
             showMainMenuPanel(at: NSEvent.mouseLocation)
             return
         }
 
         if type == .history {
-            showHistoryBrowserPanel(at: NSEvent.mouseLocation)
+            showHistoryBrowserPanel(
+                at: NSEvent.mouseLocation,
+                triggerKeyCombo: triggerKeyCombo ?? AppEnvironment.current.hotKeyService.historyKeyCombo
+            )
             return
         }
 
         if type == .snippet {
-            showSnippetBrowserPanel(at: NSEvent.mouseLocation)
+            showSnippetBrowserPanel(
+                at: NSEvent.mouseLocation,
+                triggerKeyCombo: triggerKeyCombo ?? AppEnvironment.current.hotKeyService.snippetKeyCombo
+            )
             return
         }
 
@@ -125,24 +143,38 @@ extension MenuManager {
         menu?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
-    func popUpSnippetFolder(_ folderDetail: SnippetFolderDetail) {
-        showSnippetFolderPanel(folderDetail.folder.id, at: NSEvent.mouseLocation)
+    func popUpSnippetFolder(_ folderDetail: SnippetFolderDetail, triggerKeyCombo: KeyCombo? = nil) {
+        let fallbackKeyCombo = AppEnvironment.current.hotKeyService.snippetKeyCombo(
+            forIdentifier: folderDetail.folder.id.uuidString
+        )
+        showSnippetFolderPanel(
+            folderDetail.folder.id,
+            at: NSEvent.mouseLocation,
+            triggerKeyCombo: triggerKeyCombo ?? fallbackKeyCombo
+        )
     }
 }
 
 // MARK: - Binding
-private extension MenuManager {
+extension MenuManager {
     func bind() {
-        pasteboardHistoryRepository.observeHistories()
+        pasteboardHistoryRepository.observeHistoryChanges()
             .receive(on: mainQueue)
-            .sink { [weak self] _ in self?.createClipMenu() }
+            .sink { [weak self] _ in self?.refreshHistorySurfacesIfVisible() }
             .store(in: &cancellables)
-        snippetRepository.observeFolderDetails()
+        snippetRepository.observeFolders()
             .receive(on: mainQueue)
-            .sink { [weak self] _ in self?.createClipMenu() }
+            .sink { [weak self] _ in self?.refreshSnippetSurfacesIfVisible() }
             .store(in: &cancellables)
+        NotificationCenter.default.publisher(
+            for: CPYWindowAppearance.opacityDidChangeNotification,
+            object: AppEnvironment.current.defaults
+        )
+        .receive(on: mainQueue)
+        .sink { [weak self] _ in self?.refreshVisiblePanelBackgrounds() }
+        .store(in: &cancellables)
         // Menu icon
-        AppEnvironment.current.defaults.rx.observe(Int.self, Constants.UserDefaults.showStatusItem, retainSelf: false)
+        AppEnvironment.current.defaults.rx.observe(Int.self, Constants.UserDefaults.showStatusItem, options: [.new], retainSelf: false)
             .compactMap { $0 }
             .asDriver(onErrorDriveWith: .empty())
             .drive(onNext: { [weak self] key in
@@ -204,24 +236,34 @@ private extension MenuManager {
     }
 }
 
+extension MenuManager {
+    func refreshHistorySurfacesIfVisible() {
+        historyPanelController?.reloadResultsIfVisible()
+    }
+
+    func refreshSnippetSurfacesIfVisible() {
+        mainMenuPanelController?.reloadContentIfVisible()
+        snippetPanelController?.reloadRowsIfVisible()
+    }
+
+    func refreshVisiblePanelBackgrounds() {
+        mainMenuPanelController?.refreshAppearanceIfVisible()
+        historyPanelController?.refreshAppearanceIfVisible()
+        snippetPanelController?.refreshAppearanceIfVisible()
+    }
+}
+
 // MARK: - Menus
-private extension MenuManager {
+extension MenuManager {
      func createClipMenu() {
         clipMenu = NSMenu(title: Constants.Application.name)
-        historyMenu = HistoryBrowserMenu(title: Constants.Menu.history)
-        snippetMenu = NSMenu(title: Constants.Menu.snippet)
+        historyMenu = nil
+        snippetMenu = nil
 
-        addHistoryItems(clipMenu!, asSubmenu: true)
-        addHistoryItems(historyMenu!, asSubmenu: false)
-
+        clipMenu?.addItem(makeHistoryBrowserMenuItem())
         clipMenu?.addItem(makeSnippetBrowserMenuItem())
-        addSnippetItems(snippetMenu!, separateMenu: false)
 
         clipMenu?.addItem(NSMenuItem.separator())
-
-        if AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addClearHistoryMenuItem) {
-            clipMenu?.addItem(NSMenuItem(title: String(localized: "Clear History"), action: #selector(AppDelegate.clearAllHistory)))
-        }
 
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Edit Snippets"), action: #selector(AppDelegate.showSnippetEditorWindow)))
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Preferences"), action: #selector(AppDelegate.showPreferenceWindow)))
@@ -270,7 +312,7 @@ private extension MenuManager {
 }
 
 // MARK: - Clips
-private extension MenuManager {
+extension MenuManager {
     func addHistoryItems(_ menu: NSMenu, asSubmenu: Bool) {
         if asSubmenu {
             menu.addItem(makeHistoryBrowserMenuItem())
@@ -337,43 +379,47 @@ private extension MenuManager {
         return snippetItem
     }
 
-    func showHistoryBrowserPanel(at screenPoint: NSPoint) {
+    func currentMainMenuPasteTargetContext() -> PasteTargetContext? {
+        mainMenuPanelController?.childPasteTargetContext
+    }
+
+    func showHistoryBrowserPanel(at screenPoint: NSPoint, triggerKeyCombo: KeyCombo? = nil) {
         snippetPanelController?.close()
         let panelController = historyPanelController ?? makeHistoryPanelController()
         historyPanelController = panelController
         if let mainMenuFrame = mainMenuPanelController?.visibleFrame {
             mainMenuPanelController?.beginChildPanelPresentation()
             panelController.setPinned(true)
-            panelController.show(attachedTo: mainMenuFrame)
+            panelController.show(attachedTo: mainMenuFrame, pasteTargetContext: currentMainMenuPasteTargetContext())
         } else {
             panelController.setPinned(false)
-            panelController.show(at: screenPoint)
+            panelController.show(at: screenPoint, triggerKeyCombo: triggerKeyCombo)
         }
         installPanelDismissMonitorsIfNeeded()
     }
 
-    func showMainMenuPanel(at screenPoint: NSPoint) {
+    func showMainMenuPanel(at screenPoint: NSPoint, pasteTargetContext: PasteTargetContext? = nil) {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController
-        panelController.show(at: screenPoint, pinned: isMainMenuPinned)
+        panelController.show(at: screenPoint, pinned: isMainMenuPinned, pasteTargetContext: pasteTargetContext)
         installPanelDismissMonitorsIfNeeded()
     }
 
-    func showMainMenuPanel(anchoredTo menuFrame: NSRect?, fallbackPoint: NSPoint) {
+    func showMainMenuPanel(anchoredTo menuFrame: NSRect?, fallbackPoint: NSPoint, pasteTargetContext: PasteTargetContext? = nil) {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController
         if let menuFrame {
-            panelController.show(anchoredTo: menuFrame, pinned: true)
+            panelController.show(anchoredTo: menuFrame, pinned: true, pasteTargetContext: pasteTargetContext)
         } else {
-            panelController.show(at: fallbackPoint, pinned: true)
+            panelController.show(at: fallbackPoint, pinned: true, pasteTargetContext: pasteTargetContext)
         }
         installPanelDismissMonitorsIfNeeded()
     }
 
-    func showMainMenuPanel(attachedToStatusItemFrame statusItemFrame: NSRect) {
+    func showMainMenuPanel(attachedToStatusItemFrame statusItemFrame: NSRect, pasteTargetContext: PasteTargetContext? = nil) {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController
-        panelController.show(attachedToStatusItemFrame: statusItemFrame, pinned: isMainMenuPinned)
+        panelController.show(attachedToStatusItemFrame: statusItemFrame, pinned: isMainMenuPinned, pasteTargetContext: pasteTargetContext)
         installPanelDismissMonitorsIfNeeded()
     }
 
@@ -404,12 +450,15 @@ private extension MenuManager {
                 self?.makeHistoryRowView(detail, index: index, onConfirm: onConfirm)
                     ?? HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
             },
-            selectHistory: { [weak self] historyID, application in
-                self?.selectHistory(historyID, restoring: application)
+            selectHistory: { [weak self] historyID, targetContext in
+                self?.selectHistory(historyID, restoring: targetContext)
             }
         )
         controller.onClose = { [weak self] in
             self?.mainMenuPanelController?.endChildPanelPresentation()
+        }
+        controller.onMainMenuNavigationKeyDown = { [weak self] event in
+            self?.mainMenuPanelController?.handleKeyboardNavigationFromChild(event) ?? false
         }
         return controller
     }
@@ -424,37 +473,33 @@ private extension MenuManager {
             itemsProvider: { [weak self] in self?.makeMainMenuPanelItems() ?? [] },
             onOpenHistory: { [weak self] in self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation) },
             onOpenSnippets: { [weak self] in self?.showSnippetBrowserPanel() },
-            onPinnedChange: { [weak self] pinned in self?.setMainMenuPinned(pinned) }
+            onPinnedChange: { [weak self] pinned in self?.setMainMenuPinned(pinned) },
+            onCloseChildPanels: { [weak self] in
+                self?.historyPanelController?.close()
+                self?.snippetPanelController?.close()
+            }
         )
     }
 
     func makeMainMenuPanelItems() -> [MainMenuPanelItem] {
         var items = [MainMenuPanelItem]()
 
-        let enabledSnippetFolders = snippetRepository.fetchFolderDetails()
-            .filter { $0.folder.isEnabled }
+        let enabledSnippetFolders = snippetRepository.fetchFolders()
+            .filter(\.isEnabled)
         if !enabledSnippetFolders.isEmpty {
             let folderImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu)
                 ? folderIcon
                 : nil
-            enabledSnippetFolders.forEach { detail in
-                let title = trimTitle(detail.folder.title)
+            enabledSnippetFolders.forEach { folder in
+                let title = trimTitle(folder.title)
                 let shortcutText = PasteraShortcutFormatter.string(
-                    for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: detail.folder.id.uuidString)
+                    for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folder.id.uuidString)
                 )
                 items.append(.snippetFolder(title: title, image: folderImage, shortcutText: shortcutText) { [weak self] anchorFrame in
-                    self?.showSnippetFolderPanel(detail.folder.id, attachedTo: anchorFrame)
+                    self?.showSnippetFolderPanel(folder.id, attachedTo: anchorFrame)
                 })
             }
             items.append(.separator)
-        }
-
-        if AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addClearHistoryMenuItem) {
-            let title = String(localized: "Clear History")
-            let shortcutText = PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.clearHistoryKeyCombo)
-            items.append(.action(title: title, image: menuPanelSymbol("trash", accessibilityDescription: title), shortcutText: shortcutText) {
-                NSApp.sendAction(#selector(AppDelegate.clearAllHistory), to: nil, from: nil)
-            })
         }
 
         let snippetsTitle = String(localized: "Edit Snippets")
@@ -482,15 +527,21 @@ private extension MenuManager {
 
     func makeSnippetPanelController() -> SnippetBrowserPanelController {
         let controller = SnippetBrowserPanelController(
-            fetchDetails: { [weak self] in
-                self?.snippetRepository.fetchFolderDetails() ?? []
+            fetchFolders: { [weak self] in
+                self?.snippetRepository.fetchFolders() ?? []
             },
-            selectSnippet: { [weak self] snippetID, application in
-                self?.selectSnippet(snippetID, restoring: application)
+            fetchFolderDetail: { [weak self] folderID in
+                self?.snippetRepository.fetchFolderDetail(id: folderID)
+            },
+            selectSnippet: { [weak self] snippetID, targetContext in
+                self?.selectSnippet(snippetID, restoring: targetContext)
             }
         )
         controller.onClose = { [weak self] in
             self?.mainMenuPanelController?.endChildPanelPresentation()
+        }
+        controller.onMainMenuNavigationKeyDown = { [weak self] event in
+            self?.mainMenuPanelController?.handleKeyboardNavigationFromChild(event) ?? false
         }
         return controller
     }
@@ -505,15 +556,15 @@ private extension MenuManager {
         let panelController = snippetPanelController ?? makeSnippetPanelController()
         snippetPanelController = panelController
         mainMenuPanelController?.beginChildPanelPresentation()
-        panelController.show(attachedTo: mainMenuFrame)
+        panelController.show(attachedTo: mainMenuFrame, pasteTargetContext: currentMainMenuPasteTargetContext())
         installPanelDismissMonitorsIfNeeded()
     }
 
-    func showSnippetBrowserPanel(at screenPoint: NSPoint) {
+    func showSnippetBrowserPanel(at screenPoint: NSPoint, triggerKeyCombo: KeyCombo? = nil) {
         historyPanelController?.close()
         let panelController = snippetPanelController ?? makeSnippetPanelController()
         snippetPanelController = panelController
-        panelController.show(at: screenPoint)
+        panelController.show(at: screenPoint, triggerKeyCombo: triggerKeyCombo)
         installPanelDismissMonitorsIfNeeded()
     }
 
@@ -527,15 +578,19 @@ private extension MenuManager {
         let panelController = snippetPanelController ?? makeSnippetPanelController()
         snippetPanelController = panelController
         mainMenuPanelController?.beginChildPanelPresentation()
-        panelController.show(folderID: folderID, attachedTo: anchorFrame)
+        panelController.show(folderID: folderID, attachedTo: anchorFrame, pasteTargetContext: currentMainMenuPasteTargetContext())
         installPanelDismissMonitorsIfNeeded()
     }
 
-    func showSnippetFolderPanel(_ folderID: SnippetFolder.ID, at screenPoint: NSPoint) {
+    func showSnippetFolderPanel(
+        _ folderID: SnippetFolder.ID,
+        at screenPoint: NSPoint,
+        triggerKeyCombo: KeyCombo? = nil
+    ) {
         historyPanelController?.close()
         let panelController = snippetPanelController ?? makeSnippetPanelController()
         snippetPanelController = panelController
-        panelController.show(folderID: folderID, at: screenPoint)
+        panelController.show(folderID: folderID, at: screenPoint, triggerKeyCombo: triggerKeyCombo)
         installPanelDismissMonitorsIfNeeded()
     }
 
@@ -752,24 +807,30 @@ private extension MenuManager {
         return PasteraShortcutFormatter.numericString(forRowIndex: index, startsAtZero: startsAtZero)
     }
 
-    func selectHistory(_ historyID: PasteboardHistory.ID, restoring application: NSRunningApplication?) {
+    func selectHistory(_ historyID: PasteboardHistory.ID, restoring targetContext: PasteTargetContext?) {
         dismissMenuPanelsAfterSelection()
 
         let menuItem = NSMenuItem(title: "", action: #selector(AppDelegate.selectClipMenuItem(_:)), keyEquivalent: "")
-        menuItem.representedObject = historyID
+        menuItem.representedObject = PasteboardHistorySelectionRequest(id: historyID, targetContext: targetContext)
 
-        if application?.isTerminated == false {
-            application?.activate(options: [.activateIgnoringOtherApps])
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        selectionActionScheduler(SelectionActionMetrics.delay) {
             NSApp.sendAction(#selector(AppDelegate.selectClipMenuItem(_:)), to: nil, from: menuItem)
         }
     }
 }
 
+extension MenuManager {
+    func showMainMenuPanelFromStatusItemFrame(_ statusItemFrame: NSRect?) {
+        guard let statusItemFrame else {
+            showMainMenuPanel(at: NSEvent.mouseLocation)
+            return
+        }
+        showMainMenuPanel(attachedToStatusItemFrame: statusItemFrame)
+    }
+}
+
 // MARK: - Snippets
-private extension MenuManager {
+extension MenuManager {
     func addSnippetItems(_ menu: NSMenu, separateMenu: Bool) {
         let details = snippetRepository.fetchFolderDetails()
         guard !details.isEmpty else { return }
@@ -825,171 +886,21 @@ private extension MenuManager {
         return menuItem
     }
 
-    func selectSnippet(_ snippetID: Snippet.ID, restoring application: NSRunningApplication?) {
+    func selectSnippet(_ snippetID: Snippet.ID, restoring targetContext: PasteTargetContext?) {
         dismissMenuPanelsAfterSelection()
 
         let menuItem = NSMenuItem(title: "", action: #selector(AppDelegate.selectSnippetMenuItem(_:)), keyEquivalent: "")
-        menuItem.representedObject = snippetID
+        menuItem.representedObject = SnippetSelectionRequest(id: snippetID, targetContext: targetContext)
 
-        if application?.isTerminated == false {
-            application?.activate(options: [.activateIgnoringOtherApps])
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        selectionActionScheduler(SelectionActionMetrics.delay) {
             NSApp.sendAction(#selector(AppDelegate.selectSnippetMenuItem(_:)), to: nil, from: menuItem)
         }
     }
 }
 
-// MARK: - Status Item
-private extension MenuManager {
-    func changeStatusItem(_ type: StatusType) {
-        removeStatusItem()
-        if type == .none { return }
-
-        let image: NSImage?
-        switch type {
-        case .black:
-            image = NSImage(resource: .statusbarMenuBlack)
-        case .white:
-            image = NSImage(resource: .statusbarMenuWhite)
-        case .none: return
-        }
-        image?.isTemplate = true
-
-        statusItem = NSStatusBar.system.statusItem(withLength: -1)
-        statusItem?.toolTip = "\(Constants.Application.name)\(Bundle.main.appVersion ?? "")"
-        statusItem?.menu = nil
-        statusItem?.button?.image = image
-        statusItem?.button?.imagePosition = .imageOnly
-        statusItem?.button?.target = self
-        statusItem?.button?.action = #selector(statusItemButtonClicked(_:))
-        statusItem?.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-    }
-
-    func removeStatusItem() {
-        if let item = statusItem {
-            NSStatusBar.system.removeStatusItem(item)
-            statusItem = nil
-        }
-    }
-
-    @objc func statusItemButtonClicked(_ sender: NSStatusBarButton) {
-        guard let frame = sender.window?.frame else {
-            showMainMenuPanel(at: NSEvent.mouseLocation)
-            return
-        }
-        showMainMenuPanel(attachedToStatusItemFrame: frame)
-    }
-}
-
 // MARK: - Settings
-private extension MenuManager {
+extension MenuManager {
     func firstIndexOfMenuItems() -> NSInteger {
         return AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero) ? 0 : 1
     }
 }
-
-#if DEBUG
-extension MenuManager {
-    var isMainMenuPanelVisibleForTesting: Bool {
-        mainMenuPanelController?.isVisibleForTesting == true
-    }
-
-    var mainMenuPanelFrameForTesting: NSRect? {
-        mainMenuPanelController?.visibleFrame
-    }
-
-    var historyBrowserPanelFrameForTesting: NSRect? {
-        historyPanelController?.visibleFrame
-    }
-
-    var snippetBrowserPanelFrameForTesting: NSRect? { snippetPanelController?.visibleFrame }
-    var snippetBrowserRowTitlesForTesting: [String] { snippetPanelController?.rowTitlesForTesting ?? [] }
-    var snippetBrowserShortcutTextsForTesting: [String] { snippetPanelController?.rowShortcutTextsForTesting ?? [] }
-
-    var mainMenuPanelActionTitlesForTesting: [String] {
-        makeMainMenuPanelItems().compactMap { item in
-            if case let .action(title, _, _, _) = item {
-                return title
-            }
-            return nil
-        }
-    }
-
-    var mainMenuPanelShortcutTextsForTesting: [String: String] {
-        makeMainMenuPanelItems().reduce(into: [:]) { result, item in
-            switch item {
-            case .separator:
-                return
-            case let .snippetFolder(title, _, shortcutText, _),
-                 let .action(title, _, shortcutText, _):
-                guard let shortcutText else { return }
-                result[title] = shortcutText
-            }
-        }
-    }
-
-    var mainMenuSnippetTitlesForTesting: [String] {
-        makeMainMenuPanelItems().compactMap { item in
-            if case let .snippetFolder(title, _, _, _) = item {
-                return title
-            }
-            return nil
-        }
-    }
-
-    func makeHistoryRowViewForTesting(_ historyDetail: PasteboardHistoryDetail, index: Int) -> HistoryMenuRowView {
-        makeHistoryRowView(historyDetail, index: index) {}
-    }
-
-    func makeSnippetMenuItemForTesting(_ snippet: Snippet, listNumber: Int, rowIndex: Int) -> NSMenuItem {
-        makeSnippetMenuItem(snippet, listNumber: listNumber, rowIndex: rowIndex)
-    }
-
-    func showMainMenuPanelForTesting(at screenPoint: NSPoint) {
-        isMainMenuPinned = true
-        showMainMenuPanel(at: screenPoint)
-    }
-
-    func showHistoryBrowserPanelForTesting(at screenPoint: NSPoint) {
-        showHistoryBrowserPanel(at: screenPoint)
-    }
-
-    func showSnippetBrowserPanelForTesting() {
-        showSnippetBrowserPanel()
-    }
-
-    func showSnippetFolderPanelForTesting(_ folderID: SnippetFolder.ID) {
-        showSnippetFolderPanel(folderID, attachedTo: nil)
-    }
-
-    func showSnippetFolderPanelForTesting(_ folderID: SnippetFolder.ID, at screenPoint: NSPoint) { showSnippetFolderPanel(folderID, at: screenPoint) }
-
-    func handlePanelDismissMouseDownForTesting(at screenPoint: NSPoint) {
-        handlePanelDismissMouseDown(at: screenPoint)
-    }
-
-    func confirmFirstHistoryForTesting() {
-        historyPanelController?.confirmFirstHistoryForTesting()
-    }
-
-    func confirmFirstSnippetForTesting() {
-        snippetPanelController?.confirmFirstSnippetForTesting()
-    }
-
-    func closeHistoryBrowserPanelForTesting() {
-        historyPanelController?.close()
-    }
-
-    func closeSnippetBrowserPanelForTesting() {
-        snippetPanelController?.close()
-    }
-
-    func closeMainMenuPanelForTesting() {
-        mainMenuPanelController?.close()
-        historyPanelController?.close()
-        snippetPanelController?.close()
-    }
-}
-#endif

@@ -112,6 +112,34 @@ struct SnippetRepositoryTests {
     }
 
     @Test
+    func fetchFoldersReturnsOnlyOrderedFolderMetadata() throws {
+        let folder = try #require(repository.insertFolder())
+        _ = try #require(repository.insertSnippet(to: folder.id))
+        let folder2 = try #require(repository.insertFolder())
+
+        #expect(repository.fetchFolders() == [folder, folder2])
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func observeFoldersEmitsFolderMetadataChanges() async throws {
+        var folders = [[SnippetFolder]]()
+        let cancellable = repository.observeFolders().sink { value in
+            folders.append(value)
+        }
+        defer { _ = cancellable }
+
+        try await waitUntil { folders.count >= 1 }
+
+        let folder = try #require(repository.insertFolder())
+        try await waitUntil { folders.count >= 2 }
+
+        _ = try #require(repository.insertSnippet(to: folder.id))
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        #expect(folders == [[], [folder]])
+    }
+
+    @Test
     func insertFolders() throws {
         let inserted = try #require(
             repository.insertFolders([

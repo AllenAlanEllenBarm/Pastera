@@ -191,6 +191,11 @@ final class HistoryMenuRowView: NSControl {
             return
         }
 
+        guard window?.isVisible == true else {
+            Self.hideImagePreview()
+            return
+        }
+
         if isFocused || isMouseInside {
             Self.imagePreviewController.show(image: previewImage, relativeTo: bounds, in: self)
         } else {
@@ -199,6 +204,8 @@ final class HistoryMenuRowView: NSControl {
     }
 
     private func confirm() {
+        isFocused = false
+        isMouseInside = false
         Self.hideImagePreview()
         onConfirm()
     }
@@ -206,6 +213,10 @@ final class HistoryMenuRowView: NSControl {
 
 #if DEBUG
 extension HistoryMenuRowView {
+    static var isImagePreviewVisibleForTesting: Bool {
+        imagePreviewController.isVisibleForTesting
+    }
+
     var textValuesForTesting: [String] {
         collectTextValues(in: self)
     }

@@ -72,7 +72,28 @@ struct HistorySearchQuery: Equatable {
     }
 }
 
+struct PasteboardHistorySearchCandidate: Equatable {
+    let id: PasteboardHistory.ID
+    let title: String
+    let pasteboardTypes: [NSPasteboard.PasteboardType]
+    let updateAt: Int
+
+    init(history: PasteboardHistory) {
+        self.id = history.id
+        self.title = history.title
+        self.pasteboardTypes = history.pasteboardTypes
+        self.updateAt = history.updateAt
+    }
+}
+
+@Selection
+struct PasteboardHistoryChangeToken: Equatable {
+    let id: PasteboardHistory.ID
+    let updateAt: Int
+}
+
 protocol PasteboardHistoryRepositoryProtocol {
+    func observeHistoryChanges() -> AnyPublisher<Void, Never>
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never>
     func hasHistories() -> Bool
     func fetchHistoryDetails(
@@ -98,6 +119,12 @@ protocol PasteboardHistoryRepositoryProtocol {
 }
 
 extension PasteboardHistoryRepositoryProtocol {
+    func observeHistoryChanges() -> AnyPublisher<Void, Never> {
+        observeHistories()
+            .map { _ in () }
+            .eraseToAnyPublisher()
+    }
+
     func fetchHistoryDetails(
         ascending: Bool,
         includesThumbnailAsset: Bool,
@@ -118,6 +145,26 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
 
     @FetchAll(PasteboardHistory.all.order { $0.updateAt.desc() })
     private var histories
+
+    @FetchAll(
+        PasteboardHistory
+            .all
+            .order { $0.updateAt.desc() }
+            .select {
+                PasteboardHistoryChangeToken.Columns(
+                    id: $0.id,
+                    updateAt: $0.updateAt
+                )
+            }
+    )
+    private var historyChangeTokens
+
+    func observeHistoryChanges() -> AnyPublisher<Void, Never> {
+        _historyChangeTokens.publisher
+            .map { _ in () }
+            .prepend(())
+            .eraseToAnyPublisher()
+    }
 
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
         _histories.publisher.eraseToAnyPublisher()
@@ -184,18 +231,64 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
             )
         }
 
+        let ids = try matchingHistoryIDs(query: query, limit: limit, offset: offset)
+        return fetchHistoryDetails(ids: ids, includesThumbnailAsset: includesThumbnailAsset)
+    }
+
+    func matchingHistoryIDs(
+        query: HistorySearchQuery,
+        limit: Int,
+        offset: Int
+    ) throws -> [PasteboardHistory.ID] {
+        guard limit > 0 else { return [] }
+
         let matcher = try makeMatcher(for: query)
-        let details = fetchAllHistoryDetails(
-            ascending: query.sortOrder == .oldestFirst,
-            includesThumbnailAsset: includesThumbnailAsset
-        )
-        let filteredDetails = details.filter { detail in
-            if !query.types.isEmpty && Set(detail.history.pasteboardTypes).isDisjoint(with: query.types) {
-                return false
+        let candidates = fetchSearchCandidates(ascending: query.sortOrder == .oldestFirst)
+        let filteredIDs = candidates.lazy
+            .filter { candidate in
+                if !query.types.isEmpty && Set(candidate.pasteboardTypes).isDisjoint(with: query.types) {
+                    return false
+                }
+                return matcher(candidate.title)
             }
-            return matcher(detail.history.title)
+            .map(\.id)
+
+        return Array(filteredIDs.dropFirst(max(0, offset)).prefix(limit))
+    }
+
+    func fetchHistoryDetails(
+        ids: [PasteboardHistory.ID],
+        includesThumbnailAsset: Bool
+    ) -> [PasteboardHistoryDetail] {
+        guard !ids.isEmpty else { return [] }
+        var indexByID = [PasteboardHistory.ID: Int]()
+        ids.enumerated().forEach { offset, id in
+            if indexByID[id] == nil {
+                indexByID[id] = offset
+            }
         }
-        return Array(filteredDetails.dropFirst(max(0, offset)).prefix(limit))
+        return (withErrorReporting {
+            try database.read { database in
+                let histories = PasteboardHistory
+                    .where { $0.id.in(ids) }
+
+                let details: [PasteboardHistoryDetail]
+                if includesThumbnailAsset {
+                    details = try histories
+                        .leftJoin(PasteboardHistoryThumbnailAsset.all) { $0.id.eq($1.pasteboardHistoryID) }
+                        .select { PasteboardHistoryDetail.Columns(history: $0, thumbnailAsset: $1) }
+                        .fetchAll(database)
+                } else {
+                    details = try histories
+                        .fetchAll(database)
+                        .map { PasteboardHistoryDetail(history: $0, thumbnailAsset: nil) }
+                }
+
+                return details.sorted {
+                    indexByID[$0.history.id, default: Int.max] < indexByID[$1.history.id, default: Int.max]
+                }
+            }
+        } ?? [])
     }
 
     func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? {
@@ -298,13 +391,10 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
 }
 
 private extension PasteboardHistoryRepository {
-    func fetchAllHistoryDetails(
-        ascending: Bool,
-        includesThumbnailAsset: Bool
-    ) -> [PasteboardHistoryDetail] {
+    func fetchSearchCandidates(ascending: Bool) -> [PasteboardHistorySearchCandidate] {
         withErrorReporting {
             try database.read { database in
-                let histories = PasteboardHistory
+                try PasteboardHistory
                     .all
                     .order { columns in
                         if ascending {
@@ -313,17 +403,8 @@ private extension PasteboardHistoryRepository {
                             columns.updateAt.desc()
                         }
                     }
-
-                guard includesThumbnailAsset else {
-                    return try histories
-                        .fetchAll(database)
-                        .map { PasteboardHistoryDetail(history: $0, thumbnailAsset: nil) }
-                }
-
-                return try histories
-                    .leftJoin(PasteboardHistoryThumbnailAsset.all) { $0.id.eq($1.pasteboardHistoryID) }
-                    .select { PasteboardHistoryDetail.Columns(history: $0, thumbnailAsset: $1) }
                     .fetchAll(database)
+                    .map(PasteboardHistorySearchCandidate.init(history:))
             }
         } ?? []
     }
@@ -356,14 +437,16 @@ private extension PasteboardHistoryRepository {
 
     func thumbnailAsset(from content: PasteboardContent, id: PasteboardHistory.ID) -> PasteboardHistoryThumbnailAsset? {
         var asset: PasteboardHistoryThumbnailAsset?
-        if let thumbnailImage = content.thumbnailImage, let thumbnailData = thumbnailImage.tiffRepresentation {
+        if let thumbnailImage = content.thumbnailImage,
+           let thumbnailData = PasteraImageEncoding.pngData(from: thumbnailImage) ?? thumbnailImage.tiffRepresentation {
             asset = PasteboardHistoryThumbnailAsset(
                 pasteboardHistoryID: id,
                 kind: .image,
                 data: thumbnailData
             )
         }
-        if let colorCodeImage = content.colorCodeImage, let colorCodeData = colorCodeImage.tiffRepresentation {
+        if let colorCodeImage = content.colorCodeImage,
+           let colorCodeData = PasteraImageEncoding.pngData(from: colorCodeImage) ?? colorCodeImage.tiffRepresentation {
             asset = PasteboardHistoryThumbnailAsset(
                 pasteboardHistoryID: id,
                 kind: .colorCode,

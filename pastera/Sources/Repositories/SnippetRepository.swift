@@ -73,7 +73,9 @@ struct SnippetSyncSnapshot: Codable, Equatable {
 }
 
 protocol SnippetRepositoryProtocol {
+    func observeFolders() -> AnyPublisher<[SnippetFolder], Never>
     func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never>
+    func fetchFolders() -> [SnippetFolder]
     func fetchFolderDetails() -> [SnippetFolderDetail]
     func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail?
     func fetchSyncSnapshot() -> SnippetSyncSnapshot
@@ -97,6 +99,18 @@ protocol SnippetRepositoryProtocol {
     func deleteSnippet(_ id: Snippet.ID)
 }
 
+extension SnippetRepositoryProtocol {
+    func observeFolders() -> AnyPublisher<[SnippetFolder], Never> {
+        observeFolderDetails()
+            .map { $0.map(\.folder) }
+            .eraseToAnyPublisher()
+    }
+
+    func fetchFolders() -> [SnippetFolder] {
+        fetchFolderDetails().map(\.folder)
+    }
+}
+
 final class SnippetRepository: SnippetRepositoryProtocol {
     @Dependency(\.defaultDatabase)
     private var database
@@ -106,10 +120,23 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     @FetchAll(Snippet.all.order(by: \.index))
     private var snippets
 
+    func observeFolders() -> AnyPublisher<[SnippetFolder], Never> {
+        _folders.publisher.eraseToAnyPublisher()
+    }
+
     func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
         Publishers.CombineLatest(_folders.publisher, _snippets.publisher)
             .map { Self.folderDetails(folders: $0, snippets: $1) }
             .eraseToAnyPublisher()
+    }
+
+    func fetchFolders() -> [SnippetFolder] {
+        withErrorReporting {
+            try database.read { database in
+                try SnippetFolder.all.order(by: \.index)
+                    .fetchAll(database)
+            }
+        } ?? []
     }
 
     func fetchFolderDetails() -> [SnippetFolderDetail] {

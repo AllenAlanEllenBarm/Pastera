@@ -11,6 +11,7 @@
 //
 
 import Cocoa
+import Carbon
 import Dependencies
 import Foundation
 import Magnet
@@ -27,21 +28,133 @@ struct RemoteSessionHotKeyPolicy {
     }
 }
 
+enum HistoryPanelShortcut: CaseIterable, Hashable {
+    case search
+    case previousPage
+    case nextPage
+
+    var userDefaultsKey: String {
+        switch self {
+        case .search:
+            return Constants.HotKey.historySearchKeyCombo
+        case .previousPage:
+            return Constants.HotKey.historyPreviousPageKeyCombo
+        case .nextPage:
+            return Constants.HotKey.historyNextPageKeyCombo
+        }
+    }
+
+    var defaultKeyCombo: KeyCombo {
+        switch self {
+        case .search:
+            return KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey)!
+        case .previousPage:
+            return KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey)!
+        case .nextPage:
+            return KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey)!
+        }
+    }
+
+    var commandDefaultKeyCombo: KeyCombo {
+        switch self {
+        case .search:
+            return KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey)!
+        case .previousPage:
+            return KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey)!
+        case .nextPage:
+            return KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey)!
+        }
+    }
+
+    var optionCommandDefaultKeyCombo: KeyCombo {
+        switch self {
+        case .search:
+            return KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
+        case .previousPage:
+            return KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | optionKey)!
+        case .nextPage:
+            return KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey | optionKey)!
+        }
+    }
+
+    var incorrectBetaDefaultKeyCombos: [KeyCombo] {
+        switch self {
+        case .search:
+            return [KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | optionKey)!]
+        case .previousPage:
+            return []
+        case .nextPage:
+            return [
+                KeyCombo(QWERTYKeyCode: 0, carbonModifiers: cmdKey)!,
+                KeyCombo(QWERTYKeyCode: 0, carbonModifiers: cmdKey | optionKey)!
+            ]
+        }
+    }
+
+    func shouldMigrateToCanonicalDefault(_ keyCombo: KeyCombo) -> Bool {
+        if keyCombo == commandDefaultKeyCombo {
+            return true
+        }
+        if keyCombo == optionCommandDefaultKeyCombo {
+            return true
+        }
+        if incorrectBetaDefaultKeyCombos.contains(keyCombo) {
+            return true
+        }
+        return false
+    }
+
+    func matches(_ event: NSEvent, keyCombo: KeyCombo?) -> Bool {
+        guard event.type == .keyDown, let keyCombo, !keyCombo.doubledModifiers else { return false }
+        let ignoredSystemFlags: NSEvent.ModifierFlags = [.numericPad, .function]
+        let eventFlags = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(ignoredSystemFlags)
+        let comboFlags = keyCombo.keyEquivalentModifierMask
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(ignoredSystemFlags)
+        return Int(event.keyCode) == keyCombo.QWERTYKeyCode && eventFlags == comboFlags
+    }
+
+    static func matching(_ event: NSEvent, hotKeyService: HotKeyService) -> HistoryPanelShortcut? {
+        allCases.first { shortcut in
+            shortcut.matches(event, keyCombo: hotKeyService.historyPanelKeyCombo(for: shortcut))
+        }
+    }
+}
+
 final class HotKeyService: NSObject {
     // MARK: - Properties
     static var defaultKeyCombos: [String: Any] = {
-        // MainMenu:    ⌘ + Shift + V
-        // HistoryMenu: ⌘ + Control + V
-        // SnipeetMenu: ⌘ + Shift B
-        return [Constants.Menu.clip: ["keyCode": 9, "modifiers": 768],
-                Constants.Menu.history: ["keyCode": 9, "modifiers": 4352],
-                Constants.Menu.snippet: ["keyCode": 11, "modifiers": 768]]
+        return [
+            Constants.Menu.clip: [
+                "keyCode": defaultMainKeyCombo.QWERTYKeyCode,
+                "modifiers": defaultMainKeyCombo.modifiers
+            ],
+            Constants.Menu.history: [
+                "keyCode": defaultHistoryKeyCombo.QWERTYKeyCode,
+                "modifiers": defaultHistoryKeyCombo.modifiers
+            ],
+            Constants.Menu.snippet: [
+                "keyCode": defaultSnippetKeyCombo.QWERTYKeyCode,
+                "modifiers": defaultSnippetKeyCombo.modifiers
+            ]
+        ]
     }()
+
+    private static let defaultMainKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey)!
+    private static let defaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey)!
+    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey)!
+    private static let legacyDefaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey)!
+    private static let legacyDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey)!
+    private static let defaultSnippetFolderHotKeyModifiers = cmdKey | optionKey
+    private static let defaultSnippetFolderHotKeyCodes = [12, 13, 14, 15, 0, 1, 2, 3]
 
     fileprivate(set) var mainKeyCombo: KeyCombo?
     fileprivate(set) var historyKeyCombo: KeyCombo?
     fileprivate(set) var snippetKeyCombo: KeyCombo?
     fileprivate(set) var clearHistoryKeyCombo: KeyCombo?
+    private var historyPanelKeyCombos = [HistoryPanelShortcut: KeyCombo]()
     fileprivate(set) var isSuspendedForRemoteSession = false
     private var remoteSessionObserver: NSObjectProtocol?
 
@@ -65,9 +178,24 @@ enum PasteraShortcutFormatter {
             return modifiers + modifiers
         }
 
+        if let arrowKey = arrowKeyEquivalent(for: keyCombo.QWERTYKeyCode) {
+            return modifiers + arrowKey
+        }
+
         let key = keyCombo.keyEquivalent.uppercased()
         let text = modifiers + key
         return text.isEmpty ? nil : text
+    }
+
+    private static func arrowKeyEquivalent(for keyCode: Int) -> String? {
+        switch keyCode {
+        case 123:
+            return "←"
+        case 124:
+            return "→"
+        default:
+            return nil
+        }
     }
 
     static func numericString(forRowIndex index: Int, startsAtZero: Bool) -> String? {
@@ -81,12 +209,14 @@ extension HotKeyService {
         AppEnvironment.current.menuManager.popUpMenu(.main)
     }
 
-    @objc func popupHistoryMenu() {
-        AppEnvironment.current.menuManager.popUpMenu(.history)
+    @objc func popupHistoryMenu(_ object: AnyObject) {
+        let triggerKeyCombo = (object as? HotKey)?.keyCombo ?? historyKeyCombo
+        AppEnvironment.current.menuManager.popUpMenu(.history, triggerKeyCombo: triggerKeyCombo)
     }
 
-    @objc func popUpSnippetMenu() {
-        AppEnvironment.current.menuManager.popUpMenu(.snippet)
+    @objc func popUpSnippetMenu(_ object: AnyObject) {
+        let triggerKeyCombo = (object as? HotKey)?.keyCombo ?? snippetKeyCombo
+        AppEnvironment.current.menuManager.popUpMenu(.snippet, triggerKeyCombo: triggerKeyCombo)
     }
 
     @objc func popUpClearHistoryAlert() {
@@ -104,6 +234,12 @@ extension HotKeyService {
             AppEnvironment.current.defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
             AppEnvironment.current.defaults.synchronize()
         }
+        migrateOptionCommandDefaultKeyCombosIfNeeded()
+        migrateHistoryPanelShortcutDefaultsIfNeeded()
+        migrateHistoryPanelDefaultsV2IfNeeded()
+        migrateHistoryPanelCanonicalDefaultsIfNeeded()
+        migrateHistoryPanelCanonicalDefaultsV2IfNeeded()
+        migrateHistoryPanelCommandDefaultsIfNeeded()
         // Snippet hotkey
         setupSnippetHotKeys()
 
@@ -115,6 +251,7 @@ extension HotKeyService {
         change(with: .snippet, keyCombo: savedKeyCombo(forKey: Constants.HotKey.snippetKeyCombo))
         // Clear History
         changeClearHistoryKeyCombo(savedKeyCombo(forKey: Constants.HotKey.clearHistoryKeyCombo))
+        setupHistoryPanelKeyCombos()
         startMonitoringRemoteSessionApplications()
         updateRemoteSessionHotKeyState(
             frontmostApplicationBundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -145,10 +282,125 @@ extension HotKeyService {
         hotkey.register()
     }
 
+    func historyPanelKeyCombo(for shortcut: HistoryPanelShortcut) -> KeyCombo? {
+        historyPanelKeyCombos[shortcut]
+    }
+
+    func changeHistoryPanelKeyCombo(_ shortcut: HistoryPanelShortcut, keyCombo: KeyCombo?) {
+        if let keyCombo {
+            historyPanelKeyCombos[shortcut] = keyCombo
+            AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
+        } else {
+            historyPanelKeyCombos.removeValue(forKey: shortcut)
+            AppEnvironment.current.defaults.removeObject(forKey: shortcut.userDefaultsKey)
+        }
+        AppEnvironment.current.defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
+        AppEnvironment.current.defaults.synchronize()
+    }
+
     private func savedKeyCombo(forKey key: String) -> KeyCombo? {
         guard let data = AppEnvironment.current.defaults.object(forKey: key) as? Data else { return nil }
         guard let keyCombo = NSKeyedUnarchiver.unarchiveObject(with: data) as? KeyCombo else { return nil }
         return keyCombo
+    }
+
+    private func setupHistoryPanelKeyCombos() {
+        var keyCombos = [HistoryPanelShortcut: KeyCombo]()
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            if let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) {
+                keyCombos[shortcut] = keyCombo
+            } else {
+                let keyCombo = shortcut.defaultKeyCombo
+                keyCombos[shortcut] = keyCombo
+                AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
+            }
+        }
+        historyPanelKeyCombos = keyCombos
+        AppEnvironment.current.defaults.synchronize()
+    }
+
+    private func migrateOptionCommandDefaultKeyCombosIfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos) else { return }
+
+        migrateDefaultKeyComboIfNeeded(
+            forKey: Constants.HotKey.historyKeyCombo,
+            legacyDefault: Self.legacyDefaultHistoryKeyCombo,
+            newDefault: Self.defaultHistoryKeyCombo
+        )
+        migrateDefaultKeyComboIfNeeded(
+            forKey: Constants.HotKey.snippetKeyCombo,
+            legacyDefault: Self.legacyDefaultSnippetKeyCombo,
+            newDefault: Self.defaultSnippetKeyCombo
+        )
+        defaults.set(true, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
+        defaults.synchronize()
+    }
+
+    private func migrateDefaultKeyComboIfNeeded(forKey key: String, legacyDefault: KeyCombo, newDefault: KeyCombo) {
+        guard savedKeyCombo(forKey: key) == legacyDefault else { return }
+        AppEnvironment.current.defaults.set(newDefault.archive(), forKey: key)
+    }
+
+    private func migrateHistoryPanelShortcutDefaultsIfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated) else { return }
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            guard savedKeyCombo(forKey: shortcut.userDefaultsKey) == nil else { return }
+            defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
+        }
+        defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
+        defaults.synchronize()
+    }
+
+    private func migrateHistoryPanelDefaultsV2IfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelOptionCommand) else { return }
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            guard savedKeyCombo(forKey: shortcut.userDefaultsKey) == shortcut.commandDefaultKeyCombo else { return }
+            defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
+        }
+        defaults.set(true, forKey: Constants.HotKey.migrateHistoryPanelOptionCommand)
+        defaults.synchronize()
+    }
+
+    private func migrateHistoryPanelCanonicalDefaultsIfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaults) else { return }
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else {
+                defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
+                return
+            }
+            guard shortcut.shouldMigrateToCanonicalDefault(keyCombo) else { return }
+            defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
+        }
+        defaults.set(true, forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaults)
+        defaults.synchronize()
+    }
+
+    private func migrateHistoryPanelCanonicalDefaultsV2IfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2) else { return }
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else { return }
+            guard shortcut.shouldMigrateToCanonicalDefault(keyCombo) else { return }
+            defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
+        }
+        defaults.set(true, forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2)
+        defaults.synchronize()
+    }
+
+    private func migrateHistoryPanelCommandDefaultsIfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults) else { return }
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else { return }
+            guard shortcut.shouldMigrateToCanonicalDefault(keyCombo) else { return }
+            defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
+        }
+        defaults.set(true, forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults)
+        defaults.synchronize()
     }
 }
 
@@ -275,6 +527,22 @@ extension HotKeyService {
         return folderKeyCombos?[identifier]
     }
 
+    @discardableResult
+    func registerDefaultSnippetHotKeyIfAvailable(forIdentifier identifier: String) -> KeyCombo? {
+        if let existingKeyCombo = snippetKeyCombo(forIdentifier: identifier) {
+            return existingKeyCombo
+        }
+
+        let usedKeyCombos = snippetFolderDefaultReservedKeyCombos()
+        guard let keyCombo = Self.defaultSnippetFolderHotKeyCodes
+            .compactMap({ KeyCombo(QWERTYKeyCode: $0, carbonModifiers: Self.defaultSnippetFolderHotKeyModifiers) })
+            .first(where: { candidate in !usedKeyCombos.contains(candidate) }) else {
+            return nil
+        }
+        registerSnippetHotKey(with: identifier, keyCombo: keyCombo)
+        return keyCombo
+    }
+
     func registerSnippetHotKey(with identifier: String, keyCombo: KeyCombo) {
         // Reset hotkey
         unregisterSnippetHotKey(with: identifier)
@@ -306,7 +574,7 @@ extension HotKeyService {
             return
         }
         guard folderDetail.folder.isEnabled else { return }
-        AppEnvironment.current.menuManager.popUpSnippetFolder(folderDetail)
+        AppEnvironment.current.menuManager.popUpSnippetFolder(folderDetail, triggerKeyCombo: hotKey.keyCombo)
     }
 
     fileprivate func setupSnippetHotKeys() {
@@ -315,5 +583,16 @@ extension HotKeyService {
             let hotKey = HotKey(identifier: $0, keyCombo: $1, target: self, action: #selector(HotKeyService.popupSnippetFolder(_:)))
             hotKey.register()
         }
+    }
+
+    private func snippetFolderDefaultReservedKeyCombos() -> [KeyCombo] {
+        var keyCombos = folderKeyCombos?.values.map { $0 } ?? []
+        keyCombos.append(contentsOf: [
+            mainKeyCombo ?? savedKeyCombo(forKey: Constants.HotKey.mainKeyCombo),
+            historyKeyCombo ?? savedKeyCombo(forKey: Constants.HotKey.historyKeyCombo),
+            snippetKeyCombo ?? savedKeyCombo(forKey: Constants.HotKey.snippetKeyCombo),
+            clearHistoryKeyCombo ?? savedKeyCombo(forKey: Constants.HotKey.clearHistoryKeyCombo)
+        ].compactMap { $0 })
+        return keyCombos
     }
 }

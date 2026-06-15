@@ -102,21 +102,25 @@ class AppDelegate: NSObject, NSMenuItemValidation {
 
     @objc func selectClipMenuItem(_ sender: NSMenuItem) {
         CPYUtilities.sendCustomLog(with: "selectClipMenuItem")
-        guard let id = sender.representedObject as? PasteboardHistory.ID, let history = pasteboardHistoryRepository.fetchHistory(id: id) else {
+        let selectionRequest = sender.representedObject as? PasteboardHistorySelectionRequest
+        let historyID = selectionRequest?.id ?? sender.representedObject as? PasteboardHistory.ID
+        guard let id = historyID, let history = pasteboardHistoryRepository.fetchHistory(id: id) else {
             NSSound.beep()
             return
         }
 
-        AppEnvironment.current.pasteService.paste(with: history)
+        AppEnvironment.current.pasteService.paste(with: history, restoring: selectionRequest?.targetContext)
     }
 
     @objc func selectSnippetMenuItem(_ sender: AnyObject) {
-        guard let id = sender.representedObject as? Snippet.ID, let snippet = snippetRepository.fetchSnippet(id: id) else {
+        let selectionRequest = sender.representedObject as? SnippetSelectionRequest
+        let snippetID = selectionRequest?.id ?? sender.representedObject as? Snippet.ID
+        guard let id = snippetID, let snippet = snippetRepository.fetchSnippet(id: id) else {
             NSSound.beep()
             return
         }
         AppEnvironment.current.pasteService.copyToPasteboard(with: snippet.content)
-        AppEnvironment.current.pasteService.paste()
+        AppEnvironment.current.pasteService.paste(restoring: selectionRequest?.targetContext)
     }
 
     func terminateApplication() {
@@ -393,8 +397,7 @@ private extension AppDelegate {
 extension AppDelegate: ScreenShotObserverDelegate {
     func screenShotObserver(_ observer: ScreenShotObserver, addedItem item: NSMetadataItem) {
         guard let path = item.value(forAttribute: NSMetadataItemPathKey) as? String else { return }
-        guard let image = NSImage(contentsOfFile: path) else { return }
-        AppEnvironment.current.clipService.create(with: image)
+        AppEnvironment.current.clipService.createScreenshot(from: URL(fileURLWithPath: path))
     }
 }
 

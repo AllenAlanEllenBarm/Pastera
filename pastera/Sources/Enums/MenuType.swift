@@ -33,9 +33,9 @@ enum MenuType: String {
         case .main:
             return #selector(HotKeyService.popupMainMenu)
         case .history:
-            return #selector(HotKeyService.popupHistoryMenu)
+            return #selector(HotKeyService.popupHistoryMenu(_:))
         case .snippet:
-            return #selector(HotKeyService.popUpSnippetMenu)
+            return #selector(HotKeyService.popUpSnippetMenu(_:))
         }
     }
 

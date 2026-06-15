@@ -63,10 +63,15 @@ enum HistoryMenuSelectionDirection {
 enum HistoryMenuNumberShortcutMapper {
     static let maximumShortcutRowCount = 10
 
-    static func rowIndex(for event: NSEvent, startsAtZero: Bool, rowCount: Int) -> Int? {
+    static func rowIndex(
+        for event: NSEvent,
+        startsAtZero: Bool,
+        rowCount: Int,
+        allowedModifierFlags: NSEvent.ModifierFlags = []
+    ) -> Int? {
         guard event.type == .keyDown, rowCount > 0 else { return nil }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
-        guard flags.isEmpty,
+        guard modifierFlagsMatch(flags, allowedModifierFlags: allowedModifierFlags),
               let text = event.charactersIgnoringModifiers,
               text.count == 1,
               let digit = Int(text) else {
@@ -81,6 +86,17 @@ enum HistoryMenuNumberShortcutMapper {
         }
         guard (0..<rowCount).contains(index) else { return nil }
         return index
+    }
+
+    private static func modifierFlagsMatch(
+        _ flags: NSEvent.ModifierFlags,
+        allowedModifierFlags: NSEvent.ModifierFlags
+    ) -> Bool {
+        if flags.isEmpty { return true }
+        let normalizedAllowedFlags = allowedModifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(.numericPad)
+        return !normalizedAllowedFlags.isEmpty && flags == normalizedAllowedFlags
     }
 
     static func shortcutText(forRowIndex index: Int, startsAtZero: Bool) -> String? {
@@ -270,6 +286,9 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     var onTypeFilterChange: ((HistoryMenuTypeFilter) -> Void)?
     var onPreviousPage: (() -> Void)?
     var onNextPage: (() -> Void)?
+    var onPanelShortcutKeyDown: ((NSEvent) -> Bool)? {
+        didSet { searchField.onPanelShortcutKeyDown = onPanelShortcutKeyDown }
+    }
     var onPinnedChange: ((Bool) -> Void)? {
         didSet {
             let supportsPinning = onPinnedChange != nil
@@ -498,7 +517,8 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
                 self?.lastKeyboardFocusOwner = view
             }
             (view as? HistoryMenuRowView)?.onKeyboardEvent = { [weak self] event in
-                self?.handleHistoryKeyboardEvent(event) == true
+                if self?.onPanelShortcutKeyDown?(event) == true { return true }
+                return self?.handleHistoryKeyboardEvent(event) == true
             }
         }
         configureKeyViewLoop()
@@ -683,6 +703,19 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
 }
 
 extension HistoryMenuHeaderView {
+    func focusSearchFieldFromShortcut() {
+        focusSearchFieldImmediately()
+    }
+
+    func shouldPreserveSearchFieldEditingCommand(_ event: NSEvent) -> Bool {
+        guard searchFieldOwnsFocus() else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command),
+              !flags.contains(.control),
+              !flags.contains(.option) else { return false }
+        return ["a", "c", "v", "x"].contains(searchFieldEditingCommandKey(for: event))
+    }
+
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):
@@ -804,6 +837,7 @@ extension HistoryMenuHeaderView {
 
     @discardableResult
     func handleMenuTrackingKeyDown(_ event: NSEvent) -> Bool {
+        if onPanelShortcutKeyDown?(event) == true { return true }
         if handleTabKeyFromCurrentResponder(event) {
             return true
         }
@@ -952,3 +986,13 @@ extension HistoryMenuHeaderView {
         return textView.hasMarkedText()
     }
 }
+
+#if DEBUG
+extension HistoryMenuHeaderView {
+    func dispatchSearchFieldKeyEquivalentForTesting(_ event: NSEvent) -> Bool { searchField.performKeyEquivalent(with: event) }
+
+    var isSearchFieldFocusedForTesting: Bool {
+        searchFieldOwnsFocus()
+    }
+}
+#endif

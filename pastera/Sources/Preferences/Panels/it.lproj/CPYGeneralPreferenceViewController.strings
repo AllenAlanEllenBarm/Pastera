@@ -5,9 +5,6 @@
 /* Class = "NSTextFieldCell"; title = "Appearance"; ObjectID = "FM4-mw-DCx"; */
 "FM4-mw-DCx.title" = "Aspetto";
 
-/* Class = "NSTextFieldCell"; title = "Status Bar icon style:"; ObjectID = "Faj-kQ-G1v"; */
-"Faj-kQ-G1v.title" = "Stile dell'icona nella barra dei menu:";
-
 /* Class = "NSTextFieldCell"; title = "Sort history order by:"; ObjectID = "Lps-06-dPB"; */
 "Lps-06-dPB.title" = "Ordina la Cronologia in base a:";
 
@@ -25,9 +22,6 @@
 
 /* Class = "NSMenuItem"; title = "Date Created"; ObjectID = "YmS-J6-ERc"; */
 "YmS-J6-ERc.title" = "Data e ora di creazione";
-
-/* Class = "NSMenuItem"; title = "None"; ObjectID = "aEh-u0-hQR"; */
-"aEh-u0-hQR.title" = "Nessuna icona";
 
 /* Class = "NSTextFieldCell"; title = "items"; ObjectID = "eeq-cw-v00"; */
 "eeq-cw-v00.title" = "elementi";

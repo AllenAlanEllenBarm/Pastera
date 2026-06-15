@@ -53,6 +53,7 @@ enum MainMenuPanelItem {
 
 private final class MainMenuPanel: NSPanel {
     var onCancel: (() -> Void)?
+    var onKeyDown: ((NSEvent) -> Bool)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -62,6 +63,9 @@ private final class MainMenuPanel: NSPanel {
     }
 
     override func keyDown(with event: NSEvent) {
+        if onKeyDown?(event) == true {
+            return
+        }
         guard event.keyCode == 53 else {
             super.keyDown(with: event)
             return
@@ -71,6 +75,13 @@ private final class MainMenuPanel: NSPanel {
 }
 
 final class MainMenuPanelController: NSObject, NSWindowDelegate {
+    private struct KeyboardEntry {
+        let title: String
+        let setSelected: (Bool) -> Void
+        let openChildPanel: (() -> Void)?
+        let confirm: () -> Void
+    }
+
     private let historyTitle: String
     private let historyImage: NSImage?
     private let historyShortcutText: String?
@@ -80,11 +91,15 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     private let onOpenHistory: () -> Void
     private let onOpenSnippets: () -> Void
     private let onPinnedChange: (Bool) -> Void
+    private let onCloseChildPanels: () -> Void
 
     private let contentView = NSView()
     private var panel: MainMenuPanel?
+    private var keyboardEntries = [KeyboardEntry]()
+    private var selectedKeyboardEntryIndex: Int?
     private var isPinned = true
     private var keepsVisibleWhileChildPanelOpen = false
+    private var pasteTargetContext: PasteTargetContext?
 
     init(
         historyTitle: String,
@@ -95,7 +110,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         itemsProvider: @escaping () -> [MainMenuPanelItem],
         onOpenHistory: @escaping () -> Void,
         onOpenSnippets: @escaping () -> Void,
-        onPinnedChange: @escaping (Bool) -> Void
+        onPinnedChange: @escaping (Bool) -> Void,
+        onCloseChildPanels: @escaping () -> Void = {}
     ) {
         self.historyTitle = historyTitle
         self.historyImage = historyImage
@@ -106,11 +122,13 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         self.onOpenHistory = onOpenHistory
         self.onOpenSnippets = onOpenSnippets
         self.onPinnedChange = onPinnedChange
+        self.onCloseChildPanels = onCloseChildPanels
         super.init()
     }
 
-    func show(at screenPoint: NSPoint, pinned: Bool = true) {
+    func show(at screenPoint: NSPoint, pinned: Bool = true, pasteTargetContext: PasteTargetContext? = nil) {
         isPinned = pinned
+        self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
         let panel = makePanelIfNeeded()
         reloadContent()
         applyBehavior(to: panel)
@@ -121,8 +139,9 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    func show(anchoredTo menuFrame: NSRect, pinned: Bool = true) {
+    func show(anchoredTo menuFrame: NSRect, pinned: Bool = true, pasteTargetContext: PasteTargetContext? = nil) {
         isPinned = pinned
+        self.pasteTargetContext = pasteTargetContext ?? self.pasteTargetContext ?? PasteTargetContext.capture()
         let panel = makePanelIfNeeded()
         reloadContent()
         applyBehavior(to: panel)
@@ -131,8 +150,9 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    func show(attachedToStatusItemFrame statusItemFrame: NSRect, pinned: Bool = false) {
+    func show(attachedToStatusItemFrame statusItemFrame: NSRect, pinned: Bool = false, pasteTargetContext: PasteTargetContext? = nil) {
         isPinned = pinned
+        self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
         let panel = makePanelIfNeeded()
         reloadContent()
         applyBehavior(to: panel)
@@ -154,6 +174,28 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         guard panel?.isVisible == true else { return nil }
         return panel?.frame
     }
+
+    func reloadContentIfVisible() {
+        guard let panel, panel.isVisible else { return }
+        let topLeftPoint = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        reloadContent()
+        panel.setFrameTopLeftPoint(topLeftPoint)
+    }
+
+    func refreshAppearanceIfVisible() {
+        guard panel?.isVisible == true else { return }
+        contentView.layer?.backgroundColor = CPYWindowAppearance.backgroundColor(for: panel?.effectiveAppearance).cgColor
+    }
+
+    var childPasteTargetContext: PasteTargetContext? {
+        pasteTargetContext
+    }
+
+#if DEBUG
+    var pasteTargetProcessIdentifierForTesting: pid_t? {
+        pasteTargetContext?.processIdentifier
+    }
+#endif
 
     func openHistoryFromPinnedMenu() {
         onOpenHistory()
@@ -193,6 +235,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.onCancel = { [weak self] in self?.onPinnedChange(false) }
+        panel.onKeyDown = { [weak self] event in self?.handleKeyboardNavigation(event) ?? false }
         panel.delegate = self
         panel.contentView = contentView
         applyBehavior(to: panel)
@@ -215,6 +258,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
 
     private func reloadContent() {
         contentView.subviews.forEach { $0.removeFromSuperview() }
+        keyboardEntries.removeAll()
+        selectedKeyboardEntryIndex = nil
         contentView.wantsLayer = true
         contentView.layer?.cornerRadius = MainMenuPanelLayout.cornerRadius
         contentView.layer?.masksToBounds = true
@@ -237,6 +282,15 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         headerView.frame = NSRect(x: 0, y: currentY, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.headerHeight)
         headerView.onOpen = { [weak self] in self?.openHistoryFromPinnedMenu() }
         headerView.onHoverOpen = { [weak self] in self?.openHistoryFromPinnedMenu() }
+        let historyEntryIndex = appendKeyboardEntry(
+            title: historyTitle,
+            view: headerView,
+            openChildPanel: { [weak self] in self?.openHistoryFromPinnedMenu() },
+            confirm: { [weak self] in self?.openHistoryFromPinnedMenu() }
+        )
+        headerView.onHoverFocus = { [weak self] in
+            self?.selectKeyboardEntry(at: historyEntryIndex, triggerChildPanel: false)
+        }
         contentView.addSubview(headerView)
 
         currentY -= MainMenuPanelLayout.separatorVerticalInset + MainMenuPanelLayout.separatorHeight
@@ -269,6 +323,15 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
                     width: MainMenuPanelLayout.width,
                     height: MainMenuPanelLayout.snippetFolderRowHeight
                 )
+                let entryIndex = appendKeyboardEntry(
+                    title: title,
+                    view: rowView,
+                    openChildPanel: { [weak rowView] in onOpen(rowView?.screenFrameForOpening) },
+                    confirm: { [weak rowView] in onOpen(rowView?.screenFrameForOpening) }
+                )
+                rowView.onHoverFocus = { [weak self] in
+                    self?.selectKeyboardEntry(at: entryIndex, triggerChildPanel: false)
+                }
                 contentView.addSubview(rowView)
             case let .action(title, image, shortcutText, onSelect):
                 currentY -= MainMenuPanelLayout.rowHeight
@@ -284,6 +347,15 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
                     width: MainMenuPanelLayout.width,
                     height: MainMenuPanelLayout.rowHeight
                 )
+                let entryIndex = appendKeyboardEntry(
+                    title: title,
+                    view: rowView,
+                    openChildPanel: { [weak self] in self?.onCloseChildPanels() },
+                    confirm: onSelect
+                )
+                rowView.onHoverFocus = { [weak self] in
+                    self?.selectKeyboardEntry(at: entryIndex, triggerChildPanel: false)
+                }
                 contentView.addSubview(rowView)
                 pinCenterY = rowView.frame.midY
             }
@@ -406,6 +478,79 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     }
 }
 
+extension MainMenuPanelController {
+    func handleKeyboardNavigationFromChild(_ event: NSEvent) -> Bool {
+        handleKeyboardNavigation(event)
+    }
+
+    fileprivate func handleKeyboardNavigation(_ event: NSEvent) -> Bool {
+        guard panel?.isVisible == true else { return false }
+        let direction: Int
+        switch event.keyCode {
+        case 125:
+            direction = 1
+        case 126:
+            direction = -1
+        case 36, 49, 76:
+            guard let selectedKeyboardEntryIndex,
+                  keyboardEntries.indices.contains(selectedKeyboardEntryIndex) else { return false }
+            keyboardEntries[selectedKeyboardEntryIndex].confirm()
+            return true
+        default:
+            return false
+        }
+        guard !keyboardEntries.isEmpty else { return false }
+
+        let currentIndex: Int
+        if let selectedKeyboardEntryIndex {
+            currentIndex = selectedKeyboardEntryIndex
+        } else {
+            currentIndex = direction > 0 ? -1 : keyboardEntries.count
+        }
+
+        let nextIndex = min(max(currentIndex + direction, 0), keyboardEntries.count - 1)
+        selectKeyboardEntry(at: nextIndex, triggerChildPanel: true)
+        return true
+    }
+
+    @discardableResult
+    fileprivate func appendKeyboardEntry(
+        title: String,
+        view: NSView,
+        openChildPanel: (() -> Void)?,
+        confirm: @escaping () -> Void
+    ) -> Int {
+        let index = keyboardEntries.count
+        keyboardEntries.append(KeyboardEntry(
+            title: title,
+            setSelected: { [weak view] selected in
+                if let headerView = view as? MainMenuHeaderItemView {
+                    headerView.setKeyboardSelected(selected)
+                } else if let rowView = view as? MainMenuPanelRowView {
+                    rowView.setKeyboardSelected(selected)
+                }
+            },
+            openChildPanel: openChildPanel,
+            confirm: confirm
+        ))
+        return index
+    }
+
+    fileprivate func selectKeyboardEntry(at index: Int, triggerChildPanel: Bool) {
+        guard keyboardEntries.indices.contains(index) else { return }
+        if let selectedKeyboardEntryIndex,
+           selectedKeyboardEntryIndex != index,
+           keyboardEntries.indices.contains(selectedKeyboardEntryIndex) {
+            keyboardEntries[selectedKeyboardEntryIndex].setSelected(false)
+        }
+        selectedKeyboardEntryIndex = index
+        keyboardEntries[index].setSelected(true)
+        if triggerChildPanel {
+            keyboardEntries[index].openChildPanel?()
+        }
+    }
+}
+
 private final class MainMenuPanelRowView: NSControl {
     enum RowKind {
         case snippetFolder
@@ -433,7 +578,9 @@ private final class MainMenuPanelRowView: NSControl {
     private var trackingArea: NSTrackingArea?
     private var hoverOpenWorkItem: DispatchWorkItem?
     private var isMouseInside = false
+    private var isKeyboardSelected = false
     private var didDragWindow = false
+    var onHoverFocus: (() -> Void)?
 
     init(
         title: String,
@@ -463,6 +610,7 @@ private final class MainMenuPanelRowView: NSControl {
 
     override func mouseEntered(with event: NSEvent) {
         isMouseInside = true
+        onHoverFocus?()
         updateAppearance()
         scheduleHoverOpenIfNeeded()
     }
@@ -485,7 +633,13 @@ private final class MainMenuPanelRowView: NSControl {
             return
         }
         cancelHoverOpen()
-        onConfirm(screenFrame)
+        onConfirm(screenFrameForOpening)
+    }
+
+    func setKeyboardSelected(_ selected: Bool) {
+        guard isKeyboardSelected != selected else { return }
+        isKeyboardSelected = selected
+        updateAppearance()
     }
 
     private func setup(title: String, image: NSImage?, shortcutText: String?) {
@@ -546,7 +700,7 @@ private final class MainMenuPanelRowView: NSControl {
         updateAppearance()
     }
 
-    private var screenFrame: NSRect? {
+    fileprivate var screenFrameForOpening: NSRect? {
         guard let window else { return nil }
         return window.convertToScreen(convert(bounds, to: nil))
     }
@@ -556,7 +710,7 @@ private final class MainMenuPanelRowView: NSControl {
         cancelHoverOpen()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.isMouseInside else { return }
-            onHoverOpen(self.screenFrame)
+            onHoverOpen(self.screenFrameForOpening)
         }
         hoverOpenWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + MainMenuPanelLayout.folderHoverOpenDelay, execute: workItem)
@@ -568,13 +722,14 @@ private final class MainMenuPanelRowView: NSControl {
     }
 
     private func updateAppearance() {
-        layer?.backgroundColor = isMouseInside
+        let isEmphasized = isMouseInside || isKeyboardSelected
+        layer?.backgroundColor = isEmphasized
             ? PasteraDesignTokens.colors().hoveredRow.cgColor
             : NSColor.clear.cgColor
         titleLabel.textColor = .labelColor
-        imageView.contentTintColor = isMouseInside ? .labelColor : .secondaryLabelColor
-        shortcutBadge.setState(isEmphasized: isMouseInside)
-        chevronView.contentTintColor = isMouseInside ? .secondaryLabelColor : .tertiaryLabelColor
+        imageView.contentTintColor = isEmphasized ? .labelColor : .secondaryLabelColor
+        shortcutBadge.setState(isEmphasized: isEmphasized)
+        chevronView.contentTintColor = isEmphasized ? .secondaryLabelColor : .tertiaryLabelColor
     }
 }
 
@@ -631,6 +786,25 @@ extension MainMenuPanelController {
 
     func performMainMenuPinClickForTesting() {
         mainMenuPinButtonsForTesting.first?.performClick(nil)
+    }
+
+    var selectedMainMenuTitleForTesting: String? {
+        guard let selectedKeyboardEntryIndex,
+              keyboardEntries.indices.contains(selectedKeyboardEntryIndex) else { return nil }
+        return keyboardEntries[selectedKeyboardEntryIndex].title
+    }
+
+    var contentBackgroundAlphaForTesting: CGFloat {
+        CGFloat(contentView.layer?.backgroundColor?.alpha ?? 0)
+    }
+
+    func selectMainMenuItemForTesting(title: String) {
+        guard let index = keyboardEntries.firstIndex(where: { $0.title == title }) else { return }
+        selectKeyboardEntry(at: index, triggerChildPanel: false)
+    }
+
+    func handleMainMenuNavigationForTesting(_ event: NSEvent) -> Bool {
+        handleKeyboardNavigation(event)
     }
 
     private var rowViewsForTesting: [MainMenuPanelRowView] {

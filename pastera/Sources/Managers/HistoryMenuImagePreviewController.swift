@@ -34,6 +34,7 @@ final class HistoryMenuImagePreviewController {
 
     func hide() {
         panel?.orderOut(nil)
+        imageView.image = nil
     }
 
     deinit {
@@ -52,7 +53,7 @@ final class HistoryMenuImagePreviewController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.animationBehavior = .none
-        panel.hidesOnDeactivate = false
+        panel.hidesOnDeactivate = true
         panel.ignoresMouseEvents = true
         panel.contentView = makeContentView()
         self.panel = panel
@@ -117,3 +118,11 @@ final class HistoryMenuImagePreviewController {
         return origin
     }
 }
+
+#if DEBUG
+extension HistoryMenuImagePreviewController {
+    var isVisibleForTesting: Bool {
+        panel?.isVisible == true
+    }
+}
+#endif

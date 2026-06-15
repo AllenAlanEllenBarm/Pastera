@@ -5,6 +5,7 @@
 //
 
 import Cocoa
+import KeyHolder
 
 enum PasteraDesignTokens {
     struct ColorSet: Equatable {
@@ -112,7 +113,202 @@ enum PasteraMotion {
     }
 }
 
+enum PasteraSemanticViewStyler {
+    static func apply(to view: NSView, appearance: NSAppearance? = nil) {
+        let colors = PasteraDesignTokens.colors(for: appearance ?? view.effectiveAppearance)
+        normalizeControlColors(in: view, colors: colors)
+    }
+
+    private static func normalizeControlColors(in view: NSView, colors: PasteraDesignTokens.ColorSet) {
+        switch view {
+        case let recordView as RecordView:
+            PasteraRecordViewStyler.apply(to: recordView, colors: colors)
+        case let textField as NSTextField:
+            normalize(textField)
+        case let textView as NSTextView:
+            normalize(textView, colors: colors)
+        case let scrollView as NSScrollView:
+            normalize(scrollView, colors: colors)
+        case let tableView as NSTableView:
+            normalize(tableView, colors: colors)
+        case let box as NSBox:
+            normalize(box, colors: colors)
+        case let button as NSButton:
+            normalize(button)
+        default:
+            break
+        }
+
+        view.subviews.forEach { normalizeControlColors(in: $0, colors: colors) }
+    }
+
+    private static func normalize(_ textField: NSTextField) {
+        if textField.isEditable {
+            textField.textColor = textField.isEnabled ? .textColor : .disabledControlTextColor
+            return
+        }
+        textField.textColor = textField.isEnabled ? .labelColor : .disabledControlTextColor
+    }
+
+    private static func normalize(_ textView: NSTextView, colors: PasteraDesignTokens.ColorSet) {
+        textView.textColor = textView.isEditable ? .textColor : .labelColor
+        textView.insertionPointColor = .textColor
+        textView.backgroundColor = colors.elevatedSurface
+    }
+
+    private static func normalize(_ scrollView: NSScrollView, colors: PasteraDesignTokens.ColorSet) {
+        scrollView.drawsBackground = scrollView.documentView is NSTextView
+        scrollView.backgroundColor = colors.elevatedSurface
+        scrollView.contentView.drawsBackground = false
+        scrollView.contentView.backgroundColor = .clear
+    }
+
+    private static func normalize(_ tableView: NSTableView, colors: PasteraDesignTokens.ColorSet) {
+        tableView.backgroundColor = .clear
+        tableView.gridColor = colors.separator
+        tableView.enclosingScrollView?.drawsBackground = false
+        tableView.enclosingScrollView?.backgroundColor = .clear
+    }
+
+    private static func normalize(_ box: NSBox, colors: PasteraDesignTokens.ColorSet) {
+        box.boxType = .custom
+        box.borderType = .lineBorder
+        box.fillColor = colors.surface
+        box.borderColor = colors.separator
+        box.cornerRadius = PasteraDesignTokens.Metrics.rowCornerRadius
+        box.titleFont = .systemFont(ofSize: 13, weight: .semibold)
+        box.titlePosition = .atTop
+        box.contentViewMargins = NSSize(width: 14, height: 14)
+    }
+
+    private static func normalize(_ button: NSButton) {
+        let textColor = button.isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor
+        button.contentTintColor = textColor
+        guard !(button is NSPopUpButton) else { return }
+        guard !button.title.isEmpty else { return }
+
+        button.attributedTitle = NSAttributedString(
+            string: button.title,
+            attributes: [
+                .font: button.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: textColor
+            ]
+        )
+    }
+}
+
+enum PasteraRecordViewStyler {
+    static func apply(
+        to recordView: RecordView,
+        colors: PasteraDesignTokens.ColorSet = PasteraDesignTokens.colors()
+    ) {
+        recordView.backgroundColor = colors.elevatedSurface
+        recordView.borderColor = colors.separator
+        recordView.borderWidth = PasteraDesignTokens.Metrics.hairlineWidth
+        recordView.cornerRadius = PasteraDesignTokens.Metrics.controlCornerRadius
+        recordView.tintColor = colors.accent
+        recordView.needsDisplay = true
+    }
+}
+
+final class PasteraSettingsPaneHost: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        subviews.forEach { subview in
+            if let section = subview as? PasteraSettingsSectionView {
+                section.refreshAppearance()
+            }
+        }
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+}
+
+final class PasteraSettingsSectionView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        let tokens = PasteraDesignTokens.colors(for: effectiveAppearance)
+        wantsLayer = true
+        layer?.cornerRadius = PasteraDesignTokens.Metrics.rowCornerRadius
+        layer?.backgroundColor = tokens.surface.cgColor
+        layer?.borderColor = tokens.separator.cgColor
+        layer?.borderWidth = PasteraDesignTokens.Metrics.hairlineWidth
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.masksToBounds = true
+        refreshAppearance()
+    }
+}
+
+final class PasteraSettingsRowView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        subviews.compactMap { $0 as? NSButton }.forEach {
+            PasteraSemanticViewStyler.apply(to: $0, appearance: effectiveAppearance)
+        }
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+}
+
 final class PasteraToolbarButton: NSButton {
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+
     init(title: String, symbolName: String, target: AnyObject?, action: Selector?) {
         super.init(frame: .zero)
         self.title = title
@@ -137,6 +333,15 @@ final class PasteraToolbarButton: NSButton {
             image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
         }
         setContentHuggingPriority(.required, for: .horizontal)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 36, 49, 76:
+            performClick(nil)
+        default:
+            super.keyDown(with: event)
+        }
     }
 }
 

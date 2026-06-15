@@ -31,12 +31,14 @@ final class MainMenuHeaderItemView: NSControl {
     private var didTriggerHoverOpen = false
     private var pendingHoverOpen: DispatchWorkItem?
     private var didDragWindow = false
+    private var isKeyboardSelected = false
     private var isPinned: Bool
     private let showsPin: Bool
 
     var allowsWindowDrag = false
     var onOpen: (() -> Void)?
     var onHoverOpen: (() -> Void)?
+    var onHoverFocus: (() -> Void)?
     var onPinnedChange: ((Bool, NSRect?) -> Void)?
 
     init(title: String, image: NSImage?, isPinned: Bool, showsPin: Bool = true, shortcutText: String? = nil) {
@@ -66,6 +68,7 @@ final class MainMenuHeaderItemView: NSControl {
 
     override func mouseEntered(with event: NSEvent) {
         isMouseInside = true
+        onHoverFocus?()
         scheduleHoverOpenIfNeeded()
         updateAppearance()
     }
@@ -99,6 +102,12 @@ final class MainMenuHeaderItemView: NSControl {
     func setPinned(_ pinned: Bool) {
         isPinned = pinned
         updatePinAppearance()
+    }
+
+    func setKeyboardSelected(_ selected: Bool) {
+        guard isKeyboardSelected != selected else { return }
+        isKeyboardSelected = selected
+        updateAppearance()
     }
 
     private func setup(title: String, image: NSImage?, shortcutText: String?) {
@@ -166,12 +175,13 @@ final class MainMenuHeaderItemView: NSControl {
     }
 
     private func updateAppearance() {
-        layer?.backgroundColor = isMouseInside
+        let isEmphasized = isMouseInside || isKeyboardSelected
+        layer?.backgroundColor = isEmphasized
             ? PasteraDesignTokens.colors().hoveredRow.cgColor
             : NSColor.clear.cgColor
         titleLabel.textColor = .labelColor
-        imageView.contentTintColor = isMouseInside ? .labelColor : .secondaryLabelColor
-        shortcutBadge.setState(isEmphasized: isMouseInside)
+        imageView.contentTintColor = isEmphasized ? .labelColor : .secondaryLabelColor
+        shortcutBadge.setState(isEmphasized: isEmphasized)
     }
 
     private func scheduleHoverOpenIfNeeded() {

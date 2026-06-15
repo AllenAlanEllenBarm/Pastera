@@ -11,6 +11,7 @@
 //
 
 import Cocoa
+import Magnet
 
 enum SnippetBrowserLayout {
     static let width: CGFloat = 260
@@ -45,6 +46,13 @@ private final class SnippetBrowserPanel: NSPanel {
         }
         onCancel?()
     }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onKeyDown?(event) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
@@ -53,8 +61,9 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         case snippets(SnippetFolder.ID)
     }
 
-    private let fetchDetails: () -> [SnippetFolderDetail]
-    private let selectSnippet: (Snippet.ID, NSRunningApplication?) -> Void
+    private let fetchFolders: () -> [SnippetFolder]
+    private let fetchFolderDetail: (SnippetFolder.ID) -> SnippetFolderDetail?
+    private let selectSnippet: (Snippet.ID, PasteTargetContext?) -> Void
 
     private let contentView = NSView()
     private let scrollView = NSScrollView()
@@ -63,41 +72,64 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
     private var rowViews = [NSView]()
     private var visibleSnippetIDs = [Snippet.ID]()
     private var contentMode = ContentMode.folders
-    private var sourceApplication: NSRunningApplication?
+    private var pasteTargetContext: PasteTargetContext?
+    private var numberShortcutModifierFlags: NSEvent.ModifierFlags = []
     var onClose: (() -> Void)?
+    var onMainMenuNavigationKeyDown: ((NSEvent) -> Bool)?
 
     init(
-        fetchDetails: @escaping () -> [SnippetFolderDetail],
-        selectSnippet: @escaping (Snippet.ID, NSRunningApplication?) -> Void
+        fetchFolders: @escaping () -> [SnippetFolder],
+        fetchFolderDetail: @escaping (SnippetFolder.ID) -> SnippetFolderDetail?,
+        selectSnippet: @escaping (Snippet.ID, PasteTargetContext?) -> Void
     ) {
-        self.fetchDetails = fetchDetails
+        self.fetchFolders = fetchFolders
+        self.fetchFolderDetail = fetchFolderDetail
         self.selectSnippet = selectSnippet
         super.init()
         setupContent()
     }
 
-    func show(attachedTo anchorFrame: NSRect) {
+    func show(
+        attachedTo anchorFrame: NSRect,
+        pasteTargetContext: PasteTargetContext? = nil,
+        triggerKeyCombo: KeyCombo? = nil
+    ) {
         contentMode = .folders
-        showCurrentMode(attachedTo: anchorFrame)
+        showCurrentMode(attachedTo: anchorFrame, pasteTargetContext: pasteTargetContext, triggerKeyCombo: triggerKeyCombo)
     }
 
-    func show(folderID: SnippetFolder.ID, attachedTo anchorFrame: NSRect) {
+    func show(
+        folderID: SnippetFolder.ID,
+        attachedTo anchorFrame: NSRect,
+        pasteTargetContext: PasteTargetContext? = nil,
+        triggerKeyCombo: KeyCombo? = nil
+    ) {
         contentMode = .snippets(folderID)
-        showCurrentMode(attachedTo: anchorFrame)
+        showCurrentMode(attachedTo: anchorFrame, pasteTargetContext: pasteTargetContext, triggerKeyCombo: triggerKeyCombo)
     }
 
-    func show(at screenPoint: NSPoint) {
+    func show(at screenPoint: NSPoint, pasteTargetContext: PasteTargetContext? = nil, triggerKeyCombo: KeyCombo? = nil) {
         contentMode = .folders
-        showCurrentMode(near: screenPoint)
+        showCurrentMode(near: screenPoint, pasteTargetContext: pasteTargetContext, triggerKeyCombo: triggerKeyCombo)
     }
 
-    func show(folderID: SnippetFolder.ID, at screenPoint: NSPoint) {
+    func show(
+        folderID: SnippetFolder.ID,
+        at screenPoint: NSPoint,
+        pasteTargetContext: PasteTargetContext? = nil,
+        triggerKeyCombo: KeyCombo? = nil
+    ) {
         contentMode = .snippets(folderID)
-        showCurrentMode(near: screenPoint)
+        showCurrentMode(near: screenPoint, pasteTargetContext: pasteTargetContext, triggerKeyCombo: triggerKeyCombo)
     }
 
-    private func showCurrentMode(attachedTo anchorFrame: NSRect) {
-        captureSourceApplication()
+    private func showCurrentMode(
+        attachedTo anchorFrame: NSRect,
+        pasteTargetContext: PasteTargetContext?,
+        triggerKeyCombo: KeyCombo?
+    ) {
+        capturePasteTargetContext(pasteTargetContext)
+        numberShortcutModifierFlags = triggerKeyCombo.numberShortcutModifierFlags
         let panel = makePanelIfNeeded()
         reloadRows()
         position(panel, attachedTo: anchorFrame)
@@ -105,8 +137,13 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    private func showCurrentMode(near screenPoint: NSPoint) {
-        captureSourceApplication()
+    private func showCurrentMode(
+        near screenPoint: NSPoint,
+        pasteTargetContext: PasteTargetContext?,
+        triggerKeyCombo: KeyCombo?
+    ) {
+        capturePasteTargetContext(pasteTargetContext)
+        numberShortcutModifierFlags = triggerKeyCombo.numberShortcutModifierFlags
         let panel = makePanelIfNeeded()
         reloadRows()
         position(panel, near: screenPoint)
@@ -114,15 +151,23 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    private func captureSourceApplication() {
-        sourceApplication = NSWorkspace.shared.frontmostApplication.flatMap { application in
-            application.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : application
-        }
+    private func capturePasteTargetContext(_ context: PasteTargetContext?) {
+        pasteTargetContext = context ?? PasteTargetContext.capture()
     }
 
     func close() {
         panel?.orderOut(nil)
         onClose?()
+    }
+
+    func reloadRowsIfVisible() {
+        guard panel?.isVisible == true else { return }
+        reloadRows()
+    }
+
+    func refreshAppearanceIfVisible() {
+        guard panel?.isVisible == true else { return }
+        contentView.layer?.backgroundColor = CPYWindowAppearance.backgroundColor(for: panel?.effectiveAppearance).cgColor
     }
 
     var visibleFrame: NSRect? {
@@ -166,7 +211,10 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.onCancel = { [weak self] in self?.close() }
         panel.onKeyDown = { [weak self] event in
-            self?.confirmSnippetForNumberShortcut(event) ?? false
+            if self?.onMainMenuNavigationKeyDown?(event) == true {
+                return true
+            }
+            return self?.confirmSnippetForNumberShortcut(event) ?? false
         }
         panel.delegate = self
         panel.contentView = contentView
@@ -249,21 +297,21 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     private func makeFolderRows() -> [NSView] {
-        fetchDetails()
-            .filter { $0.folder.isEnabled }
-            .map { detail in
+        fetchFolders()
+            .filter(\.isEnabled)
+            .map { folder in
                 let shortcutText = PasteraShortcutFormatter.string(
-                    for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: detail.folder.id.uuidString)
+                    for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folder.id.uuidString)
                 )
-                return SnippetBrowserFolderRowView(title: detail.folder.title, shortcutText: shortcutText) { [weak self] in
-                    self?.contentMode = .snippets(detail.folder.id)
+                return SnippetBrowserFolderRowView(title: folder.title, shortcutText: shortcutText) { [weak self] in
+                    self?.contentMode = .snippets(folder.id)
                     self?.reloadRows()
                 }
             }
     }
 
     private func makeSnippetRows(for folderID: SnippetFolder.ID) -> [NSView] {
-        guard let detail = fetchDetails().first(where: { $0.folder.id == folderID && $0.folder.isEnabled }) else {
+        guard let detail = fetchFolderDetail(folderID), detail.folder.isEnabled else {
             return []
         }
 
@@ -312,7 +360,8 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
         guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
             for: event,
             startsAtZero: startsAtZero,
-            rowCount: visibleSnippetIDs.count
+            rowCount: visibleSnippetIDs.count,
+            allowedModifierFlags: numberShortcutModifierFlags
         ) else {
             return false
         }
@@ -321,14 +370,18 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     private func confirmSelection(_ snippetID: Snippet.ID) {
-        let application = sourceApplication
+        let targetContext = pasteTargetContext
         close()
-        selectSnippet(snippetID, application)
+        selectSnippet(snippetID, targetContext)
     }
 }
 
 #if DEBUG
 extension SnippetBrowserPanelController {
+    var pasteTargetProcessIdentifierForTesting: pid_t? {
+        pasteTargetContext?.processIdentifier
+    }
+
     var rowTitlesForTesting: [String] {
         rowViews.compactMap { rowView in
             rowView.subviews
@@ -373,6 +426,18 @@ extension SnippetBrowserPanelController {
         confirmSelection(firstSnippetID)
     }
 
+    func handleNumberShortcutForTesting(_ event: NSEvent) -> Bool {
+        confirmSnippetForNumberShortcut(event)
+    }
+
+    func handleKeyDownForTesting(_ event: NSEvent) -> Bool {
+        panel?.onKeyDown?(event) ?? false
+    }
+
+    var contentBackgroundAlphaForTesting: CGFloat {
+        CGFloat(contentView.layer?.backgroundColor?.alpha ?? 0)
+    }
+
     private func collectTextValues(in view: NSView) -> [String] {
         var values = [String]()
         if let label = view as? NSTextField, !label.stringValue.isEmpty {
@@ -385,6 +450,13 @@ extension SnippetBrowserPanelController {
     }
 }
 #endif
+
+private extension Optional where Wrapped == KeyCombo {
+    var numberShortcutModifierFlags: NSEvent.ModifierFlags {
+        guard let keyCombo = self, !keyCombo.doubledModifiers else { return [] }
+        return keyCombo.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask)
+    }
+}
 
 private final class SnippetBrowserFolderRowView: NSControl {
     private enum Metrics {
