@@ -40,6 +40,30 @@ struct HistoryRetentionSettings: Equatable {
     }
 }
 
+struct PasteboardHistorySyncPayload: Codable, Equatable {
+    struct Asset: Codable, Equatable {
+        let type: NSPasteboard.PasteboardType
+        let data: Data
+    }
+
+    struct Thumbnail: Codable, Equatable {
+        let kind: PasteboardHistoryThumbnailAsset.Kind
+        let data: Data
+    }
+
+    let id: String
+    let title: String
+    let pasteboardTypes: [NSPasteboard.PasteboardType]
+    let updateAt: Int
+    let deviceID: String?
+    let assets: [Asset]
+    let thumbnail: Thumbnail?
+
+    var totalAssetBytes: Int {
+        assets.reduce(0) { $0 + $1.data.count } + (thumbnail?.data.count ?? 0)
+    }
+}
+
 struct HistorySearchQuery: Equatable {
     enum Mode: Equatable {
         case plain
@@ -116,6 +140,14 @@ protocol PasteboardHistoryRepositoryProtocol {
     func deleteAll()
     func deleteOverflowingHistories(maxHistorySize: Int)
     func pruneHistories(settings: HistoryRetentionSettings)
+    func fetchSyncPayloads(
+        currentDeviceID: String?,
+        updatedAtOrAfter: Int,
+        maxAssetBytes: Int
+    ) -> [PasteboardHistorySyncPayload]
+    @discardableResult
+    func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool
+    func suppressSyncedHistory(id: PasteboardHistory.ID)
 }
 
 extension PasteboardHistoryRepositoryProtocol {
@@ -137,6 +169,18 @@ extension PasteboardHistoryRepositoryProtocol {
             offset: 0
         )
     }
+
+    func fetchSyncPayloads(
+        currentDeviceID: String?,
+        updatedAtOrAfter: Int,
+        maxAssetBytes: Int
+    ) -> [PasteboardHistorySyncPayload] {
+        []
+    }
+
+    func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool { false }
+
+    func suppressSyncedHistory(id: PasteboardHistory.ID) {}
 }
 
 final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
@@ -346,6 +390,7 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     }
 
     func deleteHistory(id: PasteboardHistory.ID) {
+        suppressSyncedHistory(id: id)
         withErrorReporting {
             try database.write { database in
                 try PasteboardHistory
@@ -359,6 +404,20 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     func deleteAll() {
         withErrorReporting {
             try database.write { database in
+                let ids = try PasteboardHistory
+                    .select { $0.id }
+                    .fetchAll(database)
+                try ids.forEach { id in
+                    try SyncSuppression.upsert {
+                        SyncSuppression(
+                            syncIdentity: syncIdentity(kind: .history, id: id.rawValue),
+                            kind: .history,
+                            recordID: id.rawValue,
+                            suppressedAt: Int(Date().timeIntervalSince1970)
+                        )
+                    }
+                    .execute(database)
+                }
                 try PasteboardHistory.delete().execute(database)
             }
         }
@@ -387,6 +446,129 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
 
     func pruneHistories(settings: HistoryRetentionSettings) {
         deleteOverflowingHistories(maxHistorySize: settings.storedHistoryLimit)
+    }
+
+    func fetchSyncPayloads(
+        currentDeviceID: String?,
+        updatedAtOrAfter: Int,
+        maxAssetBytes: Int
+    ) -> [PasteboardHistorySyncPayload] {
+        guard let currentDeviceID else { return [] }
+        return withErrorReporting {
+            try database.read { database in
+                let histories = try PasteboardHistory
+                    .all
+                    .order { $0.updateAt }
+                    .fetchAll(database)
+                    .filter {
+                        $0.deviceID == currentDeviceID
+                            && $0.updateAt >= updatedAtOrAfter
+                    }
+                return try histories.compactMap { history in
+                    let assets = try PasteboardHistoryAsset
+                        .where { $0.pasteboardHistoryID.eq(history.id) }
+                        .fetchAll(database)
+                        .map {
+                            PasteboardHistorySyncPayload.Asset(
+                                type: $0.pasteboardType,
+                                data: $0.data
+                            )
+                        }
+                    let thumbnail = try PasteboardHistoryThumbnailAsset
+                        .find(history.id)
+                        .fetchOne(database)
+                        .map {
+                            PasteboardHistorySyncPayload.Thumbnail(
+                                kind: $0.kind,
+                                data: $0.data
+                            )
+                        }
+                    let payload = PasteboardHistorySyncPayload(
+                        id: history.id.rawValue,
+                        title: history.title,
+                        pasteboardTypes: history.pasteboardTypes,
+                        updateAt: history.updateAt,
+                        deviceID: history.deviceID,
+                        assets: assets,
+                        thumbnail: thumbnail
+                    )
+                    return payload.totalAssetBytes <= maxAssetBytes ? payload : nil
+                }
+            }
+        } ?? []
+    }
+
+    @discardableResult
+    func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool {
+        withErrorReporting {
+            try database.write { database in
+                guard try SyncSuppression
+                    .find(syncIdentity(kind: .history, id: payload.id))
+                    .fetchOne(database) == nil else {
+                    return false
+                }
+                let historyID = PasteboardHistory.ID(rawValue: payload.id)
+                if let existingHistory = try PasteboardHistory.find(historyID).fetchOne(database),
+                   payload.updateAt <= existingHistory.updateAt {
+                    return false
+                }
+                try PasteboardHistory
+                    .upsert {
+                        PasteboardHistory(
+                            id: historyID,
+                            title: payload.title,
+                            pasteboardTypes: payload.pasteboardTypes,
+                            updateAt: payload.updateAt,
+                            deviceID: payload.deviceID
+                        )
+                    }
+                    .execute(database)
+                try PasteboardHistoryAsset
+                    .delete()
+                    .where { $0.pasteboardHistoryID.eq(historyID) }
+                    .execute(database)
+                try PasteboardHistoryThumbnailAsset
+                    .delete()
+                    .where { $0.pasteboardHistoryID.eq(historyID) }
+                    .execute(database)
+                let assets = payload.assets.map {
+                    PasteboardHistoryAsset.Draft(
+                        pasteboardHistoryID: historyID,
+                        pasteboardType: $0.type,
+                        data: $0.data
+                    )
+                }
+                try PasteboardHistoryAsset.insert { assets }.execute(database)
+                if let thumbnail = payload.thumbnail {
+                    try PasteboardHistoryThumbnailAsset
+                        .upsert {
+                            PasteboardHistoryThumbnailAsset(
+                                pasteboardHistoryID: historyID,
+                                kind: thumbnail.kind,
+                                data: thumbnail.data
+                            )
+                        }
+                        .execute(database)
+                }
+                return true
+            }
+        } ?? false
+    }
+
+    func suppressSyncedHistory(id: PasteboardHistory.ID) {
+        withErrorReporting {
+            try database.write { database in
+                try SyncSuppression.upsert {
+                    SyncSuppression(
+                        syncIdentity: syncIdentity(kind: .history, id: id.rawValue),
+                        kind: .history,
+                        recordID: id.rawValue,
+                        suppressedAt: Int(Date().timeIntervalSince1970)
+                    )
+                }
+                .execute(database)
+            }
+        }
     }
 }
 
@@ -454,6 +636,10 @@ private extension PasteboardHistoryRepository {
             )
         }
         return asset
+    }
+
+    func syncIdentity(kind: SyncRecord.Kind, id: String) -> String {
+        "\(kind.rawValue):\(id)"
     }
 }
 

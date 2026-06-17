@@ -56,7 +56,7 @@ final class CPYUtilities {
         defaultValues.updateValue(storeTypes, forKey: Constants.UserDefaults.storeTypes)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.inputPasteCommand)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.reorderClipsAfterPasting)
-        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.collectCrashReport)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.collectCrashReport)
 
         /* Menu */
         defaultValues.updateValue(NSNumber(value: 16), forKey: Constants.UserDefaults.menuIconSize)
@@ -77,6 +77,12 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.overwriteSameHistory)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.copySameHistory)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncAutomaticEnabled)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncHistoryUploadEnabled)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncHistoryImportEnabled)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncSnippetImportEnabled)
+        defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.syncPollInterval)
 
         /* Updates */
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Update.enableAutomaticCheck)

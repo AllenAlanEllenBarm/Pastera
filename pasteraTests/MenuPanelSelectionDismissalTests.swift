@@ -352,6 +352,36 @@ struct PasteServiceTargetRestoreTests {
         #expect(probe.events == ["alert"])
     }
 
+    @Test
+    func defaultPasteServicePastesEvenWhenLegacyPreferenceWasDisabled() throws {
+        let suiteName = "PasteServiceTargetRestoreTests.directPaste.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(false, forKey: Constants.UserDefaults.inputPasteCommand)
+        AppEnvironment.push(defaults: defaults)
+        defer { _ = AppEnvironment.popLast() }
+
+        let probe = PasteRestoreProbe()
+        let service = PasteService(
+            accessibilityEnabledProvider: { true },
+            accessibilityAlertPresenter: { probe.events.append("alert") },
+            frontmostProcessIdentifierProvider: { 0 },
+            targetApplicationActivator: { _ in probe.events.append("activate") },
+            focusedElementRestorer: { _ in probe.events.append("focus") },
+            pasteCommandSender: { probe.events.append("paste") },
+            scheduleAfter: { delay, work in
+                probe.delays.append(delay)
+                probe.events.append("schedule")
+                work()
+            }
+        )
+
+        service.paste()
+
+        #expect(probe.delays == [0])
+        #expect(probe.events == ["schedule", "paste"])
+    }
+
     private func makeTargetContext(processIdentifier: pid_t) -> PasteTargetContext {
         PasteTargetContext(
             processIdentifier: processIdentifier,
@@ -427,7 +457,7 @@ private struct StaticSelectionSnippetRepository: SnippetRepositoryProtocol {
     func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
-    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {}
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
     func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}

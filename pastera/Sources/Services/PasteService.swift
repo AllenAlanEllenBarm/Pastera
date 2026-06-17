@@ -87,9 +87,7 @@ final class PasteService {
     var scheduleAfter: (TimeInterval, @escaping () -> Void) -> Void
 
     init(
-        inputPasteCommandEnabledProvider: @escaping () -> Bool = {
-            AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand)
-        },
+        inputPasteCommandEnabledProvider: @escaping () -> Bool = { true },
         accessibilityEnabledProvider: @escaping () -> Bool = {
             AppEnvironment.current.accessibilityService.isAccessibilityEnabled(isPrompt: false)
         },

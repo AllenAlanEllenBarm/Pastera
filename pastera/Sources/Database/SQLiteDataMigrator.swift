@@ -15,6 +15,7 @@ import SQLiteData
 extension DatabaseMigrator {
     mutating func registerMigration() {
         registerMigrationV1()
+        registerMigrationV2()
     }
 
     // swiftlint:disable:next function_body_length
@@ -135,6 +136,78 @@ extension DatabaseMigrator {
                 """
                 CREATE INDEX "index_snippets_on_folderID_index"
                 ON "snippets" ("folderID", "index")
+                """
+            )
+            .execute(database)
+        }
+    }
+
+    mutating func registerMigrationV2() {
+        registerMigration("Add non-destructive sync metadata") { database in
+            try #sql(
+                """
+                ALTER TABLE "snippetFolders"
+                ADD COLUMN "createdAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                ALTER TABLE "snippetFolders"
+                ADD COLUMN "updatedAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                ALTER TABLE "snippetFolders"
+                ADD COLUMN "lastModifiedDeviceID" TEXT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                ALTER TABLE "snippets"
+                ADD COLUMN "createdAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                ALTER TABLE "snippets"
+                ADD COLUMN "updatedAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                ALTER TABLE "snippets"
+                ADD COLUMN "lastModifiedDeviceID" TEXT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                CREATE TABLE "syncSuppressions" (
+                  "syncIdentity" TEXT PRIMARY KEY NOT NULL,
+                  "kind" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "recordID" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "suppressedAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT (unixepoch())
+                ) STRICT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                CREATE INDEX "index_syncSuppressions_on_kind_recordID"
+                ON "syncSuppressions" ("kind", "recordID")
                 """
             )
             .execute(database)

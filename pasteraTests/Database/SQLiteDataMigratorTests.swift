@@ -18,6 +18,58 @@ import Testing
 @Suite
 struct SQLiteDataMigratorTests {
     @Test
+    func registeredMigrationsAddSyncMetadata() throws {
+        let database = try DatabaseQueue()
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration()
+        try migrator.migrate(database)
+
+        try database.read { database in
+            let tables = try #sql(
+                """
+                SELECT "name"
+                FROM "sqlite_master"
+                WHERE "type" = 'table'
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(tables.contains("syncSuppressions"))
+        }
+
+        try database.read { database in
+            let folderColumns = try #sql(
+                """
+                SELECT "name"
+                FROM pragma_table_info('snippetFolders')
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(folderColumns.contains("createdAt"))
+            #expect(folderColumns.contains("updatedAt"))
+            #expect(folderColumns.contains("lastModifiedDeviceID"))
+        }
+
+        try database.read { database in
+            let snippetColumns = try #sql(
+                """
+                SELECT "name"
+                FROM pragma_table_info('snippets')
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(snippetColumns.contains("createdAt"))
+            #expect(snippetColumns.contains("updatedAt"))
+            #expect(snippetColumns.contains("lastModifiedDeviceID"))
+        }
+    }
+
+    @Test
     func migrationV1() throws { // swiftlint:disable:this function_body_length
         let database = try DatabaseQueue()
         var migrator = DatabaseMigrator()

@@ -207,7 +207,7 @@ struct KeyboardAccessibilityTests {
     }
 
     @Test
-    func preferenceTallPaneScrollsInsideFixedWindow() throws {
+    func preferenceCompactMenuPaneFitsInsideFixedWindow() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
 
@@ -217,8 +217,7 @@ struct KeyboardAccessibilityTests {
         let initialFrameSize = try #require(controller.window?.frame.size)
 
         #expect(controller.preferencePaneUsesScrollDocumentForTesting)
-        #expect(controller.selectedPaneDocumentHeightForTesting > controller.preferencePaneViewportHeightForTesting)
-        #expect(controller.preferencePaneHasVerticalScrollerForTesting)
+        #expect(controller.selectedPaneDocumentHeightForTesting <= controller.preferencePaneViewportHeightForTesting + 0.5)
         #expect(controller.window?.frame.size == initialFrameSize)
     }
 
@@ -475,7 +474,7 @@ private struct SnippetEditorKeyboardRepository: SnippetRepositoryProtocol {
         return insertedFolder
     }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
-    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {}
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
     func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}

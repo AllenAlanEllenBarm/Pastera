@@ -70,6 +70,15 @@ struct Constants {
         static let excludeApplications = "kCPYExcludeApplications"
         static let collectCrashReport = "kCPYCollectCrashReport"
         static let showColorPreviewInTheMenu = "kCPYPrefShowColorPreviewInTheMenu"
+        static let syncRootPath = "kCPYSyncRootPath"
+        static let syncAutomaticEnabled = "kCPYSyncAutomaticEnabled"
+        static let syncHistoryUploadEnabled = "kCPYSyncHistoryUploadEnabled"
+        static let syncHistoryImportEnabled = "kCPYSyncHistoryImportEnabled"
+        static let syncSnippetUploadEnabled = "kCPYSyncSnippetUploadEnabled"
+        static let syncSnippetImportEnabled = "kCPYSyncSnippetImportEnabled"
+        static let syncHistoryUploadEnabledAt = "kCPYSyncHistoryUploadEnabledAt"
+        static let syncSnippetUploadEnabledAt = "kCPYSyncSnippetUploadEnabledAt"
+        static let syncPollInterval = "kCPYSyncPollInterval"
     }
 
     struct Beta {

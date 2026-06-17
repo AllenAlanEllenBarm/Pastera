@@ -40,6 +40,12 @@
 		C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */; };
 		C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */; };
 		C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */; };
+		C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100012FD750000B7C0DE /* InstallationLocationService.swift */; };
+		C5B100032FD750000B7C0DE /* InstallationLocationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */; };
+		C5B100052FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */; };
+		C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000012FD870000B7C0DE /* SyncCoordinator.swift */; };
+		C5C000022FD870000B7C0DE /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */; };
+		C5C000042FD870000B7C0DE /* CPYSyncPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */; };
 		C5A91C002FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */; };
 		C5A91E002FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */; };
 		C5A91F002FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */; };
@@ -235,6 +241,12 @@
 		C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencePaneAlignmentTests.swift; sourceTree = "<group>"; };
 		C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPreferenceRecordingTests.swift; sourceTree = "<group>"; };
 		C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpacityPreferenceTests.swift; sourceTree = "<group>"; };
+		C5B100012FD750000B7C0DE /* InstallationLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationLocationService.swift; sourceTree = "<group>"; };
+		C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationLocationServiceTests.swift; sourceTree = "<group>"; };
+		C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleasePackagingConfigurationTests.swift; sourceTree = "<group>"; };
+		C5C000012FD870000B7C0DE /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
+		C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinatorTests.swift; sourceTree = "<group>"; };
+		C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSyncPreferenceViewController.swift; sourceTree = "<group>"; };
 		C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSnippetsEditorModels.swift; sourceTree = "<group>"; };
 		C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraPreferencePaneAlignmentAdapter.swift; sourceTree = "<group>"; };
 		C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraPreferencePaneLayoutNormalizer.swift; sourceTree = "<group>"; };
@@ -433,6 +445,8 @@
 				FAC0DCF01DE576F300309C49 /* PasteService.swift */,
 				FA1189321E4CD58C00244F12 /* ExcludeAppService.swift */,
 				FAA4BCCB2163DC9100FF5D18 /* AccessibilityService.swift */,
+				C5B100012FD750000B7C0DE /* InstallationLocationService.swift */,
+				C5C000012FD870000B7C0DE /* SyncCoordinator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -614,6 +628,7 @@
 				FA1DB4F21DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.swift */,
 				FA1DB4F31DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.swift */,
 				FA1DB4F41DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.swift */,
+				C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */,
 				FA1DB4F51DDCB4C0007F95C8 /* CPYTypePreferenceViewController.swift */,
 				FA1DB4F61DDCB4C0007F95C8 /* CPYUpdatesPreferenceViewController.swift */,
 				FA1DB4F71DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.xib */,
@@ -701,6 +716,9 @@
 				C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */,
 				C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */,
 				C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */,
+				C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */,
+				C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */,
+				C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */,
 				FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */,
 				FA6167931D3ACCB90049FA14 /* DraggedDataTests.swift */,
 				FAC43DDC1B35D8B100C06102 /* Supporting Files */,
@@ -875,6 +893,8 @@
 				C5A913002FD1900000B7C0DE /* PasteraAppIconProvider.swift in Sources */,
 				FA1DB4BA1DDCB452007F95C8 /* NSUserDefaults+ArchiveData.swift in Sources */,
 				FAA4BCCC2163DC9100FF5D18 /* AccessibilityService.swift in Sources */,
+				C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */,
+				C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */,
 				FA1DB4D31DDCB479007F95C8 /* CPYClip.swift in Sources */,
 				C5700B412FC40ABF00C8F965 /* SnippetFolderDetail.swift in Sources */,
 				C5700B422FC40ABF00C8F965 /* DraggedData.swift in Sources */,
@@ -883,6 +903,7 @@
 				FA1DB4D61DDCB479007F95C8 /* CPYFolder.swift in Sources */,
 				FA1DB4B41DDCB452007F95C8 /* NSBundle+Version.swift in Sources */,
 				FA1DB5171DDCB4C0007F95C8 /* CPYTypePreferenceViewController.swift in Sources */,
+				C5C000042FD870000B7C0DE /* CPYSyncPreferenceViewController.swift in Sources */,
 				FA1DB4A21DDCB433007F95C8 /* AppDelegate.swift in Sources */,
 				FA1DB5141DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.swift in Sources */,
 				C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */,
@@ -958,6 +979,9 @@
 				C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */,
 				C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */,
 				C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */,
+				C5B100032FD750000B7C0DE /* InstallationLocationServiceTests.swift in Sources */,
+				C5B100052FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift in Sources */,
+				C5C000022FD870000B7C0DE /* SyncCoordinatorTests.swift in Sources */,
 				C5A915002FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift in Sources */,
 				C5A916002FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift in Sources */,
 				C57100052FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift in Sources */,

@@ -8,13 +8,20 @@ import Cocoa
 
 final class CPYGeneralPreferenceViewController: NSViewController {
     private let clearHistoryButton = NSButton(title: String(localized: "Clear History"), target: nil, action: #selector(AppDelegate.clearAllHistory))
+    private let clearHistoryWarningButton = NSButton(
+        checkboxWithTitle: String(localized: "Show alert panel before clear history"),
+        target: nil,
+        action: nil
+    )
     private let opacityLabel = NSTextField(labelWithString: String(localized: "Transparency"))
     private let opacitySlider = NSSlider()
     private let opacityValueLabel = NSTextField(labelWithString: "")
     private var didInstallAdditionalControls = false
+    private weak var launchOnLoginButton: NSButton?
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        enforceRecentUseHistorySort()
         installAdditionalControls()
         updateOpacityControls()
     }
@@ -32,6 +39,7 @@ final class CPYGeneralPreferenceViewController: NSViewController {
     private func installAdditionalControls() {
         guard !didInstallAdditionalControls else { return }
         didInstallAdditionalControls = true
+        launchOnLoginButton = view.subviews.compactMap { $0 as? NSButton }.first
 
         view.subviews.forEach { subview in
             CPYWindowAppearance.apply(to: subview)
@@ -42,23 +50,28 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         clearHistoryButton.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         clearHistoryButton.setButtonType(.momentaryPushIn)
 
-        opacityLabel.frame = NSRect(x: 270, y: 47, width: 62, height: 18)
+        clearHistoryWarningButton.font = .systemFont(ofSize: NSFont.systemFontSize)
+        clearHistoryWarningButton.bind(
+            .value,
+            to: NSUserDefaultsController.shared,
+            withKeyPath: "values.\(Constants.UserDefaults.showAlertBeforeClearHistory)",
+            options: nil
+        )
+
         opacityLabel.textColor = .labelColor
         opacityLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
 
-        opacitySlider.frame = NSRect(x: 330, y: 43, width: 92, height: 24)
         opacitySlider.minValue = CPYWindowAppearance.minimumOpacity
         opacitySlider.maxValue = CPYWindowAppearance.maximumOpacity
         opacitySlider.target = self
         opacitySlider.action = #selector(opacitySliderChanged(_:))
         opacitySlider.isContinuous = true
 
-        opacityValueLabel.frame = NSRect(x: 428, y: 47, width: 42, height: 18)
         opacityValueLabel.alignment = .right
         opacityValueLabel.textColor = .secondaryLabelColor
         opacityValueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
 
-        [clearHistoryButton, opacityLabel, opacitySlider, opacityValueLabel].forEach {
+        [clearHistoryButton, clearHistoryWarningButton, opacityLabel, opacitySlider, opacityValueLabel].forEach {
             $0.autoresizingMask = [.maxXMargin, .maxYMargin]
             CPYWindowAppearance.apply(to: $0)
             view.addSubview($0)
@@ -66,23 +79,38 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         layoutAdditionalControls()
     }
 
+    private func enforceRecentUseHistorySort() {
+        AppEnvironment.current.defaults.set(true, forKey: Constants.UserDefaults.reorderClipsAfterPasting)
+    }
+
     private func layoutAdditionalControls() {
+        let contentLeftX: CGFloat = 59
+        let topY: CGFloat = 126
+        let controlMaxX = min(view.bounds.width - 18, 408)
+        let checkboxHeight: CGFloat = 18
+        let checkboxWidth = max(180, controlMaxX - contentLeftX)
         let clearHistoryButtonSize = NSSize(width: 118, height: 24)
-        let fallbackX: CGFloat = 290
-        let fallbackY: CGFloat = 132
-        let sectionTitle = view.subviews
-            .compactMap { $0 as? NSTextField }
-            .first { ["Clipboard History", "剪贴板历史"].contains($0.stringValue) }
-        let sortPopup = view.subviews.compactMap { $0 as? NSPopUpButton }.first
-        let buttonMaxX = sortPopup?.frame.maxX ?? fallbackX + clearHistoryButtonSize.width
-        let buttonMidY = sectionTitle?.frame.midY ?? fallbackY + clearHistoryButtonSize.height / 2
+
+        launchOnLoginButton?.frame = NSRect(
+            x: contentLeftX,
+            y: topY,
+            width: checkboxWidth,
+            height: checkboxHeight
+        )
 
         clearHistoryButton.frame = NSRect(
-            x: buttonMaxX - clearHistoryButtonSize.width,
-            y: buttonMidY - clearHistoryButtonSize.height / 2,
+            x: contentLeftX,
+            y: topY - 38,
             width: clearHistoryButtonSize.width,
             height: clearHistoryButtonSize.height
         )
+
+        clearHistoryWarningButton.frame = NSRect(x: contentLeftX, y: topY - 68, width: checkboxWidth, height: checkboxHeight)
+
+        let opacityY = topY - 112
+        opacityLabel.frame = NSRect(x: contentLeftX, y: opacityY, width: 80, height: checkboxHeight)
+        opacitySlider.frame = NSRect(x: contentLeftX + 98, y: opacityY - 4, width: 176, height: 24)
+        opacityValueLabel.frame = NSRect(x: contentLeftX + 292, y: opacityY, width: 42, height: checkboxHeight)
     }
 
     private func updateOpacityControls(opacity: Double = CPYWindowAppearance.opacity()) {

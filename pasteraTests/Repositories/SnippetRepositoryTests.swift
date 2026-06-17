@@ -238,6 +238,17 @@ struct SnippetRepositoryTests {
         #expect(repository.fetchSnippet(id: snippet.id) == nil)
     }
 
+}
+
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct SnippetRepositorySyncTests {
+    let repository = SnippetRepository()
+
     @Test
     func syncSnapshotExportsStableFoldersAndSnippets() throws {
         let folder = try #require(repository.insertFolder())
@@ -249,30 +260,32 @@ struct SnippetRepositoryTests {
 
         let snapshot = repository.fetchSyncSnapshot()
 
-        #expect(snapshot.folders == [
-            SnippetFolderSyncPayload(
-                id: folder.id.rawValue.uuidString,
-                title: "Remote folder",
-                index: 0,
-                isEnabled: false
-            )
-        ])
-        #expect(snapshot.snippets == [
-            SnippetSyncPayload(
-                id: snippet.id.rawValue.uuidString,
-                folderID: folder.id.rawValue.uuidString,
-                title: "Remote snippet",
-                content: "payload",
-                index: 0,
-                isEnabled: true
-            )
-        ])
+        let folderPayload = try #require(snapshot.folders.first)
+        #expect(snapshot.folders.count == 1)
+        #expect(folderPayload.id == folder.id.rawValue.uuidString)
+        #expect(folderPayload.title == "Remote folder")
+        #expect(folderPayload.index == 0)
+        #expect(folderPayload.isEnabled == false)
+        #expect(folderPayload.updatedAt > 0)
+        #expect(folderPayload.deviceID == CPYUtilities.deviceID)
+
+        let snippetPayload = try #require(snapshot.snippets.first)
+        #expect(snapshot.snippets.count == 1)
+        #expect(snippetPayload.id == snippet.id.rawValue.uuidString)
+        #expect(snippetPayload.folderID == folder.id.rawValue.uuidString)
+        #expect(snippetPayload.title == "Remote snippet")
+        #expect(snippetPayload.content == "payload")
+        #expect(snippetPayload.index == 0)
+        #expect(snippetPayload.isEnabled == true)
+        #expect(snippetPayload.updatedAt > 0)
+        #expect(snippetPayload.deviceID == CPYUtilities.deviceID)
     }
 
     @Test
-    func syncUpsertAndTombstonesMergeIntoExistingStore() throws {
+    func syncUpsertKeepsLocalDataWhenRemoteTombstonesArrive() throws {
         let folder = try #require(repository.insertFolder())
         let snippet = try #require(repository.insertSnippet(to: folder.id))
+        let remoteUpdatedAt = max(folder.updatedAt, snippet.updatedAt) + 1
 
         repository.upsertSyncSnapshot(
             SnippetSyncSnapshot(
@@ -281,7 +294,8 @@ struct SnippetRepositoryTests {
                         id: folder.id.rawValue.uuidString,
                         title: "Synced folder",
                         index: 3,
-                        isEnabled: false
+                        isEnabled: false,
+                        updatedAt: remoteUpdatedAt
                     )
                 ],
                 snippets: [
@@ -291,7 +305,8 @@ struct SnippetRepositoryTests {
                         title: "Synced snippet",
                         content: "synced content",
                         index: 4,
-                        isEnabled: false
+                        isEnabled: false,
+                        updatedAt: remoteUpdatedAt
                     )
                 ]
             )
@@ -312,8 +327,232 @@ struct SnippetRepositoryTests {
             SyncRecord.plaintextFixture(id: folder.id.rawValue.uuidString, kind: .snippetFolder, deletedAt: 21)
         ])
 
-        #expect(repository.fetchSnippet(id: snippet.id) == nil)
-        #expect(repository.fetchFolderDetail(id: folder.id) == nil)
+        #expect(repository.fetchSnippet(id: snippet.id) != nil)
+        #expect(repository.fetchFolderDetail(id: folder.id) != nil)
+    }
+
+    @Test
+    func syncSnapshotExportsOnlyCurrentDeviceChangesAfterCutoff() throws {
+        let remoteFolderID = UUID()
+        let remoteSnippetID = UUID()
+        repository.upsertSyncSnapshot(
+            SnippetSyncSnapshot(
+                folders: [
+                    SnippetFolderSyncPayload(
+                        id: remoteFolderID.uuidString,
+                        title: "Remote folder",
+                        index: 0,
+                        isEnabled: true,
+                        updatedAt: 20,
+                        deviceID: "remote-device"
+                    )
+                ],
+                snippets: [
+                    SnippetSyncPayload(
+                        id: remoteSnippetID.uuidString,
+                        folderID: remoteFolderID.uuidString,
+                        title: "Remote snippet",
+                        content: "remote",
+                        index: 0,
+                        isEnabled: true,
+                        updatedAt: 20,
+                        deviceID: "remote-device"
+                    )
+                ]
+            )
+        )
+        let localFolder = try #require(repository.insertFolder())
+        let localSnippet = try #require(repository.insertSnippet(to: localFolder.id))
+
+        let snapshot = repository.fetchSyncSnapshot(
+            currentDeviceID: CPYUtilities.deviceID,
+            updatedAtOrAfter: 0
+        )
+
+        #expect(snapshot.folders.map(\.id) == [localFolder.id.rawValue.uuidString])
+        #expect(snapshot.folders.first?.deviceID == CPYUtilities.deviceID)
+        #expect(snapshot.snippets.map(\.id) == [localSnippet.id.rawValue.uuidString])
+        #expect(snapshot.snippets.first?.deviceID == CPYUtilities.deviceID)
+        #expect(repository.fetchSyncSnapshot(currentDeviceID: CPYUtilities.deviceID, updatedAtOrAfter: Int.max).folders.isEmpty)
+        #expect(repository.fetchSyncSnapshot(currentDeviceID: CPYUtilities.deviceID, updatedAtOrAfter: Int.max).snippets.isEmpty)
+    }
+
+    @Test
+    func syncSnapshotIncludesParentFolderForChangedSnippetWithoutBumpingFolderTimestamp() throws {
+        let folderID = UUID()
+        let snippetID = UUID()
+        repository.upsertSyncSnapshot(
+            SnippetSyncSnapshot(
+                folders: [
+                    SnippetFolderSyncPayload(
+                        id: folderID.uuidString,
+                        title: "Existing folder",
+                        index: 0,
+                        isEnabled: true,
+                        updatedAt: 10,
+                        deviceID: CPYUtilities.deviceID
+                    )
+                ],
+                snippets: [
+                    SnippetSyncPayload(
+                        id: snippetID.uuidString,
+                        folderID: folderID.uuidString,
+                        title: "Changed snippet",
+                        content: "changed",
+                        index: 0,
+                        isEnabled: true,
+                        updatedAt: 30,
+                        deviceID: CPYUtilities.deviceID
+                    )
+                ]
+            )
+        )
+
+        let snapshot = repository.fetchSyncSnapshot(
+            currentDeviceID: CPYUtilities.deviceID,
+            updatedAtOrAfter: 20
+        )
+
+        #expect(snapshot.snippets.map(\.id) == [snippetID.uuidString])
+        #expect(snapshot.folders.map(\.id) == [folderID.uuidString])
+        #expect(snapshot.folders.first?.updatedAt == 10)
+    }
+
+    @Test
+    func syncImportUsesLastWriteWinsAndReportsActualSnippetWrites() throws {
+        let folderID = UUID()
+        let snippetID = UUID()
+        repository.upsertSyncSnapshot(
+            SnippetSyncSnapshot(
+                folders: [
+                    SnippetFolderSyncPayload(
+                        id: folderID.uuidString,
+                        title: "Local folder",
+                        index: 0,
+                        isEnabled: true,
+                        updatedAt: 30,
+                        deviceID: CPYUtilities.deviceID
+                    )
+                ],
+                snippets: [
+                    SnippetSyncPayload(
+                        id: snippetID.uuidString,
+                        folderID: folderID.uuidString,
+                        title: "Local snippet",
+                        content: "local",
+                        index: 0,
+                        isEnabled: true,
+                        updatedAt: 30,
+                        deviceID: CPYUtilities.deviceID
+                    )
+                ]
+            )
+        )
+
+        let olderRemote = SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(
+                    id: folderID.uuidString,
+                    title: "Remote older folder",
+                    index: 1,
+                    isEnabled: false,
+                    updatedAt: 20,
+                    deviceID: "remote-device"
+                )
+            ],
+            snippets: [
+                SnippetSyncPayload(
+                    id: snippetID.uuidString,
+                    folderID: folderID.uuidString,
+                    title: "Remote older snippet",
+                    content: "remote older",
+                    index: 1,
+                    isEnabled: false,
+                    updatedAt: 20,
+                    deviceID: "remote-device"
+                )
+            ]
+        )
+        let newerRemote = SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(
+                    id: folderID.uuidString,
+                    title: "Remote newer folder",
+                    index: 2,
+                    isEnabled: false,
+                    updatedAt: 40,
+                    deviceID: "remote-device"
+                )
+            ],
+            snippets: [
+                SnippetSyncPayload(
+                    id: snippetID.uuidString,
+                    folderID: folderID.uuidString,
+                    title: "Remote newer snippet",
+                    content: "remote newer",
+                    index: 2,
+                    isEnabled: false,
+                    updatedAt: 40,
+                    deviceID: "remote-device"
+                )
+            ]
+        )
+
+        #expect(repository.upsertSyncSnapshot(olderRemote) == 0)
+        #expect(repository.fetchFolderDetail(id: SnippetFolder.ID(rawValue: folderID))?.folder.title == "Local folder")
+        #expect(repository.fetchSnippet(id: Snippet.ID(rawValue: snippetID))?.title == "Local snippet")
+
+        #expect(repository.upsertSyncSnapshot(newerRemote) == 2)
+        #expect(repository.fetchFolderDetail(id: SnippetFolder.ID(rawValue: folderID))?.folder.title == "Remote newer folder")
+        #expect(repository.fetchSnippet(id: Snippet.ID(rawValue: snippetID))?.title == "Remote newer snippet")
+    }
+
+    @Test
+    func syncImportDoesNotApplyRemoteDeletesAndLocalSuppressionPreventsReimport() throws {
+        let folderID = UUID()
+        let snippetID = UUID()
+        let snapshot = SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(
+                    id: folderID.uuidString,
+                    title: "Remote folder",
+                    index: 0,
+                    isEnabled: true,
+                    updatedAt: 20,
+                    deviceID: "remote-device"
+                )
+            ],
+            snippets: [
+                SnippetSyncPayload(
+                    id: snippetID.uuidString,
+                    folderID: folderID.uuidString,
+                    title: "Remote snippet",
+                    content: "remote",
+                    index: 0,
+                    isEnabled: true,
+                    updatedAt: 20,
+                    deviceID: "remote-device"
+                )
+            ]
+        )
+
+        repository.upsertSyncSnapshot(snapshot)
+        repository.mergeSyncTombstones([
+            SyncRecord.plaintextFixture(id: snippetID.uuidString, kind: .snippet, deletedAt: 21),
+            SyncRecord.plaintextFixture(id: folderID.uuidString, kind: .snippetFolder, deletedAt: 21)
+        ])
+
+        let syncedFolderID = SnippetFolder.ID(rawValue: folderID)
+        let syncedSnippetID = Snippet.ID(rawValue: snippetID)
+        #expect(repository.fetchFolderDetail(id: syncedFolderID) != nil)
+        #expect(repository.fetchSnippet(id: syncedSnippetID) != nil)
+
+        repository.deleteSnippet(syncedSnippetID)
+        repository.deleteFolder(syncedFolderID)
+        repository.upsertSyncSnapshot(snapshot)
+
+        #expect(repository.fetchFolderDetail(id: syncedFolderID) == nil)
+        #expect(repository.fetchSnippet(id: syncedSnippetID) == nil)
     }
 }
 
@@ -336,20 +575,15 @@ private extension SyncRecord {
         kind: SyncRecord.Kind,
         updatedAt: Int = 10,
         deletedAt: Int? = nil,
-        payload: Data = Data("{}".utf8)
+        payload: SyncJSONValue = .object([:])
     ) -> SyncRecord {
-        let encryptedPayload = try! SyncPayloadCipher.seal(
-            payload,
-            passphrase: "test-passphrase",
-            salt: Data("test-salt".utf8)
-        )
         return SyncRecord(
             id: id,
             kind: kind,
             deviceID: "device-a",
             updatedAt: updatedAt,
             deletedAt: deletedAt,
-            payload: encryptedPayload,
+            payload: payload,
             schemaVersion: 1
         )
     }

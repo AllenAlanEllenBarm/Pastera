@@ -1,0 +1,80 @@
+<svg width="1280" height="520" viewBox="0 0 1280 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Pastera macOS clipboard manager</title>
+  <desc id="desc">A polished dark banner for Pastera with clipboard, search, snippets, and keyboard-first workflow highlights.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#13171C"/>
+      <stop offset="0.48" stop-color="#20262D"/>
+      <stop offset="1" stop-color="#0F1418"/>
+    </linearGradient>
+    <linearGradient id="surface" x1="260" y1="70" x2="1080" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3A424B" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#191F25" stop-opacity="0.82"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#43D6B2"/>
+      <stop offset="1" stop-color="#2587FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="26" stdDeviation="34" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="520" rx="42" fill="url(#bg)"/>
+  <path d="M0 402C176 324 315 365 456 298C603 228 703 84 879 102C1030 118 1127 231 1280 180V520H0V402Z" fill="#2B343C" opacity="0.46"/>
+  <path d="M0 124C161 72 323 120 454 104C634 82 747 5 949 34C1102 56 1198 115 1280 92V0H0V124Z" fill="#25303A" opacity="0.52"/>
+
+  <rect x="56" y="48" width="1168" height="424" rx="34" fill="url(#surface)" stroke="#59616A" stroke-opacity="0.35"/>
+  <rect x="88" y="80" width="332" height="360" rx="26" fill="#14191E" fill-opacity="0.72" stroke="#65707A" stroke-opacity="0.24"/>
+
+  <g filter="url(#shadow)">
+    <rect x="132" y="122" width="90" height="106" rx="22" fill="#EEF2F6"/>
+    <rect x="149" y="144" width="56" height="64" rx="9" fill="#20262D"/>
+    <rect x="164" y="111" width="27" height="28" rx="10" fill="#EEF2F6"/>
+    <rect x="158" y="126" width="39" height="10" rx="5" fill="#CFD6DE"/>
+    <path d="M171 193V158H184C194 158 200 164 200 173C200 182 194 187 184 187H178V193H171ZM178 180H184C189 180 192 177 192 173C192 169 189 166 184 166H178V180Z" fill="url(#accent)"/>
+  </g>
+
+  <text x="252" y="150" fill="#F4F7FA" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="34" font-weight="700">Pastera</text>
+  <text x="252" y="184" fill="#B9C1C9" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="500">Searchable history,</text>
+  <text x="252" y="210" fill="#B9C1C9" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="500">snippets, fast pasteback.</text>
+  <rect x="252" y="232" width="118" height="32" rx="10" fill="#2587FF" fill-opacity="0.18" stroke="#2587FF" stroke-opacity="0.36"/>
+  <text x="274" y="254" fill="#8AC4FF" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="15" font-weight="700">1.2.2beta</text>
+
+  <g transform="translate(104 286)">
+    <rect width="270" height="44" rx="13" fill="#FFFFFF" fill-opacity="0.07"/>
+    <path d="M22 23C22 15 28 9 36 9C44 9 50 15 50 23C50 31 44 37 36 37C28 37 22 31 22 23Z" stroke="#7FDCC9" stroke-width="3"/>
+    <path d="M47 34L58 45" stroke="#7FDCC9" stroke-width="3" stroke-linecap="round"/>
+    <text x="78" y="29" fill="#E7EBEF" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="650">Search history instantly</text>
+  </g>
+  <g transform="translate(104 344)">
+    <rect width="270" height="44" rx="13" fill="#FFFFFF" fill-opacity="0.07"/>
+    <path d="M24 13H55V37H24V13Z" stroke="#8AC4FF" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M31 13V9H48V13" stroke="#8AC4FF" stroke-width="3" stroke-linecap="round"/>
+    <text x="78" y="29" fill="#E7EBEF" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="650">Keyboard-first workflow</text>
+  </g>
+
+  <g transform="translate(508 94)">
+    <rect width="632" height="332" rx="28" fill="#10161B" fill-opacity="0.62" stroke="#65707A" stroke-opacity="0.26"/>
+    <rect x="26" y="24" width="580" height="56" rx="18" fill="#EEF2F6" fill-opacity="0.10"/>
+    <circle cx="58" cy="52" r="13" stroke="#B9C1C9" stroke-width="4"/>
+    <path d="M68 62L80 74" stroke="#B9C1C9" stroke-width="4" stroke-linecap="round"/>
+    <text x="104" y="60" fill="#F4F7FA" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="22" font-weight="700">Keyword</text>
+    <rect x="418" y="34" width="60" height="34" rx="11" fill="#2587FF"/>
+    <text x="438" y="58" fill="#FFFFFF" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="800">All</text>
+    <text x="502" y="58" fill="#C5CBD1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="650">Text</text>
+
+    <rect x="26" y="106" width="580" height="54" rx="16" fill="#2587FF"/>
+    <text x="50" y="141" fill="#FFFFFF" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="23" font-weight="760">中文粘贴</text>
+    <rect x="540" y="118" width="42" height="30" rx="10" fill="#FFFFFF" fill-opacity="0.22"/>
+    <text x="555" y="140" fill="#FFFFFF" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="20" font-weight="800">1</text>
+
+    <text x="50" y="205" fill="#DCE1E6" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="22" font-weight="700">AI Prompt</text>
+    <rect x="540" y="183" width="42" height="30" rx="10" fill="#FFFFFF" fill-opacity="0.10"/>
+    <text x="555" y="205" fill="#BCC4CC" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="20" font-weight="800">2</text>
+
+    <text x="50" y="266" fill="#DCE1E6" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="22" font-weight="700">Screenshot.png</text>
+    <rect x="540" y="244" width="42" height="30" rx="10" fill="#FFFFFF" fill-opacity="0.10"/>
+    <text x="555" y="266" fill="#BCC4CC" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="20" font-weight="800">3</text>
+  </g>
+</svg>

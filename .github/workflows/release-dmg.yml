@@ -1,0 +1,93 @@
+name: Release DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to publish, for example v2.0.1-beta
+        required: true
+      version:
+        description: App version used in the DMG name, for example 2.0.1-beta
+        required: true
+      appcast_branch:
+        description: Branch that hosts appcast.xml
+        required: false
+        default: develop
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+
+jobs:
+  release-dmg:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_BUILD_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s build.keychain login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security find-identity -p codesigning -v
+
+      - name: Store notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool store-credentials PasteraNotary \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+      - name: Build signed notarized DMG
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_KEYCHAIN_PROFILE: PasteraNotary
+        run: |
+          set -euo pipefail
+          chmod +x script/package_release_dmg.sh
+          script/package_release_dmg.sh --version "${{ inputs.version }}"
+
+      - name: Upload DMG to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ inputs.tag }}" \
+            ".build/release-artifacts/Pastera-${{ inputs.version }}-macOS.dmg" \
+            --clobber
+
+      - name: Publish appcast to feed branch
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.appcast_branch }}"
+          git checkout "${{ inputs.appcast_branch }}"
+          chmod +x script/update_appcast_for_dmg.sh
+          script/update_appcast_for_dmg.sh \
+            --version "${{ inputs.version }}" \
+            --tag "${{ inputs.tag }}" \
+            --dmg ".build/release-artifacts/Pastera-${{ inputs.version }}-macOS.dmg"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml
+          git commit -m "Update appcast for ${{ inputs.tag }}" || exit 0
+          git push origin "HEAD:${{ inputs.appcast_branch }}"

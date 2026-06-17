@@ -71,6 +71,27 @@ struct SnippetFolder: Identifiable, Equatable {
     let title: String
     let index: Int
     let isEnabled: Bool
+    let createdAt: Int
+    let updatedAt: Int
+    let lastModifiedDeviceID: String?
+
+    init(
+        id: ID,
+        title: String,
+        index: Int,
+        isEnabled: Bool,
+        createdAt: Int = 0,
+        updatedAt: Int = 0,
+        lastModifiedDeviceID: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.index = index
+        self.isEnabled = isEnabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.lastModifiedDeviceID = lastModifiedDeviceID
+    }
 }
 
 @Table
@@ -84,8 +105,45 @@ struct Snippet: Identifiable, Equatable {
     let content: String
     let index: Int
     let isEnabled: Bool
+    let createdAt: Int
+    let updatedAt: Int
+    let lastModifiedDeviceID: String?
+
+    init(
+        id: ID,
+        folderID: SnippetFolder.ID,
+        title: String,
+        content: String,
+        index: Int,
+        isEnabled: Bool,
+        createdAt: Int = 0,
+        updatedAt: Int = 0,
+        lastModifiedDeviceID: String? = nil
+    ) {
+        self.id = id
+        self.folderID = folderID
+        self.title = title
+        self.content = content
+        self.index = index
+        self.isEnabled = isEnabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.lastModifiedDeviceID = lastModifiedDeviceID
+    }
+}
+
+@Table
+struct SyncSuppression: Equatable {
+    @Column(primaryKey: true)
+    let syncIdentity: String
+    let kind: SyncRecord.Kind
+    let recordID: String
+    let suppressedAt: Int
 }
 
 extension NSPasteboard.PasteboardType: @retroactive SQLiteType {}
 extension NSPasteboard.PasteboardType: @retroactive QueryBindable {}
 extension NSPasteboard.PasteboardType: @retroactive Codable {}
+extension PasteboardHistoryThumbnailAsset.Kind: Codable {}
+extension SyncRecord.Kind: SQLiteType {}
+extension SyncRecord.Kind: QueryBindable {}

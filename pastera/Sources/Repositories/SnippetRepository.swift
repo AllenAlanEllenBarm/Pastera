@@ -20,12 +20,23 @@ struct SnippetFolderSyncPayload: Codable, Equatable {
     let title: String
     let index: Int
     let isEnabled: Bool
+    let updatedAt: Int
+    let deviceID: String?
 
-    init(id: String, title: String, index: Int, isEnabled: Bool) {
+    init(
+        id: String,
+        title: String,
+        index: Int,
+        isEnabled: Bool,
+        updatedAt: Int = 0,
+        deviceID: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.index = index
         self.isEnabled = isEnabled
+        self.updatedAt = updatedAt
+        self.deviceID = deviceID
     }
 
     init(folder: SnippetFolder) {
@@ -33,7 +44,9 @@ struct SnippetFolderSyncPayload: Codable, Equatable {
             id: folder.id.rawValue.uuidString,
             title: folder.title,
             index: folder.index,
-            isEnabled: folder.isEnabled
+            isEnabled: folder.isEnabled,
+            updatedAt: folder.updatedAt,
+            deviceID: folder.lastModifiedDeviceID
         )
     }
 }
@@ -45,14 +58,27 @@ struct SnippetSyncPayload: Codable, Equatable {
     let content: String
     let index: Int
     let isEnabled: Bool
+    let updatedAt: Int
+    let deviceID: String?
 
-    init(id: String, folderID: String, title: String, content: String, index: Int, isEnabled: Bool) {
+    init(
+        id: String,
+        folderID: String,
+        title: String,
+        content: String,
+        index: Int,
+        isEnabled: Bool,
+        updatedAt: Int = 0,
+        deviceID: String? = nil
+    ) {
         self.id = id
         self.folderID = folderID
         self.title = title
         self.content = content
         self.index = index
         self.isEnabled = isEnabled
+        self.updatedAt = updatedAt
+        self.deviceID = deviceID
     }
 
     init(snippet: Snippet) {
@@ -62,7 +88,9 @@ struct SnippetSyncPayload: Codable, Equatable {
             title: snippet.title,
             content: snippet.content,
             index: snippet.index,
-            isEnabled: snippet.isEnabled
+            isEnabled: snippet.isEnabled,
+            updatedAt: snippet.updatedAt,
+            deviceID: snippet.lastModifiedDeviceID
         )
     }
 }
@@ -79,10 +107,12 @@ protocol SnippetRepositoryProtocol {
     func fetchFolderDetails() -> [SnippetFolderDetail]
     func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail?
     func fetchSyncSnapshot() -> SnippetSyncSnapshot
+    func fetchSyncSnapshot(currentDeviceID: String?, updatedAtOrAfter: Int) -> SnippetSyncSnapshot
 
     func insertFolder() -> SnippetFolder?
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]?
-    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot)
+    @discardableResult
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int
     func mergeSyncTombstones(_ records: [SyncRecord])
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String)
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool)
@@ -108,6 +138,10 @@ extension SnippetRepositoryProtocol {
 
     func fetchFolders() -> [SnippetFolder] {
         fetchFolderDetails().map(\.folder)
+    }
+
+    func fetchSyncSnapshot(currentDeviceID: String?, updatedAtOrAfter: Int) -> SnippetSyncSnapshot {
+        SnippetSyncSnapshot(folders: [], snippets: [])
     }
 }
 
@@ -177,6 +211,41 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         } ?? SnippetSyncSnapshot(folders: [], snippets: [])
     }
 
+    func fetchSyncSnapshot(currentDeviceID: String?, updatedAtOrAfter: Int) -> SnippetSyncSnapshot {
+        guard let currentDeviceID else {
+            return SnippetSyncSnapshot(folders: [], snippets: [])
+        }
+        return withErrorReporting {
+            try database.read { database in
+                let allFolders = try SnippetFolder.all.order(by: \.index)
+                    .fetchAll(database)
+                let allSnippets = try Snippet.all.order(by: \.index)
+                    .fetchAll(database)
+                let changedSnippets = allSnippets
+                    .filter {
+                        $0.lastModifiedDeviceID == currentDeviceID
+                            && $0.updatedAt >= updatedAtOrAfter
+                    }
+                let changedFolderIDs = Set(
+                    allFolders
+                        .filter {
+                            $0.lastModifiedDeviceID == currentDeviceID
+                                && $0.updatedAt >= updatedAtOrAfter
+                        }
+                        .map(\.id)
+                )
+                let parentFolderIDs = Set(changedSnippets.map(\.folderID))
+                let exportedFolderIDs = changedFolderIDs.union(parentFolderIDs)
+                let folders = allFolders
+                    .filter { exportedFolderIDs.contains($0.id) }
+                    .map(SnippetFolderSyncPayload.init(folder:))
+                let snippets = changedSnippets
+                    .map(SnippetSyncPayload.init(snippet:))
+                return SnippetSyncSnapshot(folders: folders, snippets: snippets)
+            }
+        } ?? SnippetSyncSnapshot(folders: [], snippets: [])
+    }
+
     func insertFolder() -> SnippetFolder? {
         withErrorReporting {
             return try database.write { database in
@@ -186,7 +255,10 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                 let folder = SnippetFolder.Draft(
                     title: "untitled folder",
                     index: lastIndex + 1,
-                    isEnabled: true
+                    isEnabled: true,
+                    createdAt: currentUnixTime(),
+                    updatedAt: currentUnixTime(),
+                    lastModifiedDeviceID: CPYUtilities.deviceID
                 )
                 return try SnippetFolder.insert { folder }.returning(\.self).fetchOne(database)
             }
@@ -204,7 +276,10 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                     let folder = SnippetFolder.Draft(
                         title: folders.title,
                         index: lastIndex + index + 1,
-                        isEnabled: true
+                        isEnabled: true,
+                        createdAt: currentUnixTime(),
+                        updatedAt: currentUnixTime(),
+                        lastModifiedDeviceID: CPYUtilities.deviceID
                     )
                     guard let insertedFolder = try SnippetFolder.insert(values: { folder }).returning(\.self).fetchOne(database) else {
                         return
@@ -215,7 +290,10 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                             title: snippet.title,
                             content: snippet.content,
                             index: snippetIndex,
-                            isEnabled: true
+                            isEnabled: true,
+                            createdAt: currentUnixTime(),
+                            updatedAt: currentUnixTime(),
+                            lastModifiedDeviceID: CPYUtilities.deviceID
                         )
                     }
                     let insertedSnippets = try Snippet.insert { snippets }.returning(\.self).fetchAll(database)
@@ -226,50 +304,53 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         }
     }
 
-    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) {
+    @discardableResult
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int {
         withErrorReporting {
             try database.write { database in
-                try snapshot.folders
-                    .compactMap(\.snippetFolder)
-                    .forEach { folder in
-                        try SnippetFolder.upsert { folder }.execute(database)
+                var writtenCount = 0
+                for payload in snapshot.folders {
+                    guard try !isSuppressed(kind: .snippetFolder, id: payload.id, database: database),
+                          let folder = payload.snippetFolder else {
+                        continue
                     }
-                try snapshot.snippets
-                    .compactMap(\.snippet)
-                    .forEach { snippet in
-                        try Snippet.upsert { snippet }.execute(database)
+                    if let existingFolder = try SnippetFolder.find(folder.id).fetchOne(database),
+                       payload.updatedAt <= existingFolder.updatedAt {
+                        continue
                     }
+                    try SnippetFolder.upsert { folder }.execute(database)
+                    writtenCount += 1
+                }
+                for payload in snapshot.snippets {
+                    guard try !isSuppressed(kind: .snippet, id: payload.id, database: database),
+                          let snippet = payload.snippet else {
+                        continue
+                    }
+                    if let existingSnippet = try Snippet.find(snippet.id).fetchOne(database),
+                       payload.updatedAt <= existingSnippet.updatedAt {
+                        continue
+                    }
+                    try Snippet.upsert { snippet }.execute(database)
+                    writtenCount += 1
+                }
+                return writtenCount
             }
-        }
+        } ?? 0
     }
 
     func mergeSyncTombstones(_ records: [SyncRecord]) {
-        let tombstones = records.filter { $0.deletedAt != nil }
-        guard !tombstones.isEmpty else { return }
-
-        withErrorReporting {
-            try database.write { database in
-                try tombstones
-                    .filter { $0.kind == .snippet }
-                    .compactMap { Snippet.ID(uuidString: $0.id) }
-                    .forEach { id in
-                        try Snippet.delete().where { $0.id.eq(id) }.execute(database)
-                    }
-                try tombstones
-                    .filter { $0.kind == .snippetFolder }
-                    .compactMap { SnippetFolder.ID(uuidString: $0.id) }
-                    .forEach { id in
-                        try SnippetFolder.delete().where { $0.id.eq(id) }.execute(database)
-                    }
-            }
-        }
+        _ = records
     }
 
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {
         withErrorReporting {
             try database.write { database in
                 try SnippetFolder.where { $0.id.eq(id) }
-                    .update { $0.title = title }
+                    .update {
+                        $0.title = title
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
                     .execute(database)
             }
         }
@@ -279,7 +360,11 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         withErrorReporting {
             try database.write { database in
                 try SnippetFolder.where { $0.id.eq(id) }
-                    .update { $0.isEnabled = isEnabled }
+                    .update {
+                        $0.isEnabled = isEnabled
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
                     .execute(database)
             }
         }
@@ -290,7 +375,11 @@ final class SnippetRepository: SnippetRepositoryProtocol {
             try database.write { database in
                 try folderIDs.enumerated().forEach { index, folderID in
                     try SnippetFolder.where { $0.id.eq(folderID) }
-                        .update { $0.index = index }
+                        .update {
+                            $0.index = index
+                            $0.updatedAt = currentUnixTime()
+                            $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                        }
                         .execute(database)
                 }
             }
@@ -300,6 +389,14 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     func deleteFolder(_ id: SnippetFolder.ID) {
         withErrorReporting {
             try database.write { database in
+                try suppress(kind: .snippetFolder, id: id.rawValue.uuidString, database: database)
+                let snippetIDs = try Snippet
+                    .where { $0.folderID.eq(id) }
+                    .select { $0.id }
+                    .fetchAll(database)
+                try snippetIDs.forEach { snippetID in
+                    try suppress(kind: .snippet, id: snippetID.rawValue.uuidString, database: database)
+                }
                 try SnippetFolder.delete().where { $0.id.eq(id) }.execute(database)
             }
         }
@@ -325,7 +422,10 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                     title: "untitled snippet",
                     content: "",
                     index: lastIndex + 1,
-                    isEnabled: true
+                    isEnabled: true,
+                    createdAt: currentUnixTime(),
+                    updatedAt: currentUnixTime(),
+                    lastModifiedDeviceID: CPYUtilities.deviceID
                 )
                 return try Snippet.insert { snippet }.returning(\.self).fetchOne(database)
             }
@@ -336,7 +436,11 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         withErrorReporting {
             try database.write { database in
                 try Snippet.where { $0.id.eq(id) }
-                    .update { $0.title = title }
+                    .update {
+                        $0.title = title
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
                     .execute(database)
             }
         }
@@ -346,7 +450,11 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         withErrorReporting {
             try database.write { database in
                 try Snippet.where { $0.id.eq(id) }
-                    .update { $0.content = content }
+                    .update {
+                        $0.content = content
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
                     .execute(database)
             }
         }
@@ -356,7 +464,11 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         withErrorReporting {
             try database.write { database in
                 try Snippet.where { $0.id.eq(id) }
-                    .update { $0.isEnabled = isEnabled }
+                    .update {
+                        $0.isEnabled = isEnabled
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
                     .execute(database)
             }
         }
@@ -367,7 +479,11 @@ final class SnippetRepository: SnippetRepositoryProtocol {
             try database.write { database in
                 try snippetIDs.enumerated().forEach { index, snippetID in
                     try Snippet.where { $0.id.eq(snippetID) }
-                        .update { $0.index = index }
+                        .update {
+                            $0.index = index
+                            $0.updatedAt = currentUnixTime()
+                            $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                        }
                         .execute(database)
                 }
             }
@@ -378,11 +494,19 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         withErrorReporting {
             try database.write { database in
                 try Snippet.where { $0.id.eq(id) }
-                    .update { $0.folderID = folderID }
+                    .update {
+                        $0.folderID = folderID
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
                     .execute(database)
                 try snippetIDs.enumerated().forEach { index, snippetID in
                     try Snippet.where { $0.id.eq(snippetID) }
-                        .update { $0.index = index }
+                        .update {
+                            $0.index = index
+                            $0.updatedAt = currentUnixTime()
+                            $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                        }
                         .execute(database)
                 }
             }
@@ -392,6 +516,7 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     func deleteSnippet(_ id: Snippet.ID) {
         withErrorReporting {
             try database.write { database in
+                try suppress(kind: .snippet, id: id.rawValue.uuidString, database: database)
                 try Snippet.delete().where { $0.id.eq(id) }.execute(database)
             }
         }
@@ -405,7 +530,10 @@ private extension SnippetFolderSyncPayload {
             id: id,
             title: title,
             index: index,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            createdAt: updatedAt,
+            updatedAt: updatedAt,
+            lastModifiedDeviceID: deviceID
         )
     }
 }
@@ -421,7 +549,10 @@ private extension SnippetSyncPayload {
             title: title,
             content: content,
             index: index,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            createdAt: updatedAt,
+            updatedAt: updatedAt,
+            lastModifiedDeviceID: deviceID
         )
     }
 }
@@ -441,6 +572,32 @@ private extension Snippet.ID {
 }
 
 private extension SnippetRepository {
+    func currentUnixTime() -> Int {
+        Int(Date().timeIntervalSince1970)
+    }
+
+    func suppress(kind: SyncRecord.Kind, id: String, database: Database) throws {
+        try SyncSuppression.upsert {
+            SyncSuppression(
+                syncIdentity: syncIdentity(kind: kind, id: id),
+                kind: kind,
+                recordID: id,
+                suppressedAt: currentUnixTime()
+            )
+        }
+        .execute(database)
+    }
+
+    func isSuppressed(kind: SyncRecord.Kind, id: String, database: Database) throws -> Bool {
+        try SyncSuppression
+            .find(syncIdentity(kind: kind, id: id))
+            .fetchOne(database) != nil
+    }
+
+    func syncIdentity(kind: SyncRecord.Kind, id: String) -> String {
+        "\(kind.rawValue):\(id)"
+    }
+
     static func folderDetails(folders: [SnippetFolder], snippets: [Snippet]) -> [SnippetFolderDetail] {
         let snippetsByFolderID = Dictionary(grouping: snippets, by: \.folderID)
         return folders.map { folder in

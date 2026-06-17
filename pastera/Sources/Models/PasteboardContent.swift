@@ -125,34 +125,110 @@ enum PasteraImageEncoding {
     }
 }
 
-struct EncryptedSyncPayload: Codable, Equatable {
-    let nonce: Data
-    let ciphertext: Data
-    let tag: Data
-}
+enum SyncJSONValue: Codable, Equatable {
+    case object([String: SyncJSONValue])
+    case array([SyncJSONValue])
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case null
 
-enum SyncPayloadCipher {
-    static func seal(_ payload: Data, passphrase: String, salt: Data) throws -> EncryptedSyncPayload {
-        let sealedBox = try AES.GCM.seal(payload, using: key(passphrase: passphrase, salt: salt))
-        return EncryptedSyncPayload(
-            nonce: sealedBox.nonce.data,
-            ciphertext: sealedBox.ciphertext,
-            tag: sealedBox.tag
-        )
+    init<T: Encodable>(_ value: T) throws {
+        let data = try JSONEncoder().encode(value)
+        let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        self = try SyncJSONValue(jsonObject: object)
     }
 
-    static func open(_ payload: EncryptedSyncPayload, passphrase: String, salt: Data) throws -> Data {
-        let nonce = try AES.GCM.Nonce(data: payload.nonce)
-        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: payload.ciphertext, tag: payload.tag)
-        return try AES.GCM.open(sealedBox, using: key(passphrase: passphrase, salt: salt))
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Int.self) {
+            self = .int(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .double(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([String: SyncJSONValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([SyncJSONValue].self) {
+            self = .array(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+        }
     }
 
-    private static func key(passphrase: String, salt: Data) -> SymmetricKey {
-        var keyMaterial = Data()
-        keyMaterial.append(salt)
-        keyMaterial.append(Data(passphrase.utf8))
-        let digest = SHA256.hash(data: keyMaterial)
-        return SymmetricKey(data: digest)
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .string(let value):
+            try container.encode(value)
+        case .int(let value):
+            try container.encode(value)
+        case .double(let value):
+            try container.encode(value)
+        case .bool(let value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+
+    func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        let data = try JSONSerialization.data(withJSONObject: jsonObject, options: [.fragmentsAllowed])
+        return try JSONDecoder().decode(type, from: data)
+    }
+
+    private init(jsonObject: Any) throws {
+        switch jsonObject {
+        case let value as [String: Any]:
+            self = .object(try value.mapValues { try SyncJSONValue(jsonObject: $0) })
+        case let value as [Any]:
+            self = .array(try value.map { try SyncJSONValue(jsonObject: $0) })
+        case let value as String:
+            self = .string(value)
+        case let value as NSNumber:
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                self = .bool(value.boolValue)
+            } else if value.doubleValue.rounded() == value.doubleValue {
+                self = .int(value.intValue)
+            } else {
+                self = .double(value.doubleValue)
+            }
+        case _ as NSNull:
+            self = .null
+        default:
+            throw EncodingError.invalidValue(jsonObject, EncodingError.Context(
+                codingPath: [],
+                debugDescription: "Unsupported JSON value"
+            ))
+        }
+    }
+
+    private var jsonObject: Any {
+        switch self {
+        case .object(let value):
+            return value.mapValues(\.jsonObject)
+        case .array(let value):
+            return value.map(\.jsonObject)
+        case .string(let value):
+            return value
+        case .int(let value):
+            return value
+        case .double(let value):
+            return value
+        case .bool(let value):
+            return value
+        case .null:
+            return NSNull()
+        }
     }
 }
 
@@ -168,7 +244,7 @@ struct SyncRecord: Codable, Equatable {
     let deviceID: String
     let updatedAt: Int
     let deletedAt: Int?
-    let payload: EncryptedSyncPayload
+    let payload: SyncJSONValue
     let schemaVersion: Int
 }
 
@@ -184,6 +260,18 @@ struct SyncManifest: Codable, Equatable {
     let deviceID: String
     let updatedAt: Int
     let records: [SyncManifestRecord]
+
+    init(
+        schemaVersion: Int,
+        deviceID: String,
+        updatedAt: Int,
+        records: [SyncManifestRecord]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.deviceID = deviceID
+        self.updatedAt = updatedAt
+        self.records = records
+    }
 }
 
 enum SyncConflictPolicy {
@@ -192,10 +280,13 @@ enum SyncConflictPolicy {
     func resolve(local: SyncRecord, remote: SyncRecord) -> SyncRecord {
         switch self {
         case .lastWriteWins:
-            if remote.updatedAt > local.updatedAt {
+            if remote.deletedAt != nil {
+                return local
+            }
+            if local.deletedAt != nil {
                 return remote
             }
-            if remote.updatedAt == local.updatedAt, remote.deletedAt != nil, local.deletedAt == nil {
+            if remote.updatedAt > local.updatedAt {
                 return remote
             }
             return local
@@ -255,18 +346,34 @@ final class OneDriveFolderSyncProvider: SyncProvider {
         self.fileManager = fileManager
     }
 
+    func loadOrCreateManifest(deviceID: String) throws -> SyncManifest {
+        let manifestURL = manifestURL
+        if fileManager.fileExists(atPath: manifestURL.path) {
+            return try JSONDecoder().decode(SyncManifest.self, from: Data(contentsOf: manifestURL))
+        }
+
+        let manifest = SyncManifest(
+            schemaVersion: 1,
+            deviceID: deviceID,
+            updatedAt: Int(Date().timeIntervalSince1970),
+            records: []
+        )
+        try saveManifest(manifest)
+        return manifest
+    }
+
+    func saveManifest(_ manifest: SyncManifest) throws {
+        let directoryURL = syncRootURL
+        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        try writeAtomically(JSONEncoder().encode(manifest), to: manifestURL)
+    }
+
     func save(_ record: SyncRecord) throws {
         let directoryURL = directory(for: record.kind)
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let destinationURL = directoryURL.appendingPathComponent(fileName(for: record.id))
-        let temporaryURL = directoryURL.appendingPathComponent(".\(UUID().uuidString).tmp")
-        let data = try JSONEncoder().encode(record)
 
-        try data.write(to: temporaryURL, options: .atomic)
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            try fileManager.removeItem(at: destinationURL)
-        }
-        try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+        try writeAtomically(JSONEncoder().encode(record), to: destinationURL)
     }
 
     func loadRecords(kind: SyncRecord.Kind) throws -> [SyncRecord] {
@@ -277,18 +384,28 @@ final class OneDriveFolderSyncProvider: SyncProvider {
             .contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .map { try JSONDecoder().decode(SyncRecord.self, from: Data(contentsOf: $0)) }
+            .compactMap { url in
+                try? JSONDecoder().decode(SyncRecord.self, from: Data(contentsOf: url))
+            }
     }
 
     private func directory(for kind: SyncRecord.Kind) -> URL {
         switch kind {
         case .history:
-            return rootURL.appendingPathComponent("PasteraSync/histories", isDirectory: true)
+            return syncRootURL.appendingPathComponent("histories", isDirectory: true)
         case .snippet:
-            return rootURL.appendingPathComponent("PasteraSync/snippets/items", isDirectory: true)
+            return syncRootURL.appendingPathComponent("snippets/items", isDirectory: true)
         case .snippetFolder:
-            return rootURL.appendingPathComponent("PasteraSync/snippets/folders", isDirectory: true)
+            return syncRootURL.appendingPathComponent("snippets/folders", isDirectory: true)
         }
+    }
+
+    private var syncRootURL: URL {
+        rootURL
+    }
+
+    private var manifestURL: URL {
+        syncRootURL.appendingPathComponent("manifest.json")
     }
 
     private func fileName(for id: String) -> String {
@@ -297,16 +414,19 @@ final class OneDriveFolderSyncProvider: SyncProvider {
         let encodedID = id.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? UUID().uuidString
         return "\(encodedID).json"
     }
+
+    private func writeAtomically(_ data: Data, to destinationURL: URL) throws {
+        let temporaryURL = destinationURL.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).tmp")
+        try data.write(to: temporaryURL, options: .atomic)
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+    }
 }
 
 private extension SyncRecord {
     var syncIdentity: String {
         "\(kind.rawValue):\(id)"
-    }
-}
-
-private extension AES.GCM.Nonce {
-    var data: Data {
-        Data(self)
     }
 }

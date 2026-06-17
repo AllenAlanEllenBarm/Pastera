@@ -141,6 +141,40 @@
         }
       }
     },
+    "Show alert panel before clear history" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show alert panel before clear history"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show alert panel before clear history"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show alert panel before clear history"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show alert panel before clear history"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空历史前显示警告面板"
+          }
+        }
+      }
+    },
     "Main" : {
       "localizations" : {
         "de" : {
@@ -647,6 +681,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open System Preferences"
+          }
+        }
+      }
+    },
+    "Move Pastera to Applications" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Pastera to Applications"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Pastera to Applications"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Pastera to Applications"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Pastera to Applications"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 Pastera 移到应用程序文件夹"
+          }
+        }
+      }
+    },
+    "To keep Accessibility permissions stable, move Pastera.app to the Applications folder before enabling Accessibility." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To keep Accessibility permissions stable, move Pastera.app to the Applications folder before enabling Accessibility."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To keep Accessibility permissions stable, move Pastera.app to the Applications folder before enabling Accessibility."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To keep Accessibility permissions stable, move Pastera.app to the Applications folder before enabling Accessibility."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To keep Accessibility permissions stable, move Pastera.app to the Applications folder before enabling Accessibility."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为了保持辅助功能权限稳定，请先将 Pastera.app 移到应用程序文件夹，再启用辅助功能权限。"
+          }
+        }
+      }
+    },
+    "Open Applications" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Applications"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Applications"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Applications"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Applications"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开应用程序文件夹"
           }
         }
       }

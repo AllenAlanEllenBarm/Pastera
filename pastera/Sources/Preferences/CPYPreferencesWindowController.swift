@@ -44,6 +44,7 @@ final class CPYPreferencesWindowController: NSWindowController {
         case type
         case exclude
         case shortcuts
+        case sync
         case updates
         case beta
 
@@ -59,6 +60,8 @@ final class CPYPreferencesWindowController: NSWindowController {
                 return String(localized: "Exclude")
             case .shortcuts:
                 return String(localized: "Shortcuts")
+            case .sync:
+                return "同步"
             case .updates:
                 return String(localized: "Update")
             case .beta:
@@ -78,6 +81,8 @@ final class CPYPreferencesWindowController: NSWindowController {
                 return "nosign"
             case .shortcuts:
                 return "command"
+            case .sync:
+                return "arrow.triangle.2.circlepath"
             case .updates:
                 return "arrow.triangle.2.circlepath"
             case .beta:
@@ -111,6 +116,7 @@ final class CPYPreferencesWindowController: NSWindowController {
         CPYTypePreferenceViewController(nibName: "CPYTypePreferenceViewController", bundle: nil),
         CPYExcludeAppPreferenceViewController(nibName: "CPYExcludeAppPreferenceViewController", bundle: nil),
         CPYShortcutsPreferenceViewController(nibName: "CPYShortcutsPreferenceViewController", bundle: nil),
+        CPYSyncPreferenceViewController(),
         CPYUpdatesPreferenceViewController(nibName: "CPYUpdatesPreferenceViewController", bundle: nil),
         CPYBetaPreferenceViewController(nibName: "CPYBetaPreferenceViewController", bundle: nil)
     ]
@@ -366,7 +372,7 @@ private extension CPYPreferencesWindowController {
             return .shortcuts
         case .beta:
             return .beta
-        case .general, .menu, .type, .updates:
+        case .general, .menu, .type, .sync, .updates:
             return nil
         }
     }
@@ -882,6 +888,8 @@ extension CPYPreferencesWindowController {
             return .exclude
         case "shortcuts":
             return .shortcuts
+        case "sync":
+            return .sync
         case "update":
             return .updates
         case "beta":
@@ -903,6 +911,8 @@ extension CPYPreferencesWindowController {
             return "Exclude"
         case .shortcuts:
             return "Shortcuts"
+        case .sync:
+            return "Sync"
         case .updates:
             return "Update"
         case .beta:

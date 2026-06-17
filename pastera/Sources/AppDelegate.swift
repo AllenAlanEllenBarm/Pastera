@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     private let screenshotObserver = ScreenShotObserver()
     private let disposeBag = DisposeBag()
     private var historySearchWindowController: HistorySearchWindowController?
+    private let syncCoordinator = SyncCoordinator.shared
 
     @Dependency(\.context)
     var context
@@ -124,6 +125,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     }
 
     func terminateApplication() {
+        syncCoordinator.stop()
         NSApplication.shared.terminate(nil)
     }
 
@@ -324,6 +326,7 @@ extension AppDelegate: NSApplicationDelegate {
 
         // SDKs
         CPYUtilities.initSDKs()
+        InstallationLocationService().showMoveToApplicationsAlertIfNeeded()
         // Check Accessibility Permission
         AppEnvironment.current.accessibilityService.isAccessibilityEnabled(isPrompt: true)
 
@@ -348,6 +351,7 @@ extension AppDelegate: NSApplicationDelegate {
         AppEnvironment.current.clipService.startMonitoring()
         AppEnvironment.current.excludeAppService.startMonitoring()
         AppEnvironment.current.hotKeyService.setupDefaultHotKeys()
+        syncCoordinator.start()
 
         // Managers
         AppEnvironment.current.menuManager.setup()

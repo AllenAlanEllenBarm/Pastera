@@ -334,37 +334,42 @@ struct PasteboardContentTests {
     }
 
     @Test
-    func syncRecordJSONRoundTripsEncryptedPayload() throws {
-        let payload = Data("history payload".utf8)
-        let sealedPayload = try SyncPayloadCipher.seal(payload, passphrase: "sync-passphrase", salt: Data("salt".utf8))
+    func syncRecordJSONRoundTripsPlainPayloadObject() throws {
+        let payload = SyncJSONValue.object([
+            "id": .string("history-1"),
+            "title": .string("Plain history payload"),
+            "updateAt": .int(10)
+        ])
         let record = SyncRecord(
             id: "history-1",
             kind: .history,
             deviceID: "device-a",
             updatedAt: 10,
             deletedAt: nil,
-            payload: sealedPayload,
+            payload: payload,
             schemaVersion: 1
         )
 
         let data = try JSONEncoder().encode(record)
         let decoded = try JSONDecoder().decode(SyncRecord.self, from: data)
+        let json = try #require(String(data: data, encoding: .utf8))
 
         #expect(decoded == record)
-        #expect(try SyncPayloadCipher.open(decoded.payload, passphrase: "sync-passphrase", salt: Data("salt".utf8)) == payload)
-        #expect(throws: Error.self) {
-            _ = try SyncPayloadCipher.open(decoded.payload, passphrase: "wrong", salt: Data("salt".utf8))
-        }
+        #expect(json.contains("\"payload\""))
+        #expect(json.contains("\"Plain history payload\""))
+        #expect(!json.contains("\"nonce\""))
+        #expect(!json.contains("\"ciphertext\""))
+        #expect(!json.contains("\"tag\""))
     }
 
     @Test
-    func syncConflictPolicyChoosesNewestRecordAndDeleteTombstones() {
+    func syncConflictPolicyChoosesNewestRecordAndIgnoresDeleteTombstones() {
         let oldRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 1, deletedAt: nil)
         let newRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 2, deletedAt: nil)
         let deleteRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 3, deletedAt: 3)
 
         #expect(SyncConflictPolicy.lastWriteWins.resolve(local: oldRecord, remote: newRecord) == newRecord)
-        #expect(SyncConflictPolicy.lastWriteWins.resolve(local: newRecord, remote: deleteRecord) == deleteRecord)
+        #expect(SyncConflictPolicy.lastWriteWins.resolve(local: newRecord, remote: deleteRecord) == newRecord)
     }
 
     @Test
@@ -381,8 +386,31 @@ struct PasteboardContentTests {
 
         let data = try JSONEncoder().encode(manifest)
         let decoded = try JSONDecoder().decode(SyncManifest.self, from: data)
+        let json = try #require(String(data: data, encoding: .utf8))
 
         #expect(decoded == manifest)
+        #expect(!json.contains("\"crypto\""))
+        #expect(!json.contains("\"kdfAlgorithm\""))
+        #expect(!json.contains("\"encryptionAlgorithm\""))
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderCreatesManifestAndSkipsCorruptRecords() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let manifest = try provider.loadOrCreateManifest(deviceID: "device-a")
+        let history = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
+
+        try provider.save(history)
+        let corruptURL = rootURL
+            .appendingPathComponent("histories", isDirectory: true)
+            .appendingPathComponent("corrupt.json")
+        try Data("not-json".utf8).write(to: corruptURL)
+
+        #expect(manifest.deviceID == "device-a")
+        #expect(try provider.loadRecords(kind: .history) == [history])
     }
 
     @Test
@@ -418,6 +446,26 @@ struct PasteboardContentTests {
 
         #expect(try provider.loadRecords(kind: .history) == [history])
         #expect(try provider.loadRecords(kind: .snippet) == [snippet])
+    }
+}
+
+@MainActor
+@Suite
+struct OneDriveFolderSyncProviderDirectoryTests {
+    @Test
+    func usesSelectedFolderAsSyncRoot() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let history = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
+
+        _ = try provider.loadOrCreateManifest(deviceID: "device-a")
+        try provider.save(history)
+
+        #expect(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("manifest.json").path))
+        #expect(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("histories/history-1.json").path))
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("PasteraSync").path))
     }
 }
 
@@ -472,7 +520,7 @@ private extension SyncRecord {
             deviceID: "device",
             updatedAt: updatedAt,
             deletedAt: deletedAt,
-            payload: EncryptedSyncPayload(nonce: Data(), ciphertext: Data("payload".utf8), tag: Data()),
+            payload: .object(["value": .string("payload")]),
             schemaVersion: 1
         )
     }

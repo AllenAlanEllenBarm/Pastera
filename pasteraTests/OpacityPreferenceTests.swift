@@ -163,7 +163,7 @@ struct OpacityPreferenceTests {
     }
 
     @Test
-    func generalPreferenceClearHistoryButtonAlignsWithClipboardHistorySection() throws {
+    func generalPreferenceUsesSingleColumnLayoutWithoutSectionHeadings() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
 
@@ -175,17 +175,95 @@ struct OpacityPreferenceTests {
         let clearHistoryButton = try #require(buttons(in: contentView).first {
             $0.title == String(localized: "Clear History")
         })
-        let sectionTitle = try #require(textFields(in: contentView).first {
-            ["Clipboard History", "剪贴板历史"].contains($0.stringValue)
+        let launchButton = try #require(buttons(in: contentView).first {
+            ["Launch on Login", "登录时打开"].contains($0.title)
         })
-        let sortPopup = try #require(popUpButtons(in: contentView).first)
-        let buttonFrame = contentView.convert(clearHistoryButton.frame, from: clearHistoryButton.superview)
-        let titleFrame = contentView.convert(sectionTitle.frame, from: sectionTitle.superview)
-        let popupFrame = contentView.convert(sortPopup.frame, from: sortPopup.superview)
+        let warningButton = try #require(buttons(in: contentView).first {
+            ["Show alert panel before clear history", "清空历史前显示警告面板"].contains($0.title)
+        })
+        let opacityLabel = try #require(textFields(in: contentView).first {
+            [$0.stringValue].contains(String(localized: "Transparency")) || ["透明度"].contains($0.stringValue)
+        })
+        let opacitySlider = try #require(sliders(in: contentView).first)
+        let opacityValueLabel = try #require(textFields(in: contentView).first {
+            $0.stringValue.hasSuffix("%")
+        })
+        let launchFrame = contentView.convert(launchButton.frame, from: launchButton.superview)
+        let clearHistoryFrame = contentView.convert(clearHistoryButton.frame, from: clearHistoryButton.superview)
+        let warningFrame = contentView.convert(warningButton.frame, from: warningButton.superview)
+        let opacityLabelFrame = contentView.convert(opacityLabel.frame, from: opacityLabel.superview)
+        let sliderFrame = contentView.convert(opacitySlider.frame, from: opacitySlider.superview)
+        let opacityValueFrame = contentView.convert(opacityValueLabel.frame, from: opacityValueLabel.superview)
 
         #expect(clearHistoryButton.frame.height >= 22)
-        #expect(abs(buttonFrame.midY - titleFrame.midY) <= 1)
-        #expect(abs(buttonFrame.maxX - popupFrame.maxX) <= 1)
+        #expect(abs(clearHistoryFrame.minX - launchFrame.minX) <= 2)
+        #expect(abs(warningFrame.minX - launchFrame.minX) <= 2)
+        #expect(abs(opacityLabelFrame.minX - launchFrame.minX) <= 2)
+        #expect(launchFrame.minY > clearHistoryFrame.minY)
+        #expect(clearHistoryFrame.minY > warningFrame.minY)
+        #expect(warningFrame.minY > opacityLabelFrame.minY)
+        #expect(sliderFrame.minX > opacityLabelFrame.maxX)
+        #expect(opacityValueFrame.minX > sliderFrame.maxX)
+    }
+
+    @Test
+    func generalPreferenceRemovesHistoryLimitAndSortControls() throws {
+        let defaults = AppEnvironment.current.defaults
+        let previousReorderPreference = defaults.object(forKey: Constants.UserDefaults.reorderClipsAfterPasting)
+        defer {
+            if let previousReorderPreference {
+                defaults.set(previousReorderPreference, forKey: Constants.UserDefaults.reorderClipsAfterPasting)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.reorderClipsAfterPasting)
+            }
+            defaults.synchronize()
+        }
+        defaults.set(false, forKey: Constants.UserDefaults.reorderClipsAfterPasting)
+        defaults.synchronize()
+
+        let controller = CPYPreferencesWindowController()
+        defer { controller.close() }
+
+        controller.showWindow(nil)
+        controller.showPreferencePaneForTesting(title: "General")
+
+        let contentView = try #require(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+        let visibleTexts = Set(textFields(in: contentView).map(\.stringValue).filter { !$0.isEmpty })
+        let visibleButtons = Set(buttons(in: contentView).map(\.title).filter { !$0.isEmpty })
+
+        #expect(popUpButtons(in: contentView).isEmpty)
+        #expect(!visibleTexts.contains("Max clipboard history size:"))
+        #expect(!visibleTexts.contains("最大剪贴板历史："))
+        #expect(!visibleTexts.contains("Sort history order by:"))
+        #expect(!visibleTexts.contains("历史排序按照："))
+        #expect(!visibleTexts.contains("items"))
+        #expect(!visibleTexts.contains("项"))
+        #expect(!visibleTexts.contains("Behavior"))
+        #expect(!visibleTexts.contains("行为"))
+        #expect(!visibleTexts.contains("Clipboard History"))
+        #expect(!visibleTexts.contains("剪贴板历史"))
+        #expect(!visibleTexts.contains("Appearance"))
+        #expect(!visibleTexts.contains("外观"))
+        #expect(!visibleButtons.contains("Input \"⌘ + V\" after menu item selection"))
+        #expect(!visibleButtons.contains("选中菜单项后输入”⌘ + V“"))
+        #expect(!visibleButtons.contains("Send crash report and error log (reflected at the next launch)"))
+        #expect(!visibleButtons.contains("发送崩溃报告和错误日志（下次启动时生效）"))
+        #expect(defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting))
+    }
+
+    @Test
+    func simplifiedGeneralDefaultsKeepDirectPasteAndNoCrashReports() throws {
+        let suiteName = "OpacityPreferenceTests.simplifiedDefaults.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        AppEnvironment.push(defaults: defaults)
+        defer { _ = AppEnvironment.popLast() }
+
+        CPYUtilities.registerUserDefaultKeys()
+
+        #expect(defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand))
+        #expect(!defaults.bool(forKey: Constants.UserDefaults.collectCrashReport))
     }
 }
 

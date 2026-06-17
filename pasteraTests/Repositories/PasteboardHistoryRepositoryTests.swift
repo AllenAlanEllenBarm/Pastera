@@ -10,6 +10,8 @@
 //  Copyright © 2015-2026 Clipy Project.
 //
 
+// swiftlint:disable file_length
+
 import AppKit
 import Combine
 import DependenciesTestSupport
@@ -223,6 +225,101 @@ struct PasteboardHistoryRepositoryTests {
 
         repository.deleteHistory(id: id)
         #expect(repository.fetchHistory(id: id) == nil)
+    }
+
+    @Test
+    func syncPayloadsExportOnlyCurrentDeviceChangesAfterCutoffAndSkipLargeAssets() throws {
+        let current = PasteboardContent("Current")
+        let old = PasteboardContent("Old")
+        let remote = PasteboardContent("Remote")
+        let large = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .string, data: Data(repeating: 1, count: 8))
+            ]
+        )
+        let currentID = PasteboardHistory.ID(rawValue: current.hash)
+        let oldID = PasteboardHistory.ID(rawValue: old.hash)
+        let remoteID = PasteboardHistory.ID(rawValue: remote.hash)
+        let largeID = PasteboardHistory.ID(rawValue: large.hash)
+
+        repository.save(id: currentID, content: current, updateAt: 10)
+        repository.save(id: oldID, content: old, updateAt: 4)
+        repository.upsertSyncPayload(PasteboardHistorySyncPayload(
+            id: remoteID.rawValue,
+            title: "Remote",
+            pasteboardTypes: [.string],
+            updateAt: 12,
+            deviceID: "remote-device",
+            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote".utf8))],
+            thumbnail: nil
+        ))
+        repository.save(id: largeID, content: large, updateAt: 13)
+
+        let payloads = repository.fetchSyncPayloads(
+            currentDeviceID: CPYUtilities.deviceID,
+            updatedAtOrAfter: 5,
+            maxAssetBytes: 7
+        )
+
+        #expect(payloads.map(\.id) == [currentID.rawValue])
+        #expect(payloads.first?.deviceID == CPYUtilities.deviceID)
+    }
+
+    @Test
+    func syncImportDoesNotReuploadRemoteHistoryAndLocalSuppressionPreventsReimport() throws {
+        let id = PasteboardHistory.ID(rawValue: "remote-history")
+        let payload = PasteboardHistorySyncPayload(
+            id: id.rawValue,
+            title: "Remote history",
+            pasteboardTypes: [.string],
+            updateAt: 20,
+            deviceID: "remote-device",
+            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote history".utf8))],
+            thumbnail: nil
+        )
+
+        repository.upsertSyncPayload(payload)
+        #expect(repository.fetchHistory(id: id)?.deviceID == "remote-device")
+        #expect(repository.fetchSyncPayloads(currentDeviceID: CPYUtilities.deviceID, updatedAtOrAfter: 0, maxAssetBytes: 1024).isEmpty)
+
+        repository.deleteHistory(id: id)
+        repository.upsertSyncPayload(payload)
+
+        #expect(repository.fetchHistory(id: id) == nil)
+    }
+
+    @Test
+    func syncImportUsesLastWriteWinsAndReportsActualHistoryWrites() throws {
+        let id = PasteboardHistory.ID(rawValue: "shared-history")
+        let localContent = PasteboardContent("Local newer")
+        repository.save(id: id, content: localContent, updateAt: 30)
+
+        let olderRemote = PasteboardHistorySyncPayload(
+            id: id.rawValue,
+            title: "Remote older",
+            pasteboardTypes: [.string],
+            updateAt: 20,
+            deviceID: "remote-device",
+            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote older".utf8))],
+            thumbnail: nil
+        )
+        let newerRemote = PasteboardHistorySyncPayload(
+            id: id.rawValue,
+            title: "Remote newer",
+            pasteboardTypes: [.string],
+            updateAt: 40,
+            deviceID: "remote-device",
+            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote newer".utf8))],
+            thumbnail: nil
+        )
+
+        #expect(repository.upsertSyncPayload(olderRemote) == false)
+        #expect(repository.fetchHistory(id: id)?.title == "Local newer")
+        #expect(repository.fetchContent(id: id) == localContent)
+
+        #expect(repository.upsertSyncPayload(newerRemote) == true)
+        #expect(repository.fetchHistory(id: id)?.title == "Remote newer")
+        #expect(repository.fetchContent(id: id) == PasteboardContent("Remote newer"))
     }
 
     @Test
