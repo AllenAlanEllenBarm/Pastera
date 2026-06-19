@@ -31,3 +31,9 @@
 
 /* Class = "NSTextFieldCell"; title = "Behavior"; ObjectID = "nDk-8y-89n"; */
 "nDk-8y-89n.title" = "行为";
+
+"Number of characters in the menu:" = "菜单中字符的个数：";
+"chars" = "字符";
+"Place already copied history at the top" = "把已经粘贴的历史置顶";
+"Move instead of copying (removes the older one from the list)" = "移动而非拷贝（第二次粘贴时把旧的项从列表中移除）";
+"Show color code preview" = "为颜色代码显示预览";

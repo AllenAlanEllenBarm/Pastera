@@ -7,6 +7,7 @@
 import AppKit
 import Foundation
 import Testing
+@testable import Pastera
 
 @Suite(.serialized)
 struct SparkleUpdateFeedTests {
@@ -46,7 +47,7 @@ struct SparkleUpdateFeedTests {
     }
 
     @Test
-    func appcastContainsCurrentBetaReleaseItem() throws {
+    func appcastContainsParseableReleaseItem() throws {
         let appcastURL = projectRoot().appendingPathComponent("appcast.xml")
         let data = try Data(contentsOf: appcastURL)
         let document = try XMLDocument(data: data)
@@ -56,11 +57,12 @@ struct SparkleUpdateFeedTests {
 
         #expect(root.name == "rss")
         #expect(root.attribute(forName: "version")?.stringValue == "2.0")
-        #expect(item.elements(forName: "title").first?.stringValue == "Pastera 1.2.2beta")
-        #expect(enclosure.attribute(forName: "url")?.stringValue == "https://github.com/AllenAlanEllenBarm/Pastera/releases/download/v1.2.2-beta/Pastera-1.2.2beta-macOS.zip")
-        #expect(enclosure.attribute(forName: "sparkle:version")?.stringValue == "1.2.2beta")
-        #expect(enclosure.attribute(forName: "sparkle:shortVersionString")?.stringValue == "1.2.2beta")
-        #expect(enclosure.attribute(forName: "type")?.stringValue == "application/octet-stream")
+        #expect(item.elements(forName: "title").first?.stringValue?.hasPrefix("Pastera ") == true)
+        #expect(item.elements(forName: "link").first?.stringValue?.hasPrefix("https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/") == true)
+        #expect(enclosure.attribute(forName: "url")?.stringValue?.hasPrefix("https://github.com/AllenAlanEllenBarm/Pastera/releases/download/") == true)
+        #expect(enclosure.attribute(forName: "sparkle:version")?.stringValue?.isEmpty == false)
+        #expect(enclosure.attribute(forName: "sparkle:shortVersionString")?.stringValue?.isEmpty == false)
+        #expect(enclosure.attribute(forName: "type")?.stringValue?.isEmpty == false)
     }
 
     private func infoPlistValue(forKey key: String) throws -> String {
@@ -78,5 +80,106 @@ struct SparkleUpdateFeedTests {
             url.deleteLastPathComponent()
         }
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    }
+}
+
+@Suite
+struct PasteraGitHubReleaseUpdateCheckerTests {
+    @Test
+    func detectsNewerGitHubReleaseWhenSparkleAppcastIsStale() throws {
+        let checker = PasteraGitHubReleaseUpdateChecker()
+        let update = try #require(try checker.availableUpdate(
+            currentVersion: "1.2.2beta",
+            from: releasesJSON([
+                release(tag: "v2.0.1-beta", asset: "Pastera-2.0.1-beta-macOS.dmg"),
+                release(tag: "v1.2.2-beta", asset: "Pastera-1.2.2beta-macOS.zip")
+            ])
+        ))
+
+        #expect(update.version == "2.0.1-beta")
+        #expect(update.releasePageURL.absoluteString == "https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/v2.0.1-beta")
+        #expect(update.assetURL?.absoluteString == "https://github.com/AllenAlanEllenBarm/Pastera/releases/download/v2.0.1-beta/Pastera-2.0.1-beta-macOS.dmg")
+    }
+
+    @Test
+    func ignoresDraftsAndDoesNotOfferOlderReleases() throws {
+        let checker = PasteraGitHubReleaseUpdateChecker()
+        let update = try checker.availableUpdate(
+            currentVersion: "2.0.1-beta",
+            from: releasesJSON([
+                release(tag: "v3.0.0-beta", asset: "Pastera-3.0.0-beta-macOS.dmg", draft: true),
+                release(tag: "v1.2.2-beta", asset: "Pastera-1.2.2beta-macOS.dmg")
+            ])
+        )
+
+        #expect(update == nil)
+    }
+
+    @Test
+    func stillReportsLatestReleaseWhenNoUpdateIsAvailable() throws {
+        let checker = PasteraGitHubReleaseUpdateChecker()
+        let data = try releasesJSON([
+            release(tag: "v2.0.1-beta", asset: "Pastera-2.0.1-beta-macOS.dmg")
+        ])
+
+        #expect(try checker.availableUpdate(currentVersion: "2.0.1-beta", from: data) == nil)
+        #expect(try checker.latestRelease(from: data)?.version == "2.0.1-beta")
+    }
+
+    @Test
+    func comparesReleaseVersionForManualUpdateChecks() {
+        let checker = PasteraGitHubReleaseUpdateChecker()
+
+        #expect(checker.isUpdateAvailable(currentVersion: "1.2.2beta", releaseVersion: "2.0.1-beta"))
+        #expect(!checker.isUpdateAvailable(currentVersion: "2.0.1-beta", releaseVersion: "2.0.1-beta"))
+        #expect(!checker.isUpdateAvailable(currentVersion: "2.0.1", releaseVersion: "2.0.1-beta"))
+    }
+
+    @Test
+    func prefersDmgAssetForManualDownloads() throws {
+        let checker = PasteraGitHubReleaseUpdateChecker()
+        let update = try #require(try checker.availableUpdate(
+            currentVersion: "1.2.2beta",
+            from: releasesJSON([
+                release(
+                    tag: "v2.0.1-beta",
+                    assets: [
+                        "Pastera-2.0.1-beta-macOS.zip",
+                        "Pastera-2.0.1-beta-macOS.dmg"
+                    ]
+                )
+            ])
+        ))
+
+        #expect(update.assetURL?.lastPathComponent == "Pastera-2.0.1-beta-macOS.dmg")
+    }
+
+    @Test
+    func comparesExistingBetaVersionSpellings() {
+        #expect(PasteraReleaseVersion("2.0.1-beta") > PasteraReleaseVersion("1.2.2beta"))
+        #expect(PasteraReleaseVersion("2.0.1") > PasteraReleaseVersion("2.0.1-beta"))
+        #expect(!(PasteraReleaseVersion("v1.2.2-beta") > PasteraReleaseVersion("1.2.2beta")))
+    }
+
+    private func release(tag: String, asset: String, draft: Bool = false) -> [String: Any] {
+        release(tag: tag, assets: [asset], draft: draft)
+    }
+
+    private func release(tag: String, assets: [String], draft: Bool = false) -> [String: Any] {
+        [
+            "tag_name": tag,
+            "html_url": "https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/\(tag)",
+            "draft": draft,
+            "assets": assets.map {
+                [
+                    "name": $0,
+                    "browser_download_url": "https://github.com/AllenAlanEllenBarm/Pastera/releases/download/\(tag)/\($0)"
+                ]
+            }
+        ]
+    }
+
+    private func releasesJSON(_ releases: [[String: Any]]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: releases)
     }
 }

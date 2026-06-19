@@ -33,13 +33,13 @@ final class ClipService {
     func startMonitoring() {
         disposeBag = DisposeBag()
         // Pasteboard observe timer
-        Observable<Int>.interval(.microseconds(750), scheduler: scheduler)
+        Observable<Int>.interval(.milliseconds(750), scheduler: scheduler)
             .map { _ in NSPasteboard.general.changeCount }
             .withLatestFrom(cachedChangeCount.asObservable()) { ($0, $1) }
             .filter { $0 != $1 }
             .subscribe(onNext: { [weak self] changeCount, _ in
+                guard self?.create() == true else { return }
                 self?.cachedChangeCount.accept(changeCount)
-                self?.create()
             })
             .disposed(by: disposeBag)
         // Store types
@@ -72,24 +72,26 @@ final class ClipService {
 
 // MARK: - Create Clip
 extension ClipService {
-    fileprivate func create() {
+    @discardableResult
+    fileprivate func create(from pasteboard: NSPasteboard = .general) -> Bool {
         lock.lock(); defer { lock.unlock() }
 
         // Pasteboard types
-        let pasteboard = NSPasteboard.general
+        let pasteboardTypes = pasteboard.pasteboardItems?.flatMap { $0.types } ?? []
+        guard !pasteboardTypes.isEmpty else { return false }
         let types = PasteboardAvailableType.availableTypes(
-            from: pasteboard.pasteboardItems?.flatMap { $0.types } ?? [],
+            from: pasteboardTypes,
             storeAvailableTypes: storeTypes.filter { $0.value.boolValue }.compactMap { PasteboardAvailableType(rawValue: $0.key) }
         )
-        guard !types.isEmpty else { return }
+        guard !types.isEmpty else { return true }
 
         // Excluded application
-        guard !AppEnvironment.current.excludeAppService.frontProcessIsExcludedApplication() else { return }
+        guard !AppEnvironment.current.excludeAppService.frontProcessIsExcludedApplication() else { return true }
         // Special applications
-        guard !AppEnvironment.current.excludeAppService.copiedProcessIsExcludedApplications(pasteboard: pasteboard) else { return }
+        guard !AppEnvironment.current.excludeAppService.copiedProcessIsExcludedApplications(pasteboard: pasteboard) else { return true }
 
-        guard let content = PasteboardContent(pasteboard: pasteboard, types: types) else { return }
-        save(content)
+        guard let content = PasteboardContent(pasteboard: pasteboard, types: types) else { return false }
+        return save(content)
     }
 
     func create(with image: NSImage) {
@@ -106,14 +108,15 @@ extension ClipService {
         save(content, allowDuplicateContent: true)
     }
 
-    private func save(_ content: PasteboardContent, allowDuplicateContent: Bool = false) {
+    @discardableResult
+    private func save(_ content: PasteboardContent, allowDuplicateContent: Bool = false) -> Bool {
         // Copy already copied history
         let isCopySameHistory = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.copySameHistory)
         let historyID = PasteboardHistory.ID(rawValue: content.hash)
-        if !allowDuplicateContent, pasteboardHistoryRepository.fetchHistory(id: historyID) != nil, !isCopySameHistory { return }
+        if !allowDuplicateContent, pasteboardHistoryRepository.fetchHistory(id: historyID) != nil, !isCopySameHistory { return true }
 
         // Don't save empty string history
-        if content.isOnlyStringType && content.stringValue.isEmpty { return }
+        if content.isOnlyStringType && content.stringValue.isEmpty { return true }
 
         // Overwrite same history
         let isOverwriteHistory = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.overwriteSameHistory)
@@ -122,5 +125,19 @@ extension ClipService {
         let unixTime = Int(Date().timeIntervalSince1970)
         pasteboardHistoryRepository.save(id: .init(rawValue: savedHash), content: content, updateAt: unixTime)
         pasteboardHistoryRepository.pruneHistories(settings: HistoryRetentionSettings.current())
+        return true
     }
 }
+
+#if DEBUG
+extension ClipService {
+    func setStoreTypesForTesting(_ storeTypes: [String: NSNumber]) {
+        self.storeTypes = storeTypes
+    }
+
+    @discardableResult
+    func createForTesting(from pasteboard: NSPasteboard) -> Bool {
+        create(from: pasteboard)
+    }
+}
+#endif

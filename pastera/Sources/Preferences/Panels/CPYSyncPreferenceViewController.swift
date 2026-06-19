@@ -12,21 +12,119 @@
 
 import Cocoa
 
+final class PasteraSyncSwitch: NSButton {
+    static let onTrackColor = NSColor(calibratedRed: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 46, height: 24)
+    }
+
+    override func setNextState() {
+        super.setNextState()
+        needsDisplay = true
+    }
+
+    override func performClick(_ sender: Any?) {
+        super.performClick(sender)
+        needsDisplay = true
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let trackRect = bounds.insetBy(dx: 1, dy: 1)
+        let radius = trackRect.height / 2
+        let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: radius, yRadius: radius)
+        let enabledAlpha: CGFloat = isEnabled ? 1 : 0.48
+        let isOn = state == .on
+        let trackColor = isOn ? Self.onTrackColor : offTrackColor
+        trackColor.withAlphaComponent(trackColor.alphaComponent * enabledAlpha).setFill()
+        trackPath.fill()
+
+        let thumbDiameter = max(1, trackRect.height - 4)
+        let thumbX = isOn
+            ? trackRect.maxX - thumbDiameter - 2
+            : trackRect.minX + 2
+        let thumbRect = NSRect(
+            x: thumbX,
+            y: trackRect.midY - thumbDiameter / 2,
+            width: thumbDiameter,
+            height: thumbDiameter
+        )
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 1.5
+        shadow.shadowOffset = NSSize(width: 0, height: -0.5)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
+
+        NSGraphicsContext.saveGraphicsState()
+        shadow.set()
+        thumbColor.withAlphaComponent(enabledAlpha).setFill()
+        NSBezierPath(ovalIn: thumbRect).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func configure() {
+        title = ""
+        setButtonType(.switch)
+        isBordered = false
+        imagePosition = .noImage
+        focusRingType = .none
+    }
+
+    private var offTrackColor: NSColor {
+        isDarkAppearance
+            ? NSColor(calibratedWhite: 1.0, alpha: 0.14)
+            : NSColor(calibratedWhite: 0.0, alpha: 0.16)
+    }
+
+    private var thumbColor: NSColor {
+        isDarkAppearance
+            ? NSColor(calibratedWhite: 0.92, alpha: 1.0)
+            : NSColor(calibratedWhite: 0.98, alpha: 1.0)
+    }
+
+    private var isDarkAppearance: Bool {
+        effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+}
+
 final class CPYSyncPreferenceViewController: NSViewController {
     private enum Layout {
         static let width: CGFloat = 450
-        static let titleHeight: CGFloat = 20
-        static let guidanceHeight: CGFloat = 54
-        static let headerHeight: CGFloat = 88
+        static let topInset: CGFloat = 4
+        static let bottomInset: CGFloat = 28
         static let sectionInset: CGFloat = 12
         static let rowHeight: CGFloat = 32
         static let rowSpacing: CGFloat = 6
-        static let labelWidth: CGFloat = 122
-        static let buttonWidth: CGFloat = 110
-        static let secondaryButtonWidth: CGFloat = 64
+        static let accountRowCount = 2
+        static let accountLabelWidth: CGFloat = 74
+        static let accountColumnGap: CGFloat = 20
+        static let labelWidth: CGFloat = 96
+        static let buttonWidth: CGFloat = 96
+        static let secondaryButtonWidth: CGFloat = 58
         static let buttonGap: CGFloat = 8
+        static let infoButtonSize: CGFloat = 16
+        static let infoButtonGap: CGFloat = 6
         static let fieldHeight: CGFloat = 24
-        static let sectionGap: CGFloat = 14
+        static let switchWidth: CGFloat = 46
+        static let switchHeight: CGFloat = 24
+        static let switchStateWidth: CGFloat = 24
+        static let switchStateGap: CGFloat = 6
+        static let switchColumnGap: CGFloat = 20
+        static let sectionGap: CGFloat = 12
 
         static func sectionHeight(rowCount: Int) -> CGFloat {
             sectionInset * 2
@@ -35,28 +133,32 @@ final class CPYSyncPreferenceViewController: NSViewController {
         }
 
         static var height: CGFloat {
-            headerHeight
-                + sectionGap
-                + sectionHeight(rowCount: 3)
-                + sectionGap
-                + sectionHeight(rowCount: 4)
-                + sectionGap
+            topInset
+                + bottomInset
+                + sectionGap * 3
+                + sectionHeight(rowCount: accountRowCount)
+                + sectionHeight(rowCount: 1)
+                + sectionHeight(rowCount: 2)
                 + sectionHeight(rowCount: 3)
         }
     }
 
     private enum Text {
-        static let title = "云同步"
-        static let guidance = "Pastera 通过你电脑上的 OneDrive 文件夹同步；" +
-            "Pastera 不连接 Microsoft 账号，也不保存云端副本。" +
-            "开启“上传”只会同步之后的新变化；导入不会删除本地数据。"
+        static let automaticUpload = "自动上传"
         static let automaticSync = "自动同步"
-        static let showInFinder = "显示"
-        static let uploadHistory = "上传剪切板历史"
-        static let importHistory = "导入剪切板历史"
+        static let uploadHistory = "上传历史"
+        static let importHistory = "同步历史"
         static let uploadSnippets = "上传片段"
-        static let importSnippets = "导入片段"
+        static let importSnippets = "同步片段"
+        static let syncInfo = "i"
+        static let syncInfoLabel = "同步说明"
+        static let syncInfoText = "Pastera 使用你电脑上的 OneDrive 文件夹同步，不连接 Microsoft 账号。选择同步位置时会检查它是否在 OneDrive 文件夹内，并确认 Pastera 可以写入检测文件；云端是否上传完成，请看 OneDrive 客户端状态。"
+        static let switchOn = "开"
+        static let switchOff = "关"
+        static let changeFolder = "修改"
+        static let showInFinder = "显示"
         static let syncNow = "立即同步"
+        static let oneDriveStatus = "连接状态"
         static let oneDriveFolder = "同步位置"
         static let manualSync = "手动同步"
         static let defaultFolderApplied = "已使用 OneDrive 默认同步位置。"
@@ -65,33 +167,34 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let counts = "导入 / 上传"
         static let status = "状态"
         static let notDetected = "未检测到 OneDrive"
+        static let customFolderApplied = "同步位置已更新，并通过 OneDrive 文件夹检查。"
+        static let invalidOneDriveFolder = "请选择 OneDrive 中可写的文件夹。"
     }
 
     private let settingsStore = UserDefaultsSyncSettingsStore()
     private var observer: NSObjectProtocol?
+    private var switchRows = [
+        (row: PasteraSettingsRowView, label: NSTextField, stateLabel: NSTextField, control: PasteraSyncSwitch)
+    ]()
+    private var statusRows = [(row: PasteraSettingsRowView, label: NSTextField, value: NSTextField)]()
     private weak var accountSection: PasteraSettingsSectionView?
+    private weak var automationSection: PasteraSettingsSectionView?
     private weak var switchesSection: PasteraSettingsSectionView?
     private weak var statusSection: PasteraSettingsSectionView?
-    private weak var automaticSyncRow: PasteraSettingsRowView?
+    private weak var oneDriveStatusRow: PasteraSettingsRowView?
     private weak var folderRow: PasteraSettingsRowView?
     private weak var syncNowRow: PasteraSettingsRowView?
-    private weak var historyUploadRow: PasteraSettingsRowView?
-    private weak var historyImportRow: PasteraSettingsRowView?
-    private weak var snippetUploadRow: PasteraSettingsRowView?
-    private weak var snippetImportRow: PasteraSettingsRowView?
-    private weak var lastSyncRow: PasteraSettingsRowView?
-    private weak var countRow: PasteraSettingsRowView?
-    private weak var statusRow: PasteraSettingsRowView?
 
-    private let titleLabel = NSTextField(labelWithString: Text.title)
-    private let guidanceLabel = NSTextField(labelWithString: Text.guidance)
-    private let automaticSyncButton = NSButton(checkboxWithTitle: Text.automaticSync, target: nil, action: nil)
-    private let pathField = NSTextField(labelWithString: "")
+    private let syncInfoButton = NSButton(title: Text.syncInfo, target: nil, action: nil)
+    private let automaticUploadSwitch = PasteraSyncSwitch()
+    private let automaticSyncSwitch = PasteraSyncSwitch()
+    private let historyUploadSwitch = PasteraSyncSwitch()
+    private let historyImportSwitch = PasteraSyncSwitch()
+    private let snippetUploadSwitch = PasteraSyncSwitch()
+    private let snippetImportSwitch = PasteraSyncSwitch()
+    private let oneDriveStatusBadge = PasteraOneDriveStatusBadge()
+    private let changeFolderButton = NSButton(title: Text.changeFolder, target: nil, action: nil)
     private let showFolderButton = NSButton(title: Text.showInFinder, target: nil, action: nil)
-    private let historyUploadButton = NSButton(checkboxWithTitle: Text.uploadHistory, target: nil, action: nil)
-    private let historyImportButton = NSButton(checkboxWithTitle: Text.importHistory, target: nil, action: nil)
-    private let snippetUploadButton = NSButton(checkboxWithTitle: Text.uploadSnippets, target: nil, action: nil)
-    private let snippetImportButton = NSButton(checkboxWithTitle: Text.importSnippets, target: nil, action: nil)
     private let syncNowButton = NSButton(title: Text.syncNow, target: nil, action: nil)
     private let lastSyncValue = NSTextField(labelWithString: "-")
     private let countValue = NSTextField(labelWithString: "-")
@@ -99,15 +202,29 @@ final class CPYSyncPreferenceViewController: NSViewController {
     private let defaultFolderResolutionProvider: () -> SyncDefaultFolderResolution
     private let defaultFolderResolver: SyncDefaultFolderResolver
     private let revealInFinder: (URL) -> Void
+    private let chooseSyncRoot: (NSWindow?, URL?) -> URL?
+    private var infoPopover: NSPopover?
 
     init(
         defaultFolderResolver: SyncDefaultFolderResolver = SyncDefaultFolderResolver(),
         defaultFolderResolutionProvider: (() -> SyncDefaultFolderResolution)? = nil,
-        revealInFinder: @escaping (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+        revealInFinder: @escaping (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
+        chooseSyncRoot: @escaping (NSWindow?, URL?) -> URL? = { _, currentRootURL in
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = true
+            panel.prompt = Text.changeFolder
+            panel.message = "选择 OneDrive 中的一个文件夹作为 Pastera 同步位置。"
+            panel.directoryURL = currentRootURL
+            return panel.runModal() == .OK ? panel.url : nil
+        }
     ) {
         self.defaultFolderResolver = defaultFolderResolver
         self.defaultFolderResolutionProvider = defaultFolderResolutionProvider ?? { defaultFolderResolver.resolve() }
         self.revealInFinder = revealInFinder
+        self.chooseSyncRoot = chooseSyncRoot
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -150,34 +267,39 @@ final class CPYSyncPreferenceViewController: NSViewController {
     }
 
     private func makeView() -> NSView {
-        let host = PasteraSettingsPaneHost(frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height))
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.frame = NSRect(
+        let host = PasteraSettingsPaneHost(frame: NSRect(
             x: 0,
-            y: Layout.height - Layout.titleHeight,
+            y: 0,
             width: Layout.width,
-            height: Layout.titleHeight
-        )
-        host.addSubview(titleLabel)
-        guidanceLabel.font = .systemFont(ofSize: 12)
-        guidanceLabel.textColor = .secondaryLabelColor
-        guidanceLabel.lineBreakMode = .byWordWrapping
-        guidanceLabel.maximumNumberOfLines = 0
-        host.addSubview(guidanceLabel)
+            height: Layout.height
+        ))
+        syncInfoButton.bezelStyle = .circular
+        syncInfoButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        syncInfoButton.setAccessibilityLabel(Text.syncInfoLabel)
+        syncInfoButton.toolTip = Text.syncInfoText
 
-        let accountSection = makeSection(rowCount: 3)
+        let accountSection = makeSection(rowCount: Layout.accountRowCount)
         self.accountSection = accountSection
-        addAutomaticSyncRow(to: accountSection, index: 0)
-        addFolderRow(to: accountSection, index: 1)
-        addSyncNowRow(to: accountSection, index: 2)
+        oneDriveStatusRow = makeRow(in: accountSection, index: 0)
+        oneDriveStatusRow?.addSubview(makeLabel(Text.oneDriveStatus))
+        oneDriveStatusRow?.addSubview(oneDriveStatusBadge)
+        oneDriveStatusRow?.addSubview(syncInfoButton)
+        addFolderRow(to: accountSection, index: 0)
+        addSyncNowRow(to: accountSection, index: 1)
         host.addSubview(accountSection)
 
-        let switchesSection = makeSection(rowCount: 4)
+        let automationSection = makeSection(rowCount: 1)
+        self.automationSection = automationSection
+        addSwitchRow(title: Text.automaticUpload, control: automaticUploadSwitch, to: automationSection, index: 0)
+        addSwitchRow(title: Text.automaticSync, control: automaticSyncSwitch, to: automationSection, index: 1)
+        host.addSubview(automationSection)
+
+        let switchesSection = makeSection(rowCount: 2)
         self.switchesSection = switchesSection
-        addButtonRow(historyUploadButton, to: switchesSection, index: 0)
-        addButtonRow(historyImportButton, to: switchesSection, index: 1)
-        addButtonRow(snippetUploadButton, to: switchesSection, index: 2)
-        addButtonRow(snippetImportButton, to: switchesSection, index: 3)
+        addSwitchRow(title: Text.uploadHistory, control: historyUploadSwitch, to: switchesSection, index: 0)
+        addSwitchRow(title: Text.importHistory, control: historyImportSwitch, to: switchesSection, index: 1)
+        addSwitchRow(title: Text.uploadSnippets, control: snippetUploadSwitch, to: switchesSection, index: 2)
+        addSwitchRow(title: Text.importSnippets, control: snippetImportSwitch, to: switchesSection, index: 3)
         host.addSubview(switchesSection)
 
         let statusSection = makeSection(rowCount: 3)
@@ -216,33 +338,12 @@ final class CPYSyncPreferenceViewController: NSViewController {
         return row
     }
 
-    private func addAutomaticSyncRow(to section: NSView, index: Int) {
-        let row = makeRow(in: section, index: index)
-        automaticSyncRow = row
-        automaticSyncButton.frame = NSRect(x: 0, y: 4, width: row.bounds.width, height: Layout.fieldHeight)
-        row.addSubview(automaticSyncButton)
-    }
-
     private func addFolderRow(to section: NSView, index: Int) {
         let row = makeRow(in: section, index: index)
         folderRow = row
         let label = makeLabel(Text.oneDriveFolder)
-        label.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
-        pathField.frame = NSRect(
-            x: Layout.labelWidth,
-            y: 7,
-            width: row.bounds.width - Layout.labelWidth - Layout.secondaryButtonWidth - Layout.buttonGap,
-            height: 18
-        )
-        pathField.lineBreakMode = .byTruncatingMiddle
-        showFolderButton.frame = NSRect(
-            x: row.bounds.width - Layout.secondaryButtonWidth,
-            y: 3,
-            width: Layout.secondaryButtonWidth,
-            height: Layout.fieldHeight
-        )
         row.addSubview(label)
-        row.addSubview(pathField)
+        row.addSubview(changeFolderButton)
         row.addSubview(showFolderButton)
     }
 
@@ -250,48 +351,34 @@ final class CPYSyncPreferenceViewController: NSViewController {
         let row = makeRow(in: section, index: index)
         syncNowRow = row
         let label = makeLabel(Text.manualSync)
-        label.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
-        syncNowButton.frame = NSRect(
-            x: Layout.labelWidth,
-            y: 3,
-            width: Layout.buttonWidth,
-            height: Layout.fieldHeight
-        )
         row.addSubview(label)
         row.addSubview(syncNowButton)
     }
 
-    private func addButtonRow(_ button: NSButton, to section: NSView, index: Int) {
+    private func addSwitchRow(title: String, control: PasteraSyncSwitch, to section: NSView, index: Int) {
         let row = makeRow(in: section, index: index)
-        if button === historyUploadButton {
-            historyUploadRow = row
-        } else if button === historyImportButton {
-            historyImportRow = row
-        } else if button === snippetUploadButton {
-            snippetUploadRow = row
-        } else if button === snippetImportButton {
-            snippetImportRow = row
-        }
-        button.frame = NSRect(x: 0, y: 4, width: row.bounds.width, height: Layout.fieldHeight)
-        row.addSubview(button)
+        let label = makeLabel(title)
+        let stateLabel = NSTextField(labelWithString: Text.switchOff)
+        stateLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        stateLabel.alignment = .right
+        stateLabel.textColor = .secondaryLabelColor
+        control.setAccessibilityLabel(title)
+        row.addSubview(label)
+        row.addSubview(control)
+        row.addSubview(stateLabel)
+        switchRows.append((row, label, stateLabel, control))
     }
 
-    private func addStatusRow(title: String, value: NSTextField, to section: NSView, index: Int) {
+    @discardableResult
+    private func addStatusRow(title: String, value: NSTextField, to section: NSView, index: Int) -> PasteraSettingsRowView {
         let row = makeRow(in: section, index: index)
-        if value === lastSyncValue {
-            lastSyncRow = row
-        } else if value === countValue {
-            countRow = row
-        } else if value === statusValue {
-            statusRow = row
-        }
         let label = makeLabel(title)
-        label.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
-        value.frame = NSRect(x: Layout.labelWidth, y: 7, width: row.bounds.width - Layout.labelWidth, height: 18)
         value.lineBreakMode = .byTruncatingTail
         value.textColor = .secondaryLabelColor
         row.addSubview(label)
         row.addSubview(value)
+        statusRows.append((row, label, value))
+        return row
     }
 
     private func makeLabel(_ title: String) -> NSTextField {
@@ -305,23 +392,72 @@ final class CPYSyncPreferenceViewController: NSViewController {
 
 private extension CPYSyncPreferenceViewController {
     func bindActions() {
-        automaticSyncButton.target = self
-        automaticSyncButton.action = #selector(toggleAutomaticSync(_:))
+        automaticUploadSwitch.target = self
+        automaticUploadSwitch.action = #selector(toggleAutomaticUpload(_:))
+        automaticSyncSwitch.target = self
+        automaticSyncSwitch.action = #selector(toggleAutomaticSync(_:))
+        historyUploadSwitch.target = self
+        historyUploadSwitch.action = #selector(toggleHistoryUpload(_:))
+        historyImportSwitch.target = self
+        historyImportSwitch.action = #selector(toggleHistoryImport(_:))
+        snippetUploadSwitch.target = self
+        snippetUploadSwitch.action = #selector(toggleSnippetUpload(_:))
+        snippetImportSwitch.target = self
+        snippetImportSwitch.action = #selector(toggleSnippetImport(_:))
+        syncInfoButton.target = self
+        syncInfoButton.action = #selector(showSyncInfo(_:))
+        changeFolderButton.target = self
+        changeFolderButton.action = #selector(changeFolder)
         showFolderButton.target = self
         showFolderButton.action = #selector(showFolderInFinder)
         syncNowButton.target = self
         syncNowButton.action = #selector(syncNow)
-        historyUploadButton.target = self
-        historyUploadButton.action = #selector(toggleHistoryUpload(_:))
-        snippetUploadButton.target = self
-        snippetUploadButton.action = #selector(toggleSnippetUpload(_:))
-        historyImportButton.target = self
-        historyImportButton.action = #selector(toggleImport(_:))
-        snippetImportButton.target = self
-        snippetImportButton.action = #selector(toggleImport(_:))
     }
 
-    @objc func toggleAutomaticSync(_ sender: NSButton) {
+    @objc func showSyncInfo(_ sender: NSButton) {
+        if infoPopover?.isShown == true {
+            infoPopover?.close()
+            return
+        }
+
+        let label = NSTextField(wrappingLabelWithString: Text.syncInfoText)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .labelColor
+        label.frame = NSRect(x: 12, y: 12, width: 280, height: 78)
+
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 304, height: 102))
+        contentView.addSubview(label)
+
+        let controller = NSViewController()
+        controller.view = contentView
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        infoPopover = popover
+    }
+
+    @objc func toggleAutomaticUpload(_ sender: PasteraSyncSwitch) {
+        let enabled = sender.state == .on
+        guard enabled else {
+            settingsStore.setAutomaticUploadEnabled(false)
+            updateControls()
+            return
+        }
+        guard ensureDefaultFolderAvailable() else {
+            settingsStore.setAutomaticUploadEnabled(false)
+            sender.state = .off
+            updateControls()
+            return
+        }
+        settingsStore.enableUploadScopesIfNeeded()
+        settingsStore.setAutomaticUploadEnabled(true)
+        statusValue.stringValue = Text.defaultFolderApplied
+        updateControls()
+    }
+
+    @objc func toggleAutomaticSync(_ sender: PasteraSyncSwitch) {
         let enabled = sender.state == .on
         guard enabled else {
             settingsStore.setAutomaticSyncEnabled(false)
@@ -334,7 +470,7 @@ private extension CPYSyncPreferenceViewController {
             updateControls()
             return
         }
-        settingsStore.enableAllSyncScopesIfNeeded()
+        settingsStore.enableImportScopesIfNeeded()
         settingsStore.setAutomaticSyncEnabled(true)
         statusValue.stringValue = Text.defaultFolderApplied
         updateControls()
@@ -351,6 +487,14 @@ private extension CPYSyncPreferenceViewController {
         revealInFinder(rootURL)
     }
 
+    @objc func changeFolder() {
+        let currentRootURL = settingsStore.settings().rootURL
+        guard let selectedURL = chooseSyncRoot(view.window, currentRootURL) else {
+            return
+        }
+        applyCustomSyncRoot(selectedURL)
+    }
+
     @objc func syncNow() {
         guard prepareManualSync() else { return }
         syncNowButton.isEnabled = false
@@ -358,7 +502,7 @@ private extension CPYSyncPreferenceViewController {
         SyncCoordinator.shared.syncNow(reason: .manual)
     }
 
-    @objc func toggleHistoryUpload(_ sender: NSButton) {
+    @objc func toggleHistoryUpload(_ sender: PasteraSyncSwitch) {
         guard ensureDefaultFolderAvailable() else {
             sender.state = .off
             updateControls()
@@ -368,7 +512,17 @@ private extension CPYSyncPreferenceViewController {
         updateControls()
     }
 
-    @objc func toggleSnippetUpload(_ sender: NSButton) {
+    @objc func toggleHistoryImport(_ sender: PasteraSyncSwitch) {
+        guard ensureDefaultFolderAvailable() else {
+            sender.state = .off
+            updateControls()
+            return
+        }
+        settingsStore.setHistoryImportEnabled(sender.state == .on)
+        updateControls()
+    }
+
+    @objc func toggleSnippetUpload(_ sender: PasteraSyncSwitch) {
         guard ensureDefaultFolderAvailable() else {
             sender.state = .off
             updateControls()
@@ -378,29 +532,59 @@ private extension CPYSyncPreferenceViewController {
         updateControls()
     }
 
-    @objc func toggleImport(_ sender: NSButton) {
+    @objc func toggleSnippetImport(_ sender: PasteraSyncSwitch) {
         guard ensureDefaultFolderAvailable() else {
             sender.state = .off
             updateControls()
             return
         }
-        if sender === historyImportButton {
-            settingsStore.setHistoryImportEnabled(sender.state == .on)
-        } else if sender === snippetImportButton {
-            settingsStore.setSnippetImportEnabled(sender.state == .on)
-        }
+        settingsStore.setSnippetImportEnabled(sender.state == .on)
         updateControls()
     }
 
     func updateControls() {
         let settings = settingsStore.settings()
-        automaticSyncButton.state = settings.automaticSyncEnabled ? .on : .off
-        pathField.stringValue = settings.rootURL.map(displayName(for:)) ?? Text.notDetected
+        updateSwitch(automaticUploadSwitch, isOn: settings.automaticUploadEnabled)
+        updateSwitch(automaticSyncSwitch, isOn: settings.automaticSyncEnabled)
+        updateOneDriveStatus(rootURL: settings.rootURL)
         showFolderButton.isEnabled = settings.rootURL != nil
-        historyUploadButton.state = settings.historyUploadEnabled ? .on : .off
-        historyImportButton.state = settings.historyImportEnabled ? .on : .off
-        snippetUploadButton.state = settings.snippetUploadEnabled ? .on : .off
-        snippetImportButton.state = settings.snippetImportEnabled ? .on : .off
+        updateSwitch(historyUploadSwitch, isOn: settings.historyUploadEnabled)
+        updateSwitch(historyImportSwitch, isOn: settings.historyImportEnabled)
+        updateSwitch(snippetUploadSwitch, isOn: settings.snippetUploadEnabled)
+        updateSwitch(snippetImportSwitch, isOn: settings.snippetImportEnabled)
+    }
+
+    func updateSwitch(_ control: PasteraSyncSwitch, isOn: Bool) {
+        control.state = isOn ? .on : .off
+        control.setAccessibilityValue(isOn ? Text.switchOn : Text.switchOff)
+        control.needsDisplay = true
+        guard let switchRow = switchRows.first(where: { $0.control === control }) else {
+            return
+        }
+        switchRow.stateLabel.stringValue = isOn ? Text.switchOn : Text.switchOff
+        switchRow.stateLabel.textColor = isOn ? PasteraSyncSwitch.onTrackColor : .secondaryLabelColor
+    }
+
+    func updateOneDriveStatus(rootURL: URL?) {
+        guard let rootURL else {
+            oneDriveStatusBadge.state = .notDetected
+            folderRow?.toolTip = nil
+            changeFolderButton.toolTip = nil
+            showFolderButton.toolTip = nil
+            layoutOneDriveStatusRow()
+            return
+        }
+        var isDirectory: ObjCBool = false
+        let isAvailable = FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+            && isOneDriveBacked(rootURL)
+            && FileManager.default.isWritableFile(atPath: rootURL.path)
+        oneDriveStatusBadge.state = isAvailable ? .available : .unavailable
+        let displayName = displayName(for: rootURL)
+        folderRow?.toolTip = displayName
+        changeFolderButton.toolTip = displayName
+        showFolderButton.toolTip = displayName
+        layoutOneDriveStatusRow()
     }
 
     func updateStatus() {
@@ -440,6 +624,10 @@ private extension CPYSyncPreferenceViewController {
 
     @discardableResult
     func applyDefaultFolder() -> String? {
+        if let rootURL = settingsStore.settings().rootURL,
+           isSyncRootAvailable(rootURL) {
+            return nil
+        }
         switch defaultFolderResolutionProvider() {
         case .found(let candidate):
             return useDefaultFolder(candidate)
@@ -462,6 +650,57 @@ private extension CPYSyncPreferenceViewController {
         }
         settingsStore.setRootURL(preparedCandidate.syncRootURL)
         return Text.defaultFolderApplied
+    }
+
+    func applyCustomSyncRoot(_ selectedURL: URL) {
+        let rootURL = selectedURL.resolvingSymlinksInPath().standardizedFileURL
+        guard isSyncRootAvailable(rootURL), canWriteSyncProbe(at: rootURL) else {
+            statusValue.stringValue = Text.invalidOneDriveFolder
+            updateControls()
+            return
+        }
+        settingsStore.setRootURL(rootURL)
+        statusValue.stringValue = Text.customFolderApplied
+        updateControls()
+    }
+
+    func isSyncRootAvailable(_ rootURL: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+            && isOneDriveBacked(rootURL)
+            && FileManager.default.isWritableFile(atPath: rootURL.path)
+    }
+
+    func isOneDriveBacked(_ rootURL: URL) -> Bool {
+        if defaultFolderResolver.oneDriveCandidate(containing: rootURL) != nil {
+            return true
+        }
+        let components = rootURL.standardizedFileURL.pathComponents
+        guard let cloudStorageIndex = components.firstIndex(of: "CloudStorage"),
+              components.indices.contains(cloudStorageIndex + 1) else {
+            return false
+        }
+        let oneDriveName = components[cloudStorageIndex + 1]
+        guard oneDriveName.range(of: "OneDrive", options: [.anchored, .caseInsensitive]) != nil else {
+            return false
+        }
+        return oneDriveName.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil
+            && oneDriveName.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
+    }
+
+    func canWriteSyncProbe(at rootURL: URL) -> Bool {
+        let probeURL = rootURL.appendingPathComponent(".pastera-sync-check", isDirectory: false)
+        let payload = UUID().uuidString
+        do {
+            try payload.write(to: probeURL, atomically: true, encoding: .utf8)
+            let checkedPayload = try String(contentsOf: probeURL, encoding: .utf8)
+            try? FileManager.default.removeItem(at: probeURL)
+            return checkedPayload == payload
+        } catch {
+            try? FileManager.default.removeItem(at: probeURL)
+            return false
+        }
     }
 
     func displayName(for rootURL: URL) -> String {
@@ -498,49 +737,43 @@ private extension CPYSyncPreferenceViewController {
 private extension CPYSyncPreferenceViewController {
     func layoutContent(width: CGFloat) {
         let contentWidth = max(320, width)
-        let accountHeight = Layout.sectionHeight(rowCount: 3)
-        let switchesHeight = Layout.sectionHeight(rowCount: 4)
-        let statusHeight = Layout.sectionHeight(rowCount: 3)
-        let titleY = Layout.height - Layout.titleHeight - 4
-
-        titleLabel.frame = NSRect(
-            x: 0,
-            y: titleY,
-            width: contentWidth,
-            height: Layout.titleHeight
+        let contentHeight = Layout.height
+        if isViewLoaded, view.frame.height != contentHeight {
+            view.frame.size.height = contentHeight
+        }
+        var sectionTopY = contentHeight - Layout.topInset
+        sectionTopY = layoutSection(
+            accountSection,
+            rowCount: Layout.accountRowCount,
+            topY: sectionTopY,
+            contentWidth: contentWidth
         )
-        guidanceLabel.frame = NSRect(
-            x: 0,
-            y: titleY - 6 - Layout.guidanceHeight,
-            width: contentWidth,
-            height: Layout.guidanceHeight
-        )
-
-        let accountY = Layout.height - Layout.headerHeight - Layout.sectionGap - accountHeight
-        accountSection?.frame = NSRect(x: 0, y: accountY, width: contentWidth, height: accountHeight)
-        layoutRows([automaticSyncRow, folderRow, syncNowRow], in: accountSection)
-        layoutAutomaticSyncRow()
+        layoutAccountRows()
+        layoutOneDriveStatusRow()
         layoutFolderRow()
         layoutSyncNowRow()
 
-        let switchesY = accountY - Layout.sectionGap - switchesHeight
-        switchesSection?.frame = NSRect(x: 0, y: switchesY, width: contentWidth, height: switchesHeight)
-        layoutRows([historyUploadRow, historyImportRow, snippetUploadRow, snippetImportRow], in: switchesSection)
-        [
-            (historyUploadButton, historyUploadRow),
-            (historyImportButton, historyImportRow),
-            (snippetUploadButton, snippetUploadRow),
-            (snippetImportButton, snippetImportRow)
-        ].forEach { button, row in
-            guard let row else { return }
-            button.frame = NSRect(x: 0, y: 4, width: row.bounds.width, height: Layout.fieldHeight)
-        }
+        sectionTopY -= Layout.sectionGap
+        sectionTopY = layoutSection(automationSection, rowCount: 1, topY: sectionTopY, contentWidth: contentWidth)
+        layoutSwitchRows(in: automationSection)
+        sectionTopY -= Layout.sectionGap
+        sectionTopY = layoutSection(switchesSection, rowCount: 2, topY: sectionTopY, contentWidth: contentWidth)
+        layoutSwitchRows(in: switchesSection)
 
-        statusSection?.frame = NSRect(x: 0, y: 0, width: contentWidth, height: statusHeight)
-        layoutRows([lastSyncRow, countRow, statusRow], in: statusSection)
-        layoutStatusValue(lastSyncValue, in: lastSyncRow)
-        layoutStatusValue(countValue, in: countRow)
-        layoutStatusValue(statusValue, in: statusRow)
+        sectionTopY -= Layout.sectionGap
+        _ = layoutSection(statusSection, rowCount: 3, topY: sectionTopY, contentWidth: contentWidth)
+        layoutStatusRows()
+    }
+
+    func layoutSection(
+        _ section: PasteraSettingsSectionView?,
+        rowCount: Int,
+        topY: CGFloat,
+        contentWidth: CGFloat
+    ) -> CGFloat {
+        let sectionHeight = Layout.sectionHeight(rowCount: rowCount)
+        section?.frame = NSRect(x: 0, y: topY - sectionHeight, width: contentWidth, height: sectionHeight)
+        return topY - sectionHeight
     }
 
     func layoutRows(_ rows: [PasteraSettingsRowView?], in section: NSView?) {
@@ -559,53 +792,163 @@ private extension CPYSyncPreferenceViewController {
         }
     }
 
-    func layoutAutomaticSyncRow() {
-        guard let row = automaticSyncRow else { return }
-        automaticSyncButton.frame = NSRect(x: 0, y: 4, width: row.bounds.width, height: Layout.fieldHeight)
+    func layoutAccountRows() {
+        guard let section = accountSection else { return }
+        let availableWidth = max(1, section.bounds.width - Layout.sectionInset * 2)
+        let columnWidth = floor(max(1, (availableWidth - Layout.accountColumnGap) / 2))
+        let topRowY = section.bounds.height - Layout.sectionInset - Layout.rowHeight
+        let bottomRowY = topRowY - Layout.rowHeight - Layout.rowSpacing
+        oneDriveStatusRow?.frame = NSRect(
+            x: Layout.sectionInset,
+            y: topRowY,
+            width: columnWidth,
+            height: Layout.rowHeight
+        )
+        syncNowRow?.frame = NSRect(
+            x: Layout.sectionInset + columnWidth + Layout.accountColumnGap,
+            y: topRowY,
+            width: columnWidth,
+            height: Layout.rowHeight
+        )
+        folderRow?.frame = NSRect(
+            x: Layout.sectionInset,
+            y: bottomRowY,
+            width: availableWidth,
+            height: Layout.rowHeight
+        )
     }
 
     func layoutFolderRow() {
         guard let row = folderRow else { return }
-        let label = row.subviews.compactMap { $0 as? NSTextField }.first { $0 !== pathField }
+        let label = row.subviews.compactMap { $0 as? NSTextField }.first
         let showWidth = min(Layout.secondaryButtonWidth, row.bounds.width)
-        let pathWidth = max(1, row.bounds.width - Layout.labelWidth - showWidth - Layout.buttonGap)
-        label?.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
-        pathField.frame = NSRect(
-            x: Layout.labelWidth,
-            y: 7,
-            width: pathWidth,
+        let changeWidth = min(Layout.secondaryButtonWidth, row.bounds.width)
+        let actionGroupWidth = showWidth + changeWidth + Layout.buttonGap
+        let actionMinX = min(
+            Layout.accountLabelWidth,
+            max(0, row.bounds.width - actionGroupWidth)
+        )
+        label?.frame = NSRect(
+            x: 0,
+            y: centeredY(height: 18, in: row),
+            width: max(1, actionMinX - Layout.buttonGap),
             height: 18
         )
+        changeFolderButton.frame = NSRect(
+            x: actionMinX,
+            y: centeredY(height: Layout.fieldHeight, in: row),
+            width: changeWidth,
+            height: Layout.fieldHeight
+        )
         showFolderButton.frame = NSRect(
-            x: row.bounds.width - showWidth,
-            y: 3,
+            x: changeFolderButton.frame.maxX + Layout.buttonGap,
+            y: centeredY(height: Layout.fieldHeight, in: row),
             width: showWidth,
             height: Layout.fieldHeight
+        )
+    }
+
+    func layoutOneDriveStatusRow() {
+        guard let row = oneDriveStatusRow else { return }
+        let label = row.subviews.compactMap { $0 as? NSTextField }.first
+        let badgeSize = oneDriveStatusBadge.intrinsicContentSize
+        let badgeX = min(
+            Layout.accountLabelWidth,
+            max(0, row.bounds.width - badgeSize.width - Layout.infoButtonSize - Layout.infoButtonGap)
+        )
+        let maxBadgeWidth = max(1, row.bounds.width - badgeX - Layout.infoButtonSize - Layout.infoButtonGap)
+        let badgeWidth = min(maxBadgeWidth, badgeSize.width)
+        label?.frame = NSRect(x: 0, y: centeredY(height: 18, in: row), width: badgeX, height: 18)
+        oneDriveStatusBadge.frame = NSRect(
+            x: badgeX,
+            y: centeredY(height: badgeSize.height, in: row),
+            width: badgeWidth,
+            height: badgeSize.height
+        )
+        syncInfoButton.frame = NSRect(
+            x: oneDriveStatusBadge.frame.maxX + Layout.infoButtonGap,
+            y: centeredY(height: Layout.infoButtonSize, in: row),
+            width: Layout.infoButtonSize,
+            height: Layout.infoButtonSize
         )
     }
 
     func layoutSyncNowRow() {
         guard let row = syncNowRow else { return }
         let label = row.subviews.compactMap { $0 as? NSTextField }.first
-        let buttonWidth = min(Layout.buttonWidth, row.bounds.width - Layout.labelWidth)
-        label?.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
+        let buttonWidth = min(Layout.buttonWidth, row.bounds.width - Layout.accountLabelWidth)
+        label?.frame = NSRect(
+            x: 0,
+            y: centeredY(height: 18, in: row),
+            width: Layout.accountLabelWidth,
+            height: 18
+        )
         syncNowButton.frame = NSRect(
-            x: Layout.labelWidth,
-            y: 3,
+            x: Layout.accountLabelWidth,
+            y: centeredY(height: Layout.fieldHeight, in: row),
             width: max(1, buttonWidth),
             height: Layout.fieldHeight
         )
     }
 
-    func layoutStatusValue(_ value: NSTextField, in row: PasteraSettingsRowView?) {
-        guard let row else { return }
-        let label = row.subviews.compactMap { $0 as? NSTextField }.first { $0 !== value }
-        label?.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
-        value.frame = NSRect(
-            x: Layout.labelWidth,
-            y: 7,
-            width: max(1, row.bounds.width - Layout.labelWidth),
-            height: 18
-        )
+    func layoutSwitchRows(in section: NSView?) {
+        guard let section else { return }
+        let rows = switchRows.filter { $0.row.superview === section }
+        let availableWidth = max(1, section.bounds.width - Layout.sectionInset * 2)
+        let columnWidth = floor(max(1, (availableWidth - Layout.switchColumnGap) / 2))
+        for (index, switchRow) in rows.enumerated() {
+            let columnIndex = index % 2
+            let rowIndex = index / 2
+            let rowX = Layout.sectionInset
+                + CGFloat(columnIndex) * (columnWidth + Layout.switchColumnGap)
+            let rowY = section.bounds.height
+                - Layout.sectionInset
+                - Layout.rowHeight
+                - CGFloat(rowIndex) * (Layout.rowHeight + Layout.rowSpacing)
+            let row = switchRow.row
+            row.frame = NSRect(
+                x: rowX,
+                y: rowY,
+                width: columnWidth,
+                height: Layout.rowHeight
+            )
+            let stateX = row.bounds.width - Layout.switchStateWidth
+            let controlX = max(0, stateX - Layout.switchStateGap - Layout.switchWidth)
+            switchRow.label.frame = NSRect(
+                x: 0,
+                y: 7,
+                width: max(1, controlX - Layout.buttonGap),
+                height: 18
+            )
+            switchRow.control.frame = NSRect(
+                x: controlX,
+                y: 4,
+                width: Layout.switchWidth,
+                height: Layout.switchHeight
+            )
+            switchRow.stateLabel.frame = NSRect(
+                x: stateX,
+                y: 7,
+                width: Layout.switchStateWidth,
+                height: 18
+            )
+        }
+    }
+
+    func layoutStatusRows() {
+        for statusRow in statusRows {
+            let row = statusRow.row
+            statusRow.label.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
+            statusRow.value.frame = NSRect(
+                x: Layout.labelWidth,
+                y: 7,
+                width: max(1, row.bounds.width - Layout.labelWidth),
+                height: 18
+            )
+        }
+    }
+
+    func centeredY(height: CGFloat, in row: NSView) -> CGFloat {
+        floor((row.bounds.height - height) / 2)
     }
 }

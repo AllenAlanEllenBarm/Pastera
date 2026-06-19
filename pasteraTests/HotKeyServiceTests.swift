@@ -239,7 +239,7 @@ final class HotKeyServiceTests {
         let defaultKeyCombos: [String: Any] = [Constants.Menu.clip: ["keyCode": 0, "modifiers": 4352],
                                                Constants.Menu.history: ["keyCode": 9, "modifiers": 768],
                                                Constants.Menu.snippet: ["keyCode": 11, "modifiers": 4352]]
-        defaults.register(defaults: [Constants.UserDefaults.hotKeys: defaultKeyCombos])
+        defaults.set(defaultKeyCombos, forKey: Constants.UserDefaults.hotKeys)
         defaults.synchronize()
 
         #expect(defaults.bool(forKey: Constants.HotKey.migrateNewKeyCombo) == false)

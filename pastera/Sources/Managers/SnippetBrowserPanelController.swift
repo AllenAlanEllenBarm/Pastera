@@ -341,9 +341,6 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     private func numericShortcutText(forRowIndex index: Int) -> String? {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
-            return nil
-        }
         let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
         return PasteraShortcutFormatter.numericString(forRowIndex: index, startsAtZero: startsAtZero)
     }
@@ -353,9 +350,6 @@ final class SnippetBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     private func confirmSnippetForNumberShortcut(_ event: NSEvent) -> Bool {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
-            return false
-        }
         let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
         guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
             for: event,

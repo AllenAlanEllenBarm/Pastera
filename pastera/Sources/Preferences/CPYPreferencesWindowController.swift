@@ -40,7 +40,6 @@ final class CPYPreferencesWindowController: NSWindowController {
 
     private enum Pane: Int, CaseIterable {
         case general
-        case menu
         case type
         case exclude
         case shortcuts
@@ -51,21 +50,19 @@ final class CPYPreferencesWindowController: NSWindowController {
         var title: String {
             switch self {
             case .general:
-                return String(localized: "General")
-            case .menu:
-                return String(localized: "Menu")
+                return "通用"
             case .type:
-                return String(localized: "Types")
+                return "类型"
             case .exclude:
-                return String(localized: "Exclude")
+                return "排除"
             case .shortcuts:
-                return String(localized: "Shortcuts")
+                return "快捷键"
             case .sync:
                 return "同步"
             case .updates:
-                return String(localized: "Update")
+                return "更新"
             case .beta:
-                return String(localized: "Beta")
+                return "测试"
             }
         }
 
@@ -73,8 +70,6 @@ final class CPYPreferencesWindowController: NSWindowController {
             switch self {
             case .general:
                 return "switch.2"
-            case .menu:
-                return "list.bullet"
             case .type:
                 return "doc"
             case .exclude:
@@ -82,7 +77,7 @@ final class CPYPreferencesWindowController: NSWindowController {
             case .shortcuts:
                 return "command"
             case .sync:
-                return "arrow.triangle.2.circlepath"
+                return "arrow.up.arrow.down.circle"
             case .updates:
                 return "arrow.triangle.2.circlepath"
             case .beta:
@@ -112,7 +107,6 @@ final class CPYPreferencesWindowController: NSWindowController {
     private var sidebarButtons = [PasteraPreferenceSidebarButton]()
     private let viewController: [NSViewController] = [
         CPYGeneralPreferenceViewController(nibName: "CPYGeneralPreferenceViewController", bundle: nil),
-        NSViewController(nibName: "CPYMenuPreferenceViewController", bundle: nil),
         CPYTypePreferenceViewController(nibName: "CPYTypePreferenceViewController", bundle: nil),
         CPYExcludeAppPreferenceViewController(nibName: "CPYExcludeAppPreferenceViewController", bundle: nil),
         CPYShortcutsPreferenceViewController(nibName: "CPYShortcutsPreferenceViewController", bundle: nil),
@@ -327,9 +321,13 @@ private extension CPYPreferencesWindowController {
             width: visibleWidth,
             height: documentHeight
         )
+        let initialOriginY = selectedPaneOriginY(
+            visibleHeight: visibleHeight,
+            contentHeight: contentHeight
+        )
         selectedView.frame = NSRect(
             x: Metrics.paneDocumentInset,
-            y: Metrics.paneDocumentInset,
+            y: initialOriginY,
             width: contentWidth,
             height: contentHeight
         )
@@ -350,9 +348,13 @@ private extension CPYPreferencesWindowController {
                 width: visibleWidth,
                 height: max(visibleHeight, contentHeight + Metrics.paneDocumentInset * 2)
             )
+            let compactOriginY = selectedPaneOriginY(
+                visibleHeight: visibleHeight,
+                contentHeight: contentHeight
+            )
             selectedView.frame = NSRect(
                 x: Metrics.paneDocumentInset,
-                y: Metrics.paneDocumentInset,
+                y: compactOriginY,
                 width: contentWidth,
                 height: contentHeight
             )
@@ -362,6 +364,36 @@ private extension CPYPreferencesWindowController {
                 availableWidth: contentWidth
             )
         }
+        centerSelectedGeneralPaneContent(visibleHeight: visibleHeight)
+    }
+
+    func selectedPaneOriginY(visibleHeight: CGFloat, contentHeight: CGFloat) -> CGFloat {
+        guard Pane(rawValue: selectedTabIndex) == .general else {
+            return Metrics.paneDocumentInset
+        }
+        let centeredOriginY = floor((visibleHeight - contentHeight) / 2)
+        return max(Metrics.paneDocumentInset, centeredOriginY)
+    }
+
+    func centerSelectedGeneralPaneContent(visibleHeight: CGFloat) {
+        guard Pane(rawValue: selectedTabIndex) == .general,
+              let selectedView,
+              let contentBounds = visibleControlBounds(in: selectedView) else { return }
+        let contentFrame = selectedView.convert(contentBounds, to: paneDocumentView)
+        let deltaY = contentFrame.midY - visibleHeight / 2
+        selectedView.frame.origin.y = max(
+            Metrics.paneDocumentInset,
+            floor(selectedView.frame.origin.y - deltaY)
+        )
+    }
+
+    func visibleControlBounds(in view: NSView) -> NSRect? {
+        view.subviews
+            .filter { !$0.isHidden && $0.alphaValue > 0 && !$0.frame.isEmpty && $0 is NSControl }
+            .map(\.frame)
+            .reduce(nil as NSRect?) { partial, frame in
+                partial.map { $0.union(frame) } ?? frame
+            }
     }
 
     private func alignmentKind(for pane: Pane) -> PasteraPreferencePaneAlignmentKind? {
@@ -372,7 +404,7 @@ private extension CPYPreferencesWindowController {
             return .shortcuts
         case .beta:
             return .beta
-        case .general, .menu, .type, .sync, .updates:
+        case .general, .type, .sync, .updates:
             return nil
         }
     }
@@ -550,6 +582,7 @@ private final class PasteraPreferenceSidebarButton: NSButton {
         }
     }
 
+    private let symbolName: String
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
 
@@ -557,6 +590,7 @@ private final class PasteraPreferenceSidebarButton: NSButton {
     override var canBecomeKeyView: Bool { true }
 
     init(title: String, symbolName: String) {
+        self.symbolName = symbolName
         super.init(frame: .zero)
         self.title = title
         image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
@@ -564,6 +598,7 @@ private final class PasteraPreferenceSidebarButton: NSButton {
     }
 
     required init?(coder: NSCoder) {
+        symbolName = ""
         super.init(coder: coder)
         setup()
     }
@@ -631,6 +666,12 @@ private final class PasteraPreferenceSidebarButton: NSButton {
         setAccessibilityLabel(title)
         refreshAppearance()
     }
+
+    #if DEBUG
+    var symbolNameForTesting: String {
+        symbolName
+    }
+    #endif
 }
 
 private enum PasteraPreferenceFocusableCollector {
@@ -685,6 +726,14 @@ extension CPYPreferencesWindowController {
 
     var sidebarBackgroundBrightnessForTesting: CGFloat {
         perceivedBrightness(for: sidebarView.layer?.backgroundColor)
+    }
+
+    var preferenceSidebarTitlesForTesting: [String] {
+        sidebarButtons.map(\.title)
+    }
+
+    var preferenceSidebarSymbolNamesForTesting: [String] {
+        sidebarButtons.map(\.symbolNameForTesting)
     }
 
     func showPreferencePaneForTesting(title: String) {
@@ -880,8 +929,6 @@ extension CPYPreferencesWindowController {
         switch title.lowercased() {
         case "general":
             return .general
-        case "menu":
-            return .menu
         case "types":
             return .type
         case "exclude":
@@ -903,8 +950,6 @@ extension CPYPreferencesWindowController {
         switch pane {
         case .general:
             return "General"
-        case .menu:
-            return "Menu"
         case .type:
             return "Types"
         case .exclude:

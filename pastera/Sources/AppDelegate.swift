@@ -80,23 +80,14 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     }
 
     @objc func clearAllHistory() {
-        let isShowAlert = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showAlertBeforeClearHistory)
-        if isShowAlert {
-            let result = PasteraConfirmationController.runModal(options: PasteraConfirmationOptions(
-                title: String(localized: "Clear History"),
-                message: String(localized: "Are you sure you want to clear your clipboard history?"),
-                confirmTitle: String(localized: "Clear History"),
-                cancelTitle: String(localized: "Cancel"),
-                isDestructive: true,
-                suppressionTitle: String(localized: "Don't ask again")
-            ))
-            guard result.confirmed else { return }
-
-            if result.suppressionChecked {
-                AppEnvironment.current.defaults.set(false, forKey: Constants.UserDefaults.showAlertBeforeClearHistory)
-            }
-            AppEnvironment.current.defaults.synchronize()
-        }
+        let result = PasteraConfirmationController.runModal(options: PasteraConfirmationOptions(
+            title: String(localized: "Clear History"),
+            message: String(localized: "Are you sure you want to clear your clipboard history?"),
+            confirmTitle: String(localized: "Clear History"),
+            cancelTitle: String(localized: "Cancel"),
+            isDestructive: true
+        ))
+        guard result.confirmed else { return }
 
         AppEnvironment.current.clipService.clearAll()
     }
@@ -357,6 +348,8 @@ extension AppDelegate: NSApplicationDelegate {
         AppEnvironment.current.menuManager.setup()
         // Screenshot
         screenshotObserver.delegate = self
+        screenshotObserver.isEnabled = true
+        screenshotObserver.start()
 
         // Clean datas every 30 minutes
         Observable<Int>.interval(.seconds(60 * 30), scheduler: MainScheduler.asyncInstance)
@@ -376,22 +369,6 @@ private extension AppDelegate {
             .compactMap { $0 }
             .subscribe(onNext: { [weak self] _ in
                 self?.reflectLoginItemState()
-            })
-            .disposed(by: disposeBag)
-        // Observe Screenshot
-        let observerScreenshot = AppEnvironment.current.defaults.rx.observe(Bool.self, Constants.Beta.observerScreenshot, retainSelf: false)
-            .compactMap { $0 }
-            .share(replay: 1)
-        observerScreenshot
-            .subscribe(onNext: { [weak self] enabled in
-                self?.screenshotObserver.isEnabled = enabled
-            })
-            .disposed(by: disposeBag)
-        observerScreenshot
-            .filter { $0 }
-            .take(1)
-            .subscribe(onNext: { [weak self] _ in
-                self?.screenshotObserver.start()
             })
             .disposed(by: disposeBag)
     }

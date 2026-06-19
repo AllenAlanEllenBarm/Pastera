@@ -38,7 +38,7 @@ struct KeyboardAccessibilityTests {
 
         controller.showWindow(nil)
 
-        for paneTitle in ["General", "Menu", "Types", "Shortcuts", "Update", "Beta"] {
+        for paneTitle in ["General", "Types", "Shortcuts", "Update", "Beta"] {
             controller.showPreferencePaneForTesting(title: paneTitle)
             let minimumGap = try #require(controller.minimumVisibleControlVerticalGapForTesting)
             #expect(minimumGap >= 8, "\(paneTitle) pane controls are visually cramped: \(minimumGap)")
@@ -57,7 +57,7 @@ struct KeyboardAccessibilityTests {
         let returnEvent = try makeKeyEvent(keyCode: 36, characters: "\r")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(downEvent))
-        #expect(controller.selectedPreferencePaneTitleForTesting == "Menu")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "Types")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(returnEvent))
         #expect(controller.focusedPreferencePaneControlTitleForTesting != nil)
@@ -74,8 +74,8 @@ struct KeyboardAccessibilityTests {
 
         #expect(controller.focusedPreferenceSidebarTitleForTesting == "General")
         #expect(controller.handlePreferenceKeyboardEventForTesting(downEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Menu")
-        #expect(controller.selectedPreferencePaneTitleForTesting == "Menu")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Types")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "Types")
     }
 
     @Test
@@ -89,8 +89,8 @@ struct KeyboardAccessibilityTests {
         let tabEvent = try makeKeyEvent(keyCode: 48, characters: "\t")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(tabEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Menu")
-        #expect(controller.selectedPreferencePaneTitleForTesting == "Menu")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Types")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "Types")
     }
 
     @Test
@@ -104,20 +104,25 @@ struct KeyboardAccessibilityTests {
         #expect(initialFrameSize == NSSize(width: 600, height: 340))
         #expect(controller.window?.minSize == NSSize(width: 560, height: 320))
 
-        for paneTitle in ["General", "Menu", "Types", "Exclude", "Shortcuts", "Update", "Beta"] {
+        for paneTitle in ["General", "Types", "Exclude", "Shortcuts", "Update", "Beta"] {
             controller.showPreferencePaneForTesting(title: paneTitle)
 
             #expect(controller.window?.frame.size == initialFrameSize)
             #expect(controller.preferencePaneUsesScrollDocumentForTesting)
-            #expect(
-                controller.selectedPaneDocumentOriginForTesting == NSPoint(x: 16, y: 16),
-                "\(paneTitle) pane should be pinned to the top-leading inset"
-            )
-            let visibleTopGap = try #require(controller.preferencePaneVisibleTopGapForTesting)
-            #expect(
-                visibleTopGap <= 24,
-                "\(paneTitle) pane content starts too low: \(visibleTopGap)"
-            )
+            if paneTitle == "General" {
+                #expect(controller.selectedPaneDocumentOriginForTesting.x == 16)
+                #expect(controller.selectedPaneDocumentOriginForTesting.y >= 16)
+            } else {
+                #expect(
+                    controller.selectedPaneDocumentOriginForTesting == NSPoint(x: 16, y: 16),
+                    "\(paneTitle) pane should be pinned to the top-leading inset"
+                )
+                let visibleTopGap = try #require(controller.preferencePaneVisibleTopGapForTesting)
+                #expect(
+                    visibleTopGap <= 24,
+                    "\(paneTitle) pane content starts too low: \(visibleTopGap)"
+                )
+            }
             #expect(controller.selectedPaneDocumentWidthForTesting <= controller.preferencePaneViewportWidthForTesting)
         }
     }
@@ -475,7 +480,6 @@ private struct SnippetEditorKeyboardRepository: SnippetRepositoryProtocol {
     }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}

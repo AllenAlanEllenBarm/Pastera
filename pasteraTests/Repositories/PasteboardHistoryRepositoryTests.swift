@@ -20,6 +20,57 @@ import Testing
 @testable import Pastera
 
 @MainActor
+@Suite
+struct HistoryRepositoryBootstrapTests {
+    @Test
+    func repositoryCreatedBeforeBootstrapUsesBootstrappedDatabaseAtCallTime() throws {
+        let repository = PasteboardHistoryRepository()
+
+        try withDependencies {
+            try $0.bootstrapDatabase()
+        } operation: {
+            let content = PasteboardContent("Bootstrap after init")
+            let id = PasteboardHistory.ID(rawValue: content.hash)
+            let history = PasteboardHistory(id: id, title: "Bootstrap after init", updateAt: 1)
+
+            repository.save(id: id, content: content, updateAt: 1)
+
+            #expect(repository.fetchHistory(id: id) == history)
+            #expect(repository.fetchContent(id: id) == content)
+        }
+    }
+}
+
+@MainActor
+@Suite
+struct ClipServiceCaptureTests {
+    @Test
+    func emptyPasteboardChangeRetriesUntilTypesAreAvailable() {
+        let repository = RecordingPasteboardHistoryRepository()
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("ClipServiceCaptureTests.retry.\(UUID().uuidString)"))
+        defer { pasteboard.clearContents() }
+        pasteboard.clearContents()
+
+        withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let service = ClipService()
+            service.setStoreTypesForTesting(["String": NSNumber(value: true)])
+
+            #expect(!service.createForTesting(from: pasteboard))
+
+            let item = NSPasteboardItem()
+            item.setString("Ready after clear", forType: .string)
+            pasteboard.writeObjects([item])
+
+            #expect(service.createForTesting(from: pasteboard))
+        }
+
+        #expect(repository.savedContents.map(\.stringValue) == ["Ready after clear"])
+    }
+}
+
+@MainActor
 @Suite(
     .dependencies {
         try $0.bootstrapDatabase()
@@ -228,101 +279,6 @@ struct PasteboardHistoryRepositoryTests {
     }
 
     @Test
-    func syncPayloadsExportOnlyCurrentDeviceChangesAfterCutoffAndSkipLargeAssets() throws {
-        let current = PasteboardContent("Current")
-        let old = PasteboardContent("Old")
-        let remote = PasteboardContent("Remote")
-        let large = PasteboardContent(
-            assets: [
-                PasteboardContent.Asset(type: .string, data: Data(repeating: 1, count: 8))
-            ]
-        )
-        let currentID = PasteboardHistory.ID(rawValue: current.hash)
-        let oldID = PasteboardHistory.ID(rawValue: old.hash)
-        let remoteID = PasteboardHistory.ID(rawValue: remote.hash)
-        let largeID = PasteboardHistory.ID(rawValue: large.hash)
-
-        repository.save(id: currentID, content: current, updateAt: 10)
-        repository.save(id: oldID, content: old, updateAt: 4)
-        repository.upsertSyncPayload(PasteboardHistorySyncPayload(
-            id: remoteID.rawValue,
-            title: "Remote",
-            pasteboardTypes: [.string],
-            updateAt: 12,
-            deviceID: "remote-device",
-            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote".utf8))],
-            thumbnail: nil
-        ))
-        repository.save(id: largeID, content: large, updateAt: 13)
-
-        let payloads = repository.fetchSyncPayloads(
-            currentDeviceID: CPYUtilities.deviceID,
-            updatedAtOrAfter: 5,
-            maxAssetBytes: 7
-        )
-
-        #expect(payloads.map(\.id) == [currentID.rawValue])
-        #expect(payloads.first?.deviceID == CPYUtilities.deviceID)
-    }
-
-    @Test
-    func syncImportDoesNotReuploadRemoteHistoryAndLocalSuppressionPreventsReimport() throws {
-        let id = PasteboardHistory.ID(rawValue: "remote-history")
-        let payload = PasteboardHistorySyncPayload(
-            id: id.rawValue,
-            title: "Remote history",
-            pasteboardTypes: [.string],
-            updateAt: 20,
-            deviceID: "remote-device",
-            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote history".utf8))],
-            thumbnail: nil
-        )
-
-        repository.upsertSyncPayload(payload)
-        #expect(repository.fetchHistory(id: id)?.deviceID == "remote-device")
-        #expect(repository.fetchSyncPayloads(currentDeviceID: CPYUtilities.deviceID, updatedAtOrAfter: 0, maxAssetBytes: 1024).isEmpty)
-
-        repository.deleteHistory(id: id)
-        repository.upsertSyncPayload(payload)
-
-        #expect(repository.fetchHistory(id: id) == nil)
-    }
-
-    @Test
-    func syncImportUsesLastWriteWinsAndReportsActualHistoryWrites() throws {
-        let id = PasteboardHistory.ID(rawValue: "shared-history")
-        let localContent = PasteboardContent("Local newer")
-        repository.save(id: id, content: localContent, updateAt: 30)
-
-        let olderRemote = PasteboardHistorySyncPayload(
-            id: id.rawValue,
-            title: "Remote older",
-            pasteboardTypes: [.string],
-            updateAt: 20,
-            deviceID: "remote-device",
-            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote older".utf8))],
-            thumbnail: nil
-        )
-        let newerRemote = PasteboardHistorySyncPayload(
-            id: id.rawValue,
-            title: "Remote newer",
-            pasteboardTypes: [.string],
-            updateAt: 40,
-            deviceID: "remote-device",
-            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote newer".utf8))],
-            thumbnail: nil
-        )
-
-        #expect(repository.upsertSyncPayload(olderRemote) == false)
-        #expect(repository.fetchHistory(id: id)?.title == "Local newer")
-        #expect(repository.fetchContent(id: id) == localContent)
-
-        #expect(repository.upsertSyncPayload(newerRemote) == true)
-        #expect(repository.fetchHistory(id: id)?.title == "Remote newer")
-        #expect(repository.fetchContent(id: id) == PasteboardContent("Remote newer"))
-    }
-
-    @Test
     func deleteAll() throws {
         let content = PasteboardContent("First")
         let content2 = PasteboardContent("Second")
@@ -365,7 +321,12 @@ struct PasteboardHistoryRepositoryTests {
 
     @Test
     func retentionSettingsSeparateMenuDisplayFromStoredHistory() throws {
-        let settings = HistoryRetentionSettings(menuDisplayLimit: 1, storedHistoryLimit: 2, maxSyncedAssetBytes: 1024)
+        let settings = HistoryRetentionSettings(
+            menuDisplayLimit: 1,
+            storedHistoryLimit: 2,
+            maxSyncedHistoryTextBytes: 256 * 1024,
+            maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024
+        )
         let first = PasteboardContent("First")
         let second = PasteboardContent("Second")
         let third = PasteboardContent("Third")
@@ -460,6 +421,200 @@ struct PasteboardHistoryRepositoryTests {
             )
         }
     }
+}
+
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct PasteboardHistorySyncRepositoryTests {
+    let repository = PasteboardHistoryRepository()
+
+    @Test
+    func syncPayloadsExportNewestCurrentDeviceTextAndURLWindowOnly() throws {
+        let current = PasteboardContent("Current")
+        let old = PasteboardContent("Old")
+        let remote = PasteboardContent("Remote")
+        let webURL = try #require(URL(string: "https://e.co"))
+        let urlContent = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .URL, data: webURL.dataRepresentation)]
+        )
+        let image = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .tiff, data: Data(repeating: 1, count: 8))]
+        )
+        let file = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(
+                    type: .fileURL,
+                    data: URL(fileURLWithPath: "/tmp/pastera.txt").dataRepresentation
+                )
+            ]
+        )
+        let rtf = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .rtf, data: Data("{\\rtf1 Remote}".utf8))]
+        )
+        let html = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .html, data: Data("<strong>Remote</strong>".utf8))]
+        )
+        let large = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .string, data: Data(String(repeating: "A", count: 17).utf8))]
+        )
+        let currentID = PasteboardHistory.ID(rawValue: current.hash)
+        let oldID = PasteboardHistory.ID(rawValue: old.hash)
+        let remoteID = PasteboardHistory.ID(rawValue: remote.hash)
+        let urlID = PasteboardHistory.ID(rawValue: urlContent.hash)
+
+        repository.save(id: currentID, content: current, updateAt: 10)
+        repository.save(id: oldID, content: old, updateAt: 4)
+        repository.upsertSyncPayload(PasteboardHistorySyncPayload(
+            id: remoteID.rawValue,
+            text: "Remote",
+            updateAt: 12,
+            deviceID: "remote-device",
+            sourceKind: .plainText
+        ))
+        repository.save(id: urlID, content: urlContent, updateAt: 12)
+        repository.save(id: PasteboardHistory.ID(rawValue: image.hash), content: image, updateAt: 16)
+        repository.save(id: PasteboardHistory.ID(rawValue: file.hash), content: file, updateAt: 15)
+        repository.save(id: PasteboardHistory.ID(rawValue: rtf.hash), content: rtf, updateAt: 14)
+        repository.save(id: PasteboardHistory.ID(rawValue: html.hash), content: html, updateAt: 13)
+        repository.save(id: PasteboardHistory.ID(rawValue: large.hash), content: large, updateAt: 13)
+
+        let payloads = repository.fetchSyncPayloads(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 3,
+            maxTextBytes: 16,
+            snapshotTextBudgetBytes: 128
+        )
+
+        #expect(payloads.map(\.id) == [urlID.rawValue, currentID.rawValue, oldID.rawValue])
+        #expect(payloads.map(\.sourceKind) == [.url, .plainText, .plainText])
+        #expect(payloads.first?.text == "https://e.co")
+        #expect(payloads.first?.deviceID == CPYUtilities.deviceID)
+    }
+
+    @Test
+    func syncPayloadExportStopsAtSnapshotTextBudget() throws {
+        let newest = PasteboardContent("First")
+        let older = PasteboardContent("Second")
+        let newestID = PasteboardHistory.ID(rawValue: newest.hash)
+        repository.save(id: newestID, content: newest, updateAt: 2)
+        repository.save(id: PasteboardHistory.ID(rawValue: older.hash), content: older, updateAt: 1)
+
+        let payloads = repository.fetchSyncPayloads(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 6
+        )
+
+        #expect(payloads.map(\.id) == [newestID.rawValue])
+    }
+
+    @Test
+    func syncImportDoesNotReuploadRemoteHistoryAndLocalSuppressionPreventsReimport() throws {
+        let id = PasteboardHistory.ID(rawValue: "remote-history")
+        let payload = PasteboardHistorySyncPayload(
+            id: id.rawValue,
+            text: "Remote history",
+            updateAt: 20,
+            deviceID: "remote-device",
+            sourceKind: .plainText
+        )
+
+        repository.upsertSyncPayload(payload)
+        #expect(repository.fetchHistory(id: id)?.deviceID == "remote-device")
+        #expect(repository.fetchSyncPayloads(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 8 * 1024 * 1024
+        ).isEmpty)
+
+        repository.deleteHistory(id: id)
+        repository.upsertSyncPayload(payload)
+
+        #expect(repository.fetchHistory(id: id) == nil)
+    }
+
+    @Test
+    func syncImportUsesLastWriteWinsAndReportsActualHistoryWrites() throws {
+        let id = PasteboardHistory.ID(rawValue: "shared-history")
+        let localContent = PasteboardContent("Local newer")
+        repository.save(id: id, content: localContent, updateAt: 30)
+
+        let olderRemote = PasteboardHistorySyncPayload(
+            id: id.rawValue,
+            text: "Remote older",
+            updateAt: 20,
+            deviceID: "remote-device",
+            sourceKind: .plainText
+        )
+        let newerRemote = PasteboardHistorySyncPayload(
+            id: id.rawValue,
+            text: "Remote newer",
+            updateAt: 40,
+            deviceID: "remote-device",
+            sourceKind: .url
+        )
+
+        #expect(repository.upsertSyncPayload(olderRemote) == false)
+        #expect(repository.fetchHistory(id: id)?.title == "Local newer")
+        #expect(repository.fetchContent(id: id) == localContent)
+
+        #expect(repository.upsertSyncPayload(newerRemote) == true)
+        #expect(repository.fetchHistory(id: id)?.title == "Remote newer")
+        #expect(repository.fetchContent(id: id) == PasteboardContent("Remote newer"))
+        #expect(repository.fetchHistory(id: id)?.pasteboardTypes == [.string])
+        #expect(
+            repository
+                .fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1)
+                .first?
+                .thumbnailAsset == nil
+        )
+    }
+}
+
+private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
+    private(set) var savedContents = [PasteboardContent]()
+
+    func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func hasHistories() -> Bool { false }
+
+    func fetchHistoryDetails(
+        ascending: Bool,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) -> [PasteboardHistoryDetail] {
+        []
+    }
+
+    func searchHistoryDetails(
+        query: HistorySearchQuery,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) throws -> [PasteboardHistoryDetail] {
+        []
+    }
+
+    func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? { nil }
+    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
+
+    func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {
+        savedContents.append(content)
+    }
+
+    func deleteHistory(id: PasteboardHistory.ID) {}
+    func deleteAll() {}
+    func deleteOverflowingHistories(maxHistorySize: Int) {}
+    func pruneHistories(settings: HistoryRetentionSettings) {}
 }
 
 private extension PasteboardContent {

@@ -12,6 +12,7 @@
 
 import AppKit
 import CryptoKit
+import SQLite3
 import Testing
 @testable import Pastera
 
@@ -334,118 +335,130 @@ struct PasteboardContentTests {
     }
 
     @Test
-    func syncRecordJSONRoundTripsPlainPayloadObject() throws {
-        let payload = SyncJSONValue.object([
-            "id": .string("history-1"),
-            "title": .string("Plain history payload"),
-            "updateAt": .int(10)
-        ])
-        let record = SyncRecord(
-            id: "history-1",
-            kind: .history,
+    func oneDriveFolderSyncProviderWritesBoundedHistorySQLiteSnapshot() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let payloads = (0..<2005).map { index in
+            PasteboardHistorySyncPayload(
+                id: "history-\(index)",
+                text: "History \(index)",
+                updateAt: index,
+                deviceID: "device-a",
+                sourceKind: .plainText
+            )
+        }
+
+        try provider.saveHistorySnapshot(
+            payloads,
             deviceID: "device-a",
-            updatedAt: 10,
-            deletedAt: nil,
-            payload: payload,
-            schemaVersion: 1
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 8 * 1024 * 1024
         )
 
-        let data = try JSONEncoder().encode(record)
-        let decoded = try JSONDecoder().decode(SyncRecord.self, from: data)
-        let json = try #require(String(data: data, encoding: .utf8))
-
-        #expect(decoded == record)
-        #expect(json.contains("\"payload\""))
-        #expect(json.contains("\"Plain history payload\""))
-        #expect(!json.contains("\"nonce\""))
-        #expect(!json.contains("\"ciphertext\""))
-        #expect(!json.contains("\"tag\""))
+        let snapshot = try #require(provider.loadHistorySnapshots(excludingDeviceID: "device-b").first)
+        let sqliteURL = rootURL.appendingPathComponent("history/devices/device-a.sqlite")
+        let sqliteData = try Data(contentsOf: sqliteURL)
+        #expect(snapshot.deviceID == "device-a")
+        #expect(snapshot.payloads.count == 2000)
+        #expect(snapshot.payloads.first?.id == "history-2004")
+        #expect(snapshot.payloads.last?.id == "history-5")
+        #expect(sqliteData.starts(with: Data("SQLite format 3".utf8)))
+        #expect(sqliteData.range(of: Data("schemaVersion".utf8)) != nil)
+        #expect(sqliteData.range(of: Data("History 2004".utf8)) != nil)
+        #expect(sqliteData.range(of: Data("plainText".utf8)) != nil)
+        #expect(sqliteData.range(of: Data("history_assets".utf8)) == nil)
+        #expect(sqliteData.range(of: Data("history_thumbnails".utf8)) == nil)
+        #expect(sqliteData.range(of: Data("pasteboardType".utf8)) == nil)
+        #expect(sqliteData.range(of: Data("public.utf8-plain-text".utf8)) == nil)
+        #expect(snapshot.payloads.first?.text == "History 2004")
+        #expect(snapshot.payloads.first?.sourceKind == .plainText)
+        #expect(!FileManager.default.fileExists(atPath: sqliteURL.path + "-wal"))
+        #expect(!FileManager.default.fileExists(atPath: sqliteURL.path + "-shm"))
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("manifest.json").path))
     }
 
     @Test
-    func syncConflictPolicyChoosesNewestRecordAndIgnoresDeleteTombstones() {
-        let oldRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 1, deletedAt: nil)
-        let newRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 2, deletedAt: nil)
-        let deleteRecord = SyncRecord.plaintextFixture(id: "history-1", updatedAt: 3, deletedAt: 3)
+    func oneDriveFolderSyncProviderSkipsV2HistorySnapshots() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let historyDirectory = rootURL.appendingPathComponent("history/devices", isDirectory: true)
+        try FileManager.default.createDirectory(at: historyDirectory, withIntermediateDirectories: true)
+        let sqliteURL = historyDirectory.appendingPathComponent("remote.sqlite")
+        var handle: OpaquePointer?
+        sqlite3_open_v2(sqliteURL.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+        defer { sqlite3_close(handle) }
+        sqlite3_exec(handle, """
+            CREATE TABLE metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+            INSERT INTO metadata(key, value) VALUES ('schemaVersion', '2'), ('deviceID', 'remote-device');
+            CREATE TABLE histories (id TEXT PRIMARY KEY NOT NULL, updatedAt INTEGER NOT NULL, title TEXT NOT NULL);
+            """, nil, nil, nil)
 
-        #expect(SyncConflictPolicy.lastWriteWins.resolve(local: oldRecord, remote: newRecord) == newRecord)
-        #expect(SyncConflictPolicy.lastWriteWins.resolve(local: newRecord, remote: deleteRecord) == newRecord)
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "device-a").isEmpty)
     }
 
     @Test
-    func syncManifestJSONRoundTripsRecordMetadata() throws {
-        let manifest = SyncManifest(
-            schemaVersion: 1,
-            deviceID: "device-a",
-            updatedAt: 10,
-            records: [
-                SyncManifestRecord(id: "history-1", kind: .history, updatedAt: 8, deletedAt: nil),
-                SyncManifestRecord(id: "snippet-1", kind: .snippet, updatedAt: 9, deletedAt: 9)
+    func oneDriveFolderSyncProviderWritesFullSnippetSQLiteSnapshot() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(
+                    id: UUID().uuidString,
+                    title: "Folder",
+                    index: 1,
+                    isEnabled: true,
+                    updatedAt: 10,
+                    deviceID: "device-a"
+                )
+            ],
+            snippets: [
+                SnippetSyncPayload(
+                    id: UUID().uuidString,
+                    folderID: UUID().uuidString,
+                    title: "Snippet",
+                    content: "content",
+                    index: 2,
+                    isEnabled: false,
+                    updatedAt: 20,
+                    deviceID: "device-a"
+                )
             ]
         )
 
-        let data = try JSONEncoder().encode(manifest)
-        let decoded = try JSONDecoder().decode(SyncManifest.self, from: data)
-        let json = try #require(String(data: data, encoding: .utf8))
+        try provider.saveSnippetSnapshot(snapshot, deviceID: "device-a")
 
-        #expect(decoded == manifest)
-        #expect(!json.contains("\"crypto\""))
-        #expect(!json.contains("\"kdfAlgorithm\""))
-        #expect(!json.contains("\"encryptionAlgorithm\""))
+        let loaded = try #require(provider.loadSnippetSnapshots(excludingDeviceID: "device-b").first)
+        let sqliteURL = rootURL.appendingPathComponent("snippets/devices/device-a.sqlite")
+        let sqliteData = try Data(contentsOf: sqliteURL)
+        #expect(loaded.deviceID == "device-a")
+        #expect(loaded.snapshot == snapshot)
+        #expect(sqliteData.starts(with: Data("SQLite format 3".utf8)))
+        #expect(!FileManager.default.fileExists(atPath: sqliteURL.path + "-wal"))
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("snippets/items").path))
     }
 
     @Test
-    func oneDriveFolderSyncProviderCreatesManifestAndSkipsCorruptRecords() throws {
+    func oneDriveFolderSyncProviderSkipsCorruptSQLiteSnapshots() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
-        let manifest = try provider.loadOrCreateManifest(deviceID: "device-a")
-        let history = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
+        let historyDirectory = rootURL.appendingPathComponent("history/devices", isDirectory: true)
+        let snippetDirectory = rootURL.appendingPathComponent("snippets/devices", isDirectory: true)
+        try FileManager.default.createDirectory(at: historyDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: snippetDirectory, withIntermediateDirectories: true)
+        try Data("not sqlite".utf8).write(to: historyDirectory.appendingPathComponent("remote.sqlite"))
+        try Data("not sqlite".utf8).write(to: snippetDirectory.appendingPathComponent("remote.sqlite"))
 
-        try provider.save(history)
-        let corruptURL = rootURL
-            .appendingPathComponent("histories", isDirectory: true)
-            .appendingPathComponent("corrupt.json")
-        try Data("not-json".utf8).write(to: corruptURL)
-
-        #expect(manifest.deviceID == "device-a")
-        #expect(try provider.loadRecords(kind: .history) == [history])
-    }
-
-    @Test
-    func syncServiceMergesRecordsAndPersistsWinners() throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
-        let service = SyncService(provider: provider)
-        let local = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
-        let remote = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 2, deletedAt: nil)
-        let snippet = SyncRecord.plaintextFixture(id: "snippet-1", kind: .snippet, updatedAt: 1, deletedAt: nil)
-
-        let merged = service.merge(local: [local, snippet], remote: [remote])
-        try service.push(merged)
-
-        #expect(merged == [remote, snippet])
-        #expect(try service.pull(kind: .history) == [remote])
-        #expect(try service.pull(kind: .snippet) == [snippet])
-    }
-
-    @Test
-    func oneDriveFolderSyncProviderWritesRecordsAtomically() throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
-        let history = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
-        let snippet = SyncRecord.plaintextFixture(id: "snippet-1", kind: .snippet, updatedAt: 2, deletedAt: nil)
-
-        try provider.save(history)
-        try provider.save(snippet)
-
-        #expect(try provider.loadRecords(kind: .history) == [history])
-        #expect(try provider.loadRecords(kind: .snippet) == [snippet])
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "device-a").isEmpty)
+        #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "device-a").isEmpty)
     }
 }
 
@@ -458,13 +471,27 @@ struct OneDriveFolderSyncProviderDirectoryTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
-        let history = SyncRecord.plaintextFixture(id: "history-1", kind: .history, updatedAt: 1, deletedAt: nil)
+        let history = PasteboardHistorySyncPayload(
+            id: "history-1",
+            text: "History",
+            updateAt: 1,
+            deviceID: "device-a",
+            sourceKind: .plainText
+        )
 
-        _ = try provider.loadOrCreateManifest(deviceID: "device-a")
-        try provider.save(history)
+        try provider.saveHistorySnapshot(
+            [history],
+            deviceID: "device:a/with\\bad*chars?",
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 8 * 1024 * 1024
+        )
 
-        #expect(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("manifest.json").path))
-        #expect(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("histories/history-1.json").path))
+        #expect(FileManager.default.fileExists(
+            atPath: rootURL.appendingPathComponent("history/devices/device-a-with-bad-chars.sqlite").path
+        ))
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("manifest.json").path))
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("histories").path))
         #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("PasteraSync").path))
     }
 }
@@ -504,24 +531,5 @@ private extension Data {
             append(contentsOf: $0)
         }
         append(value)
-    }
-}
-
-private extension SyncRecord {
-    static func plaintextFixture(
-        id: String,
-        kind: SyncRecord.Kind = .history,
-        updatedAt: Int,
-        deletedAt: Int?
-    ) -> SyncRecord {
-        SyncRecord(
-            id: id,
-            kind: kind,
-            deviceID: "device",
-            updatedAt: updatedAt,
-            deletedAt: deletedAt,
-            payload: .object(["value": .string("payload")]),
-            schemaVersion: 1
-        )
     }
 }

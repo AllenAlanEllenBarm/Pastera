@@ -789,8 +789,7 @@ extension HistoryMenuHeaderView {
     }
 
     private func confirmHistoryRowForNumberShortcut(_ event: NSEvent) -> Bool {
-        guard !searchFieldOwnsFocus(),
-              AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
+        guard !searchFieldOwnsFocus() else {
             return false
         }
         let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)

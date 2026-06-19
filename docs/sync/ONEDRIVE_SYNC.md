@@ -1,11 +1,12 @@
-# OneDrive Folder Sync
+# Folder Sync
 
-## V1 Beta Model
+## V3 Snapshot Model
 
-Pastera v1 beta sync uses the local OneDrive folder on macOS. Pastera only
-reads and writes protocol files under the OneDrive-backed local directory; the
-OneDrive desktop client handles cloud transport. The app does not call
-Microsoft Graph, CloudKit, or a hosted Pastera service.
+Pastera sync uses ordinary files in a folder-sync provider. On macOS today that
+folder is a local OneDrive directory; the OneDrive desktop client handles cloud
+transport. Pastera does not call Microsoft Graph, CloudKit, or a hosted Pastera
+service. A future Windows client can write the same `Pastera/sync` structure
+under its own OneDrive/AppData-backed path.
 
 The default macOS location is:
 
@@ -20,134 +21,156 @@ locations, and creates `<OneDrive>/Pastera/sync` only for the selected default
 candidate. If multiple OneDrive roots exist, Pastera prefers the personal
 `OneDrive` folder; otherwise it uses the first usable OneDrive root by name.
 
-There is no custom sync-folder picker in v1 beta. If no usable OneDrive folder
-is detected, sync controls report that the user must install and log in to
-OneDrive. Pastera does not fall back to `~/Documents`.
+The settings UI allows the user to choose a sync location. On macOS the chosen
+location must be inside a usable OneDrive folder and writable; otherwise Pastera
+does not save it. If no usable OneDrive folder is detected, sync controls report
+that the user must install and log in to OneDrive. Pastera does not fall back to
+`~/Documents`.
 
 Sync is intentionally non-destructive:
 
 - Cloud imports may create or update local history and snippet records.
 - Cloud imports do not delete local history or snippets.
-- Local deletes stay local and are not emitted as cross-device delete
-  tombstones in v1.
+- Local deletes stay local and are not emitted as cross-device tombstones.
 - When a user deletes a synced local item, Pastera records a local suppression
-  entry so the same cloud record is not imported back onto that device later.
+  entry so the same cloud item is not imported back onto that device later.
 
 ## Directory Layout
 
-`sync` is the protocol root. Pastera no longer creates an extra `PasteraSync`
-folder inside it.
+`sync` is the protocol root. History and snippets are stored separately, and
+each device writes one SQLite snapshot per kind.
 
 ```text
 <OneDrive>/Pastera/sync/
-  manifest.json
-  histories/
-    <history-id>.json
+  history/
+    devices/
+      <device-id>.sqlite
   snippets/
-    folders/
-      <folder-id>.json
-    items/
-      <snippet-id>.json
+    devices/
+      <device-id>.sqlite
 ```
 
-Files are written atomically by writing a temporary file in the same directory
-and then replacing the destination. Corrupt JSON and legacy encrypted beta
-records are skipped during import.
+The old development protocol is not read. Pastera no longer reads
+`manifest.json`, `histories/*.json`, or `snippets/items|folders/*.json`.
+The first v3 write removes those known old paths from the selected sync root.
 
-Sync success status reflects local file work only. When Pastera reports that it
-wrote records to the local sync folder, it means the local OneDrive-backed
-folder was updated. Pastera does not know whether the OneDrive desktop client
-has uploaded those files to the cloud yet.
+Each app installation uses a persistent app-level device UUID. macOS seeds that
+value from the machine UUID on first use when available, then stores it in
+preferences; Windows should store an equivalent UUID under the user's app data
+directory. Device snapshot file names only use cross-platform-safe characters.
 
-## Manifest And Records
+Snapshots are written by generating a temporary SQLite file in the target
+directory, closing the SQLite connection, then atomically replacing the target
+device snapshot. WAL is disabled so OneDrive does not need to sync `-wal` or
+`-shm` sidecar files.
 
-`manifest.json` stores the sync schema version, the creating device ID, the
-manifest update time, and record summaries. It does not contain crypto metadata.
+Corrupt SQLite snapshots are skipped during import. Sync success status
+reflects local file work only; Pastera does not know whether the OneDrive
+desktop client has uploaded the local snapshot to the cloud.
 
-Each record includes:
+## SQLite Schemas
 
-- `id`
-- `kind`
-- `deviceID`
-- `updatedAt`
-- `deletedAt`
-- plain JSON `payload`
-- `schemaVersion`
+History snapshot:
 
-The payload is a JSON object encoded directly in the record. History payloads
-include title, pasteboard types, assets within `maxSyncedAssetBytes`, and
-thumbnail metadata when available. Snippet payloads include folder and snippet
-content needed to rebuild the SQLiteData tables. Binary assets inside payloads
-use Swift `Codable` data encoding, but the record is not encrypted.
+```sql
+metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)
+histories(
+  id TEXT PRIMARY KEY NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  sourceKind TEXT NOT NULL,
+  text TEXT NOT NULL
+)
+CREATE INDEX histories_updatedAt_index ON histories(updatedAt DESC);
+```
 
-V1 keeps the `deletedAt` field for schema compatibility, but Pastera does not
-emit or apply cross-device tombstones.
+History metadata includes `schemaVersion=3`, `deviceID`, `platform`,
+`generatedAt`, `historyLimit`, `maxTextBytes`, and
+`snapshotTextBudgetBytes`.
 
-Legacy encrypted beta records with `nonce`, `ciphertext`, and `tag` payloads
-are incompatible with the simplified protocol. New builds skip those records;
-clean the sync folder or re-export from a current build if a beta profile still
-contains old encrypted files.
+History sync is text-only. `sourceKind` is one of:
+
+- `plainText`: UTF-8 text copied as plain text.
+- `url`: a non-`file://` URL serialized as its absolute string.
+
+Images, files, PDFs, RTF, HTML, thumbnails, and raw pasteboard assets are not
+stored in history sync snapshots. The history protocol does not expose macOS
+`NSPasteboard` type names.
+
+Snippet snapshot:
+
+```sql
+metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)
+folders(id TEXT PRIMARY KEY, title TEXT NOT NULL, displayIndex INTEGER NOT NULL,
+        isEnabled INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
+        lastModifiedDeviceID TEXT)
+snippets(id TEXT PRIMARY KEY, folderID TEXT NOT NULL, title TEXT NOT NULL,
+         content TEXT NOT NULL, displayIndex INTEGER NOT NULL,
+         isEnabled INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
+         lastModifiedDeviceID TEXT)
+```
+
+Snippet metadata includes `schemaVersion=2`, `deviceID`, and `generatedAt`.
+
+Snippet snapshots remain full snapshots and may keep all snippet text. They are
+independent from the text-only history protocol.
+
+## Upload And Import
+
+History upload writes only records whose `deviceID` matches the current device.
+The exported history snapshot is ordered by `updatedAt DESC`, capped at 2000
+rows, skips single text values larger than 256 KiB, and stops when the snapshot
+reaches the 8 MiB text budget. The effective count is also limited by the local
+stored-history retention setting. New installs default that local retention to
+2000; explicit existing user settings are not force-reset.
+
+Snippet upload writes the current complete snippet library. Folder and snippet
+rows keep their `lastModifiedDeviceID`, so imported remote snippets do not
+become current-device changes.
+
+Import reads SQLite snapshots from other devices only. Same-ID conflicts use
+last-write-wins by business timestamp:
+
+- Remote history uses `histories.updatedAt`.
+- Remote snippet folders and snippets use their `updatedAt`.
+- A remote row is imported only when the local row does not exist, or the
+  remote timestamp is strictly greater than the local timestamp.
+- Equal or older remote rows are skipped.
+
+Imported history rows are written locally as plain text clipboard history. URL
+history also imports as plain text so it works the same across macOS and future
+Windows clients.
+
+Remote absence never deletes local data. Import counts report actual local
+writes; corrupt snapshots, locally suppressed IDs, and older/equal records are
+not counted as imported.
 
 ## Sync Switches
 
-The Sync pane has a top-level `自动同步` switch. It defaults to off and gates
-startup sync, timer sync, and local-change sync. Manual `立即同步` remains
-available even when automatic sync is off.
+The Sync pane separates automatic work into two main switches:
 
-The app still exposes four detailed scope switches:
+- `自动上传`: startup, timer, and local-change passes may write this device's
+  history/snippet snapshots to OneDrive.
+- `自动同步`: startup and timer passes may import snapshots written by other
+  devices.
 
-- History upload
-- History import
-- Snippet upload
-- Snippet import
+Four detailed scope switches still control the exact work:
 
-When `自动同步` is turned on for the first time and all four detailed switches
-are off, Pastera enables all four scopes so the first sync has meaningful work.
-All sync paths go through `SyncCoordinator`, which respects the same scope
-switches for each pass.
+- `上传历史`
+- `同步历史`
+- `上传片段`
+- `同步片段`
 
-When upload is enabled for the first time, Pastera records the enable time.
-Upload candidates are limited to records from the current device with
-`updatedAt` at or after that enable time. Existing local history and snippet
-stock is not backfilled to the cloud.
+When `自动上传` is turned on and both upload scopes are off, Pastera enables
+history and snippet upload so the switch has meaningful work. When `自动同步`
+is turned on and both import scopes are off, Pastera enables history and
+snippet import.
 
-Remote records preserve their source `deviceID` on import. Imported records are
-therefore not treated as current-device changes and are not re-uploaded by the
-importing device.
-
-Import counts report actual local writes. A record that is skipped by legacy
-payload incompatibility, local suppression, or last-write-wins checks is not
-counted as imported.
-
-Snippet upload includes enough folder context for changed snippets. When a
-snippet changed after upload was enabled, the exported snapshot also includes
-that snippet's parent folder record, even if the folder itself did not change
-after the cutoff. The parent folder payload preserves its existing `updatedAt`;
-export does not bump an old folder timestamp just to provide context.
-
-## Conflict Policy
-
-For same-ID active records, last write wins by business payload timestamp:
-
-- Remote history uses payload `updateAt`.
-- Remote snippet folders and snippets use payload `updatedAt`.
-- A remote record is imported only when the local record does not exist, or the
-  remote payload timestamp is strictly greater than the local `updatedAt` /
-  `updateAt`.
-- Equal or older remote records are skipped.
-
-Sync record `updatedAt` is copied from the business payload timestamp. It is not
-replaced with the export time when the payload timestamp is `0`.
-
-Remote tombstones do not delete or replace local active data in v1. Local
-suppression still blocks re-importing records that the user deleted on this
-device, even when the remote payload timestamp is newer.
-
-If the OneDrive desktop client creates conflict copies of JSON files, Pastera v1
-does not automatically merge those copies. Resolve or inspect OneDrive conflict
-files manually before treating the folder as converged.
+Manual `立即同步` bypasses the two automatic main switches, but still respects
+the four detailed scope switches.
 
 ## Limits
 
-Default `maxSyncedAssetBytes` is 10 MB per history record. Records larger than
-the limit are skipped for sync and remain local-only.
+History snapshots are capped at 2000 rows per device. A single history text
+value larger than 256 KiB is skipped rather than truncated. Each device snapshot
+also has an 8 MiB cumulative text budget. Items skipped by these sync limits
+remain in the local clipboard history when local retention allows them.

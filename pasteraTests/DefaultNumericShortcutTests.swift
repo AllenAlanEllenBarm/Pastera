@@ -12,9 +12,23 @@ import Testing
 @Suite(.serialized)
 struct DefaultNumericShortcutTests {
     @Test
-    func registeredDefaultsEnableNumericShortcutBadges() throws {
+    func legacyDisabledNumericShortcutPreferenceIsIgnored() throws {
         try withRegisteredDefaultEnvironment { defaults in
-            #expect(defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents))
+            defaults.set(false, forKey: Constants.UserDefaults.addNumericKeyEquivalents)
+
+            let detail = PasteboardHistoryDetail(
+                history: PasteboardHistory(
+                    id: PasteboardHistory.ID("legacy-disabled-history"),
+                    title: "Legacy Disabled",
+                    pasteboardTypes: [.string],
+                    updateAt: 1,
+                    deviceID: CPYUtilities.deviceID
+                ),
+                thumbnailAsset: nil
+            )
+            let row = MenuManager().makeHistoryRowViewForTesting(detail, index: 0)
+
+            #expect(row.textValuesForTesting.contains("1"))
         }
     }
 

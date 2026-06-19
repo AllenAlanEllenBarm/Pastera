@@ -31,3 +31,9 @@
 
 /* Class = "NSTextFieldCell"; title = "Behavior"; ObjectID = "nDk-8y-89n"; */
 "nDk-8y-89n.title" = "Impostazioni essenziali";
+
+"Number of characters in the menu:" = "Lunghezza massima delle voci di menu:";
+"chars" = "caratteri";
+"Place already copied history at the top" = "Mostra in cima gli elementi selezionati dalla Cronologia";
+"Move instead of copying (removes the older one from the list)" = "Sposta (Rimuovi il meno recente)";
+"Show color code preview" = "Mostra l'anteprima del codice colore";

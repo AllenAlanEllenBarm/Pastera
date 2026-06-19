@@ -58,6 +58,7 @@ final class MenuManager: NSObject {
     var isMainMenuPinned = false
     var panelDismissLocalMonitor: Any?
     var panelDismissGlobalMonitor: Any?
+    var secureEventInputStatusTimer: Timer?
     static let panelDismissMouseEventMask: NSEvent.EventTypeMask = [
         .leftMouseDown,
         .rightMouseDown,
@@ -95,6 +96,7 @@ final class MenuManager: NSObject {
     }
 
     deinit {
+        secureEventInputStatusTimer?.invalidate()
         removePanelDismissMonitors()
         removeStatusItem()
     }
@@ -102,6 +104,7 @@ final class MenuManager: NSObject {
     func setup() {
         createClipMenu()
         configureStatusItemFromDefaults()
+        startSecureEventInputStatusMonitoring()
         bind()
     }
 
@@ -204,8 +207,6 @@ extension MenuManager {
                                         .compactMap { $0 }.distinctUntilChanged().map { _ in })
         menuChangedObservables.append(defaults.rx.observe(Int.self, Constants.UserDefaults.maxHistorySize, options: [.new], retainSelf: false)
                                         .compactMap { $0 }.distinctUntilChanged().map { _ in })
-        menuChangedObservables.append(defaults.rx.observe(Bool.self, Constants.UserDefaults.showIconInTheMenu, options: [.new], retainSelf: false)
-                                        .compactMap { $0 }.distinctUntilChanged().map { _ in })
         menuChangedObservables.append(defaults.rx.observe(Int.self, Constants.UserDefaults.numberOfItemsPlaceInline, options: [.new], retainSelf: false)
                                         .compactMap { $0 }.distinctUntilChanged().map { _ in })
         menuChangedObservables.append(defaults.rx.observe(Int.self, Constants.UserDefaults.numberOfItemsPlaceInsideFolder, options: [.new], retainSelf: false)
@@ -217,10 +218,6 @@ extension MenuManager {
         menuChangedObservables.append(defaults.rx.observe(Bool.self, Constants.UserDefaults.menuItemsAreMarkedWithNumbers, options: [.new], retainSelf: false)
                                         .compactMap { $0 }.distinctUntilChanged().map { _ in })
         menuChangedObservables.append(defaults.rx.observe(Bool.self, Constants.UserDefaults.showToolTipOnMenuItem, options: [.new], retainSelf: false)
-                                        .compactMap { $0 }.distinctUntilChanged().map { _ in })
-        menuChangedObservables.append(defaults.rx.observe(Bool.self, Constants.UserDefaults.showImageInTheMenu, options: [.new], retainSelf: false)
-                                        .compactMap { $0 }.distinctUntilChanged().map { _ in })
-        menuChangedObservables.append(defaults.rx.observe(Bool.self, Constants.UserDefaults.addNumericKeyEquivalents, options: [.new], retainSelf: false)
                                         .compactMap { $0 }.distinctUntilChanged().map { _ in })
         menuChangedObservables.append(defaults.rx.observe(Int.self, Constants.UserDefaults.maxLengthOfToolTip, options: [.new], retainSelf: false)
                                         .compactMap { $0 }.distinctUntilChanged().map { _ in })
@@ -281,7 +278,7 @@ extension MenuManager {
         let subMenu = NSMenu(title: "")
         let subMenuItem = NSMenuItem(title: title, action: nil)
         subMenuItem.submenu = subMenu
-        subMenuItem.image = (AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu)) ? folderIcon : nil
+        subMenuItem.image = folderIcon
         return subMenuItem
     }
 
@@ -325,7 +322,7 @@ extension MenuManager {
         let historyItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         let itemView = MainMenuHeaderItemView(
             title: String(localized: "History"),
-            image: AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu) ? folderIcon : nil,
+            image: folderIcon,
             isPinned: isMainMenuPinned,
             shortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.historyKeyCombo)
         )
@@ -359,7 +356,7 @@ extension MenuManager {
         let snippetItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         let itemView = MainMenuHeaderItemView(
             title: String(localized: "Snippet"),
-            image: AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu) ? snippetIcon : nil,
+            image: snippetIcon,
             isPinned: false,
             showsPin: false,
             shortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.snippetKeyCombo)
@@ -466,10 +463,10 @@ extension MenuManager {
     func makeMainMenuPanelController() -> MainMenuPanelController {
         MainMenuPanelController(
             historyTitle: String(localized: "History"),
-            historyImage: AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu) ? folderIcon : nil,
+            historyImage: folderIcon,
             historyShortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.historyKeyCombo),
             snippetTitle: String(localized: "Snippet"),
-            snippetImage: AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu) ? snippetIcon : nil,
+            snippetImage: snippetIcon,
             itemsProvider: { [weak self] in self?.makeMainMenuPanelItems() ?? [] },
             onOpenHistory: { [weak self] in self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation) },
             onOpenSnippets: { [weak self] in self?.showSnippetBrowserPanel() },
@@ -487,9 +484,7 @@ extension MenuManager {
         let enabledSnippetFolders = snippetRepository.fetchFolders()
             .filter(\.isEnabled)
         if !enabledSnippetFolders.isEmpty {
-            let folderImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu)
-                ? folderIcon
-                : nil
+            let folderImage = folderIcon
             enabledSnippetFolders.forEach { folder in
                 let title = trimTitle(folder.title)
                 let shortcutText = PasteraShortcutFormatter.string(
@@ -682,8 +677,6 @@ extension MenuManager {
 
     func fetchHistoryMenuPage() -> HistoryMenuPage {
         let ascending = !AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting)
-        let isShowImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showImageInTheMenu)
-        let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
         let limit = historyMenuState.pageSize + 1
         let query = HistorySearchQuery(
             text: historyMenuState.query,
@@ -695,7 +688,7 @@ extension MenuManager {
         do {
             let details = try pasteboardHistoryRepository.searchHistoryDetails(
                 query: query,
-                includesThumbnailAsset: isShowImage || isShowColorCode,
+                includesThumbnailAsset: true,
                 limit: limit,
                 offset: historyMenuState.offset
             )
@@ -759,7 +752,6 @@ extension MenuManager {
         let history = historyDetail.history
         let isMarkWithNumber = usesLeadingNumber ?? false
         let isShowToolTip = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showToolTipOnMenuItem)
-        let isShowImage = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showImageInTheMenu)
         let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
         let primaryPboardType = history.primaryType
         let clipString = history.title
@@ -787,10 +779,9 @@ extension MenuManager {
         }
 
         let image: NSImage?
-        if isShowImage || isShowColorCode,
-           let thumbnailAsset = historyDetail.thumbnailAsset,
+        if let thumbnailAsset = historyDetail.thumbnailAsset,
            let thumbnailImage = NSImage(data: thumbnailAsset.data),
-           (thumbnailAsset.kind == .image && isShowImage) || (thumbnailAsset.kind == .colorCode && isShowColorCode) {
+           thumbnailAsset.kind == .image || (thumbnailAsset.kind == .colorCode && isShowColorCode) {
             image = thumbnailImage
         } else {
             image = nil
@@ -800,9 +791,6 @@ extension MenuManager {
     }
 
     func numericShortcutText(forRowIndex index: Int) -> String? {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
-            return nil
-        }
         let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
         return PasteraShortcutFormatter.numericString(forRowIndex: index, startsAtZero: startsAtZero)
     }
@@ -868,7 +856,6 @@ extension MenuManager {
 
     func makeSnippetMenuItem(_ snippet: Snippet, listNumber: Int, rowIndex: Int) -> NSMenuItem {
         let shortcutText = numericShortcutText(forRowIndex: rowIndex)
-        let isShowIcon = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showIconInTheMenu)
 
         let title = trimTitle(snippet.title)
         let titleWithMark = menuItemTitle(title, listNumber: listNumber, isMarkWithNumber: false)
@@ -880,7 +867,7 @@ extension MenuManager {
         )
         menuItem.representedObject = snippet.id
         menuItem.toolTip = snippet.content
-        menuItem.image = (isShowIcon) ? snippetIcon : nil
+        menuItem.image = snippetIcon
         menuItem.keyEquivalentModifierMask = []
 
         return menuItem

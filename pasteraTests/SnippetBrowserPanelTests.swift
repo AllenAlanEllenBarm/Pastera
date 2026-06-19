@@ -241,7 +241,7 @@ struct SnippetBrowserPanelTests {
     }
 
     @Test
-    func historyRowDoesNotRestoreNumberedTitleWhenNumericShortcutsAreDisabled() throws {
+    func historyRowKeepsNumericBadgeWhenRetiredShortcutPreferenceWasDisabled() throws {
         try withNumericShortcutDefaults(enabled: false, startsAtZero: false) {
             let defaults = AppEnvironment.current.defaults
             let markKey = Constants.UserDefaults.menuItemsAreMarkedWithNumbers
@@ -265,7 +265,7 @@ struct SnippetBrowserPanelTests {
 
             #expect(row.textValuesForTesting.contains("First History"))
             #expect(!row.textValuesForTesting.contains("1. First History"))
-            #expect(!row.textValuesForTesting.contains("1"))
+            #expect(row.textValuesForTesting.contains("1"))
         }
     }
 
@@ -392,7 +392,7 @@ struct SnippetBrowserPanelTests {
     }
 
     @Test
-    func snippetRowsDoNotRestoreLeadingNumbersWhenNumericShortcutsAreDisabled() throws {
+    func snippetRowsKeepNumericBadgeWhenRetiredShortcutPreferenceWasDisabled() throws {
         try withNumericShortcutDefaults(enabled: false, startsAtZero: false) {
             let defaults = AppEnvironment.current.defaults
             let markKey = Constants.UserDefaults.menuItemsAreMarkedWithNumbers
@@ -424,7 +424,7 @@ struct SnippetBrowserPanelTests {
             defer { controller.close() }
 
             #expect(controller.rowTitlesForTesting == ["Ask GPT"])
-            #expect(controller.rowShortcutTextsForTesting.isEmpty)
+            #expect(controller.rowShortcutTextsForTesting == ["1"])
         }
     }
 
@@ -544,7 +544,6 @@ private struct StaticSnippetRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}

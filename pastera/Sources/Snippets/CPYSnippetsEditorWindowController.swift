@@ -618,9 +618,6 @@ private extension CPYSnippetsEditorWindowController {
     }
 
     func numericShortcutText(forRowIndex index: Int) -> String? {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
-            return nil
-        }
         let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
         return PasteraShortcutFormatter.numericString(forRowIndex: index, startsAtZero: startsAtZero)
     }

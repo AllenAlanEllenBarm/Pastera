@@ -458,7 +458,6 @@ private struct StaticSelectionSnippetRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}

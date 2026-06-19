@@ -636,12 +636,12 @@ extension HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func numberKeyDoesNotConfirmHistoryRowWhenShortcutsAreDisabled() throws {
+    func numberKeyConfirmsHistoryRowWhenRetiredShortcutPreferenceWasDisabled() throws {
         try withNumericShortcutDefaults(enabled: false, startsAtZero: false) {
             let window = makeWindow()
             let headerView = HistoryMenuHeaderView()
-            var didConfirm = false
-            let firstRow = HistoryMenuRowView(title: "1. First", image: nil) { didConfirm = true }
+            var confirmedRows = [Int]()
+            let firstRow = HistoryMenuRowView(title: "1. First", image: nil) { confirmedRows.append(0) }
             attach([headerView, firstRow], to: window)
             headerView.configure(state: HistoryMenuPaginationState(pageIndex: 0), hasNextPage: true)
             headerView.connectKeyboardNavigation(to: [firstRow])
@@ -650,8 +650,8 @@ extension HistoryMenuKeyEquivalentTests {
             window.makeFirstResponder(firstRow)
             let firstEvent = try makeTextEvent("1", keyCode: 18)
 
-            #expect(!headerView.handleMenuTrackingKeyDown(firstEvent))
-            #expect(!didConfirm)
+            #expect(headerView.handleMenuTrackingKeyDown(firstEvent))
+            #expect(confirmedRows == [0])
         }
     }
 
@@ -980,7 +980,6 @@ private struct EmptySnippetRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}

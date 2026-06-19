@@ -178,9 +178,9 @@ struct OpacityPreferenceTests {
         let launchButton = try #require(buttons(in: contentView).first {
             ["Launch on Login", "登录时打开"].contains($0.title)
         })
-        let warningButton = try #require(buttons(in: contentView).first {
+        let warningButton = buttons(in: contentView).first {
             ["Show alert panel before clear history", "清空历史前显示警告面板"].contains($0.title)
-        })
+        }
         let opacityLabel = try #require(textFields(in: contentView).first {
             [$0.stringValue].contains(String(localized: "Transparency")) || ["透明度"].contains($0.stringValue)
         })
@@ -190,18 +190,16 @@ struct OpacityPreferenceTests {
         })
         let launchFrame = contentView.convert(launchButton.frame, from: launchButton.superview)
         let clearHistoryFrame = contentView.convert(clearHistoryButton.frame, from: clearHistoryButton.superview)
-        let warningFrame = contentView.convert(warningButton.frame, from: warningButton.superview)
         let opacityLabelFrame = contentView.convert(opacityLabel.frame, from: opacityLabel.superview)
         let sliderFrame = contentView.convert(opacitySlider.frame, from: opacitySlider.superview)
         let opacityValueFrame = contentView.convert(opacityValueLabel.frame, from: opacityValueLabel.superview)
 
+        #expect(warningButton == nil)
         #expect(clearHistoryButton.frame.height >= 22)
         #expect(abs(clearHistoryFrame.minX - launchFrame.minX) <= 2)
-        #expect(abs(warningFrame.minX - launchFrame.minX) <= 2)
         #expect(abs(opacityLabelFrame.minX - launchFrame.minX) <= 2)
         #expect(launchFrame.minY > clearHistoryFrame.minY)
-        #expect(clearHistoryFrame.minY > warningFrame.minY)
-        #expect(warningFrame.minY > opacityLabelFrame.minY)
+        #expect(clearHistoryFrame.minY > opacityLabelFrame.minY)
         #expect(sliderFrame.minX > opacityLabelFrame.maxX)
         #expect(opacityValueFrame.minX > sliderFrame.maxX)
     }
@@ -249,7 +247,7 @@ struct OpacityPreferenceTests {
         #expect(!visibleButtons.contains("选中菜单项后输入”⌘ + V“"))
         #expect(!visibleButtons.contains("Send crash report and error log (reflected at the next launch)"))
         #expect(!visibleButtons.contains("发送崩溃报告和错误日志（下次启动时生效）"))
-        #expect(defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting))
+        #expect(!defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting))
     }
 
     @Test
@@ -263,7 +261,9 @@ struct OpacityPreferenceTests {
         CPYUtilities.registerUserDefaultKeys()
 
         #expect(defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand))
+        #expect(defaults.object(forKey: Constants.UserDefaults.showAlertBeforeClearHistory) == nil)
         #expect(!defaults.bool(forKey: Constants.UserDefaults.collectCrashReport))
+        #expect(defaults.bool(forKey: Constants.Beta.observerScreenshot))
     }
 }
 

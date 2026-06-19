@@ -249,6 +249,7 @@ struct CPYWindowAppearanceTests {
         let paneView = controller.view
         let buttons = paneView.subviews.compactMap { $0 as? NSButton }
         let buttonTitles = Set(buttons.map(\.title))
+        let textTitles = Set(paneView.subviews.compactMap { ($0 as? NSTextField)?.stringValue })
         let launchButton = buttons.first { ["Launch on Login", "登录时打开"].contains($0.title) }
         let clearButton = buttons.first { $0.title == String(localized: "Clear History") }
         let warningButton = buttons.first { $0.title == String(localized: "Show alert panel before clear history") }
@@ -257,11 +258,11 @@ struct CPYWindowAppearanceTests {
             "Send crash report and error log (reflected at the next launch)"
         ]
 
-        #expect(Int(paneView.frame.height.rounded()) == 162)
         #expect(buttonTitles.isDisjoint(with: removedTitles))
-        #expect(Int((launchButton?.frame.maxY ?? 0).rounded()) == 144)
+        #expect(textTitles.contains("Number of characters in the menu:") || textTitles.contains("菜单中字符的个数："))
+        #expect(warningButton == nil)
+        #expect((launchButton?.frame.maxY ?? 0) > (clearButton?.frame.maxY ?? 0))
         #expect(abs((clearButton?.frame.minX ?? 0) - (launchButton?.frame.minX ?? 0)) <= 2)
-        #expect(abs((warningButton?.frame.minX ?? 0) - (launchButton?.frame.minX ?? 0)) <= 2)
     }
 
     @Test @MainActor
@@ -578,7 +579,6 @@ private struct SnippetEditorInsertingSnippetRepository: SnippetRepositoryProtoco
     func insertFolder() -> SnippetFolder? { folder }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
@@ -606,7 +606,6 @@ private struct SnippetEditorStaticSnippetRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}

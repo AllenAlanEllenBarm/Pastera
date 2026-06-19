@@ -6,6 +6,7 @@
 
 import AppKit
 import Combine
+import Carbon
 import Dependencies
 import Testing
 @testable import Pastera
@@ -25,6 +26,40 @@ struct MenuManagerStatusItemTests {
     }
 
     @Test
+    func fromStorageRecreatesRuntimeServicesAfterDependencyBootstrap() throws {
+        let suiteName = "MenuManagerStatusItemTests.freshServices.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let clipService = ClipService()
+        let hotKeyService = HotKeyService()
+        let pasteService = PasteService()
+        let excludeAppService = ExcludeAppService(applications: [])
+        let accessibilityService = AccessibilityService()
+        let menuManager = MenuManager()
+        AppEnvironment.push(
+            clipService: clipService,
+            hotKeyService: hotKeyService,
+            pasteService: pasteService,
+            excludeAppService: excludeAppService,
+            accessibilityService: accessibilityService,
+            menuManager: menuManager,
+            defaults: defaults
+        )
+        defer { _ = AppEnvironment.popLast() }
+
+        let environment = AppEnvironment.fromStorage(defaults: defaults)
+
+        #expect(environment.defaults === defaults)
+        #expect(environment.clipService !== clipService)
+        #expect(environment.hotKeyService !== hotKeyService)
+        #expect(environment.pasteService !== pasteService)
+        #expect(environment.excludeAppService !== excludeAppService)
+        #expect(environment.accessibilityService !== accessibilityService)
+        #expect(environment.menuManager !== menuManager)
+    }
+
+    @Test
     func setupCreatesStatusItemFromRegisteredDefaultWhenNoPersistentPreferenceExists() throws {
         try withRegisteredDefaultEnvironment { defaults, suiteName in
             #expect(defaults.persistentDomain(forName: suiteName)?[Constants.UserDefaults.showStatusItem] == nil)
@@ -36,6 +71,22 @@ struct MenuManagerStatusItemTests {
             #expect(manager.hasStatusItemForTesting)
             #expect(manager.statusItemImageForTesting?.isTemplate == true)
             #expect(manager.statusItemActionForTesting == #selector(MenuManager.statusItemButtonClicked(_:)))
+        }
+    }
+
+    @Test
+    func statusItemTooltipExplainsSecureKeyboardEntryFallback() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            #expect(EnableSecureEventInput() == noErr)
+            defer { DisableSecureEventInput() }
+
+            let manager = MenuManager()
+            manager.setup()
+            defer { manager.removeStatusItemForTesting() }
+
+            let toolTip = try #require(manager.statusItem?.toolTip)
+            #expect(toolTip.contains("Secure Keyboard Entry is active"))
+            #expect(toolTip.contains("click this menu bar icon"))
         }
     }
 
@@ -64,6 +115,25 @@ struct MenuManagerStatusItemTests {
 
             #expect(manager.hasStatusItemForTesting)
             #expect(manager.statusItemImageForTesting?.isTemplate == true)
+        }
+    }
+
+    @Test
+    func legacyMenuIconsStayVisibleWhenRetiredPreferenceWasPreviouslyDisabled() throws {
+        try withRegisteredDefaultEnvironment { defaults, _ in
+            defaults.set(false, forKey: "kCPYPrefShowIconInTheMenuKey")
+            let snippet = Snippet(
+                id: Snippet.ID(rawValue: UUID()),
+                folderID: SnippetFolder.ID(rawValue: UUID()),
+                title: "Ask GPT",
+                content: "Summarize this",
+                index: 0,
+                isEnabled: true
+            )
+            let menuManager = MenuManager()
+
+            #expect(menuManager.makeSubmenuItem("AI Prompt").image != nil)
+            #expect(menuManager.makeSnippetMenuItemForTesting(snippet, listNumber: 1, rowIndex: 0).image != nil)
         }
     }
 
@@ -210,7 +280,6 @@ private struct StatusItemEmptySnippetRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
@@ -257,7 +326,6 @@ private final class CountingFolderChangeRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func mergeSyncTombstones(_ records: [SyncRecord]) {}
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}

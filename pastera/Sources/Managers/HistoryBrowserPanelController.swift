@@ -412,9 +412,6 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     }
 
     private func confirmHistoryForNumberShortcut(_ event: NSEvent) -> Bool {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.addNumericKeyEquivalents) else {
-            return false
-        }
         let startsAtZero = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
         guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
             for: event,

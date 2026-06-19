@@ -136,7 +136,7 @@ struct Snippet: Identifiable, Equatable {
 struct SyncSuppression: Equatable {
     @Column(primaryKey: true)
     let syncIdentity: String
-    let kind: SyncRecord.Kind
+    let kind: SyncEntityKind
     let recordID: String
     let suppressedAt: Int
 }
@@ -145,5 +145,5 @@ extension NSPasteboard.PasteboardType: @retroactive SQLiteType {}
 extension NSPasteboard.PasteboardType: @retroactive QueryBindable {}
 extension NSPasteboard.PasteboardType: @retroactive Codable {}
 extension PasteboardHistoryThumbnailAsset.Kind: Codable {}
-extension SyncRecord.Kind: SQLiteType {}
-extension SyncRecord.Kind: QueryBindable {}
+extension SyncEntityKind: SQLiteType {}
+extension SyncEntityKind: QueryBindable {}

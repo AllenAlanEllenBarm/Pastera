@@ -38,6 +38,7 @@
 		C5A91A002FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */; };
 		C5A91B002FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */; };
 		C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */; };
+		C5A91D022FD200000B7C0DE /* SyncPreferenceTopSectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91D032FD200000B7C0DE /* SyncPreferenceTopSectionTests.swift */; };
 		C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */; };
 		C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */; };
 		C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100012FD750000B7C0DE /* InstallationLocationService.swift */; };
@@ -46,6 +47,7 @@
 		C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000012FD870000B7C0DE /* SyncCoordinator.swift */; };
 		C5C000022FD870000B7C0DE /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */; };
 		C5C000042FD870000B7C0DE /* CPYSyncPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */; };
+		C5C000062FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000072FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift */; };
 		C5A91C002FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */; };
 		C5A91E002FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */; };
 		C5A91F002FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */; };
@@ -124,7 +126,6 @@
 		FA1DB5191DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB4F71DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.xib */; };
 		FA1DB51A1DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB4F91DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.xib */; };
 		FA1DB51B1DDCB4C0007F95C8 /* CPYGeneralPreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB4FB1DDCB4C0007F95C8 /* CPYGeneralPreferenceViewController.xib */; };
-		FA1DB51C1DDCB4C0007F95C8 /* CPYMenuPreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB4FD1DDCB4C0007F95C8 /* CPYMenuPreferenceViewController.xib */; };
 		FA1DB51D1DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB4FF1DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.xib */; };
 		FA1DB51E1DDCB4C0007F95C8 /* CPYTypePreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB5011DDCB4C0007F95C8 /* CPYTypePreferenceViewController.xib */; };
 		FA1DB51F1DDCB4C0007F95C8 /* CPYUpdatesPreferenceViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = FA1DB5031DDCB4C0007F95C8 /* CPYUpdatesPreferenceViewController.xib */; };
@@ -167,7 +168,6 @@
 		31ACA9F11EC5B85B00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYBetaPreferenceViewController.strings; sourceTree = "<group>"; };
 		31ACA9F21EC5B85B00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYExcludeAppPreferenceViewController.strings; sourceTree = "<group>"; };
 		31ACA9F31EC5B85B00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYGeneralPreferenceViewController.strings; sourceTree = "<group>"; };
-		31ACA9F41EC5B85B00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYMenuPreferenceViewController.strings; sourceTree = "<group>"; };
 		31ACA9F51EC5B85B00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYShortcutsPreferenceViewController.strings; sourceTree = "<group>"; };
 		31ACA9F61EC5B85C00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYTypePreferenceViewController.strings; sourceTree = "<group>"; };
 		31ACA9F71EC5B85C00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYUpdatesPreferenceViewController.strings; sourceTree = "<group>"; };
@@ -176,7 +176,6 @@
 		54ADE0FB2008F64000239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYBetaPreferenceViewController.strings"; sourceTree = "<group>"; };
 		54ADE0FC2008F64000239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYExcludeAppPreferenceViewController.strings"; sourceTree = "<group>"; };
 		54ADE0FD2008F64000239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYGeneralPreferenceViewController.strings"; sourceTree = "<group>"; };
-		54ADE0FE2008F64000239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYMenuPreferenceViewController.strings"; sourceTree = "<group>"; };
 		54ADE0FF2008F64000239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYShortcutsPreferenceViewController.strings"; sourceTree = "<group>"; };
 		54ADE1002008F64000239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYTypePreferenceViewController.strings"; sourceTree = "<group>"; };
 		54ADE1012008F64100239852 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/CPYUpdatesPreferenceViewController.strings"; sourceTree = "<group>"; };
@@ -185,7 +184,6 @@
 		846004971FD5511900BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYBetaPreferenceViewController.strings; sourceTree = "<group>"; };
 		846004981FD5511900BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYExcludeAppPreferenceViewController.strings; sourceTree = "<group>"; };
 		846004991FD5511900BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYGeneralPreferenceViewController.strings; sourceTree = "<group>"; };
-		8460049A1FD5511900BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYMenuPreferenceViewController.strings; sourceTree = "<group>"; };
 		8460049B1FD5511900BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYShortcutsPreferenceViewController.strings; sourceTree = "<group>"; };
 		8460049C1FD5511900BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYTypePreferenceViewController.strings; sourceTree = "<group>"; };
 		8460049D1FD5511A00BA733E /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/CPYUpdatesPreferenceViewController.strings; sourceTree = "<group>"; };
@@ -239,6 +237,7 @@
 		C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuChildNavigationTests.swift; sourceTree = "<group>"; };
 		C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessibilityTests.swift; sourceTree = "<group>"; };
 		C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencePaneAlignmentTests.swift; sourceTree = "<group>"; };
+		C5A91D032FD200000B7C0DE /* SyncPreferenceTopSectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncPreferenceTopSectionTests.swift; sourceTree = "<group>"; };
 		C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPreferenceRecordingTests.swift; sourceTree = "<group>"; };
 		C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpacityPreferenceTests.swift; sourceTree = "<group>"; };
 		C5B100012FD750000B7C0DE /* InstallationLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationLocationService.swift; sourceTree = "<group>"; };
@@ -247,6 +246,7 @@
 		C5C000012FD870000B7C0DE /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
 		C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinatorTests.swift; sourceTree = "<group>"; };
 		C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSyncPreferenceViewController.swift; sourceTree = "<group>"; };
+		C5C000072FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraOneDriveStatusBadge.swift; sourceTree = "<group>"; };
 		C5A91C012FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSnippetsEditorModels.swift; sourceTree = "<group>"; };
 		C5A91E012FD210000B7C0DE /* PasteraPreferencePaneAlignmentAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraPreferencePaneAlignmentAdapter.swift; sourceTree = "<group>"; };
 		C5A91F012FD220000B7C0DE /* PasteraPreferencePaneLayoutNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraPreferencePaneLayoutNormalizer.swift; sourceTree = "<group>"; };
@@ -303,8 +303,6 @@
 		FAAA88701E685DD40088FB34 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/CPYExcludeAppPreferenceViewController.strings; sourceTree = "<group>"; };
 		FAAA88721E685E270088FB34 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/CPYGeneralPreferenceViewController.xib; sourceTree = "<group>"; };
 		FAAA88761E685E310088FB34 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/CPYGeneralPreferenceViewController.strings; sourceTree = "<group>"; };
-		FAAA88781E685F360088FB34 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/CPYMenuPreferenceViewController.xib; sourceTree = "<group>"; };
-		FAAA887C1E685F3F0088FB34 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/CPYMenuPreferenceViewController.strings; sourceTree = "<group>"; };
 		FAAA887E1E6862370088FB34 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/CPYShortcutsPreferenceViewController.xib; sourceTree = "<group>"; };
 		FAAA88821E6862400088FB34 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/CPYShortcutsPreferenceViewController.strings; sourceTree = "<group>"; };
 		FAAA88841E68627D0088FB34 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/CPYTypePreferenceViewController.xib; sourceTree = "<group>"; };
@@ -627,14 +625,14 @@
 				C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */,
 				FA1DB4F21DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.swift */,
 				FA1DB4F31DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.swift */,
-				FA1DB4F41DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.swift */,
-				C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */,
-				FA1DB4F51DDCB4C0007F95C8 /* CPYTypePreferenceViewController.swift */,
+					FA1DB4F41DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.swift */,
+					C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */,
+					C5C000072FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift */,
+					FA1DB4F51DDCB4C0007F95C8 /* CPYTypePreferenceViewController.swift */,
 				FA1DB4F61DDCB4C0007F95C8 /* CPYUpdatesPreferenceViewController.swift */,
 				FA1DB4F71DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.xib */,
 				FA1DB4F91DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.xib */,
 				FA1DB4FB1DDCB4C0007F95C8 /* CPYGeneralPreferenceViewController.xib */,
-				FA1DB4FD1DDCB4C0007F95C8 /* CPYMenuPreferenceViewController.xib */,
 				FA1DB4FF1DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.xib */,
 				FA1DB5011DDCB4C0007F95C8 /* CPYTypePreferenceViewController.xib */,
 				FA1DB5031DDCB4C0007F95C8 /* CPYUpdatesPreferenceViewController.xib */,
@@ -712,9 +710,10 @@
 				C5A919012FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift */,
 				C5A916012FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift */,
 				C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */,
-				C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */,
-				C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */,
-				C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */,
+					C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */,
+					C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */,
+					C5A91D032FD200000B7C0DE /* SyncPreferenceTopSectionTests.swift */,
+					C5A922012FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift */,
 				C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */,
 				C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */,
 				C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */,
@@ -857,7 +856,6 @@
 				FA1DB4901DDCA5D9007F95C8 /* Assets.xcassets in Resources */,
 				FA1DB51D1DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.xib in Resources */,
 				FA1DB51F1DDCB4C0007F95C8 /* CPYUpdatesPreferenceViewController.xib in Resources */,
-				FA1DB51C1DDCB4C0007F95C8 /* CPYMenuPreferenceViewController.xib in Resources */,
 				FA1DB51B1DDCB4C0007F95C8 /* CPYGeneralPreferenceViewController.xib in Resources */,
 				FA1DB51A1DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.xib in Resources */,
 				FA1DB5191DDCB4C0007F95C8 /* CPYBetaPreferenceViewController.xib in Resources */,
@@ -894,9 +892,10 @@
 				FA1DB4BA1DDCB452007F95C8 /* NSUserDefaults+ArchiveData.swift in Sources */,
 				FAA4BCCC2163DC9100FF5D18 /* AccessibilityService.swift in Sources */,
 				C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */,
-				C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */,
-				FA1DB4D31DDCB479007F95C8 /* CPYClip.swift in Sources */,
-				C5700B412FC40ABF00C8F965 /* SnippetFolderDetail.swift in Sources */,
+					C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */,
+					FA1DB4D31DDCB479007F95C8 /* CPYClip.swift in Sources */,
+					C5C000062FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift in Sources */,
+					C5700B412FC40ABF00C8F965 /* SnippetFolderDetail.swift in Sources */,
 				C5700B422FC40ABF00C8F965 /* DraggedData.swift in Sources */,
 				C5F1B7331FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift in Sources */,
 				FA1DB4A31DDCB433007F95C8 /* Constants.swift in Sources */,
@@ -975,9 +974,10 @@
 				C5A914002FD1970000B7C0DE /* SnippetHotkeyPanelEntrypointTests.swift in Sources */,
 				C5A919002FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift in Sources */,
 				C5A91A002FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift in Sources */,
-				C5A91B002FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift in Sources */,
-				C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */,
-				C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */,
+					C5A91B002FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift in Sources */,
+					C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */,
+					C5A91D022FD200000B7C0DE /* SyncPreferenceTopSectionTests.swift in Sources */,
+					C5A922002FD250000B7C0DE /* ShortcutPreferenceRecordingTests.swift in Sources */,
 				C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */,
 				C5B100032FD750000B7C0DE /* InstallationLocationServiceTests.swift in Sources */,
 				C5B100052FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift in Sources */,
@@ -1054,18 +1054,6 @@
 				54ADE0FD2008F64000239852 /* zh-Hans */,
 			);
 			name = CPYGeneralPreferenceViewController.xib;
-			sourceTree = "<group>";
-		};
-		FA1DB4FD1DDCB4C0007F95C8 /* CPYMenuPreferenceViewController.xib */ = {
-			isa = PBXVariantGroup;
-			children = (
-				FAAA88781E685F360088FB34 /* Base */,
-				FAAA887C1E685F3F0088FB34 /* ja */,
-				31ACA9F41EC5B85B00BD34C0 /* it */,
-				8460049A1FD5511900BA733E /* de */,
-				54ADE0FE2008F64000239852 /* zh-Hans */,
-			);
-			name = CPYMenuPreferenceViewController.xib;
 			sourceTree = "<group>";
 		};
 		FA1DB4FF1DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.xib */ = {

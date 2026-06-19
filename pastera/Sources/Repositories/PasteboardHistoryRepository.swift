@@ -20,47 +20,50 @@ enum HistorySearchError: Error, Equatable {
 }
 
 struct HistoryRetentionSettings: Equatable {
-    static let defaultStoredHistoryLimit = 1000
-    static let defaultMaxSyncedAssetBytes = 10 * 1024 * 1024
+    static let defaultStoredHistoryLimit = 2000
+    static let defaultMaxSyncedHistoryTextBytes = 256 * 1024
+    static let defaultMaxHistorySnapshotTextBudgetBytes = 8 * 1024 * 1024
 
     let menuDisplayLimit: Int
     let storedHistoryLimit: Int
-    let maxSyncedAssetBytes: Int
+    let maxSyncedHistoryTextBytes: Int
+    let maxHistorySnapshotTextBudgetBytes: Int
 
     static func current(defaults: UserDefaults = AppEnvironment.current.defaults) -> HistoryRetentionSettings {
         let menuDisplayLimit = defaults.integer(forKey: Constants.UserDefaults.maxHistorySize)
         let storedHistoryLimit = defaults.integer(forKey: Constants.UserDefaults.storedHistoryLimit)
-        let maxSyncedAssetBytes = defaults.integer(forKey: Constants.UserDefaults.maxSyncedAssetBytes)
+        let maxSyncedHistoryTextBytes = defaults.integer(forKey: Constants.UserDefaults.maxSyncedHistoryTextBytes)
+        let maxHistorySnapshotTextBudgetBytes = defaults.integer(
+            forKey: Constants.UserDefaults.maxHistorySnapshotTextBudgetBytes
+        )
 
         return HistoryRetentionSettings(
             menuDisplayLimit: max(0, menuDisplayLimit),
             storedHistoryLimit: storedHistoryLimit > 0 ? storedHistoryLimit : defaultStoredHistoryLimit,
-            maxSyncedAssetBytes: maxSyncedAssetBytes > 0 ? maxSyncedAssetBytes : defaultMaxSyncedAssetBytes
+            maxSyncedHistoryTextBytes: maxSyncedHistoryTextBytes > 0
+                ? maxSyncedHistoryTextBytes
+                : defaultMaxSyncedHistoryTextBytes,
+            maxHistorySnapshotTextBudgetBytes: maxHistorySnapshotTextBudgetBytes > 0
+                ? maxHistorySnapshotTextBudgetBytes
+                : defaultMaxHistorySnapshotTextBudgetBytes
         )
     }
 }
 
-struct PasteboardHistorySyncPayload: Codable, Equatable {
-    struct Asset: Codable, Equatable {
-        let type: NSPasteboard.PasteboardType
-        let data: Data
-    }
+enum HistoryTextSourceKind: String, Codable {
+    case plainText
+    case url
+}
 
-    struct Thumbnail: Codable, Equatable {
-        let kind: PasteboardHistoryThumbnailAsset.Kind
-        let data: Data
-    }
-
+struct PasteboardHistorySyncPayload: Equatable {
     let id: String
-    let title: String
-    let pasteboardTypes: [NSPasteboard.PasteboardType]
+    let text: String
     let updateAt: Int
     let deviceID: String?
-    let assets: [Asset]
-    let thumbnail: Thumbnail?
+    let sourceKind: HistoryTextSourceKind
 
-    var totalAssetBytes: Int {
-        assets.reduce(0) { $0 + $1.data.count } + (thumbnail?.data.count ?? 0)
+    var textByteCount: Int {
+        text.lengthOfBytes(using: .utf8)
     }
 }
 
@@ -142,8 +145,9 @@ protocol PasteboardHistoryRepositoryProtocol {
     func pruneHistories(settings: HistoryRetentionSettings)
     func fetchSyncPayloads(
         currentDeviceID: String?,
-        updatedAtOrAfter: Int,
-        maxAssetBytes: Int
+        limit: Int,
+        maxTextBytes: Int,
+        snapshotTextBudgetBytes: Int
     ) -> [PasteboardHistorySyncPayload]
     @discardableResult
     func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool
@@ -172,8 +176,9 @@ extension PasteboardHistoryRepositoryProtocol {
 
     func fetchSyncPayloads(
         currentDeviceID: String?,
-        updatedAtOrAfter: Int,
-        maxAssetBytes: Int
+        limit: Int,
+        maxTextBytes: Int,
+        snapshotTextBudgetBytes: Int
     ) -> [PasteboardHistorySyncPayload] {
         []
     }
@@ -184,34 +189,36 @@ extension PasteboardHistoryRepositoryProtocol {
 }
 
 final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
-    @Dependency(\.defaultDatabase)
-    private var database
-
-    @FetchAll(PasteboardHistory.all.order { $0.updateAt.desc() })
-    private var histories
-
-    @FetchAll(
-        PasteboardHistory
-            .all
-            .order { $0.updateAt.desc() }
-            .select {
-                PasteboardHistoryChangeToken.Columns(
-                    id: $0.id,
-                    updateAt: $0.updateAt
-                )
-            }
-    )
-    private var historyChangeTokens
+    private var database: any DatabaseWriter {
+        @Dependency(\.defaultDatabase) var database
+        return database
+    }
 
     func observeHistoryChanges() -> AnyPublisher<Void, Never> {
-        _historyChangeTokens.publisher
+        @FetchAll(
+            PasteboardHistory
+                .all
+                .order { $0.updateAt.desc() }
+                .select {
+                    PasteboardHistoryChangeToken.Columns(
+                        id: $0.id,
+                        updateAt: $0.updateAt
+                    )
+                }
+        )
+        var historyChangeTokens
+
+        return $historyChangeTokens.publisher
             .map { _ in () }
             .prepend(())
             .eraseToAnyPublisher()
     }
 
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
-        _histories.publisher.eraseToAnyPublisher()
+        @FetchAll(PasteboardHistory.all.order { $0.updateAt.desc() })
+        var histories
+
+        return $histories.publisher.eraseToAnyPublisher()
     }
 
     func hasHistories() -> Bool {
@@ -450,50 +457,43 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
 
     func fetchSyncPayloads(
         currentDeviceID: String?,
-        updatedAtOrAfter: Int,
-        maxAssetBytes: Int
+        limit: Int,
+        maxTextBytes: Int,
+        snapshotTextBudgetBytes: Int
     ) -> [PasteboardHistorySyncPayload] {
         guard let currentDeviceID else { return [] }
         return withErrorReporting {
             try database.read { database in
                 let histories = try PasteboardHistory
                     .all
-                    .order { $0.updateAt }
+                    .order { $0.updateAt.desc() }
                     .fetchAll(database)
                     .filter {
                         $0.deviceID == currentDeviceID
-                            && $0.updateAt >= updatedAtOrAfter
                     }
-                return try histories.compactMap { history in
+                var remainingTextBudget = max(0, snapshotTextBudgetBytes)
+                var payloads = [PasteboardHistorySyncPayload]()
+                for history in histories {
                     let assets = try PasteboardHistoryAsset
                         .where { $0.pasteboardHistoryID.eq(history.id) }
                         .fetchAll(database)
-                        .map {
-                            PasteboardHistorySyncPayload.Asset(
-                                type: $0.pasteboardType,
-                                data: $0.data
-                            )
-                        }
-                    let thumbnail = try PasteboardHistoryThumbnailAsset
-                        .find(history.id)
-                        .fetchOne(database)
-                        .map {
-                            PasteboardHistorySyncPayload.Thumbnail(
-                                kind: $0.kind,
-                                data: $0.data
-                            )
-                        }
-                    let payload = PasteboardHistorySyncPayload(
+                    guard let textPayload = Self.textSyncPayload(from: assets) else { continue }
+                    let textByteCount = textPayload.text.lengthOfBytes(using: .utf8)
+                    guard textByteCount <= maxTextBytes else { continue }
+                    guard textByteCount <= remainingTextBudget else { break }
+                    remainingTextBudget -= textByteCount
+                    payloads.append(PasteboardHistorySyncPayload(
                         id: history.id.rawValue,
-                        title: history.title,
-                        pasteboardTypes: history.pasteboardTypes,
+                        text: textPayload.text,
                         updateAt: history.updateAt,
                         deviceID: history.deviceID,
-                        assets: assets,
-                        thumbnail: thumbnail
-                    )
-                    return payload.totalAssetBytes <= maxAssetBytes ? payload : nil
+                        sourceKind: textPayload.sourceKind
+                    ))
+                    if payloads.count >= max(0, limit) {
+                        break
+                    }
                 }
+                return payloads
             }
         } ?? []
     }
@@ -514,13 +514,13 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                 }
                 try PasteboardHistory
                     .upsert {
-                        PasteboardHistory(
-                            id: historyID,
-                            title: payload.title,
-                            pasteboardTypes: payload.pasteboardTypes,
-                            updateAt: payload.updateAt,
-                            deviceID: payload.deviceID
-                        )
+                            PasteboardHistory(
+                                id: historyID,
+                                title: payload.text[0...10000],
+                                pasteboardTypes: [.string],
+                                updateAt: payload.updateAt,
+                                deviceID: payload.deviceID
+                            )
                     }
                     .execute(database)
                 try PasteboardHistoryAsset
@@ -531,28 +531,57 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                     .delete()
                     .where { $0.pasteboardHistoryID.eq(historyID) }
                     .execute(database)
-                let assets = payload.assets.map {
+                let assets = [
                     PasteboardHistoryAsset.Draft(
                         pasteboardHistoryID: historyID,
-                        pasteboardType: $0.type,
-                        data: $0.data
+                        pasteboardType: .string,
+                        data: Data(payload.text.utf8)
                     )
-                }
+                ]
                 try PasteboardHistoryAsset.insert { assets }.execute(database)
-                if let thumbnail = payload.thumbnail {
-                    try PasteboardHistoryThumbnailAsset
-                        .upsert {
-                            PasteboardHistoryThumbnailAsset(
-                                pasteboardHistoryID: historyID,
-                                kind: thumbnail.kind,
-                                data: thumbnail.data
-                            )
-                        }
-                        .execute(database)
-                }
                 return true
             }
         } ?? false
+    }
+
+    private static func textSyncPayload(
+        from assets: [PasteboardHistoryAsset]
+    ) -> (text: String, sourceKind: HistoryTextSourceKind)? {
+        let types = Set(assets.map(\.pasteboardType))
+        let plainTextTypes: Set<NSPasteboard.PasteboardType> = [.string, .deprecatedString]
+        if types.isSubset(of: plainTextTypes),
+           let text = assets.compactMap({ plainText(from: $0) }).first {
+            return (text, .plainText)
+        }
+
+        let urlTypes: Set<NSPasteboard.PasteboardType> = [.URL, .deprecatedURL]
+        if types.isSubset(of: urlTypes),
+           let urlText = assets.compactMap({ nonFileURLText(from: $0) }).first {
+            return (urlText, .url)
+        }
+        return nil
+    }
+
+    private static func plainText(from asset: PasteboardHistoryAsset) -> String? {
+        guard asset.pasteboardType == .string || asset.pasteboardType == .deprecatedString else {
+            return nil
+        }
+        return String(data: asset.data, encoding: .utf8)
+    }
+
+    private static func nonFileURLText(from asset: PasteboardHistoryAsset) -> String? {
+        guard asset.pasteboardType == .URL || asset.pasteboardType == .deprecatedURL else {
+            return nil
+        }
+        if let url = URL(dataRepresentation: asset.data, relativeTo: nil), !url.isFileURL {
+            return url.absoluteString
+        }
+        guard let text = String(data: asset.data, encoding: .utf8),
+              let url = URL(string: text),
+              !url.isFileURL else {
+            return nil
+        }
+        return url.absoluteString
     }
 
     func suppressSyncedHistory(id: PasteboardHistory.ID) {
@@ -638,13 +667,13 @@ private extension PasteboardHistoryRepository {
         return asset
     }
 
-    func syncIdentity(kind: SyncRecord.Kind, id: String) -> String {
+    func syncIdentity(kind: SyncEntityKind, id: String) -> String {
         "\(kind.rawValue):\(id)"
     }
 }
 
 private enum PasteboardHistoryRepositoryKey: DependencyKey {
-    static let liveValue: any PasteboardHistoryRepositoryProtocol = PasteboardHistoryRepository()
+    static var liveValue: any PasteboardHistoryRepositoryProtocol { PasteboardHistoryRepository() }
 }
 
 extension DependencyValues {

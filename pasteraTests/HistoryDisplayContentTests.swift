@@ -33,6 +33,35 @@ struct HistoryDisplayContentTests {
         }
     }
 
+    @Test
+    func imageHistoryRowShowsThumbnailWhenRetiredImagePreferenceWasDisabled() throws {
+        try withRegisteredDefaultEnvironment { defaults in
+            defaults.set(false, forKey: Constants.UserDefaults.showImageInTheMenu)
+            let historyID = PasteboardHistory.ID("legacy-disabled-image")
+            let image = NSImage.create(with: .red, size: NSSize(width: 24, height: 18))
+            let imageData = try #require(image.tiffRepresentation)
+            let detail = PasteboardHistoryDetail(
+                history: PasteboardHistory(
+                    id: historyID,
+                    title: "Screenshot",
+                    pasteboardTypes: [.tiff],
+                    updateAt: 1,
+                    deviceID: CPYUtilities.deviceID
+                ),
+                thumbnailAsset: PasteboardHistoryThumbnailAsset(
+                    pasteboardHistoryID: historyID,
+                    kind: .image,
+                    data: imageData
+                )
+            )
+
+            let row = MenuManager().makeHistoryRowViewForTesting(detail, index: 0)
+
+            #expect(row.frame.height > 28)
+            #expect(row.textValuesForTesting.contains("(Image)"))
+        }
+    }
+
     private func withRegisteredDefaultEnvironment(
         operation: (UserDefaults) throws -> Void
     ) throws {

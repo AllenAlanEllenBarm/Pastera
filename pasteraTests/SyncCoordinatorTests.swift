@@ -31,7 +31,20 @@ struct SyncCoordinatorTests {
         #expect(SyncCoordinatorError.noEnabledWork.localizedDescription == "请先开启至少一个同步开关。")
         #expect(SyncCoordinatorError.missingOneDrive.localizedDescription == "请先安装并登录 OneDrive。")
         #expect(SyncCoordinatorError.folderUnavailable.localizedDescription == "所选 OneDrive 文件夹不可用。")
+        #expect(SyncCoordinatorError.automaticUploadDisabled.localizedDescription == "自动上传未开启。")
         #expect(SyncCoordinatorError.automaticSyncDisabled.localizedDescription == "自动同步未开启。")
+    }
+
+    @Test
+    func settingsStoreCapsHistorySyncLimitAtTwoThousand() throws {
+        let suiteName = "Pastera.SyncCoordinatorTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(5000, forKey: Constants.UserDefaults.storedHistoryLimit)
+
+        let settings = UserDefaultsSyncSettingsStore(defaults: defaults).settings()
+
+        #expect(settings.historyLimit == 2000)
     }
 
     @Test
@@ -152,30 +165,45 @@ struct SyncCoordinatorTests {
 
         coordinator.syncNow(reason: .manual, wait: true)
 
-        #expect(try provider.loadRecords(kind: .history).count == 1)
-        #expect(try provider.loadRecords(kind: .snippet).isEmpty)
-        #expect(try provider.loadRecords(kind: .snippetFolder).isEmpty)
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
+        #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "remote-device").isEmpty)
 
         settings = makeSettings(rootURL: rootURL, historyUpload: false, snippetUpload: true)
         coordinator.syncNow(reason: .manual, wait: true)
 
-        #expect(try provider.loadRecords(kind: .history).count == 1)
-        #expect(try provider.loadRecords(kind: .snippet).count == 1)
-        #expect(try provider.loadRecords(kind: .snippetFolder).count == 1)
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
+        #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "remote-device").first?.snapshot.snippets.count == 1)
+        #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "remote-device").first?.snapshot.folders.count == 1)
     }
 
     @Test
-    func coordinatorSkipsBackgroundSyncWhenAutomaticSyncIsOffButAllowsManualSync() throws {
+    func coordinatorSeparatesAutomaticUploadAndSync() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
         let content = PasteboardContent(
             assets: [
-                PasteboardContent.Asset(type: .string, data: Data("Background gated".utf8))
+                PasteboardContent.Asset(type: .string, data: Data("Local upload".utf8))
             ]
         )
         historyRepository.save(id: PasteboardHistory.ID(rawValue: content.hash), content: content, updateAt: 10)
-        let settings = makeSettings(rootURL: rootURL, automaticSync: false, historyUpload: true)
+        let remoteID = PasteboardHistory.ID(rawValue: "remote-history")
+        try provider.saveHistorySnapshot([
+            PasteboardHistorySyncPayload(
+                id: remoteID.rawValue,
+                text: "Remote history",
+                updateAt: 20,
+                deviceID: "remote-device",
+                sourceKind: .plainText
+            )
+        ], deviceID: "remote-device", limit: 2000, maxTextBytes: 256 * 1024, snapshotTextBudgetBytes: 8 * 1024 * 1024)
+        var settings = makeSettings(
+            rootURL: rootURL,
+            automaticUpload: true,
+            automaticSync: false,
+            historyUpload: true,
+            historyImport: true
+        )
         let coordinator = SyncCoordinator(
             settingsProvider: { settings },
             providerFactory: { _ in provider },
@@ -185,51 +213,53 @@ struct SyncCoordinatorTests {
 
         coordinator.syncNow(reason: .timer, wait: true)
 
-        #expect(coordinator.status.phase == .skipped)
-        #expect(coordinator.status.statusText == "自动同步未开启。")
-        #expect(try provider.loadRecords(kind: .history).isEmpty)
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(historyRepository.fetchHistory(id: remoteID) == nil)
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
 
-        coordinator.syncNow(reason: .manual, wait: true)
+        settings = makeSettings(
+            rootURL: rootURL,
+            automaticUpload: false,
+            automaticSync: true,
+            historyUpload: true,
+            historyImport: true
+        )
+        coordinator.syncNow(reason: .timer, wait: true)
 
         #expect(coordinator.status.phase == .succeeded)
-        #expect(try provider.loadRecords(kind: .history).count == 1)
+        #expect(coordinator.status.uploadedCount == 0)
+        #expect(historyRepository.fetchHistory(id: remoteID)?.title == "Remote history")
     }
 
     @Test
-    func coordinatorSkipsLegacyEncryptedRecordsWithoutRequiringAKey() throws {
+    func coordinatorSkipsLocalChangeUploadWhenAutomaticUploadIsOffButAllowsManualSync() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
-        let remoteID = PasteboardHistory.ID(rawValue: "remote-history")
-        let historyDirectory = rootURL.appendingPathComponent("histories", isDirectory: true)
-        try FileManager.default.createDirectory(at: historyDirectory, withIntermediateDirectories: true)
-        try Data("""
-        {
-          "id": "remote-history",
-          "kind": "history",
-          "deviceID": "remote-device",
-          "updatedAt": 20,
-          "deletedAt": null,
-          "payload": {
-            "nonce": "",
-            "ciphertext": "cGF5bG9hZA==",
-            "tag": ""
-          },
-          "schemaVersion": 1
-        }
-        """.utf8).write(to: historyDirectory.appendingPathComponent("remote-history.json"))
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .string, data: Data("Background gated".utf8))
+            ]
+        )
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: content.hash), content: content, updateAt: 10)
+        let settings = makeSettings(rootURL: rootURL, automaticUpload: false, automaticSync: false, historyUpload: true)
         let coordinator = SyncCoordinator(
-            settingsProvider: { makeSettings(rootURL: rootURL, historyImport: true) },
+            settingsProvider: { settings },
             providerFactory: { _ in provider },
             historyRepository: historyRepository,
             snippetRepository: snippetRepository
         )
 
+        coordinator.syncNow(reason: .localChange, wait: true)
+
+        #expect(coordinator.status.phase == .skipped)
+        #expect(coordinator.status.statusText == "自动上传未开启。")
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").isEmpty)
+
         coordinator.syncNow(reason: .manual, wait: true)
 
-        #expect(historyRepository.fetchHistory(id: remoteID) == nil)
         #expect(coordinator.status.phase == .succeeded)
-        #expect(coordinator.status.importedCount == 0)
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
     }
 
     @Test
@@ -246,14 +276,18 @@ struct SyncCoordinatorTests {
         historyRepository.save(id: sharedID, content: localContent, updateAt: 30)
         let remotePayload = PasteboardHistorySyncPayload(
             id: sharedID.rawValue,
-            title: "Remote older",
-            pasteboardTypes: [.string],
+            text: "Remote older",
             updateAt: 20,
             deviceID: "remote-device",
-            assets: [PasteboardHistorySyncPayload.Asset(type: .string, data: Data("Remote older".utf8))],
-            thumbnail: nil
+            sourceKind: .plainText
         )
-        try provider.save(makePlaintextRecord(payload: remotePayload, kind: .history))
+        try provider.saveHistorySnapshot(
+            [remotePayload],
+            deviceID: "remote-device",
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 8 * 1024 * 1024
+        )
         let coordinator = SyncCoordinator(
             settingsProvider: { makeSettings(rootURL: rootURL, historyImport: true) },
             providerFactory: { _ in provider },
@@ -289,9 +323,10 @@ struct SyncCoordinatorTests {
 
         coordinator.syncNow(reason: .manual, wait: true)
 
-        let record = try #require(provider.loadRecords(kind: .history).first)
-        #expect(record.updatedAt == 0)
-        #expect(record.payload != .object([:]))
+        let payload = try #require(provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.first)
+        #expect(payload.updateAt == 0)
+        #expect(payload.text == "Zero timestamp")
+        #expect(payload.sourceKind == .plainText)
         #expect(coordinator.status.statusText == "已写入 1 条到本地同步文件夹，等待 OneDrive 客户端上传；Pastera 不知道云端是否已完成。")
     }
 
@@ -315,38 +350,9 @@ struct SyncCoordinatorTests {
             .appendingPathComponent("sync", isDirectory: true)
     }
 
-    private func makePlaintextRecord<T: Encodable>(
-        payload: T,
-        kind: SyncRecord.Kind
-    ) throws -> SyncRecord {
-        let recordID: String
-        let updatedAt: Int
-        switch payload {
-        case let history as PasteboardHistorySyncPayload:
-            recordID = history.id
-            updatedAt = history.updateAt
-        case let folder as SnippetFolderSyncPayload:
-            recordID = folder.id
-            updatedAt = folder.updatedAt
-        case let snippet as SnippetSyncPayload:
-            recordID = snippet.id
-            updatedAt = snippet.updatedAt
-        default:
-            throw NSError(domain: "SyncCoordinatorTests", code: 1, userInfo: nil)
-        }
-        return SyncRecord(
-            id: recordID,
-            kind: kind,
-            deviceID: "remote-device",
-            updatedAt: updatedAt,
-            deletedAt: nil,
-            payload: try SyncJSONValue(payload),
-            schemaVersion: 1
-        )
-    }
-
     private func makeSettings(
         rootURL: URL,
+        automaticUpload: Bool = true,
         automaticSync: Bool = true,
         historyUpload: Bool = false,
         historyImport: Bool = false,
@@ -354,16 +360,17 @@ struct SyncCoordinatorTests {
         snippetImport: Bool = false
     ) -> SyncSettings {
         SyncSettings(
+            automaticUploadEnabled: automaticUpload,
             automaticSyncEnabled: automaticSync,
             rootURL: rootURL,
             historyUploadEnabled: historyUpload,
             historyImportEnabled: historyImport,
             snippetUploadEnabled: snippetUpload,
             snippetImportEnabled: snippetImport,
-            historyUploadEnabledAt: 0,
-            snippetUploadEnabledAt: 0,
             pollInterval: 300,
-            maxSyncedAssetBytes: 1024
+            maxSyncedHistoryTextBytes: 256 * 1024,
+            maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024,
+            historyLimit: 2000
         )
     }
 

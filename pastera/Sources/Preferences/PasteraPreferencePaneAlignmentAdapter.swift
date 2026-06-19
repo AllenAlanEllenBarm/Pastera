@@ -337,6 +337,6 @@ enum PasteraPreferencePaneAlignmentAdapter {
     }
 
     private static func isBetaSectionTitle(_ text: String) -> Bool {
-        ["Action", "操作", "Screenshot", "屏幕截图"].contains(text)
+        ["Action", "操作"].contains(text)
     }
 }

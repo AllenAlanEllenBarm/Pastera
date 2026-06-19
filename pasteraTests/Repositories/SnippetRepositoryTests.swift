@@ -282,9 +282,11 @@ struct SnippetRepositorySyncTests {
     }
 
     @Test
-    func syncUpsertKeepsLocalDataWhenRemoteTombstonesArrive() throws {
+    func syncUpsertKeepsLocalDataWhenRemoteSnapshotOmitsItems() throws {
         let folder = try #require(repository.insertFolder())
         let snippet = try #require(repository.insertSnippet(to: folder.id))
+        let omittedFolder = try #require(repository.insertFolder())
+        let omittedSnippet = try #require(repository.insertSnippet(to: omittedFolder.id))
         let remoteUpdatedAt = max(folder.updatedAt, snippet.updatedAt) + 1
 
         repository.upsertSyncSnapshot(
@@ -322,17 +324,14 @@ struct SnippetRepositorySyncTests {
         #expect(syncedSnippet.index == 4)
         #expect(syncedSnippet.isEnabled == false)
 
-        repository.mergeSyncTombstones([
-            SyncRecord.plaintextFixture(id: snippet.id.rawValue.uuidString, kind: .snippet, deletedAt: 20),
-            SyncRecord.plaintextFixture(id: folder.id.rawValue.uuidString, kind: .snippetFolder, deletedAt: 21)
-        ])
-
         #expect(repository.fetchSnippet(id: snippet.id) != nil)
         #expect(repository.fetchFolderDetail(id: folder.id) != nil)
+        #expect(repository.fetchSnippet(id: omittedSnippet.id) != nil)
+        #expect(repository.fetchFolderDetail(id: omittedFolder.id) != nil)
     }
 
     @Test
-    func syncSnapshotExportsOnlyCurrentDeviceChangesAfterCutoff() throws {
+    func syncSnapshotExportsFullSnapshotAcrossDevices() throws {
         let remoteFolderID = UUID()
         let remoteSnippetID = UUID()
         repository.upsertSyncSnapshot(
@@ -364,58 +363,20 @@ struct SnippetRepositorySyncTests {
         let localFolder = try #require(repository.insertFolder())
         let localSnippet = try #require(repository.insertSnippet(to: localFolder.id))
 
-        let snapshot = repository.fetchSyncSnapshot(
-            currentDeviceID: CPYUtilities.deviceID,
-            updatedAtOrAfter: 0
-        )
+        let snapshot = repository.fetchSyncSnapshot()
 
-        #expect(snapshot.folders.map(\.id) == [localFolder.id.rawValue.uuidString])
-        #expect(snapshot.folders.first?.deviceID == CPYUtilities.deviceID)
-        #expect(snapshot.snippets.map(\.id) == [localSnippet.id.rawValue.uuidString])
-        #expect(snapshot.snippets.first?.deviceID == CPYUtilities.deviceID)
-        #expect(repository.fetchSyncSnapshot(currentDeviceID: CPYUtilities.deviceID, updatedAtOrAfter: Int.max).folders.isEmpty)
-        #expect(repository.fetchSyncSnapshot(currentDeviceID: CPYUtilities.deviceID, updatedAtOrAfter: Int.max).snippets.isEmpty)
-    }
-
-    @Test
-    func syncSnapshotIncludesParentFolderForChangedSnippetWithoutBumpingFolderTimestamp() throws {
-        let folderID = UUID()
-        let snippetID = UUID()
-        repository.upsertSyncSnapshot(
-            SnippetSyncSnapshot(
-                folders: [
-                    SnippetFolderSyncPayload(
-                        id: folderID.uuidString,
-                        title: "Existing folder",
-                        index: 0,
-                        isEnabled: true,
-                        updatedAt: 10,
-                        deviceID: CPYUtilities.deviceID
-                    )
-                ],
-                snippets: [
-                    SnippetSyncPayload(
-                        id: snippetID.uuidString,
-                        folderID: folderID.uuidString,
-                        title: "Changed snippet",
-                        content: "changed",
-                        index: 0,
-                        isEnabled: true,
-                        updatedAt: 30,
-                        deviceID: CPYUtilities.deviceID
-                    )
-                ]
-            )
-        )
-
-        let snapshot = repository.fetchSyncSnapshot(
-            currentDeviceID: CPYUtilities.deviceID,
-            updatedAtOrAfter: 20
-        )
-
-        #expect(snapshot.snippets.map(\.id) == [snippetID.uuidString])
-        #expect(snapshot.folders.map(\.id) == [folderID.uuidString])
-        #expect(snapshot.folders.first?.updatedAt == 10)
+        #expect(Set(snapshot.folders.map(\.id)) == [
+            remoteFolderID.uuidString,
+            localFolder.id.rawValue.uuidString
+        ])
+        #expect(Set(snapshot.snippets.map(\.id)) == [
+            remoteSnippetID.uuidString,
+            localSnippet.id.rawValue.uuidString
+        ])
+        #expect(snapshot.folders.first { $0.id == remoteFolderID.uuidString }?.deviceID == "remote-device")
+        #expect(snapshot.folders.first { $0.id == localFolder.id.rawValue.uuidString }?.deviceID == CPYUtilities.deviceID)
+        #expect(snapshot.snippets.first { $0.id == remoteSnippetID.uuidString }?.deviceID == "remote-device")
+        #expect(snapshot.snippets.first { $0.id == localSnippet.id.rawValue.uuidString }?.deviceID == CPYUtilities.deviceID)
     }
 
     @Test
@@ -508,7 +469,7 @@ struct SnippetRepositorySyncTests {
     }
 
     @Test
-    func syncImportDoesNotApplyRemoteDeletesAndLocalSuppressionPreventsReimport() throws {
+    func syncImportLocalSuppressionPreventsReimport() throws {
         let folderID = UUID()
         let snippetID = UUID()
         let snapshot = SnippetSyncSnapshot(
@@ -537,10 +498,6 @@ struct SnippetRepositorySyncTests {
         )
 
         repository.upsertSyncSnapshot(snapshot)
-        repository.mergeSyncTombstones([
-            SyncRecord.plaintextFixture(id: snippetID.uuidString, kind: .snippet, deletedAt: 21),
-            SyncRecord.plaintextFixture(id: folderID.uuidString, kind: .snippetFolder, deletedAt: 21)
-        ])
 
         let syncedFolderID = SnippetFolder.ID(rawValue: folderID)
         let syncedSnippetID = Snippet.ID(rawValue: snippetID)
@@ -566,25 +523,5 @@ private func waitUntil(condition: @escaping @MainActor () async -> Bool) async t
                 try await Task.sleep(for: .seconds(0.01))
             }
         }
-    }
-}
-
-private extension SyncRecord {
-    static func plaintextFixture(
-        id: String,
-        kind: SyncRecord.Kind,
-        updatedAt: Int = 10,
-        deletedAt: Int? = nil,
-        payload: SyncJSONValue = .object([:])
-    ) -> SyncRecord {
-        return SyncRecord(
-            id: id,
-            kind: kind,
-            deviceID: "device-a",
-            updatedAt: updatedAt,
-            deletedAt: deletedAt,
-            payload: payload,
-            schemaVersion: 1
-        )
     }
 }

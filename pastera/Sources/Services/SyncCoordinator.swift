@@ -14,21 +14,29 @@ import Combine
 import Foundation
 
 struct SyncSettings: Equatable {
+    let automaticUploadEnabled: Bool
     let automaticSyncEnabled: Bool
     let rootURL: URL?
     let historyUploadEnabled: Bool
     let historyImportEnabled: Bool
     let snippetUploadEnabled: Bool
     let snippetImportEnabled: Bool
-    let historyUploadEnabledAt: Int
-    let snippetUploadEnabledAt: Int
     let pollInterval: TimeInterval
-    let maxSyncedAssetBytes: Int
+    let maxSyncedHistoryTextBytes: Int
+    let maxHistorySnapshotTextBudgetBytes: Int
+    let historyLimit: Int
 
     var hasEnabledWork: Bool {
+        hasEnabledUploadWork || hasEnabledImportWork
+    }
+
+    var hasEnabledUploadWork: Bool {
         historyUploadEnabled
-            || historyImportEnabled
             || snippetUploadEnabled
+    }
+
+    var hasEnabledImportWork: Bool {
+        historyImportEnabled
             || snippetImportEnabled
     }
 }
@@ -91,6 +99,7 @@ enum SyncCoordinatorError: LocalizedError {
     case noEnabledWork
     case missingOneDrive
     case folderUnavailable
+    case automaticUploadDisabled
     case automaticSyncDisabled
 
     var errorDescription: String? {
@@ -101,6 +110,8 @@ enum SyncCoordinatorError: LocalizedError {
             return "请先安装并登录 OneDrive。"
         case .folderUnavailable:
             return "所选 OneDrive 文件夹不可用。"
+        case .automaticUploadDisabled:
+            return "自动上传未开启。"
         case .automaticSyncDisabled:
             return "自动同步未开启。"
         }
@@ -117,18 +128,24 @@ final class UserDefaultsSyncSettingsStore {
     func settings() -> SyncSettings {
         let rootPath = defaults.string(forKey: Constants.UserDefaults.syncRootPath)
         let pollInterval = defaults.double(forKey: Constants.UserDefaults.syncPollInterval)
+        let retentionSettings = HistoryRetentionSettings.current(defaults: defaults)
         return SyncSettings(
+            automaticUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncAutomaticUploadEnabled),
             automaticSyncEnabled: defaults.bool(forKey: Constants.UserDefaults.syncAutomaticEnabled),
             rootURL: rootPath.map { URL(fileURLWithPath: $0, isDirectory: true) },
             historyUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncHistoryUploadEnabled),
             historyImportEnabled: defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled),
             snippetUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled),
             snippetImportEnabled: defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled),
-            historyUploadEnabledAt: defaults.integer(forKey: Constants.UserDefaults.syncHistoryUploadEnabledAt),
-            snippetUploadEnabledAt: defaults.integer(forKey: Constants.UserDefaults.syncSnippetUploadEnabledAt),
             pollInterval: pollInterval > 0 ? pollInterval : 300,
-            maxSyncedAssetBytes: HistoryRetentionSettings.current(defaults: defaults).maxSyncedAssetBytes
+            maxSyncedHistoryTextBytes: retentionSettings.maxSyncedHistoryTextBytes,
+            maxHistorySnapshotTextBudgetBytes: retentionSettings.maxHistorySnapshotTextBudgetBytes,
+            historyLimit: min(retentionSettings.storedHistoryLimit, HistoryRetentionSettings.defaultStoredHistoryLimit)
         )
+    }
+
+    func setAutomaticUploadEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Constants.UserDefaults.syncAutomaticUploadEnabled)
     }
 
     func setAutomaticSyncEnabled(_ enabled: Bool) {
@@ -144,19 +161,11 @@ final class UserDefaultsSyncSettingsStore {
     }
 
     func setHistoryUploadEnabled(_ enabled: Bool) {
-        setUploadEnabled(
-            enabled,
-            enabledKey: Constants.UserDefaults.syncHistoryUploadEnabled,
-            enabledAtKey: Constants.UserDefaults.syncHistoryUploadEnabledAt
-        )
+        defaults.set(enabled, forKey: Constants.UserDefaults.syncHistoryUploadEnabled)
     }
 
     func setSnippetUploadEnabled(_ enabled: Bool) {
-        setUploadEnabled(
-            enabled,
-            enabledKey: Constants.UserDefaults.syncSnippetUploadEnabled,
-            enabledAtKey: Constants.UserDefaults.syncSnippetUploadEnabledAt
-        )
+        defaults.set(enabled, forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
     }
 
     func setHistoryImportEnabled(_ enabled: Bool) {
@@ -167,21 +176,18 @@ final class UserDefaultsSyncSettingsStore {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncSnippetImportEnabled)
     }
 
-    func enableAllSyncScopesIfNeeded() {
+    func enableUploadScopesIfNeeded() {
         let settings = settings()
-        guard !settings.hasEnabledWork else { return }
+        guard !settings.hasEnabledUploadWork else { return }
         setHistoryUploadEnabled(true)
-        setHistoryImportEnabled(true)
         setSnippetUploadEnabled(true)
-        setSnippetImportEnabled(true)
     }
 
-    private func setUploadEnabled(_ enabled: Bool, enabledKey: String, enabledAtKey: String) {
-        let wasEnabled = defaults.bool(forKey: enabledKey)
-        defaults.set(enabled, forKey: enabledKey)
-        if enabled, !wasEnabled {
-            defaults.set(Int(Date().timeIntervalSince1970), forKey: enabledAtKey)
-        }
+    func enableImportScopesIfNeeded() {
+        let settings = settings()
+        guard !settings.hasEnabledImportWork else { return }
+        setHistoryImportEnabled(true)
+        setSnippetImportEnabled(true)
     }
 }
 
@@ -332,6 +338,11 @@ final class SyncCoordinator {
     private var timer: DispatchSourceTimer?
     private var cancellables = Set<AnyCancellable>()
 
+    private struct DirectionPlan {
+        let upload: Bool
+        let importRemote: Bool
+    }
+
     init(
         settingsProvider: @escaping () -> SyncSettings = { UserDefaultsSyncSettingsStore().settings() },
         providerFactory: @escaping (URL) -> OneDriveFolderSyncProvider = { OneDriveFolderSyncProvider(rootURL: $0) },
@@ -405,10 +416,6 @@ final class SyncCoordinator {
 
     private func performSync(reason: Reason) {
         let settings = settingsProvider()
-        guard reason == .manual || settings.automaticSyncEnabled else {
-            setSkipped(error: SyncCoordinatorError.automaticSyncDisabled)
-            return
-        }
         guard let rootURL = settings.rootURL else {
             setSkipped(error: SyncCoordinatorError.missingOneDrive)
             return
@@ -419,6 +426,10 @@ final class SyncCoordinator {
         }
         guard settings.hasEnabledWork else {
             setSkipped(error: SyncCoordinatorError.noEnabledWork)
+            return
+        }
+        guard let directionPlan = directionPlan(reason: reason, settings: settings) else {
+            setSkipped(error: disabledAutomaticError(reason: reason, settings: settings))
             return
         }
 
@@ -432,9 +443,7 @@ final class SyncCoordinator {
 
         do {
             let provider = providerFactory(rootURL)
-            let manifest = try provider.loadOrCreateManifest(deviceID: currentDeviceID)
-            let result = try sync(settings: settings, provider: provider, manifest: manifest)
-            _ = reason
+            let result = try sync(settings: settings, provider: provider, directionPlan: directionPlan)
             setStatus(SyncStatus(
                 phase: .succeeded,
                 lastSyncAt: Date(),
@@ -456,103 +465,62 @@ final class SyncCoordinator {
     private func sync(
         settings: SyncSettings,
         provider: OneDriveFolderSyncProvider,
-        manifest: SyncManifest
+        directionPlan: DirectionPlan
     ) throws -> (uploaded: Int, imported: Int) {
-        var uploadedRecords = [SyncRecord]()
+        var uploaded = 0
         var imported = 0
 
-        if settings.historyImportEnabled {
+        if directionPlan.importRemote, settings.historyImportEnabled {
             imported += try importHistories(provider: provider)
         }
-        if settings.snippetImportEnabled {
+        if directionPlan.importRemote, settings.snippetImportEnabled {
             imported += try importSnippets(provider: provider)
         }
-        if settings.historyUploadEnabled {
-            let records = try exportHistories(settings: settings, manifest: manifest)
-            try records.forEach(provider.save)
-            uploadedRecords.append(contentsOf: records)
+        if directionPlan.upload, settings.historyUploadEnabled {
+            uploaded += try exportHistories(settings: settings, provider: provider)
         }
-        if settings.snippetUploadEnabled {
-            let records = try exportSnippets(settings: settings, manifest: manifest)
-            try records.forEach(provider.save)
-            uploadedRecords.append(contentsOf: records)
+        if directionPlan.upload, settings.snippetUploadEnabled {
+            uploaded += try exportSnippets(provider: provider)
         }
-        if !uploadedRecords.isEmpty {
-            try provider.saveManifest(manifest.merging(records: uploadedRecords))
-        }
-        return (uploadedRecords.count, imported)
+        return (uploaded, imported)
     }
 
     private func importHistories(provider: OneDriveFolderSyncProvider) throws -> Int {
-        let records = try provider.loadRecords(kind: .history)
-            .filter { $0.deletedAt == nil && $0.deviceID != currentDeviceID }
-        let payloads = records.compactMap { record in
-            try? decodePayload(PasteboardHistorySyncPayload.self, from: record)
-        }
+        let payloads = try provider.loadHistorySnapshots(excludingDeviceID: currentDeviceID)
+            .flatMap(\.payloads)
         return payloads.reduce(0) { importedCount, payload in
             importedCount + (historyRepository.upsertSyncPayload(payload) ? 1 : 0)
         }
     }
 
     private func importSnippets(provider: OneDriveFolderSyncProvider) throws -> Int {
-        let folderRecords = try provider.loadRecords(kind: .snippetFolder)
-            .filter { $0.deletedAt == nil && $0.deviceID != currentDeviceID }
-        let snippetRecords = try provider.loadRecords(kind: .snippet)
-            .filter { $0.deletedAt == nil && $0.deviceID != currentDeviceID }
-        let folders = folderRecords.compactMap {
-            try? decodePayload(SnippetFolderSyncPayload.self, from: $0)
+        try provider.loadSnippetSnapshots(excludingDeviceID: currentDeviceID).reduce(0) { importedCount, snapshot in
+            importedCount + snippetRepository.upsertSyncSnapshot(snapshot.snapshot)
         }
-        let snippets = snippetRecords.compactMap {
-            try? decodePayload(SnippetSyncPayload.self, from: $0)
-        }
-        return snippetRepository.upsertSyncSnapshot(SnippetSyncSnapshot(folders: folders, snippets: snippets))
     }
 
-    private func exportHistories(settings: SyncSettings, manifest: SyncManifest) throws -> [SyncRecord] {
+    private func exportHistories(settings: SyncSettings, provider: OneDriveFolderSyncProvider) throws -> Int {
+        let historyLimit = max(0, min(settings.historyLimit, HistoryRetentionSettings.defaultStoredHistoryLimit))
         let payloads = historyRepository.fetchSyncPayloads(
             currentDeviceID: currentDeviceID,
-            updatedAtOrAfter: settings.historyUploadEnabledAt,
-            maxAssetBytes: settings.maxSyncedAssetBytes
+            limit: historyLimit,
+            maxTextBytes: settings.maxSyncedHistoryTextBytes,
+            snapshotTextBudgetBytes: settings.maxHistorySnapshotTextBudgetBytes
         )
-        return try payloads.map {
-            try makeRecord(id: $0.id, kind: .history, updatedAt: $0.updateAt, payload: $0)
-        }
-    }
-
-    private func exportSnippets(settings: SyncSettings, manifest: SyncManifest) throws -> [SyncRecord] {
-        let snapshot = snippetRepository.fetchSyncSnapshot(
-            currentDeviceID: currentDeviceID,
-            updatedAtOrAfter: settings.snippetUploadEnabledAt
-        )
-        let folderRecords = try snapshot.folders.map {
-            try makeRecord(id: $0.id, kind: .snippetFolder, updatedAt: $0.updatedAt, payload: $0)
-        }
-        let snippetRecords = try snapshot.snippets.map {
-            try makeRecord(id: $0.id, kind: .snippet, updatedAt: $0.updatedAt, payload: $0)
-        }
-        _ = manifest
-        return folderRecords + snippetRecords
-    }
-
-    private func makeRecord<T: Encodable>(
-        id: String,
-        kind: SyncRecord.Kind,
-        updatedAt: Int,
-        payload: T
-    ) throws -> SyncRecord {
-        return SyncRecord(
-            id: id,
-            kind: kind,
+        try provider.saveHistorySnapshot(
+            payloads,
             deviceID: currentDeviceID,
-            updatedAt: updatedAt,
-            deletedAt: nil,
-            payload: try SyncJSONValue(payload),
-            schemaVersion: 1
+            limit: historyLimit,
+            maxTextBytes: settings.maxSyncedHistoryTextBytes,
+            snapshotTextBudgetBytes: settings.maxHistorySnapshotTextBudgetBytes
         )
+        return payloads.count
     }
 
-    private func decodePayload<T: Decodable>(_ type: T.Type, from record: SyncRecord) throws -> T {
-        try record.payload.decode(type)
+    private func exportSnippets(provider: OneDriveFolderSyncProvider) throws -> Int {
+        let snapshot = snippetRepository.fetchSyncSnapshot()
+        try provider.saveSnippetSnapshot(snapshot, deviceID: currentDeviceID)
+        return snapshot.folders.count + snapshot.snippets.count
     }
 
     private func setSkipped(error: Error? = nil) {
@@ -575,29 +543,26 @@ final class SyncCoordinator {
     private var currentDeviceID: String {
         CPYUtilities.deviceID ?? ProcessInfo.processInfo.hostName
     }
-}
 
-private extension SyncManifest {
-    func merging(records newRecords: [SyncRecord]) -> SyncManifest {
-        var mergedRecords = Dictionary(uniqueKeysWithValues: records.map { ("\($0.kind.rawValue):\($0.id)", $0) })
-        newRecords.forEach { record in
-            mergedRecords["\(record.kind.rawValue):\(record.id)"] = SyncManifestRecord(
-                id: record.id,
-                kind: record.kind,
-                updatedAt: record.updatedAt,
-                deletedAt: record.deletedAt
-            )
+    private func directionPlan(reason: Reason, settings: SyncSettings) -> DirectionPlan? {
+        let wantsUpload = settings.hasEnabledUploadWork
+        let wantsImport = reason == .localChange ? false : settings.hasEnabledImportWork
+        guard wantsUpload || wantsImport else { return nil }
+        let uploadAllowed = reason == .manual || settings.automaticUploadEnabled
+        let importAllowed = reason == .manual || settings.automaticSyncEnabled
+        let upload = wantsUpload && uploadAllowed
+        let importRemote = wantsImport && importAllowed
+        guard upload || importRemote else { return nil }
+        return DirectionPlan(upload: upload, importRemote: importRemote)
+    }
+
+    private func disabledAutomaticError(reason: Reason, settings: SyncSettings) -> SyncCoordinatorError {
+        if reason == .localChange, settings.hasEnabledUploadWork {
+            return .automaticUploadDisabled
         }
-        return SyncManifest(
-            schemaVersion: schemaVersion,
-            deviceID: deviceID,
-            updatedAt: Int(Date().timeIntervalSince1970),
-            records: mergedRecords.values.sorted { lhs, rhs in
-                if lhs.kind.rawValue == rhs.kind.rawValue {
-                    return lhs.id < rhs.id
-                }
-                return lhs.kind.rawValue < rhs.kind.rawValue
-            }
-        )
+        if settings.hasEnabledUploadWork, !settings.automaticUploadEnabled {
+            return .automaticUploadDisabled
+        }
+        return .automaticSyncDisabled
     }
 }

@@ -16,7 +16,7 @@ import RealmSwift
 
 final class CPYUtilities {
     // ref: https://gist.github.com/vadimpiven/3373bb2592d59560b5d698ba1e2ed7e4
-    static let deviceID: String? = {
+    private static let hardwareDeviceID: String? = {
         let platformExpert = IOServiceGetMatchingService(
             kIOMainPortDefault,
             IOServiceMatching("IOPlatformExpertDevice")
@@ -31,6 +31,20 @@ final class CPYUtilities {
             0
         ).takeRetainedValue() as? String
     }()
+
+    static var deviceID: String? {
+        syncDeviceID()
+    }
+
+    static func syncDeviceID(defaults: UserDefaults = AppEnvironment.current.defaults) -> String {
+        if let existingDeviceID = defaults.string(forKey: Constants.UserDefaults.syncDeviceID),
+           !existingDeviceID.isEmpty {
+            return existingDeviceID
+        }
+        let deviceID = hardwareDeviceID ?? UUID().uuidString
+        defaults.set(deviceID, forKey: Constants.UserDefaults.syncDeviceID)
+        return deviceID
+    }
 
     static func initSDKs() {
         // Fabric
@@ -48,8 +62,12 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.loginItem)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.suppressAlertForLoginItem)
         defaultValues.updateValue(NSNumber(value: 30), forKey: Constants.UserDefaults.maxHistorySize)
-        defaultValues.updateValue(NSNumber(value: 1000), forKey: Constants.UserDefaults.storedHistoryLimit)
-        defaultValues.updateValue(NSNumber(value: 10 * 1024 * 1024), forKey: Constants.UserDefaults.maxSyncedAssetBytes)
+        defaultValues.updateValue(NSNumber(value: 2000), forKey: Constants.UserDefaults.storedHistoryLimit)
+        defaultValues.updateValue(NSNumber(value: 256 * 1024), forKey: Constants.UserDefaults.maxSyncedHistoryTextBytes)
+        defaultValues.updateValue(
+            NSNumber(value: 8 * 1024 * 1024),
+            forKey: Constants.UserDefaults.maxHistorySnapshotTextBudgetBytes
+        )
         defaultValues.updateValue(NSNumber(value: CPYWindowAppearance.defaultOpacity), forKey: Constants.UserDefaults.windowBackgroundOpacity)
         defaultValues.updateValue(NSNumber(value: 2), forKey: Constants.UserDefaults.showStatusItem)
         let storeTypes = PasteboardAvailableType.allCases.reduce(into: [:]) { $0[$1.rawValue] = NSNumber(value: true) }
@@ -64,9 +82,7 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: 0), forKey: Constants.UserDefaults.numberOfItemsPlaceInline)
         defaultValues.updateValue(NSNumber(value: 10), forKey: Constants.UserDefaults.numberOfItemsPlaceInsideFolder)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.menuItemsTitleStartWithZero)
-        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.showAlertBeforeClearHistory)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.addClearHistoryMenuItem)
-        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.showIconInTheMenu)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.menuItemsAreMarkedWithNumbers)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.addNumericKeyEquivalents)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.showToolTipOnMenuItem)
@@ -77,6 +93,7 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.overwriteSameHistory)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.copySameHistory)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncAutomaticUploadEnabled)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncAutomaticEnabled)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncHistoryUploadEnabled)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncHistoryImportEnabled)
@@ -95,7 +112,7 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: 0), forKey: Constants.Beta.deleteHistoryModifier)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.Beta.pasteAndDeleteHistory)
         defaultValues.updateValue(NSNumber(value: 0), forKey: Constants.Beta.pasteAndDeleteHistoryModifier)
-        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.Beta.observerScreenshot)
+        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Beta.observerScreenshot)
 
         AppEnvironment.current.defaults.register(defaults: defaultValues)
         AppEnvironment.current.defaults.synchronize()

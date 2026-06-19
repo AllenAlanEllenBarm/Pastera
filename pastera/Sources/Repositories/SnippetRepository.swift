@@ -107,13 +107,11 @@ protocol SnippetRepositoryProtocol {
     func fetchFolderDetails() -> [SnippetFolderDetail]
     func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail?
     func fetchSyncSnapshot() -> SnippetSyncSnapshot
-    func fetchSyncSnapshot(currentDeviceID: String?, updatedAtOrAfter: Int) -> SnippetSyncSnapshot
 
     func insertFolder() -> SnippetFolder?
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]?
     @discardableResult
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int
-    func mergeSyncTombstones(_ records: [SyncRecord])
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String)
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool)
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID])
@@ -140,26 +138,28 @@ extension SnippetRepositoryProtocol {
         fetchFolderDetails().map(\.folder)
     }
 
-    func fetchSyncSnapshot(currentDeviceID: String?, updatedAtOrAfter: Int) -> SnippetSyncSnapshot {
-        SnippetSyncSnapshot(folders: [], snippets: [])
-    }
 }
 
 final class SnippetRepository: SnippetRepositoryProtocol {
-    @Dependency(\.defaultDatabase)
-    private var database
-
-    @FetchAll(SnippetFolder.all.order(by: \.index))
-    private var folders
-    @FetchAll(Snippet.all.order(by: \.index))
-    private var snippets
+    private var database: any DatabaseWriter {
+        @Dependency(\.defaultDatabase) var database
+        return database
+    }
 
     func observeFolders() -> AnyPublisher<[SnippetFolder], Never> {
-        _folders.publisher.eraseToAnyPublisher()
+        @FetchAll(SnippetFolder.all.order(by: \.index))
+        var folders
+
+        return $folders.publisher.eraseToAnyPublisher()
     }
 
     func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
-        Publishers.CombineLatest(_folders.publisher, _snippets.publisher)
+        @FetchAll(SnippetFolder.all.order(by: \.index))
+        var folders
+        @FetchAll(Snippet.all.order(by: \.index))
+        var snippets
+
+        return Publishers.CombineLatest($folders.publisher, $snippets.publisher)
             .map { Self.folderDetails(folders: $0, snippets: $1) }
             .eraseToAnyPublisher()
     }
@@ -205,41 +205,6 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                     .map(SnippetFolderSyncPayload.init(folder:))
                 let snippets = try Snippet.all.order(by: \.index)
                     .fetchAll(database)
-                    .map(SnippetSyncPayload.init(snippet:))
-                return SnippetSyncSnapshot(folders: folders, snippets: snippets)
-            }
-        } ?? SnippetSyncSnapshot(folders: [], snippets: [])
-    }
-
-    func fetchSyncSnapshot(currentDeviceID: String?, updatedAtOrAfter: Int) -> SnippetSyncSnapshot {
-        guard let currentDeviceID else {
-            return SnippetSyncSnapshot(folders: [], snippets: [])
-        }
-        return withErrorReporting {
-            try database.read { database in
-                let allFolders = try SnippetFolder.all.order(by: \.index)
-                    .fetchAll(database)
-                let allSnippets = try Snippet.all.order(by: \.index)
-                    .fetchAll(database)
-                let changedSnippets = allSnippets
-                    .filter {
-                        $0.lastModifiedDeviceID == currentDeviceID
-                            && $0.updatedAt >= updatedAtOrAfter
-                    }
-                let changedFolderIDs = Set(
-                    allFolders
-                        .filter {
-                            $0.lastModifiedDeviceID == currentDeviceID
-                                && $0.updatedAt >= updatedAtOrAfter
-                        }
-                        .map(\.id)
-                )
-                let parentFolderIDs = Set(changedSnippets.map(\.folderID))
-                let exportedFolderIDs = changedFolderIDs.union(parentFolderIDs)
-                let folders = allFolders
-                    .filter { exportedFolderIDs.contains($0.id) }
-                    .map(SnippetFolderSyncPayload.init(folder:))
-                let snippets = changedSnippets
                     .map(SnippetSyncPayload.init(snippet:))
                 return SnippetSyncSnapshot(folders: folders, snippets: snippets)
             }
@@ -336,10 +301,6 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                 return writtenCount
             }
         } ?? 0
-    }
-
-    func mergeSyncTombstones(_ records: [SyncRecord]) {
-        _ = records
     }
 
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {
@@ -576,7 +537,7 @@ private extension SnippetRepository {
         Int(Date().timeIntervalSince1970)
     }
 
-    func suppress(kind: SyncRecord.Kind, id: String, database: Database) throws {
+    func suppress(kind: SyncEntityKind, id: String, database: Database) throws {
         try SyncSuppression.upsert {
             SyncSuppression(
                 syncIdentity: syncIdentity(kind: kind, id: id),
@@ -588,13 +549,13 @@ private extension SnippetRepository {
         .execute(database)
     }
 
-    func isSuppressed(kind: SyncRecord.Kind, id: String, database: Database) throws -> Bool {
+    func isSuppressed(kind: SyncEntityKind, id: String, database: Database) throws -> Bool {
         try SyncSuppression
             .find(syncIdentity(kind: kind, id: id))
             .fetchOne(database) != nil
     }
 
-    func syncIdentity(kind: SyncRecord.Kind, id: String) -> String {
+    func syncIdentity(kind: SyncEntityKind, id: String) -> String {
         "\(kind.rawValue):\(id)"
     }
 
@@ -610,7 +571,7 @@ private extension SnippetRepository {
 }
 
 private enum SnippetRepositoryKey: DependencyKey {
-    static let liveValue: any SnippetRepositoryProtocol = SnippetRepository()
+    static var liveValue: any SnippetRepositoryProtocol { SnippetRepository() }
 }
 
 extension DependencyValues {
