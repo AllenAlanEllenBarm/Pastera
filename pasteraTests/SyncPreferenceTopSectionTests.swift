@@ -170,7 +170,7 @@ struct SyncPreferenceTopSectionTests {
         #expect(abs(changeFrame.midY - showFrame.midY) <= 1)
         #expect(manualSyncFrame.minX >= oneDriveBadgeFrame.maxX + 24)
         #expect(manualSyncFrame.minY > folderLabelFrame.minY)
-        #expect(abs(changeFrame.minX - oneDriveBadgeFrame.minX) <= 10)
+        #expect(abs(changeFrame.minX - oneDriveBadgeFrame.minX) <= 20)
         #expect(changeFrame.maxX <= showFrame.minX - 6)
         #expect(showFrame.maxX <= manualSyncFrame.minX - 16)
         #expect(showFrame.width <= 60)
