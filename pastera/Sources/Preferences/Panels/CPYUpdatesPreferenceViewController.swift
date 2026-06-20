@@ -94,7 +94,7 @@ struct PasteraAvailableUpdate: Equatable {
 }
 
 final class PasteraGitHubReleaseUpdateChecker {
-    private let releasesURL = URL(string: "https://api.github.com/repos/AllenAlanEllenBarm/Pastera/releases?per_page=10")!
+    private let releasesURL = URL(string: "https://api.github.com/repos/pastera-app/Pastera/releases?per_page=10")!
     private let session: URLSession
 
     init(session: URLSession = .shared) {

@@ -85,8 +85,8 @@ if [[ -z "${length}" || -z "${ed_signature}" ]]; then
     exit 1
 fi
 
-release_url="https://github.com/AllenAlanEllenBarm/Pastera/releases/download/${TAG}/Pastera-${VERSION}-macOS.dmg"
-release_page="https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/${TAG}"
+release_url="https://github.com/pastera-app/Pastera/releases/download/${TAG}/Pastera-${VERSION}-macOS.dmg"
+release_page="https://github.com/pastera-app/Pastera/releases/tag/${TAG}"
 
 PASTERA_APPCAST_URL="${release_url}" \
 PASTERA_APPCAST_RELEASE_PAGE="${release_page}" \

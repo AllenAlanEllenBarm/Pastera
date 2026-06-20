@@ -15,7 +15,7 @@ struct SparkleUpdateFeedTests {
     func infoPlistUsesRawSparkleAppcastFeed() throws {
         let feedURL = try infoPlistValue(forKey: "SUFeedURL")
 
-        #expect(feedURL == "https://raw.githubusercontent.com/AllenAlanEllenBarm/Pastera/develop/appcast.xml")
+        #expect(feedURL == "https://raw.githubusercontent.com/pastera-app/Pastera/develop/appcast.xml")
         #expect(!feedURL.hasSuffix("/releases"))
     }
 
@@ -58,8 +58,8 @@ struct SparkleUpdateFeedTests {
         #expect(root.name == "rss")
         #expect(root.attribute(forName: "version")?.stringValue == "2.0")
         #expect(item.elements(forName: "title").first?.stringValue?.hasPrefix("Pastera ") == true)
-        #expect(item.elements(forName: "link").first?.stringValue?.hasPrefix("https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/") == true)
-        #expect(enclosure.attribute(forName: "url")?.stringValue?.hasPrefix("https://github.com/AllenAlanEllenBarm/Pastera/releases/download/") == true)
+        #expect(item.elements(forName: "link").first?.stringValue?.hasPrefix("https://github.com/pastera-app/Pastera/releases/tag/") == true)
+        #expect(enclosure.attribute(forName: "url")?.stringValue?.hasPrefix("https://github.com/pastera-app/Pastera/releases/download/") == true)
         #expect(enclosure.attribute(forName: "sparkle:version")?.stringValue?.isEmpty == false)
         #expect(enclosure.attribute(forName: "sparkle:shortVersionString")?.stringValue?.isEmpty == false)
         #expect(enclosure.attribute(forName: "type")?.stringValue?.isEmpty == false)
@@ -97,8 +97,8 @@ struct PasteraGitHubReleaseUpdateCheckerTests {
         ))
 
         #expect(update.version == "2.0.1-beta")
-        #expect(update.releasePageURL.absoluteString == "https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/v2.0.1-beta")
-        #expect(update.assetURL?.absoluteString == "https://github.com/AllenAlanEllenBarm/Pastera/releases/download/v2.0.1-beta/Pastera-2.0.1-beta-macOS.dmg")
+        #expect(update.releasePageURL.absoluteString == "https://github.com/pastera-app/Pastera/releases/tag/v2.0.1-beta")
+        #expect(update.assetURL?.absoluteString == "https://github.com/pastera-app/Pastera/releases/download/v2.0.1-beta/Pastera-2.0.1-beta-macOS.dmg")
     }
 
     @Test
@@ -168,12 +168,12 @@ struct PasteraGitHubReleaseUpdateCheckerTests {
     private func release(tag: String, assets: [String], draft: Bool = false) -> [String: Any] {
         [
             "tag_name": tag,
-            "html_url": "https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/\(tag)",
+            "html_url": "https://github.com/pastera-app/Pastera/releases/tag/\(tag)",
             "draft": draft,
             "assets": assets.map {
                 [
                     "name": $0,
-                    "browser_download_url": "https://github.com/AllenAlanEllenBarm/Pastera/releases/download/\(tag)/\($0)"
+                    "browser_download_url": "https://github.com/pastera-app/Pastera/releases/download/\(tag)/\($0)"
                 ]
             }
         ]
