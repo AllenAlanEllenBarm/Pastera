@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/v2.0.1-beta"><strong>Download 2.0.1-beta</strong></a>
+  <a href="https://github.com/pastera-app/Pastera/releases/tag/v2.0.1-beta"><strong>Download 2.0.1-beta</strong></a>
   ·
   <a href="#latest-beta-201-beta">更新说明</a>
   ·

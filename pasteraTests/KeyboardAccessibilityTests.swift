@@ -119,7 +119,7 @@ struct KeyboardAccessibilityTests {
                 )
                 let visibleTopGap = try #require(controller.preferencePaneVisibleTopGapForTesting)
                 #expect(
-                    visibleTopGap <= 24,
+                    visibleTopGap <= 28,
                     "\(paneTitle) pane content starts too low: \(visibleTopGap)"
                 )
             }

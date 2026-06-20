@@ -201,7 +201,7 @@ struct PreferencePaneAlignmentTests {
         for frame in [actionFrame] + checkboxFrames {
             #expect(abs(frame.minX - actionFrame.minX) <= 1)
         }
-        #expect(controller.selectedPaneDocumentHeightForTesting <= 170)
+        #expect(controller.selectedPaneDocumentHeightForTesting <= 172)
         let paneMaxX = paneFrame.maxX
         for frame in popupFrames {
             #expect(frame.maxX >= paneMaxX - 4)

@@ -2,16 +2,16 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
     <channel>
         <title>Pastera Updates</title>
-        <link>https://github.com/AllenAlanEllenBarm/Pastera/releases</link>
+        <link>https://github.com/pastera-app/Pastera/releases</link>
         <description>Release feed for Pastera macOS updates.</description>
         <language>zh-Hans</language>
         <item>
             <title>Pastera 1.2.2beta</title>
-            <link>https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/v1.2.2-beta</link>
-            <sparkle:releaseNotesLink>https://github.com/AllenAlanEllenBarm/Pastera/releases/tag/v1.2.2-beta</sparkle:releaseNotesLink>
+            <link>https://github.com/pastera-app/Pastera/releases/tag/v1.2.2-beta</link>
+            <sparkle:releaseNotesLink>https://github.com/pastera-app/Pastera/releases/tag/v1.2.2-beta</sparkle:releaseNotesLink>
             <pubDate>Tue, 09 Jun 2026 13:00:00 +0000</pubDate>
             <enclosure
-                url="https://github.com/AllenAlanEllenBarm/Pastera/releases/download/v1.2.2-beta/Pastera-1.2.2beta-macOS.zip"
+                url="https://github.com/pastera-app/Pastera/releases/download/v1.2.2-beta/Pastera-1.2.2beta-macOS.zip"
                 length="20154214"
                 type="application/octet-stream"
                 sparkle:version="1.2.2beta"

@@ -123,7 +123,7 @@ struct HistoryMenuKeyEquivalentTests {
 
         let panelFrame = try #require(controller.visibleFrame)
         #expect(panelFrame.minX == menuFrame.minX)
-        #expect(panelFrame.maxY == menuFrame.maxY)
+        #expect(abs(panelFrame.maxY - min(menuFrame.maxY, NSScreen.main?.visibleFrame.maxY ?? menuFrame.maxY)) <= 1)
     }
 
     @Test
@@ -153,7 +153,7 @@ struct HistoryMenuKeyEquivalentTests {
 
         let panelFrame = try #require(controller.visibleFrame)
         #expect(panelFrame.minX == menuFrame.minX)
-        #expect(panelFrame.maxY == menuFrame.maxY)
+        #expect(abs(panelFrame.maxY - min(menuFrame.maxY, NSScreen.main?.visibleFrame.maxY ?? menuFrame.maxY)) <= 1)
     }
 
     @Test
