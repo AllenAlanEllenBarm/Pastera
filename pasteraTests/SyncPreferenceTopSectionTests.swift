@@ -18,7 +18,7 @@ struct SyncPreferenceTopSectionTests {
     }
 
     @Test
-    func syncPaneUsesCompactChineseControlsAndStatusRowsStayWithinPaneBounds() throws {
+    func syncPaneUsesCompactChineseControlsWithoutStatusSummary() throws {
         let defaults = AppEnvironment.current.defaults
         let syncKeys = [
             Constants.UserDefaults.syncAutomaticUploadEnabled,
@@ -27,7 +27,10 @@ struct SyncPreferenceTopSectionTests {
             Constants.UserDefaults.syncHistoryUploadEnabled,
             Constants.UserDefaults.syncHistoryImportEnabled,
             Constants.UserDefaults.syncSnippetUploadEnabled,
-            Constants.UserDefaults.syncSnippetImportEnabled
+            Constants.UserDefaults.syncSnippetImportEnabled,
+            Constants.UserDefaults.syncFileUploadEnabled,
+            Constants.UserDefaults.syncFileImportEnabled,
+            Constants.UserDefaults.syncFileTypes
         ]
         let previousValues = syncKeys.reduce(into: [String: Any]()) { values, key in
             if let value = defaults.object(forKey: key) {
@@ -53,6 +56,8 @@ struct SyncPreferenceTopSectionTests {
         defaults.set(false, forKey: Constants.UserDefaults.syncHistoryImportEnabled)
         defaults.set(true, forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
         defaults.set(false, forKey: Constants.UserDefaults.syncSnippetImportEnabled)
+        defaults.set(false, forKey: Constants.UserDefaults.syncFileUploadEnabled)
+        defaults.set(false, forKey: Constants.UserDefaults.syncFileImportEnabled)
         defaults.synchronize()
 
         let controller = CPYPreferencesWindowController()
@@ -67,6 +72,7 @@ struct SyncPreferenceTopSectionTests {
         let paneMinX = paneFrame.minX - 1
         let paneMaxX = paneFrame.maxX + 1
         let syncButtonTitles: Set<String> = ["i", "修改", "显示", "立即同步"]
+        let fileTypeLabels: Set<String> = ["图片", "PDF", "RTF", "RTFD"]
         let syncSwitchLabels: Set<String> = [
             "自动上传",
             "自动同步",
@@ -92,9 +98,7 @@ struct SyncPreferenceTopSectionTests {
             "连接状态",
             "同步位置",
             "手动同步",
-            "上次同步",
-            "导入 / 上传",
-            "状态",
+            "文件类型",
             "开",
             "关"
         ]).union(syncSwitchLabels)
@@ -107,6 +111,9 @@ struct SyncPreferenceTopSectionTests {
         let syncSwitchFrames = preferenceSwitchButtons(in: contentView, labels: syncSwitchLabels).map { switchControl in
             contentView.convert(switchControl.frame, from: switchControl.superview)
         }
+        let fileTypeFrames = preferenceButtons(in: contentView)
+            .filter { fileTypeLabels.contains($0.accessibilityLabel() ?? "") }
+            .map { contentView.convert($0.frame, from: $0.superview) }
         let nativeSyncSwitches = preferenceSwitches(in: contentView).filter {
             syncSwitchLabels.contains($0.accessibilityLabel() ?? "")
         }
@@ -115,11 +122,7 @@ struct SyncPreferenceTopSectionTests {
         let textFields = preferenceTextFieldFrames(in: contentView)
             .filter { $0.frame.minX >= paneMinX }
         let visibleTexts = Set(textFields.map(\.text))
-        let statusFrames = textFields
-            .filter {
-                ["上次同步", "导入 / 上传", "状态"].contains($0.text)
-            }
-            .map(\.frame)
+        let removedStatusTexts: Set<String> = ["上次同步", "导入 / 上传", "状态"]
         let switchRows = Set(syncSwitchFrames.map { Int(($0.midY / 2).rounded()) })
         let switchColumns = Set(syncSwitchFrames.map { Int(($0.midX / 2).rounded()) })
         let oneDriveStatusTexts: Set<String> = ["OneDrive 可用", "OneDrive 不可用", "未检测到 OneDrive"]
@@ -150,16 +153,22 @@ struct SyncPreferenceTopSectionTests {
         #expect(!visibleTexts.contains(guidanceText))
         #expect(!visibleTexts.contains("已选择 OneDrive 同步位置"))
         #expect(!visibleTexts.contains(where: { $0.contains(" > Pastera > sync") }))
+        #expect(!visibleTexts.contains("上传文件"))
+        #expect(!visibleTexts.contains("同步文件"))
+        #expect(removedStatusTexts.isDisjoint(with: visibleTexts))
+        #expect(!preferenceButtons(in: contentView).contains { $0.title == "不上传文件" })
+        #expect(!preferenceButtons(in: contentView).contains { $0.accessibilityLabel() == "文件类型" })
+        #expect(!preferenceButtons(in: contentView).contains { $0.accessibilityLabel() == "Finder 文件" })
         #expect(infoButton?.toolTip?.contains("OneDrive 文件夹") == true)
         #expect(syncButtonFrames.count == syncButtonTitles.count)
+        #expect(fileTypeFrames.count == fileTypeLabels.count)
         #expect(syncSwitchFrames.count == syncSwitchLabels.count)
         #expect(nativeSyncSwitches.isEmpty)
-        #expect(switchRows.count <= 3)
+        #expect(switchRows.count <= 4)
         #expect(switchColumns.count >= 2)
         #expect(removedButtons.isEmpty)
         #expect(!visibleTexts.contains("同步口令"))
         #expect(!visibleTexts.contains("位置操作"))
-        #expect(statusFrames.count == 3)
         #expect(oneDriveStatusFrame.maxY >= paneFrame.maxY - 42)
         #expect(oneDriveStatusFrame.width >= oneDriveStatusField.intrinsicWidth)
         #expect(oneDriveBadgeFrame.width <= 132)
@@ -175,7 +184,7 @@ struct SyncPreferenceTopSectionTests {
         #expect(showFrame.maxX <= manualSyncFrame.minX - 16)
         #expect(showFrame.width <= 60)
         #expect(syncNowFrame.width <= 100)
-        for frame in syncButtonFrames + syncSwitchFrames + statusFrames {
+        for frame in syncButtonFrames + syncSwitchFrames + fileTypeFrames {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
         }
@@ -191,7 +200,10 @@ struct SyncPreferenceTopSectionTests {
             Constants.UserDefaults.syncHistoryUploadEnabled,
             Constants.UserDefaults.syncHistoryImportEnabled,
             Constants.UserDefaults.syncSnippetUploadEnabled,
-            Constants.UserDefaults.syncSnippetImportEnabled
+            Constants.UserDefaults.syncSnippetImportEnabled,
+            Constants.UserDefaults.syncFileUploadEnabled,
+            Constants.UserDefaults.syncFileImportEnabled,
+            Constants.UserDefaults.syncFileTypes
         ]
         let previousValues = syncKeys.reduce(into: [String: Any]()) { values, key in
             if let value = defaults.object(forKey: key) {
@@ -224,7 +236,7 @@ struct SyncPreferenceTopSectionTests {
         let visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
         #expect(visibleTexts.contains("未检测到 OneDrive"))
         #expect(!visibleTexts.contains("OneDrive 状态"))
-        #expect(visibleTexts.contains("请先安装并登录 OneDrive。"))
+        #expect(!visibleTexts.contains("请先安装并登录 OneDrive。"))
     }
 
     private func preferenceTextFieldFrames(

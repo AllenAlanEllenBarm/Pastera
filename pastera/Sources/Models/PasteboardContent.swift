@@ -15,6 +15,8 @@ import CryptoKit
 import SQLite3
 import SwiftHEXColors
 
+// swiftlint:disable type_body_length file_length
+
 struct PasteboardContent: Equatable {
     struct Asset: Equatable {
         let type: NSPasteboard.PasteboardType
@@ -137,9 +139,121 @@ struct HistorySyncSnapshot: Equatable {
     let payloads: [PasteboardHistorySyncPayload]
 }
 
+struct HistoryWindowSignature: Equatable, Codable {
+    let rawValue: String
+
+    static func make(
+        payloads: [PasteboardHistorySyncPayload],
+        limit: Int,
+        maxTextBytes: Int,
+        snapshotTextBudgetBytes: Int
+    ) -> HistoryWindowSignature {
+        var hasher = SHA256()
+        [
+            "v4",
+            "\(limit)",
+            "\(maxTextBytes)",
+            "\(snapshotTextBudgetBytes)",
+            "\(payloads.count)"
+        ].forEach { hasher.update(lengthPrefixed: Data($0.utf8)) }
+        for payload in payloads {
+            [
+                payload.id,
+                "\(payload.updateAt)",
+                payload.sourceKind.rawValue,
+                "\(payload.textByteCount)"
+            ].forEach { hasher.update(lengthPrefixed: Data($0.utf8)) }
+        }
+        return HistoryWindowSignature(
+            rawValue: hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        )
+    }
+}
+
+struct HistoryRemoteSnapshotState: Equatable {
+    let deviceID: String
+    let url: URL
+    let byteCount: Int
+    let modifiedAtNanoseconds: Int64
+
+    var cacheKey: String {
+        url.standardizedFileURL.path
+    }
+}
+
 struct SnippetDeviceSyncSnapshot: Equatable {
     let deviceID: String
     let snapshot: SnippetSyncSnapshot
+}
+
+struct FileSyncAssetPayload: Equatable {
+    let assetIndex: Int
+    let pasteboardType: NSPasteboard.PasteboardType
+    let data: Data
+    let originalFilename: String?
+    let byteCountOverride: Int?
+    let modifiedAtNanoseconds: Int64?
+
+    init(
+        assetIndex: Int,
+        pasteboardType: NSPasteboard.PasteboardType,
+        data: Data,
+        originalFilename: String?,
+        byteCount: Int? = nil,
+        modifiedAtNanoseconds: Int64? = nil
+    ) {
+        self.assetIndex = assetIndex
+        self.pasteboardType = pasteboardType
+        self.data = data
+        self.originalFilename = originalFilename
+        self.byteCountOverride = byteCount
+        self.modifiedAtNanoseconds = modifiedAtNanoseconds
+    }
+
+    var byteCount: Int {
+        byteCountOverride ?? data.count
+    }
+
+    static func == (lhs: FileSyncAssetPayload, rhs: FileSyncAssetPayload) -> Bool {
+        lhs.assetIndex == rhs.assetIndex
+            && lhs.pasteboardType == rhs.pasteboardType
+            && lhs.data == rhs.data
+            && lhs.originalFilename == rhs.originalFilename
+            && lhs.byteCount == rhs.byteCount
+            && lhs.modifiedAtNanoseconds == rhs.modifiedAtNanoseconds
+    }
+}
+
+struct FileSyncHistoryPayload: Equatable {
+    let deviceID: String?
+    let historyID: String
+    let updatedAt: Int
+    let assets: [FileSyncAssetPayload]
+
+    var assetCount: Int {
+        assets.count
+    }
+}
+
+struct FileSyncExportSnapshot: Equatable {
+    let histories: [FileSyncHistoryPayload]
+    let skippedAssetCount: Int
+
+    var assetCount: Int {
+        histories.reduce(0) { $0 + $1.assetCount }
+    }
+}
+
+struct FileDeviceSyncSnapshot: Equatable {
+    let deviceID: String
+    let histories: [FileSyncHistoryPayload]
+    let skippedAssetCount: Int
+}
+
+struct FileDeviceSyncLoadResult: Equatable {
+    let snapshots: [FileDeviceSyncSnapshot]
+    let skippedManifestCount: Int
+    var skippedAssetCount: Int { snapshots.reduce(0) { $0 + $1.skippedAssetCount } }
 }
 
 enum SyncSQLiteError: LocalizedError {
@@ -166,8 +280,47 @@ enum SyncSQLiteError: LocalizedError {
 }
 
 final class OneDriveFolderSyncProvider {
+    private static let historyProtocolVersion = 4
+
     private let rootURL: URL
     private let fileManager: FileManager
+
+    private struct HistoryProtocolManifest: Codable {
+        let schemaVersion: Int
+        let generatedAt: Int
+    }
+
+    private struct FileDirectoryManifest: Codable {
+        let manifestVersion: Int
+        let schemaVersion: Int
+        let deviceID: String
+        let generatedAt: Int
+        let assetCount: Int
+        let histories: [FileDirectoryHistory]
+    }
+
+    private struct FileDirectoryHistory: Codable {
+        let historyID: String
+        let updatedAt: Int
+        let assets: [FileDirectoryAsset]
+    }
+
+    private struct FileDirectoryAsset: Codable {
+        let assetIndex: Int
+        let pasteboardType: String
+        let byteCount: Int
+        let modifiedAtNanoseconds: Int64?
+        let relativePath: String
+        let originalFilename: String?
+    }
+
+    private struct FileSnapshotLoadOptions {
+        let excludedDeviceID: String?
+        let includedFileTypes: Set<PasteboardAvailableType>
+        let maxFileBytes: Int
+        let maxAssetsPerDevice: Int
+        let shouldImportHistory: ((String, Int) -> Bool)?
+    }
 
     init(rootURL: URL, fileManager: FileManager = .default) {
         self.rootURL = rootURL
@@ -182,6 +335,7 @@ final class OneDriveFolderSyncProvider {
         snapshotTextBudgetBytes: Int
     ) throws {
         try removeLegacyV1Paths()
+        try ensureHistoryProtocol()
         let destinationURL = historyDevicesURL.appendingPathComponent(fileName(for: deviceID))
         let sortedPayloads = Array(payloads
             .sorted {
@@ -191,6 +345,12 @@ final class OneDriveFolderSyncProvider {
                 return $0.updateAt > $1.updateAt
             }
             .prefix(max(0, limit)))
+        let windowSignature = HistoryWindowSignature.make(
+            payloads: sortedPayloads,
+            limit: limit,
+            maxTextBytes: maxTextBytes,
+            snapshotTextBudgetBytes: snapshotTextBudgetBytes
+        )
         try writeSQLiteSnapshot(to: destinationURL) { database in
             try database.execute("""
                 CREATE TABLE metadata (
@@ -206,13 +366,14 @@ final class OneDriveFolderSyncProvider {
                 CREATE INDEX histories_updatedAt_index ON histories(updatedAt DESC);
                 """)
             try writeMetadata([
-                "schemaVersion": "3",
+                "schemaVersion": "\(Self.historyProtocolVersion)",
                 "deviceID": deviceID,
                 "platform": "macOS",
                 "generatedAt": "\(Int(Date().timeIntervalSince1970))",
                 "historyLimit": "\(limit)",
                 "maxTextBytes": "\(maxTextBytes)",
-                "snapshotTextBudgetBytes": "\(snapshotTextBudgetBytes)"
+                "snapshotTextBudgetBytes": "\(snapshotTextBudgetBytes)",
+                "windowSignature": windowSignature.rawValue
             ], database: database)
             let historyStatement = try database.prepare(
                 "INSERT INTO histories(id, updatedAt, sourceKind, text) VALUES (?, ?, ?, ?)"
@@ -229,11 +390,46 @@ final class OneDriveFolderSyncProvider {
     }
 
     func loadHistorySnapshots(excludingDeviceID deviceID: String) throws -> [HistorySyncSnapshot] {
-        try loadSQLiteFiles(in: historyDevicesURL).compactMap { url in
+        try ensureHistoryProtocol()
+        return try loadHistorySnapshots(
+            from: historySnapshotFileStates(excludingDeviceID: deviceID),
+            excludingDeviceID: deviceID
+        )
+    }
+
+    func loadHistorySnapshots(
+        from states: [HistoryRemoteSnapshotState],
+        excludingDeviceID deviceID: String
+    ) throws -> [HistorySyncSnapshot] {
+        states.compactMap { state in
+            let url = state.url
             guard let snapshot = try? loadHistorySnapshot(at: url), snapshot.deviceID != deviceID else {
                 return nil
             }
             return snapshot
+        }
+    }
+
+    func historySnapshotExists(deviceID: String) -> Bool {
+        fileManager.fileExists(atPath: historyDevicesURL.appendingPathComponent(fileName(for: deviceID)).path)
+    }
+
+    func historySnapshotFileStates(excludingDeviceID deviceID: String) throws -> [HistoryRemoteSnapshotState] {
+        try ensureHistoryProtocol()
+        let excludedFileName = fileName(for: deviceID)
+        return try loadSQLiteFiles(in: historyDevicesURL).compactMap { url in
+            guard url.lastPathComponent != excludedFileName,
+                  let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+                  let size = attributes[.size] as? NSNumber else {
+                return nil
+            }
+            let modifiedAt = attributes[.modificationDate] as? Date
+            return HistoryRemoteSnapshotState(
+                deviceID: url.deletingPathExtension().lastPathComponent,
+                url: url,
+                byteCount: size.intValue,
+                modifiedAtNanoseconds: modifiedAt.map(Self.nanosecondsSince1970) ?? 0
+            )
         }
     }
 
@@ -312,10 +508,122 @@ final class OneDriveFolderSyncProvider {
         }
     }
 
+    func saveFileSnapshot(_ snapshot: FileSyncExportSnapshot, deviceID: String) throws {
+        try removeLegacyV1Paths()
+        let deviceDirectoryName = safePathComponent(for: deviceID)
+        let deviceDirectoryURL = fileDevicesURL.appendingPathComponent(deviceDirectoryName, isDirectory: true)
+        try fileManager.createDirectory(at: deviceDirectoryURL, withIntermediateDirectories: true)
+
+        let previousRelativePaths = existingDirectFileRelativePaths(in: deviceDirectoryURL)
+        var writtenNewRelativePaths = Set<String>()
+        do {
+            var manifestHistories = [FileDirectoryHistory]()
+            var manifestAssetCount = 0
+            var keptRelativePaths = Set<String>()
+            for history in snapshot.histories.sorted(by: fileHistorySort) {
+                let sortedAssets = history.assets.sorted(by: { $0.assetIndex < $1.assetIndex })
+                guard sortedAssets.allSatisfy({ PasteboardAvailableType.syncFileType(for: $0.pasteboardType) != nil }) else {
+                    continue
+                }
+                var manifestAssets = [FileDirectoryAsset]()
+                for asset in sortedAssets {
+                    let relativePath = fileAssetRelativePath(
+                        historyID: history.historyID,
+                        updatedAt: history.updatedAt,
+                        asset: asset
+                    )
+                    let objectURL = deviceDirectoryURL.appendingPathComponent(relativePath, isDirectory: false)
+                    let didWrite = try writeFileAssetIfNeeded(
+                        asset,
+                        to: objectURL,
+                        expectedByteCount: asset.byteCount
+                    )
+                    if didWrite, !previousRelativePaths.contains(relativePath) {
+                        writtenNewRelativePaths.insert(relativePath)
+                    }
+                    keptRelativePaths.insert(relativePath)
+                    manifestAssets.append(FileDirectoryAsset(
+                        assetIndex: asset.assetIndex,
+                        pasteboardType: asset.pasteboardType.rawValue,
+                        byteCount: asset.byteCount,
+                        modifiedAtNanoseconds: asset.modifiedAtNanoseconds,
+                        relativePath: relativePath,
+                        originalFilename: asset.originalFilename
+                    ))
+                }
+                manifestAssetCount += manifestAssets.count
+                manifestHistories.append(FileDirectoryHistory(
+                    historyID: history.historyID,
+                    updatedAt: history.updatedAt,
+                    assets: manifestAssets
+                ))
+            }
+
+            let manifest = FileDirectoryManifest(
+                manifestVersion: 1,
+                schemaVersion: 1,
+                deviceID: deviceID,
+                generatedAt: Int(Date().timeIntervalSince1970),
+                assetCount: manifestAssetCount,
+                histories: manifestHistories
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try writeFileDataAtomically(encoder.encode(manifest), to: fileManifestURL(for: deviceID))
+            try pruneDirectFileAssets(in: deviceDirectoryURL, keeping: keptRelativePaths)
+            try removeLegacyFileDevicePaths(for: deviceID)
+        } catch {
+            removeDirectFileAssets(in: deviceDirectoryURL, relativePaths: writtenNewRelativePaths)
+            try? pruneDirectFileAssets(in: deviceDirectoryURL, keeping: previousRelativePaths)
+            throw error
+        }
+    }
+
+    func loadFileSnapshots(excludingDeviceID deviceID: String) throws -> [FileDeviceSyncSnapshot] {
+        try loadFileSnapshotResult(
+            excludingDeviceID: deviceID,
+            includedFileTypes: Set(PasteboardAvailableType.syncFileTypes),
+            maxFileBytes: 25 * 1024 * 1024,
+            maxAssetsPerDevice: 10
+        ).snapshots
+    }
+
+    func loadFileSnapshotResult(
+        excludingDeviceID deviceID: String,
+        includedFileTypes: Set<PasteboardAvailableType>,
+        maxFileBytes: Int,
+        maxAssetsPerDevice: Int = 10,
+        shouldImportHistory: ((String, Int) -> Bool)? = nil
+    ) throws -> FileDeviceSyncLoadResult {
+        var snapshots = [FileDeviceSyncSnapshot]()
+        var skippedManifestCount = 0
+        for url in try loadFileDeviceDirectories(in: fileDevicesURL) {
+            do {
+                if let snapshot = try loadFileSnapshot(
+                    at: url,
+                    options: FileSnapshotLoadOptions(
+                        excludedDeviceID: deviceID,
+                        includedFileTypes: includedFileTypes,
+                        maxFileBytes: maxFileBytes,
+                        maxAssetsPerDevice: maxAssetsPerDevice,
+                        shouldImportHistory: shouldImportHistory
+                    )
+                ) {
+                    snapshots.append(snapshot)
+                }
+            } catch {
+                skippedManifestCount += 1
+            }
+        }
+        return FileDeviceSyncLoadResult(snapshots: snapshots, skippedManifestCount: skippedManifestCount)
+    }
+
     private func loadHistorySnapshot(at url: URL) throws -> HistorySyncSnapshot {
         let database = try SyncSQLiteDatabase(url: url)
         let metadata = try readMetadata(database: database)
-        guard metadata["schemaVersion"] == "3" else { throw SyncSQLiteError.missingMetadata("schemaVersion") }
+        guard metadata["schemaVersion"] == "\(Self.historyProtocolVersion)" else {
+            throw SyncSQLiteError.missingMetadata("schemaVersion")
+        }
         guard let deviceID = metadata["deviceID"] else { throw SyncSQLiteError.missingMetadata("deviceID") }
         let statement = try database.prepare(
             "SELECT id, updatedAt, sourceKind, text FROM histories ORDER BY updatedAt DESC, id ASC"
@@ -382,6 +690,210 @@ final class OneDriveFolderSyncProvider {
         )
     }
 
+    private func loadFileSnapshot(
+        at url: URL,
+        options: FileSnapshotLoadOptions
+    ) throws -> FileDeviceSyncSnapshot? {
+        let manifestData = try Data(contentsOf: fileManifestURL(forDeviceDirectory: url))
+        let manifest = try JSONDecoder().decode(FileDirectoryManifest.self, from: manifestData)
+        guard manifest.manifestVersion == 1, manifest.schemaVersion == 1 else {
+            throw SyncSQLiteError.missingMetadata("manifestVersion")
+        }
+        let deviceID = manifest.deviceID
+        guard deviceID != options.excludedDeviceID else { return nil }
+        var skippedAssetCount = 0
+        let boundedMaxFileBytes = max(0, options.maxFileBytes)
+        var remainingAssetSlots = max(0, options.maxAssetsPerDevice)
+        let orderedHistories = manifest.histories.sorted(by: {
+            if $0.updatedAt == $1.updatedAt {
+                return $0.historyID < $1.historyID
+            }
+            return $0.updatedAt > $1.updatedAt
+        })
+        let histories = orderedHistories.compactMap { history -> FileSyncHistoryPayload? in
+            guard options.shouldImportHistory?(history.historyID, history.updatedAt) ?? true else {
+                return nil
+            }
+            let rows = history.assets.sorted(by: { $0.assetIndex < $1.assetIndex })
+            guard rows.allSatisfy({
+                let pasteboardType = NSPasteboard.PasteboardType(rawValue: $0.pasteboardType)
+                guard let fileType = PasteboardAvailableType.syncFileType(for: pasteboardType) else {
+                    return false
+                }
+                return options.includedFileTypes.contains(fileType)
+            }) else {
+                return nil
+            }
+            guard rows.allSatisfy({ $0.byteCount >= 0 && $0.byteCount <= boundedMaxFileBytes }) else {
+                skippedAssetCount += rows.count
+                return nil
+            }
+            guard rows.count <= remainingAssetSlots else {
+                skippedAssetCount += rows.count
+                return nil
+            }
+            var assets = [FileSyncAssetPayload]()
+            for row in rows {
+                guard let asset = loadFileAsset(
+                    row,
+                    deviceDirectoryURL: url,
+                    maxFileBytes: boundedMaxFileBytes
+                ) else {
+                    skippedAssetCount += rows.count
+                    return nil
+                }
+                assets.append(asset)
+            }
+            remainingAssetSlots -= rows.count
+            return FileSyncHistoryPayload(
+                deviceID: deviceID,
+                historyID: history.historyID,
+                updatedAt: history.updatedAt,
+                assets: assets
+            )
+        }
+        return FileDeviceSyncSnapshot(
+            deviceID: deviceID,
+            histories: histories,
+            skippedAssetCount: skippedAssetCount
+        )
+    }
+
+    private func loadFileAsset(
+        _ row: FileDirectoryAsset,
+        deviceDirectoryURL: URL,
+        maxFileBytes: Int
+    ) -> FileSyncAssetPayload? {
+        let pasteboardType = NSPasteboard.PasteboardType(rawValue: row.pasteboardType)
+        guard let objectURL = directFileURL(for: row.relativePath, deviceDirectoryURL: deviceDirectoryURL),
+              fileSizeMatches(at: objectURL, expectedByteCount: row.byteCount, maxFileBytes: maxFileBytes) else {
+            return nil
+        }
+        guard let data = validatedFileData(
+            at: objectURL,
+            expectedByteCount: row.byteCount,
+            maxFileBytes: maxFileBytes
+        ) else {
+            return nil
+        }
+        return FileSyncAssetPayload(
+            assetIndex: row.assetIndex,
+            pasteboardType: pasteboardType,
+            data: data,
+            originalFilename: row.originalFilename,
+            byteCount: row.byteCount,
+            modifiedAtNanoseconds: row.modifiedAtNanoseconds
+        )
+    }
+
+    @discardableResult
+    private func writeFileAssetIfNeeded(
+        _ asset: FileSyncAssetPayload,
+        to destinationURL: URL,
+        expectedByteCount: Int
+    ) throws -> Bool {
+        if fileSizeMatches(
+            at: destinationURL,
+            expectedByteCount: expectedByteCount,
+            maxFileBytes: expectedByteCount
+        ) {
+            return false
+        }
+        try writeFileDataAtomically(asset.data, to: destinationURL)
+        return true
+    }
+
+    private func writeFileDataAtomically(_ data: Data, to destinationURL: URL) throws {
+        try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let temporaryExtension = destinationURL.pathExtension.isEmpty ? "tmp" : destinationURL.pathExtension
+        let temporaryURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(UUID().uuidString).\(temporaryExtension)")
+        try? fileManager.removeItem(at: temporaryURL)
+        do {
+            try data.write(to: temporaryURL, options: .atomic)
+            try replaceItem(at: destinationURL, with: temporaryURL)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
+    private func fileHistorySort(_ lhs: FileSyncHistoryPayload, _ rhs: FileSyncHistoryPayload) -> Bool {
+        if lhs.updatedAt == rhs.updatedAt {
+            return lhs.historyID < rhs.historyID
+        }
+        return lhs.updatedAt > rhs.updatedAt
+    }
+
+    private func fileAssetRelativePath(historyID: String, updatedAt: Int, asset: FileSyncAssetPayload) -> String {
+        "assets/\(safePathComponent(for: historyID))/\(fileAssetFileName(asset, updatedAt: updatedAt))"
+    }
+
+    private func fileAssetFileName(_ asset: FileSyncAssetPayload, updatedAt: Int) -> String {
+        let originalName = asset.originalFilename ?? "asset.\(fileExtension(for: asset.pasteboardType))"
+        let prefix = String(format: "%03d", asset.assetIndex)
+        let version = asset.modifiedAtNanoseconds ?? Int64(updatedAt)
+        return "\(prefix)-\(asset.byteCount)-\(version)-\(safeFileName(originalName, maxUTF8Bytes: 180))"
+    }
+
+    private func fileExtension(for pasteboardType: NSPasteboard.PasteboardType) -> String {
+        switch pasteboardType {
+        case .pdf, .deprecatedPDF:
+            return "pdf"
+        case .rtf, .deprecatedRTF:
+            return "rtf"
+        case .rtfd, .deprecatedRTFD:
+            return "rtfd"
+        case .png, .clipyApplePNG, .clipySnipastePNG:
+            return "png"
+        case .tiff, .deprecatedTIFF:
+            return "tiff"
+        default:
+            return "dat"
+        }
+    }
+
+    private func pruneDirectFileAssets(in deviceDirectoryURL: URL, keeping relativePaths: Set<String>) throws {
+        let assetsURL = deviceDirectoryURL.appendingPathComponent("assets", isDirectory: true)
+        guard fileManager.fileExists(atPath: assetsURL.path) else { return }
+        guard let enumerator = fileManager.enumerator(
+            at: assetsURL,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return }
+        var directories = [URL]()
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            if values?.isDirectory == true {
+                directories.append(url)
+                continue
+            }
+            if !relativePaths.contains(relativePath(of: url, base: deviceDirectoryURL)) {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+        for directory in directories.sorted(by: { $0.path.count > $1.path.count }) {
+            guard let contents = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil),
+                  contents.isEmpty else { continue }
+            try? fileManager.removeItem(at: directory)
+        }
+    }
+
+    private func removeDirectFileAssets(in deviceDirectoryURL: URL, relativePaths: Set<String>) {
+        for relativePath in relativePaths {
+            guard let url = directFileURL(for: relativePath, deviceDirectoryURL: deviceDirectoryURL) else { continue }
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    private func existingDirectFileRelativePaths(in deviceDirectoryURL: URL) -> Set<String> {
+        guard let manifestData = try? Data(contentsOf: fileManifestURL(forDeviceDirectory: deviceDirectoryURL)),
+              let manifest = try? JSONDecoder().decode(FileDirectoryManifest.self, from: manifestData) else {
+            return []
+        }
+        return Set(manifest.histories.flatMap { $0.assets.map(\.relativePath) })
+    }
+
     private func writeMetadata(_ metadata: [String: String], database: SyncSQLiteDatabase) throws {
         let statement = try database.prepare("INSERT INTO metadata(key, value) VALUES (?, ?)")
         for (key, value) in metadata {
@@ -405,21 +917,97 @@ final class OneDriveFolderSyncProvider {
         try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let temporaryURL = destinationURL.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).sqlite")
         try? fileManager.removeItem(at: temporaryURL)
+        let database = try SyncSQLiteDatabase(url: temporaryURL)
         do {
-            let database = try SyncSQLiteDatabase(url: temporaryURL)
             try database.execute("PRAGMA journal_mode=DELETE; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;")
             try database.execute("BEGIN IMMEDIATE")
             try write(database)
             try database.execute("COMMIT")
             database.close()
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.removeItem(at: destinationURL)
-            }
-            try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+            try replaceItem(at: destinationURL, with: temporaryURL)
         } catch {
+            database.close()
             try? fileManager.removeItem(at: temporaryURL)
             throw error
         }
+    }
+
+    private func replaceItem(at destinationURL: URL, with temporaryURL: URL) throws {
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            let replacementURL = destinationURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(".\(UUID().uuidString).\(destinationURL.pathExtension)")
+            try fileManager.moveItem(at: temporaryURL, to: replacementURL)
+            do {
+                _ = try fileManager.replaceItemAt(destinationURL, withItemAt: replacementURL, backupItemName: nil, options: [])
+            } catch {
+                try? fileManager.removeItem(at: replacementURL)
+                throw error
+            }
+        } else {
+            try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+        }
+    }
+
+    private func directFileURL(for relativePath: String, deviceDirectoryURL: URL) -> URL? {
+        guard relativePath.hasPrefix("assets/"),
+              !relativePath.hasPrefix("/"),
+              !relativePath.split(separator: "/", omittingEmptySubsequences: false).contains("..") else {
+            return nil
+        }
+        let objectURL = deviceDirectoryURL.appendingPathComponent(relativePath, isDirectory: false).standardizedFileURL
+        let assetsRootURL = deviceDirectoryURL.appendingPathComponent("assets", isDirectory: true).standardizedFileURL
+        guard objectURL.path.hasPrefix(assetsRootURL.path + "/") else {
+            return nil
+        }
+        return objectURL
+    }
+
+    private func validatedFileData(
+        at url: URL,
+        expectedByteCount: Int,
+        maxFileBytes: Int
+    ) -> Data? {
+        guard expectedByteCount >= 0,
+              expectedByteCount <= maxFileBytes,
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        var data = Data()
+        data.reserveCapacity(min(expectedByteCount, 1024 * 1024))
+        var byteCount = 0
+
+        do {
+            while true {
+                let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
+                guard !chunk.isEmpty else { break }
+                byteCount += chunk.count
+                guard byteCount <= maxFileBytes else { return nil }
+                data.append(chunk)
+            }
+        } catch {
+            return nil
+        }
+
+        guard byteCount == expectedByteCount else { return nil }
+        return data
+    }
+
+    private func fileSizeMatches(
+        at url: URL,
+        expectedByteCount: Int,
+        maxFileBytes: Int
+    ) -> Bool {
+        guard expectedByteCount >= 0,
+              expectedByteCount <= maxFileBytes,
+              let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber,
+              size.intValue == expectedByteCount else {
+            return false
+        }
+        return true
     }
 
     private func loadSQLiteFiles(in directoryURL: URL) throws -> [URL] {
@@ -427,6 +1015,18 @@ final class OneDriveFolderSyncProvider {
         return try fileManager
             .contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "sqlite" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private func loadFileDeviceDirectories(in directoryURL: URL) throws -> [URL] {
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
+        return try fileManager
+            .contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.isDirectoryKey])
+            .filter { url in
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+                return values?.isDirectory == true
+                    && fileManager.fileExists(atPath: fileManifestURL(forDeviceDirectory: url).path)
+            }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
@@ -441,13 +1041,61 @@ final class OneDriveFolderSyncProvider {
         }
     }
 
+    private func ensureHistoryProtocol() throws {
+        if let data = try? Data(contentsOf: historyProtocolURL),
+           let manifest = try? JSONDecoder().decode(HistoryProtocolManifest.self, from: data),
+           manifest.schemaVersion == Self.historyProtocolVersion {
+            try fileManager.createDirectory(at: historyDevicesURL, withIntermediateDirectories: true)
+            return
+        }
+
+        if fileManager.fileExists(atPath: historyRootURL.path) {
+            try fileManager.removeItem(at: historyRootURL)
+        }
+        try fileManager.createDirectory(at: historyDevicesURL, withIntermediateDirectories: true)
+        let manifest = HistoryProtocolManifest(
+            schemaVersion: Self.historyProtocolVersion,
+            generatedAt: Int(Date().timeIntervalSince1970)
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try writeFileDataAtomically(encoder.encode(manifest), to: historyProtocolURL)
+    }
+
+    private func removeLegacyFileDevicePaths(for deviceID: String) throws {
+        for url in [
+            fileDevicesURL.appendingPathComponent(fileName(for: deviceID)),
+            fileObjectsURL.appendingPathComponent(safePathComponent(for: deviceID), isDirectory: true)
+        ] where fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+        if let contents = try? fileManager.contentsOfDirectory(at: fileObjectsURL, includingPropertiesForKeys: nil),
+           contents.isEmpty {
+            try? fileManager.removeItem(at: fileObjectsURL)
+        }
+    }
+
+    private func relativePath(of url: URL, base baseURL: URL) -> String {
+        let basePath = baseURL.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(basePath + "/") else { return url.lastPathComponent }
+        return String(path.dropFirst(basePath.count + 1))
+    }
+
     private var syncRootURL: URL {
         rootURL
     }
 
+    private var historyRootURL: URL {
+        syncRootURL.appendingPathComponent("history", isDirectory: true)
+    }
+
+    private var historyProtocolURL: URL {
+        historyRootURL.appendingPathComponent("protocol.json", isDirectory: false)
+    }
+
     private var historyDevicesURL: URL {
-        syncRootURL
-            .appendingPathComponent("history", isDirectory: true)
+        historyRootURL
             .appendingPathComponent("devices", isDirectory: true)
     }
 
@@ -457,13 +1105,71 @@ final class OneDriveFolderSyncProvider {
             .appendingPathComponent("devices", isDirectory: true)
     }
 
+    private var fileDevicesURL: URL {
+        syncRootURL
+            .appendingPathComponent("files", isDirectory: true)
+            .appendingPathComponent("devices", isDirectory: true)
+    }
+
+    private var fileObjectsURL: URL {
+        syncRootURL
+            .appendingPathComponent("files", isDirectory: true)
+            .appendingPathComponent("objects", isDirectory: true)
+    }
+
     private func fileName(for id: String) -> String {
+        "\(safePathComponent(for: id)).sqlite"
+    }
+
+    private func fileManifestURL(for deviceID: String) -> URL {
+        fileDevicesURL
+            .appendingPathComponent(safePathComponent(for: deviceID), isDirectory: true)
+            .appendingPathComponent("manifest.json", isDirectory: false)
+    }
+
+    private func fileManifestURL(forDeviceDirectory deviceDirectoryURL: URL) -> URL {
+        deviceDirectoryURL.appendingPathComponent("manifest.json", isDirectory: false)
+    }
+
+    private func safePathComponent(for id: String) -> String {
         let allowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.")
         let sanitized = String(id.unicodeScalars.map {
             allowedCharacters.contains($0) ? Character($0) : "-"
         })
         let trimmed = sanitized.trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
-        return "\((trimmed.isEmpty ? UUID().uuidString : trimmed)).sqlite"
+        return trimmed.isEmpty ? UUID().uuidString : trimmed
+    }
+
+    private static func nanosecondsSince1970(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000_000_000).rounded())
+    }
+
+    private func safeFileName(_ value: String, maxUTF8Bytes: Int = 255) -> String {
+        let disallowed = CharacterSet(charactersIn: "/:")
+            .union(.newlines)
+            .union(.controlCharacters)
+        let cleanedScalars = value.unicodeScalars.map { scalar in
+            disallowed.contains(scalar) ? "-" : Character(scalar)
+        }
+        let cleaned = String(cleanedScalars).trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        let fallback = UUID().uuidString
+        let name = cleaned.isEmpty ? fallback : cleaned
+        guard name.lengthOfBytes(using: .utf8) > maxUTF8Bytes else { return name }
+
+        let nsName = name as NSString
+        let pathExtension = nsName.pathExtension
+        let rawSuffix = pathExtension.isEmpty ? "" : ".\(pathExtension)"
+        let suffix = rawSuffix.lengthOfBytes(using: .utf8) < maxUTF8Bytes ? rawSuffix : ""
+        let suffixBudget = suffix.lengthOfBytes(using: .utf8)
+        let baseBudget = max(1, maxUTF8Bytes - suffixBudget)
+        let baseName = suffix.isEmpty ? name : nsName.deletingPathExtension
+        var truncatedBase = ""
+        for character in baseName {
+            let candidate = truncatedBase + String(character)
+            guard candidate.lengthOfBytes(using: .utf8) <= baseBudget else { break }
+            truncatedBase = candidate
+        }
+        return (truncatedBase.isEmpty ? fallback : truncatedBase) + suffix
     }
 }
 

@@ -88,4 +88,10 @@ struct PasteboardAvailableTypeTests {
         )
         #expect(availableTypes == [.deprecatedURL, .deprecatedString, .deprecatedPDF])
     }
+
+    @Test
+    func syncFileTypesExcludeFinderFiles() {
+        #expect(!PasteboardAvailableType.syncFileTypes.contains(.filenames))
+        #expect(PasteboardAvailableType.syncFileType(for: .fileURL) == nil)
+    }
 }

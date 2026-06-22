@@ -12,6 +12,8 @@
 
 import Cocoa
 
+// swiftlint:disable file_length
+
 final class PasteraSyncSwitch: NSButton {
     static let onTrackColor = NSColor(calibratedRed: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
 
@@ -112,7 +114,6 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let accountRowCount = 2
         static let accountLabelWidth: CGFloat = 74
         static let accountColumnGap: CGFloat = 20
-        static let labelWidth: CGFloat = 96
         static let buttonWidth: CGFloat = 96
         static let secondaryButtonWidth: CGFloat = 58
         static let buttonGap: CGFloat = 8
@@ -135,11 +136,10 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static var height: CGFloat {
             topInset
                 + bottomInset
-                + sectionGap * 3
+                + sectionGap * 2
                 + sectionHeight(rowCount: accountRowCount)
                 + sectionHeight(rowCount: 1)
                 + sectionHeight(rowCount: 2)
-                + sectionHeight(rowCount: 3)
         }
     }
 
@@ -150,6 +150,7 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let importHistory = "同步历史"
         static let uploadSnippets = "上传片段"
         static let importSnippets = "同步片段"
+        static let fileTypes = "文件类型"
         static let syncInfo = "i"
         static let syncInfoLabel = "同步说明"
         static let syncInfoText = "Pastera 使用你电脑上的 OneDrive 文件夹同步，不连接 Microsoft 账号。选择同步位置时会检查它是否在 OneDrive 文件夹内，并确认 Pastera 可以写入检测文件；云端是否上传完成，请看 OneDrive 客户端状态。"
@@ -161,28 +162,29 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let oneDriveStatus = "连接状态"
         static let oneDriveFolder = "同步位置"
         static let manualSync = "手动同步"
-        static let defaultFolderApplied = "已使用 OneDrive 默认同步位置。"
-        static let syncing = "同步中..."
-        static let lastSync = "上次同步"
-        static let counts = "导入 / 上传"
-        static let status = "状态"
         static let notDetected = "未检测到 OneDrive"
-        static let customFolderApplied = "同步位置已更新，并通过 OneDrive 文件夹检查。"
-        static let invalidOneDriveFolder = "请选择 OneDrive 中可写的文件夹。"
+    }
+
+    private struct FileTypeOption {
+        let type: PasteboardAvailableType
+        let title: String
+        let accessibilityLabel: String
+        let symbolName: String
     }
 
     private let settingsStore = UserDefaultsSyncSettingsStore()
-    private var observer: NSObjectProtocol?
+    private var syncActivityObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
     private var switchRows = [
         (row: PasteraSettingsRowView, label: NSTextField, stateLabel: NSTextField, control: PasteraSyncSwitch)
     ]()
-    private var statusRows = [(row: PasteraSettingsRowView, label: NSTextField, value: NSTextField)]()
     private weak var accountSection: PasteraSettingsSectionView?
     private weak var automationSection: PasteraSettingsSectionView?
     private weak var switchesSection: PasteraSettingsSectionView?
-    private weak var statusSection: PasteraSettingsSectionView?
     private weak var oneDriveStatusRow: PasteraSettingsRowView?
     private weak var folderRow: PasteraSettingsRowView?
+    private weak var folderLabel: NSTextField?
+    private weak var fileTypeLabel: NSTextField?
     private weak var syncNowRow: PasteraSettingsRowView?
 
     private let syncInfoButton = NSButton(title: Text.syncInfo, target: nil, action: nil)
@@ -192,18 +194,22 @@ final class CPYSyncPreferenceViewController: NSViewController {
     private let historyImportSwitch = PasteraSyncSwitch()
     private let snippetUploadSwitch = PasteraSyncSwitch()
     private let snippetImportSwitch = PasteraSyncSwitch()
+    private var fileTypeButtons = [NSButton]()
     private let oneDriveStatusBadge = PasteraOneDriveStatusBadge()
     private let changeFolderButton = NSButton(title: Text.changeFolder, target: nil, action: nil)
     private let showFolderButton = NSButton(title: Text.showInFinder, target: nil, action: nil)
     private let syncNowButton = NSButton(title: Text.syncNow, target: nil, action: nil)
-    private let lastSyncValue = NSTextField(labelWithString: "-")
-    private let countValue = NSTextField(labelWithString: "-")
-    private let statusValue = NSTextField(labelWithString: "-")
     private let defaultFolderResolutionProvider: () -> SyncDefaultFolderResolution
     private let defaultFolderResolver: SyncDefaultFolderResolver
     private let revealInFinder: (URL) -> Void
     private let chooseSyncRoot: (NSWindow?, URL?) -> URL?
     private var infoPopover: NSPopover?
+    private let fileTypeOptions: [FileTypeOption] = [
+        FileTypeOption(type: .tiff, title: "", accessibilityLabel: "图片", symbolName: "photo"),
+        FileTypeOption(type: .pdf, title: "", accessibilityLabel: "PDF", symbolName: "doc.richtext"),
+        FileTypeOption(type: .rtf, title: "", accessibilityLabel: "RTF", symbolName: "text.alignleft"),
+        FileTypeOption(type: .rtfd, title: "", accessibilityLabel: "RTFD", symbolName: "doc.text.image")
+    ]
 
     init(
         defaultFolderResolver: SyncDefaultFolderResolver = SyncDefaultFolderResolver(),
@@ -240,18 +246,20 @@ final class CPYSyncPreferenceViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         bindActions()
-        let defaultFolderMessage = applyDefaultFolder()
-        updateControls()
-        updateStatus()
-        if let defaultFolderMessage {
-            statusValue.stringValue = defaultFolderMessage
-        }
-        observer = NotificationCenter.default.addObserver(
+        refreshDefaultFolderAvailability()
+        syncActivityObserver = NotificationCenter.default.addObserver(
             forName: SyncCoordinator.statusDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.updateStatus()
+            self?.updateSyncActivityState()
+        }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.refreshSavedFolderStatus()
         }
     }
 
@@ -261,8 +269,11 @@ final class CPYSyncPreferenceViewController: NSViewController {
     }
 
     deinit {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
+        if let syncActivityObserver {
+            NotificationCenter.default.removeObserver(syncActivityObserver)
+        }
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
         }
     }
 
@@ -277,7 +288,6 @@ final class CPYSyncPreferenceViewController: NSViewController {
         syncInfoButton.font = .systemFont(ofSize: 11, weight: .semibold)
         syncInfoButton.setAccessibilityLabel(Text.syncInfoLabel)
         syncInfoButton.toolTip = Text.syncInfoText
-
         let accountSection = makeSection(rowCount: Layout.accountRowCount)
         self.accountSection = accountSection
         oneDriveStatusRow = makeRow(in: accountSection, index: 0)
@@ -301,13 +311,6 @@ final class CPYSyncPreferenceViewController: NSViewController {
         addSwitchRow(title: Text.uploadSnippets, control: snippetUploadSwitch, to: switchesSection, index: 2)
         addSwitchRow(title: Text.importSnippets, control: snippetImportSwitch, to: switchesSection, index: 3)
         host.addSubview(switchesSection)
-
-        let statusSection = makeSection(rowCount: 3)
-        self.statusSection = statusSection
-        addStatusRow(title: Text.lastSync, value: lastSyncValue, to: statusSection, index: 0)
-        addStatusRow(title: Text.counts, value: countValue, to: statusSection, index: 1)
-        addStatusRow(title: Text.status, value: statusValue, to: statusSection, index: 2)
-        host.addSubview(statusSection)
 
         layoutContent(width: Layout.width)
         CPYWindowAppearance.apply(to: host)
@@ -342,9 +345,15 @@ final class CPYSyncPreferenceViewController: NSViewController {
         let row = makeRow(in: section, index: index)
         folderRow = row
         let label = makeLabel(Text.oneDriveFolder)
+        folderLabel = label
+        let fileTypeLabel = makeLabel(Text.fileTypes)
+        self.fileTypeLabel = fileTypeLabel
         row.addSubview(label)
         row.addSubview(changeFolderButton)
         row.addSubview(showFolderButton)
+        row.addSubview(fileTypeLabel)
+        fileTypeButtons = fileTypeOptions.map(makeFileTypeCheckbox)
+        fileTypeButtons.forEach { row.addSubview($0) }
     }
 
     private func addSyncNowRow(to section: NSView, index: Int) {
@@ -369,24 +378,38 @@ final class CPYSyncPreferenceViewController: NSViewController {
         switchRows.append((row, label, stateLabel, control))
     }
 
-    @discardableResult
-    private func addStatusRow(title: String, value: NSTextField, to section: NSView, index: Int) -> PasteraSettingsRowView {
-        let row = makeRow(in: section, index: index)
-        let label = makeLabel(title)
-        value.lineBreakMode = .byTruncatingTail
-        value.textColor = .secondaryLabelColor
-        row.addSubview(label)
-        row.addSubview(value)
-        statusRows.append((row, label, value))
-        return row
-    }
-
     private func makeLabel(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: NSFont.systemFontSize)
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
         return label
+    }
+
+    private func makeFileTypeCheckbox(_ option: FileTypeOption) -> NSButton {
+        let button = NSButton(checkboxWithTitle: option.title, target: self, action: #selector(toggleFileTypeCheckbox(_:)))
+        button.identifier = NSUserInterfaceItemIdentifier(option.type.rawValue)
+        button.setAccessibilityLabel(option.accessibilityLabel)
+        button.toolTip = option.accessibilityLabel
+        button.image = NSImage(systemSymbolName: option.symbolName, accessibilityDescription: option.accessibilityLabel)
+        button.imagePosition = .imageOnly
+        button.alignment = .center
+        button.font = .systemFont(ofSize: 12, weight: .medium)
+        button.lineBreakMode = .byTruncatingTail
+        return button
+    }
+}
+
+extension CPYSyncPreferenceViewController {
+    func refreshDefaultFolderAvailability() {
+        applyDefaultFolder()
+        updateControls()
+        updateSyncActivityState()
+    }
+
+    func refreshSavedFolderStatus() {
+        _ = updateControls()
+        updateSyncActivityState()
     }
 }
 
@@ -453,7 +476,6 @@ private extension CPYSyncPreferenceViewController {
         }
         settingsStore.enableUploadScopesIfNeeded()
         settingsStore.setAutomaticUploadEnabled(true)
-        statusValue.stringValue = Text.defaultFolderApplied
         updateControls()
     }
 
@@ -472,7 +494,6 @@ private extension CPYSyncPreferenceViewController {
         }
         settingsStore.enableImportScopesIfNeeded()
         settingsStore.setAutomaticSyncEnabled(true)
-        statusValue.stringValue = Text.defaultFolderApplied
         updateControls()
     }
 
@@ -481,7 +502,6 @@ private extension CPYSyncPreferenceViewController {
             return
         }
         guard FileManager.default.fileExists(atPath: rootURL.path) else {
-            statusValue.stringValue = SyncCoordinatorError.folderUnavailable.localizedDescription
             return
         }
         revealInFinder(rootURL)
@@ -498,7 +518,6 @@ private extension CPYSyncPreferenceViewController {
     @objc func syncNow() {
         guard prepareManualSync() else { return }
         syncNowButton.isEnabled = false
-        statusValue.stringValue = Text.syncing
         SyncCoordinator.shared.syncNow(reason: .manual)
     }
 
@@ -542,16 +561,33 @@ private extension CPYSyncPreferenceViewController {
         updateControls()
     }
 
-    func updateControls() {
+    @objc func toggleFileTypeCheckbox(_ sender: NSButton) {
+        guard ensureDefaultFolderAvailable() else {
+            sender.state = .off
+            updateControls()
+            return
+        }
+        guard let rawValue = sender.identifier?.rawValue,
+              let type = PasteboardAvailableType(rawValue: rawValue) else {
+            return
+        }
+        settingsStore.setFileTypeEnabled(type, enabled: sender.state == .on)
+        updateControls()
+    }
+
+    @discardableResult
+    func updateControls() -> Bool {
         let settings = settingsStore.settings()
         updateSwitch(automaticUploadSwitch, isOn: settings.automaticUploadEnabled)
         updateSwitch(automaticSyncSwitch, isOn: settings.automaticSyncEnabled)
-        updateOneDriveStatus(rootURL: settings.rootURL)
-        showFolderButton.isEnabled = settings.rootURL != nil
+        let rootIsAvailable = updateOneDriveStatus(rootURL: settings.rootURL)
+        showFolderButton.isEnabled = rootIsAvailable
         updateSwitch(historyUploadSwitch, isOn: settings.historyUploadEnabled)
         updateSwitch(historyImportSwitch, isOn: settings.historyImportEnabled)
         updateSwitch(snippetUploadSwitch, isOn: settings.snippetUploadEnabled)
         updateSwitch(snippetImportSwitch, isOn: settings.snippetImportEnabled)
+        updateFileTypeCheckboxes(settings: settings)
+        return rootIsAvailable
     }
 
     func updateSwitch(_ control: PasteraSyncSwitch, isOn: Bool) {
@@ -565,14 +601,25 @@ private extension CPYSyncPreferenceViewController {
         switchRow.stateLabel.textColor = isOn ? PasteraSyncSwitch.onTrackColor : .secondaryLabelColor
     }
 
-    func updateOneDriveStatus(rootURL: URL?) {
+    func updateFileTypeCheckboxes(settings: SyncSettings) {
+        for button in fileTypeButtons {
+            guard let rawValue = button.identifier?.rawValue,
+                  let type = PasteboardAvailableType(rawValue: rawValue) else {
+                continue
+            }
+            button.state = settings.fileAssetTypes.contains(type) ? .on : .off
+        }
+    }
+
+    @discardableResult
+    func updateOneDriveStatus(rootURL: URL?) -> Bool {
         guard let rootURL else {
             oneDriveStatusBadge.state = .notDetected
             folderRow?.toolTip = nil
             changeFolderButton.toolTip = nil
             showFolderButton.toolTip = nil
             layoutOneDriveStatusRow()
-            return
+            return false
         }
         var isDirectory: ObjCBool = false
         let isAvailable = FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
@@ -585,21 +632,11 @@ private extension CPYSyncPreferenceViewController {
         changeFolderButton.toolTip = displayName
         showFolderButton.toolTip = displayName
         layoutOneDriveStatusRow()
+        return isAvailable
     }
 
-    func updateStatus() {
+    func updateSyncActivityState() {
         let status = SyncCoordinator.shared.status
-        if let lastSyncAt = status.lastSyncAt {
-            lastSyncValue.stringValue = DateFormatter.localizedString(
-                from: lastSyncAt,
-                dateStyle: .short,
-                timeStyle: .medium
-            )
-        } else {
-            lastSyncValue.stringValue = "-"
-        }
-        countValue.stringValue = "\(status.importedCount) / \(status.uploadedCount)"
-        statusValue.stringValue = status.statusText
         syncNowButton.isEnabled = status.phase != .syncing
     }
 
@@ -609,58 +646,55 @@ private extension CPYSyncPreferenceViewController {
         }
         let settings = settingsStore.settings()
         guard settings.hasEnabledWork else {
-            statusValue.stringValue = SyncCoordinatorError.noEnabledWork.localizedDescription
             return false
         }
         return true
     }
 
     func ensureDefaultFolderAvailable() -> Bool {
-        if let message = applyDefaultFolder() {
-            statusValue.stringValue = message
+        applyDefaultFolder()
+        guard let rootURL = settingsStore.settings().rootURL else {
+            return false
         }
-        return settingsStore.settings().rootURL != nil
+        return isSyncRootAvailable(rootURL)
     }
 
-    @discardableResult
-    func applyDefaultFolder() -> String? {
-        if let rootURL = settingsStore.settings().rootURL,
-           isSyncRootAvailable(rootURL) {
-            return nil
+    func applyDefaultFolder() {
+        if let rootURL = settingsStore.settings().rootURL {
+            if !isSyncRootAvailable(rootURL) {
+                updateControls()
+            }
+            return
         }
         switch defaultFolderResolutionProvider() {
         case .found(let candidate):
-            return useDefaultFolder(candidate)
+            useDefaultFolder(candidate)
         case .notFound:
             settingsStore.setRootURL(nil)
-            return SyncCoordinatorError.missingOneDrive.localizedDescription
         case .multiple(let candidates):
             guard let candidate = defaultFolderResolver.preferredCandidate(from: candidates) else {
                 settingsStore.setRootURL(nil)
-                return SyncCoordinatorError.missingOneDrive.localizedDescription
+                return
             }
-            return useDefaultFolder(candidate)
+            useDefaultFolder(candidate)
         }
     }
 
-    func useDefaultFolder(_ candidate: SyncDefaultFolderCandidate) -> String {
+    func useDefaultFolder(_ candidate: SyncDefaultFolderCandidate) {
         guard let preparedCandidate = defaultFolderResolver.prepare(candidate) else {
             settingsStore.setRootURL(nil)
-            return SyncCoordinatorError.folderUnavailable.localizedDescription
+            return
         }
         settingsStore.setRootURL(preparedCandidate.syncRootURL)
-        return Text.defaultFolderApplied
     }
 
     func applyCustomSyncRoot(_ selectedURL: URL) {
         let rootURL = selectedURL.resolvingSymlinksInPath().standardizedFileURL
         guard isSyncRootAvailable(rootURL), canWriteSyncProbe(at: rootURL) else {
-            statusValue.stringValue = Text.invalidOneDriveFolder
             updateControls()
             return
         }
         settingsStore.setRootURL(rootURL)
-        statusValue.stringValue = Text.customFolderApplied
         updateControls()
     }
 
@@ -673,20 +707,17 @@ private extension CPYSyncPreferenceViewController {
     }
 
     func isOneDriveBacked(_ rootURL: URL) -> Bool {
-        if defaultFolderResolver.oneDriveCandidate(containing: rootURL) != nil {
-            return true
-        }
         let components = rootURL.standardizedFileURL.pathComponents
-        guard let cloudStorageIndex = components.firstIndex(of: "CloudStorage"),
-              components.indices.contains(cloudStorageIndex + 1) else {
-            return false
+        if let cloudStorageIndex = components.firstIndex(of: "CloudStorage"),
+           components.indices.contains(cloudStorageIndex + 1) {
+            let oneDriveName = components[cloudStorageIndex + 1]
+            guard oneDriveName.range(of: "OneDrive", options: [.anchored, .caseInsensitive]) != nil else {
+                return false
+            }
+            return oneDriveName.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil
+                && oneDriveName.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
         }
-        let oneDriveName = components[cloudStorageIndex + 1]
-        guard oneDriveName.range(of: "OneDrive", options: [.anchored, .caseInsensitive]) != nil else {
-            return false
-        }
-        return oneDriveName.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil
-            && oneDriveName.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
+        return defaultFolderResolver.oneDriveCandidate(containing: rootURL) != nil
     }
 
     func canWriteSyncProbe(at rootURL: URL) -> Bool {
@@ -759,10 +790,6 @@ private extension CPYSyncPreferenceViewController {
         sectionTopY -= Layout.sectionGap
         sectionTopY = layoutSection(switchesSection, rowCount: 2, topY: sectionTopY, contentWidth: contentWidth)
         layoutSwitchRows(in: switchesSection)
-
-        sectionTopY -= Layout.sectionGap
-        _ = layoutSection(statusSection, rowCount: 3, topY: sectionTopY, contentWidth: contentWidth)
-        layoutStatusRows()
     }
 
     func layoutSection(
@@ -820,15 +847,17 @@ private extension CPYSyncPreferenceViewController {
 
     func layoutFolderRow() {
         guard let row = folderRow else { return }
-        let label = row.subviews.compactMap { $0 as? NSTextField }.first
-        let showWidth = min(Layout.secondaryButtonWidth, row.bounds.width)
-        let changeWidth = min(Layout.secondaryButtonWidth, row.bounds.width)
+        let availableWidth = max(1, row.bounds.width)
+        let columnWidth = floor(max(1, (availableWidth - Layout.accountColumnGap) / 2))
+        let fileColumnX = columnWidth + Layout.accountColumnGap
+        let showWidth = min(Layout.secondaryButtonWidth, columnWidth)
+        let changeWidth = min(Layout.secondaryButtonWidth, columnWidth)
         let actionGroupWidth = showWidth + changeWidth + Layout.buttonGap
         let actionMinX = min(
             Layout.accountLabelWidth,
-            max(0, row.bounds.width - actionGroupWidth)
+            max(0, columnWidth - actionGroupWidth)
         )
-        label?.frame = NSRect(
+        folderLabel?.frame = NSRect(
             x: 0,
             y: centeredY(height: 18, in: row),
             width: max(1, actionMinX - Layout.buttonGap),
@@ -846,6 +875,24 @@ private extension CPYSyncPreferenceViewController {
             width: showWidth,
             height: Layout.fieldHeight
         )
+        fileTypeLabel?.frame = NSRect(
+            x: fileColumnX,
+            y: centeredY(height: 18, in: row),
+            width: Layout.accountLabelWidth,
+            height: 18
+        )
+        let checkboxSize = min(22, Layout.fieldHeight)
+        let checkboxGap: CGFloat = 4
+        let checkboxY = centeredY(height: checkboxSize, in: row)
+        let checkboxStartX = fileColumnX + Layout.accountLabelWidth
+        for (index, button) in fileTypeButtons.enumerated() {
+            button.frame = NSRect(
+                x: checkboxStartX + CGFloat(index) * (checkboxSize + checkboxGap),
+                y: checkboxY,
+                width: checkboxSize,
+                height: checkboxSize
+            )
+        }
     }
 
     func layoutOneDriveStatusRow() {
@@ -930,19 +977,6 @@ private extension CPYSyncPreferenceViewController {
                 x: stateX,
                 y: 7,
                 width: Layout.switchStateWidth,
-                height: 18
-            )
-        }
-    }
-
-    func layoutStatusRows() {
-        for statusRow in statusRows {
-            let row = statusRow.row
-            statusRow.label.frame = NSRect(x: 0, y: 7, width: Layout.labelWidth, height: 18)
-            statusRow.value.frame = NSRect(
-                x: Layout.labelWidth,
-                y: 7,
-                width: max(1, row.bounds.width - Layout.labelWidth),
                 height: 18
             )
         }

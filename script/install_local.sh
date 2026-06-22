@@ -9,6 +9,7 @@ APP_TARGET="pastera"
 PROJECT_PATH="${ROOT_DIR}/pastera.xcodeproj"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-${ROOT_DIR}/.build/xcode-derived-data}"
+LOCAL_ARCH="${PASTERA_LOCAL_ARCH:-$(uname -m)}"
 INSTALL_DIR="${PASTERA_INSTALL_DIR:-/Applications}"
 DEST_APP="${INSTALL_DIR}/${APP_BUNDLE}"
 TARGET_BUILD_ROOT="${DERIVED_DATA_PATH}/AppTargetBuild"
@@ -20,10 +21,11 @@ SHOULD_BUILD=1
 SHOULD_LAUNCH=1
 SHOULD_CLEAN=0
 SHOULD_TEST=0
+SHOULD_VERIFY=0
 
 usage() {
     cat <<EOF
-Usage: $0 [--clean] [--test] [--no-build] [--no-launch]
+Usage: $0 [--clean] [--test] [--no-build] [--no-launch] [--verify]
 
 Builds ${APP_BUNDLE}, installs it to:
   ${DEST_APP}
@@ -32,6 +34,7 @@ Environment overrides:
   CONFIGURATION=Debug|Release
   DERIVED_DATA_PATH=/path/to/DerivedData
   PASTERA_INSTALL_DIR=/Applications
+  PASTERA_LOCAL_ARCH=${LOCAL_ARCH}
 EOF
 }
 
@@ -48,6 +51,10 @@ while (($#)); do
             ;;
         --no-launch)
             SHOULD_LAUNCH=0
+            ;;
+        --verify)
+            SHOULD_VERIFY=1
+            SHOULD_LAUNCH=1
             ;;
         -h|--help)
             usage
@@ -66,6 +73,8 @@ XCODEBUILD_ARGS=(
     CODE_SIGN_IDENTITY=-
     CODE_SIGNING_REQUIRED=NO
     CODE_SIGNING_ALLOWED=NO
+    ONLY_ACTIVE_ARCH=YES
+    ARCHS="${LOCAL_ARCH}"
     -project "${PROJECT_PATH}"
     -configuration "${CONFIGURATION}"
     -clonedSourcePackagesDirPath "${ROOT_DIR}/.spm-cache/SourcePackages"
@@ -130,7 +139,20 @@ quit_running_app() {
         return
     fi
 
-    /usr/bin/osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 || true
+    /usr/bin/osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 &
+    local quit_pid=$!
+    for _ in {1..10}; do
+        if ! kill -0 "${quit_pid}" >/dev/null 2>&1; then
+            wait "${quit_pid}" >/dev/null 2>&1 || true
+            break
+        fi
+        sleep 0.2
+    done
+    if kill -0 "${quit_pid}" >/dev/null 2>&1; then
+        kill "${quit_pid}" >/dev/null 2>&1 || true
+        wait "${quit_pid}" >/dev/null 2>&1 || true
+    fi
+
     for _ in {1..20}; do
         if ! pgrep -x "${APP_NAME}" >/dev/null; then
             return
@@ -139,6 +161,29 @@ quit_running_app() {
     done
 
     pkill -x "${APP_NAME}" >/dev/null 2>&1 || true
+}
+
+verify_launched_app() {
+    local expected_executable="${DEST_APP}/Contents/MacOS/${APP_NAME}"
+
+    for _ in {1..50}; do
+        while IFS= read -r pid; do
+            [[ -n "${pid}" ]] || continue
+
+            local args
+            args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
+            if [[ "${args}" == "${expected_executable}"* ]]; then
+                echo "Verified ${APP_NAME} is running from ${expected_executable}"
+                return
+            fi
+        done < <(pgrep -x "${APP_NAME}" || true)
+
+        sleep 0.2
+    done
+
+    echo "Failed to verify ${APP_NAME} is running from ${expected_executable}" >&2
+    pgrep -fl "${APP_NAME}" >&2 || true
+    exit 1
 }
 
 install_app() {
@@ -180,3 +225,7 @@ if [[ "${SHOULD_LAUNCH}" == "1" ]]; then
 fi
 
 echo "Installed ${APP_BUNDLE} to ${DEST_APP}"
+
+if [[ "${SHOULD_VERIFY}" == "1" ]]; then
+    verify_launched_app
+fi

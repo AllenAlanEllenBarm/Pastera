@@ -21,10 +21,15 @@ struct SyncSettings: Equatable {
     let historyImportEnabled: Bool
     let snippetUploadEnabled: Bool
     let snippetImportEnabled: Bool
+    let fileUploadEnabled: Bool
+    let fileImportEnabled: Bool
+    let fileAssetTypes: Set<PasteboardAvailableType>
     let pollInterval: TimeInterval
     let maxSyncedHistoryTextBytes: Int
     let maxHistorySnapshotTextBudgetBytes: Int
     let historyLimit: Int
+    let maxSyncedFileBytes: Int
+    let syncedFileLimitPerDevice: Int
 
     var hasEnabledWork: Bool {
         hasEnabledUploadWork || hasEnabledImportWork
@@ -33,11 +38,13 @@ struct SyncSettings: Equatable {
     var hasEnabledUploadWork: Bool {
         historyUploadEnabled
             || snippetUploadEnabled
+            || fileUploadEnabled
     }
 
     var hasEnabledImportWork: Bool {
         historyImportEnabled
             || snippetImportEnabled
+            || fileImportEnabled
     }
 }
 
@@ -55,11 +62,13 @@ struct SyncStatus: Equatable {
     let uploadedCount: Int
     let importedCount: Int
     let errorDescription: String?
+    let warningDescription: String?
 
     var statusText: String {
         if let errorDescription {
             return errorDescription
         }
+        let warningSuffix = warningDescription.map { " \($0)。" } ?? ""
         switch phase {
         case .idle:
             return "未同步"
@@ -72,15 +81,15 @@ struct SyncStatus: Equatable {
                 "Pastera 不知道云端是否已完成。"
             if importedCount > 0, uploadedCount > 0 {
                 return "已导入 \(importedCount) 条，已写入 \(uploadedCount) 条到本地同步文件夹" +
-                    uploadStatusText
+                    uploadStatusText + warningSuffix
             }
             if importedCount > 0 {
-                return "已导入 \(importedCount) 条。OneDrive 云端上传状态请查看 OneDrive。"
+                return "已导入 \(importedCount) 条。OneDrive 云端上传状态请查看 OneDrive。" + warningSuffix
             }
             if uploadedCount > 0 {
-                return "已写入 \(uploadedCount) 条到本地同步文件夹" + uploadStatusText
+                return "已写入 \(uploadedCount) 条到本地同步文件夹" + uploadStatusText + warningSuffix
             }
-            return "没有新数据。OneDrive 云端上传状态请查看 OneDrive。"
+            return "没有新数据。OneDrive 云端上传状态请查看 OneDrive。" + warningSuffix
         case .failed:
             return "同步失败"
         }
@@ -91,7 +100,8 @@ struct SyncStatus: Equatable {
         lastSyncAt: nil,
         uploadedCount: 0,
         importedCount: 0,
-        errorDescription: nil
+        errorDescription: nil,
+        warningDescription: nil
     )
 }
 
@@ -129,6 +139,7 @@ final class UserDefaultsSyncSettingsStore {
         let rootPath = defaults.string(forKey: Constants.UserDefaults.syncRootPath)
         let pollInterval = defaults.double(forKey: Constants.UserDefaults.syncPollInterval)
         let retentionSettings = HistoryRetentionSettings.current(defaults: defaults)
+        let fileAssetTypes = fileAssetTypes()
         return SyncSettings(
             automaticUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncAutomaticUploadEnabled),
             automaticSyncEnabled: defaults.bool(forKey: Constants.UserDefaults.syncAutomaticEnabled),
@@ -137,10 +148,15 @@ final class UserDefaultsSyncSettingsStore {
             historyImportEnabled: defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled),
             snippetUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled),
             snippetImportEnabled: defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled),
+            fileUploadEnabled: !fileAssetTypes.isEmpty && defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled),
+            fileImportEnabled: !fileAssetTypes.isEmpty && defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled),
+            fileAssetTypes: fileAssetTypes,
             pollInterval: pollInterval > 0 ? pollInterval : 300,
             maxSyncedHistoryTextBytes: retentionSettings.maxSyncedHistoryTextBytes,
             maxHistorySnapshotTextBudgetBytes: retentionSettings.maxHistorySnapshotTextBudgetBytes,
-            historyLimit: min(retentionSettings.storedHistoryLimit, HistoryRetentionSettings.defaultStoredHistoryLimit)
+            historyLimit: min(retentionSettings.storedHistoryLimit, HistoryRetentionSettings.defaultStoredHistoryLimit),
+            maxSyncedFileBytes: maxSyncedFileBytes(),
+            syncedFileLimitPerDevice: syncedFileLimitPerDevice()
         )
     }
 
@@ -162,18 +178,28 @@ final class UserDefaultsSyncSettingsStore {
 
     func setHistoryUploadEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncHistoryUploadEnabled)
+        updateDerivedFileScopes()
     }
 
     func setSnippetUploadEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
     }
 
+    func setFileUploadEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Constants.UserDefaults.syncFileUploadEnabled)
+    }
+
     func setHistoryImportEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncHistoryImportEnabled)
+        updateDerivedFileScopes()
     }
 
     func setSnippetImportEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncSnippetImportEnabled)
+    }
+
+    func setFileImportEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Constants.UserDefaults.syncFileImportEnabled)
     }
 
     func enableUploadScopesIfNeeded() {
@@ -181,6 +207,7 @@ final class UserDefaultsSyncSettingsStore {
         guard !settings.hasEnabledUploadWork else { return }
         setHistoryUploadEnabled(true)
         setSnippetUploadEnabled(true)
+        updateDerivedFileScopes()
     }
 
     func enableImportScopesIfNeeded() {
@@ -188,6 +215,58 @@ final class UserDefaultsSyncSettingsStore {
         guard !settings.hasEnabledImportWork else { return }
         setHistoryImportEnabled(true)
         setSnippetImportEnabled(true)
+        updateDerivedFileScopes()
+    }
+
+    func setFileTypeEnabled(_ type: PasteboardAvailableType, enabled: Bool) {
+        var states = fileTypeStates()
+        states[type.rawValue] = NSNumber(value: enabled)
+        defaults.set(states, forKey: Constants.UserDefaults.syncFileTypes)
+        updateDerivedFileScopes()
+    }
+
+    private func maxSyncedFileBytes() -> Int {
+        let value = defaults.integer(forKey: Constants.UserDefaults.maxSyncedFileBytes)
+        let maximum = 25 * 1024 * 1024
+        return value > 0 ? min(value, maximum) : maximum
+    }
+
+    private func syncedFileLimitPerDevice() -> Int {
+        let value = defaults.integer(forKey: Constants.UserDefaults.syncedFileLimitPerDevice)
+        return value > 0 ? min(value, 10) : 10
+    }
+
+    private func fileAssetTypes() -> Set<PasteboardAvailableType> {
+        Set(fileTypeStates().compactMap { key, value in
+            guard value.boolValue else { return nil }
+            return PasteboardAvailableType(rawValue: key)
+        })
+    }
+
+    private func fileTypeStates() -> [String: NSNumber] {
+        let values = defaults.object(forKey: Constants.UserDefaults.syncFileTypes) as? [String: Any] ?? [:]
+        return PasteboardAvailableType.syncFileTypes.reduce(into: [String: NSNumber]()) { result, type in
+            if let number = values[type.rawValue] as? NSNumber {
+                result[type.rawValue] = number
+            } else if let bool = values[type.rawValue] as? Bool {
+                result[type.rawValue] = NSNumber(value: bool)
+            } else {
+                result[type.rawValue] = NSNumber(value: false)
+            }
+        }
+    }
+
+    private func updateDerivedFileScopes() {
+        let hasFileTypes = !fileAssetTypes().isEmpty
+        defaults.set(
+            hasFileTypes && defaults.bool(forKey: Constants.UserDefaults.syncHistoryUploadEnabled),
+            forKey: Constants.UserDefaults.syncFileUploadEnabled
+        )
+        defaults.set(
+            hasFileTypes && defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled),
+            forKey: Constants.UserDefaults.syncFileImportEnabled
+        )
+        defaults.synchronize()
     }
 }
 
@@ -337,10 +416,26 @@ final class SyncCoordinator {
     private let queue: DispatchQueue
     private var timer: DispatchSourceTimer?
     private var cancellables = Set<AnyCancellable>()
+    private var lastHistoryExportSignature: HistoryWindowSignature?
+    private var importedHistorySnapshotStates = [String: HistoryRemoteSnapshotState]()
 
     private struct DirectionPlan {
         let upload: Bool
         let importRemote: Bool
+    }
+
+    private struct SyncRunResult {
+        var uploaded = 0
+        var imported = 0
+        var warnings = [String]()
+
+        var isNoOp: Bool {
+            uploaded == 0 && imported == 0 && warnings.isEmpty
+        }
+
+        var warningDescription: String? {
+            warnings.isEmpty ? nil : warnings.joined(separator: "；")
+        }
     }
 
     init(
@@ -397,7 +492,7 @@ final class SyncCoordinator {
     }
 
     private func observeLocalChanges() {
-        historyRepository.observeHistoryChanges()
+        historyRepository.observeTextSyncCandidateChanges(currentDeviceID: currentDeviceID)
             .dropFirst()
             .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -433,23 +528,28 @@ final class SyncCoordinator {
             return
         }
 
-        setStatus(SyncStatus(
-            phase: .syncing,
-            lastSyncAt: status.lastSyncAt,
-            uploadedCount: status.uploadedCount,
-            importedCount: status.importedCount,
-            errorDescription: nil
-        ))
+        if reason == .manual {
+            setStatus(SyncStatus(
+                phase: .syncing,
+                lastSyncAt: status.lastSyncAt,
+                uploadedCount: status.uploadedCount,
+                importedCount: status.importedCount,
+                errorDescription: nil,
+                warningDescription: nil
+            ))
+        }
 
         do {
             let provider = providerFactory(rootURL)
             let result = try sync(settings: settings, provider: provider, directionPlan: directionPlan)
+            guard reason == .manual || !result.isNoOp else { return }
             setStatus(SyncStatus(
                 phase: .succeeded,
                 lastSyncAt: Date(),
                 uploadedCount: result.uploaded,
                 importedCount: result.imported,
-                errorDescription: nil
+                errorDescription: nil,
+                warningDescription: result.warningDescription
             ))
         } catch {
             setStatus(SyncStatus(
@@ -457,7 +557,8 @@ final class SyncCoordinator {
                 lastSyncAt: status.lastSyncAt,
                 uploadedCount: status.uploadedCount,
                 importedCount: status.importedCount,
-                errorDescription: error.localizedDescription
+                errorDescription: error.localizedDescription,
+                warningDescription: nil
             ))
         }
     }
@@ -466,37 +567,103 @@ final class SyncCoordinator {
         settings: SyncSettings,
         provider: OneDriveFolderSyncProvider,
         directionPlan: DirectionPlan
-    ) throws -> (uploaded: Int, imported: Int) {
-        var uploaded = 0
-        var imported = 0
+    ) throws -> SyncRunResult {
+        var result = SyncRunResult()
 
         if directionPlan.importRemote, settings.historyImportEnabled {
-            imported += try importHistories(provider: provider)
+            result.imported += try importHistories(provider: provider)
         }
         if directionPlan.importRemote, settings.snippetImportEnabled {
-            imported += try importSnippets(provider: provider)
+            result.imported += try importSnippets(provider: provider)
+        }
+        if directionPlan.importRemote, settings.fileImportEnabled {
+            do {
+                let fileResult = try importFiles(settings: settings, provider: provider)
+                result.imported += fileResult.imported
+                if let warning = fileResult.warning {
+                    result.warnings.append(warning)
+                }
+            } catch {
+                result.warnings.append("文件同步失败：\(error.localizedDescription)")
+            }
         }
         if directionPlan.upload, settings.historyUploadEnabled {
-            uploaded += try exportHistories(settings: settings, provider: provider)
+            result.uploaded += try exportHistories(settings: settings, provider: provider)
         }
         if directionPlan.upload, settings.snippetUploadEnabled {
-            uploaded += try exportSnippets(provider: provider)
+            result.uploaded += try exportSnippets(provider: provider)
         }
-        return (uploaded, imported)
+        if directionPlan.upload, settings.fileUploadEnabled {
+            do {
+                let fileResult = try exportFiles(settings: settings, provider: provider)
+                result.uploaded += fileResult.uploaded
+                if let warning = fileResult.warning {
+                    result.warnings.append(warning)
+                }
+            } catch {
+                result.warnings.append("文件同步失败：\(error.localizedDescription)")
+            }
+        }
+        return result
     }
 
     private func importHistories(provider: OneDriveFolderSyncProvider) throws -> Int {
-        let payloads = try provider.loadHistorySnapshots(excludingDeviceID: currentDeviceID)
+        let states = try provider.historySnapshotFileStates(excludingDeviceID: currentDeviceID)
+        let changedStates = states.filter {
+            importedHistorySnapshotStates[$0.cacheKey] != $0
+        }
+        guard !changedStates.isEmpty else { return 0 }
+        let payloads = try provider.loadHistorySnapshots(from: changedStates, excludingDeviceID: currentDeviceID)
             .flatMap(\.payloads)
-        return payloads.reduce(0) { importedCount, payload in
+        let imported = payloads.reduce(0) { importedCount, payload in
             importedCount + (historyRepository.upsertSyncPayload(payload) ? 1 : 0)
         }
+        for state in changedStates {
+            importedHistorySnapshotStates[state.cacheKey] = state
+        }
+        return imported
     }
 
     private func importSnippets(provider: OneDriveFolderSyncProvider) throws -> Int {
         try provider.loadSnippetSnapshots(excludingDeviceID: currentDeviceID).reduce(0) { importedCount, snapshot in
             importedCount + snippetRepository.upsertSyncSnapshot(snapshot.snapshot)
         }
+    }
+
+    private func importFiles(
+        settings: SyncSettings,
+        provider: OneDriveFolderSyncProvider
+    ) throws -> (imported: Int, warning: String?) {
+        let loadResult = try provider.loadFileSnapshotResult(
+            excludingDeviceID: currentDeviceID,
+            includedFileTypes: settings.fileAssetTypes,
+            maxFileBytes: settings.maxSyncedFileBytes,
+            maxAssetsPerDevice: settings.syncedFileLimitPerDevice,
+            shouldImportHistory: { [historyRepository] historyID, updatedAt in
+                historyRepository.shouldImportFileSyncHistory(historyID: historyID, updatedAt: updatedAt)
+            }
+        )
+        let imported = loadResult.snapshots.reduce(0) { importedCount, snapshot in
+            importedCount + snapshot.histories.reduce(0) { historyImportedCount, payload in
+                guard payload.assets.allSatisfy({
+                    guard let fileType = PasteboardAvailableType.syncFileType(for: $0.pasteboardType) else {
+                        return false
+                    }
+                    return settings.fileAssetTypes.contains(fileType)
+                }) else {
+                    return historyImportedCount
+                }
+                return historyImportedCount + (historyRepository.upsertFileSyncHistory(payload) ? 1 : 0)
+            }
+        }
+        var warnings = [String]()
+        if loadResult.skippedAssetCount > 0 {
+            warnings.append("已跳过 \(loadResult.skippedAssetCount) 个文件（缺失、超限或校验失败）")
+        }
+        if loadResult.skippedManifestCount > 0 {
+            warnings.append("已跳过 \(loadResult.skippedManifestCount) 个文件同步清单（无法读取）")
+        }
+        return (imported, warnings.isEmpty ? nil : warnings.joined(separator: "。"))
     }
 
     private func exportHistories(settings: SyncSettings, provider: OneDriveFolderSyncProvider) throws -> Int {
@@ -507,6 +674,16 @@ final class SyncCoordinator {
             maxTextBytes: settings.maxSyncedHistoryTextBytes,
             snapshotTextBudgetBytes: settings.maxHistorySnapshotTextBudgetBytes
         )
+        let signature = HistoryWindowSignature.make(
+            payloads: payloads,
+            limit: historyLimit,
+            maxTextBytes: settings.maxSyncedHistoryTextBytes,
+            snapshotTextBudgetBytes: settings.maxHistorySnapshotTextBudgetBytes
+        )
+        if lastHistoryExportSignature == signature,
+           provider.historySnapshotExists(deviceID: currentDeviceID) {
+            return 0
+        }
         try provider.saveHistorySnapshot(
             payloads,
             deviceID: currentDeviceID,
@@ -514,6 +691,7 @@ final class SyncCoordinator {
             maxTextBytes: settings.maxSyncedHistoryTextBytes,
             snapshotTextBudgetBytes: settings.maxHistorySnapshotTextBudgetBytes
         )
+        lastHistoryExportSignature = signature
         return payloads.count
     }
 
@@ -523,13 +701,31 @@ final class SyncCoordinator {
         return snapshot.folders.count + snapshot.snippets.count
     }
 
+    private func exportFiles(
+        settings: SyncSettings,
+        provider: OneDriveFolderSyncProvider
+    ) throws -> (uploaded: Int, warning: String?) {
+        let snapshot = historyRepository.fetchFileSyncSnapshot(
+            currentDeviceID: currentDeviceID,
+            limit: settings.syncedFileLimitPerDevice,
+            maxFileBytes: settings.maxSyncedFileBytes,
+            includedFileTypes: settings.fileAssetTypes
+        )
+        try provider.saveFileSnapshot(snapshot, deviceID: currentDeviceID)
+        let warning = snapshot.skippedAssetCount > 0
+            ? "已跳过 \(snapshot.skippedAssetCount) 个文件（超过大小限制或无法同步）"
+            : nil
+        return (snapshot.assetCount, warning)
+    }
+
     private func setSkipped(error: Error? = nil) {
         setStatus(SyncStatus(
             phase: .skipped,
             lastSyncAt: status.lastSyncAt,
             uploadedCount: status.uploadedCount,
             importedCount: status.importedCount,
-            errorDescription: error?.localizedDescription
+            errorDescription: error?.localizedDescription,
+            warningDescription: status.warningDescription
         ))
     }
 

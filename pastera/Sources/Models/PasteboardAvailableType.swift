@@ -23,6 +23,21 @@ enum PasteboardAvailableType: String, Equatable, CaseIterable {
     case url = "URL"
     case tiff = "TIFF"
 
+    static let syncFileTypes: [PasteboardAvailableType] = [.tiff, .pdf, .rtf, .rtfd]
+
+    static func syncFileType(for pasteboardType: NSPasteboard.PasteboardType) -> PasteboardAvailableType? {
+        switch pasteboardType {
+        case .rtf, .deprecatedRTF:
+            return .rtf
+        case .rtfd, .deprecatedRTFD:
+            return .rtfd
+        case .pdf, .deprecatedPDF:
+            return .pdf
+        default:
+            return pasteboardType.isClipyImageType ? .tiff : nil
+        }
+    }
+
     static func availableTypes(
         from pasteboardTypes: [NSPasteboard.PasteboardType],
         storeAvailableTypes: [PasteboardAvailableType]

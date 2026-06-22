@@ -12,6 +12,20 @@ import Testing
 @Suite(.serialized)
 struct PreferenceSidebarTests {
     @Test
+    func preferenceWindowRestoresDefaultFrameSize() throws {
+        let controller = CPYPreferencesWindowController()
+        defer { controller.close() }
+
+        controller.showWindow(nil)
+        let window = try #require(controller.window)
+        window.setFrame(NSRect(x: 20, y: 30, width: 1400, height: 900), display: false)
+
+        window.performZoom(nil)
+
+        #expect(window.frame.size == controller.defaultPreferenceWindowFrameSizeForTesting)
+    }
+
+    @Test
     func sidebarUsesChineseTitlesAndDistinctSyncUpdateIcons() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
@@ -457,7 +471,7 @@ struct GeneralPreferenceMergedMenuTests {
 
 @MainActor
 @Suite(.serialized)
-struct SyncPreferenceOneDriveLocationTests {
+struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body_length
     @Test
     func syncPaneHidesLongOneDrivePathAndShowsValidatedStatus() throws {
         let rootURL = FileManager.default.temporaryDirectory
@@ -486,11 +500,143 @@ struct SyncPreferenceOneDriveLocationTests {
             let visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
             #expect(!visibleTexts.contains("OneDrive > Pastera > sync"))
             #expect(visibleTexts.contains("OneDrive 可用"))
-            #expect(visibleTexts.contains("已使用 OneDrive 默认同步位置。"))
+            #expect(!visibleTexts.contains("已使用 OneDrive 默认同步位置。"))
             #expect(!visibleTexts.contains("OneDrive 状态"))
             #expect(!visibleTexts.contains("可用"))
             #expect(!visibleTexts.contains(where: { $0.contains("Library/CloudStorage") }))
             #expect(preferenceButtons(in: controller.view).contains { $0.title == "修改" })
+        }
+    }
+
+    @Test
+    func syncPaneDoesNotRescanDefaultOneDriveLocationWhenAppBecomesActive() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let oneDriveRootURL = cloudStorageURL(homeURL: homeURL).appendingPathComponent("OneDrive", isDirectory: true)
+        let defaultRootURL = recommendedSyncRootURL(oneDriveRootURL: oneDriveRootURL)
+        try FileManager.default.createDirectory(at: oneDriveRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        var resolution = SyncDefaultFolderResolution.notFound
+
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(defaultFolderResolutionProvider: { resolution })
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            var visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(visibleTexts.contains("未检测到 OneDrive"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == nil)
+
+            resolution = .found(SyncDefaultFolderCandidate(
+                oneDriveRootURL: oneDriveRootURL,
+                syncRootURL: defaultRootURL,
+                displayName: "OneDrive",
+                isOneDriveBacked: true
+            ))
+            NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+            controller.view.layoutSubtreeIfNeeded()
+
+            visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(visibleTexts.contains("未检测到 OneDrive"))
+            #expect(!visibleTexts.contains("OneDrive 可用"))
+            #expect(!visibleTexts.contains("已使用 OneDrive 默认同步位置。"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == nil)
+            #expect(!FileManager.default.fileExists(atPath: defaultRootURL.path))
+        }
+    }
+
+    @Test
+    func syncPaneMarksSavedRootUnavailableWithoutRecreatingItWhenAppBecomesActive() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let oneDriveRootURL = cloudStorageURL(homeURL: homeURL).appendingPathComponent("OneDrive", isDirectory: true)
+        let defaultRootURL = recommendedSyncRootURL(oneDriveRootURL: oneDriveRootURL)
+        try FileManager.default.createDirectory(at: defaultRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+
+        try withPreservedSyncDefaults {
+            defaults.set(defaultRootURL.path, forKey: Constants.UserDefaults.syncRootPath)
+            defaults.synchronize()
+
+            let controller = CPYSyncPreferenceViewController(defaultFolderResolutionProvider: {
+                .found(SyncDefaultFolderCandidate(
+                    oneDriveRootURL: oneDriveRootURL,
+                    syncRootURL: defaultRootURL,
+                    displayName: "OneDrive",
+                    isOneDriveBacked: true
+                ))
+            })
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            var visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(visibleTexts.contains("OneDrive 可用"))
+
+            try FileManager.default.removeItem(at: defaultRootURL)
+            NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+            controller.view.layoutSubtreeIfNeeded()
+
+            visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(visibleTexts.contains("OneDrive 不可用"))
+            #expect(!visibleTexts.contains("所选 OneDrive 文件夹不可用。"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
+            #expect(!FileManager.default.fileExists(atPath: defaultRootURL.path))
+            #expect(preferenceButtons(in: controller.view).first { $0.title == "显示" }?.isEnabled == false)
+        }
+    }
+
+    @Test
+    func syncPanePreservesMissingSavedRootAcrossRepeatedOneDriveLifecycleCycles() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let oneDriveRootURL = cloudStorageURL(homeURL: homeURL).appendingPathComponent("OneDrive", isDirectory: true)
+        let defaultRootURL = recommendedSyncRootURL(oneDriveRootURL: oneDriveRootURL)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+
+        try withPreservedSyncDefaults {
+            defaults.set(defaultRootURL.path, forKey: Constants.UserDefaults.syncRootPath)
+            defaults.synchronize()
+
+            for _ in 0..<3 {
+                try FileManager.default.createDirectory(at: defaultRootURL, withIntermediateDirectories: true)
+                var controller = CPYSyncPreferenceViewController(defaultFolderResolutionProvider: {
+                    .found(SyncDefaultFolderCandidate(
+                        oneDriveRootURL: oneDriveRootURL,
+                        syncRootURL: defaultRootURL,
+                        displayName: "OneDrive",
+                        isOneDriveBacked: true
+                    ))
+                })
+                controller.loadView()
+                controller.viewDidLoad()
+                controller.view.layoutSubtreeIfNeeded()
+                var visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+                #expect(visibleTexts.contains("OneDrive 可用"))
+                #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
+
+                try FileManager.default.removeItem(at: defaultRootURL)
+                controller = CPYSyncPreferenceViewController(defaultFolderResolutionProvider: {
+                    .found(SyncDefaultFolderCandidate(
+                        oneDriveRootURL: oneDriveRootURL,
+                        syncRootURL: defaultRootURL,
+                        displayName: "OneDrive",
+                        isOneDriveBacked: true
+                    ))
+                })
+                controller.loadView()
+                controller.viewDidLoad()
+                controller.view.layoutSubtreeIfNeeded()
+                visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+                #expect(visibleTexts.contains("OneDrive 不可用"))
+                #expect(!visibleTexts.contains("所选 OneDrive 文件夹不可用。"))
+                #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
+                #expect(!FileManager.default.fileExists(atPath: defaultRootURL.path))
+            }
         }
     }
 
@@ -566,14 +712,15 @@ struct SyncPreferenceOneDriveLocationTests {
             changeButton.performClick(nil)
 
             #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
-            #expect(Set(preferenceTextFieldFrames(in: controller.view).map(\.text)).contains("请选择 OneDrive 中可写的文件夹。"))
+            #expect(!Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+                .contains("请选择 OneDrive 中可写的文件夹。"))
 
             selectedURL = customRootURL
             changeButton.performClick(nil)
 
             #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == customRootURL.standardizedFileURL.path)
             let validTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
-            #expect(validTexts.contains("同步位置已更新，并通过 OneDrive 文件夹检查。"))
+            #expect(!validTexts.contains("同步位置已更新，并通过 OneDrive 文件夹检查。"))
             #expect(validTexts.contains("OneDrive 可用"))
         }
     }
@@ -618,7 +765,7 @@ struct SyncPreferenceOneDriveLocationTests {
     }
 
     @Test
-    func syncPaneFirstAutomaticEnableTurnsOnAllSyncScopes() throws {
+    func syncPaneFirstAutomaticEnableTurnsOnHistoryAndSnippetScopesOnly() throws {
         let defaults = AppEnvironment.current.defaults
         let homeURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -653,6 +800,8 @@ struct SyncPreferenceOneDriveLocationTests {
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
 
             automaticSyncSwitch.performClick(nil)
 
@@ -661,6 +810,74 @@ struct SyncPreferenceOneDriveLocationTests {
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled))
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled))
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
+        }
+    }
+
+    @Test
+    func syncPaneFileTypeCheckboxesReplaceFileSwitchesAndDeriveFileScopesFromHistoryDirections() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let oneDriveRootURL = cloudStorageURL(homeURL: homeURL).appendingPathComponent("OneDrive", isDirectory: true)
+        let defaultRootURL = recommendedSyncRootURL(oneDriveRootURL: oneDriveRootURL)
+        try FileManager.default.createDirectory(at: oneDriveRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(defaultFolderResolutionProvider: {
+                .found(SyncDefaultFolderCandidate(
+                    oneDriveRootURL: oneDriveRootURL,
+                    syncRootURL: defaultRootURL,
+                    displayName: "OneDrive",
+                    isOneDriveBacked: true
+                ))
+            })
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+            let labels = Set(preferenceSwitchButtons(in: controller.view).compactMap { $0.accessibilityLabel() })
+            #expect(!labels.contains("上传文件"))
+            #expect(!labels.contains("同步文件"))
+            let fileTypeLabels: Set<String> = ["图片", "PDF", "RTF", "RTFD"]
+            let fileTypeCheckboxes = preferenceButtons(in: controller.view).filter {
+                fileTypeLabels.contains($0.accessibilityLabel() ?? "")
+            }
+            #expect(fileTypeCheckboxes.count == 4)
+            #expect(!preferenceButtons(in: controller.view).contains { $0.accessibilityLabel() == "Finder 文件" })
+            #expect(fileTypeCheckboxes.allSatisfy { $0.state == .off })
+
+            let historyUploadSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
+                $0.accessibilityLabel() == "上传历史"
+            })
+            let historyImportSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
+                $0.accessibilityLabel() == "同步历史"
+            })
+            let pdfCheckbox = try #require(fileTypeCheckboxes.first {
+                $0.accessibilityLabel() == "PDF"
+            })
+
+            historyUploadSwitch.performClick(nil)
+            #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
+
+            pdfCheckbox.performClick(nil)
+
+            #expect(pdfCheckbox.state == .on)
+            #expect(defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
+
+            historyImportSwitch.performClick(nil)
+            #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled))
+            #expect(defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
+
+            pdfCheckbox.performClick(nil)
+
+            #expect(pdfCheckbox.state == .off)
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
         }
     }
 
@@ -685,7 +902,10 @@ struct SyncPreferenceOneDriveLocationTests {
             Constants.UserDefaults.syncHistoryUploadEnabled,
             Constants.UserDefaults.syncHistoryImportEnabled,
             Constants.UserDefaults.syncSnippetUploadEnabled,
-            Constants.UserDefaults.syncSnippetImportEnabled
+            Constants.UserDefaults.syncSnippetImportEnabled,
+            Constants.UserDefaults.syncFileUploadEnabled,
+            Constants.UserDefaults.syncFileImportEnabled,
+            Constants.UserDefaults.syncFileTypes
         ]
         let previousValues = syncKeys.reduce(into: [String: Any]()) { values, key in
             if let value = defaults.object(forKey: key) {

@@ -13,14 +13,31 @@
 import Cocoa
 import KeyHolder
 
+// swiftlint:disable file_length
+
 private final class PasteraPreferencesWindow: NSWindow {
     var onKeyDown: ((NSEvent) -> Bool)?
+    var onRestoreDefaultFrameSize: (() -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.type == .keyDown, onKeyDown?(event) == true {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    override func performZoom(_ sender: Any?) {
+        if onRestoreDefaultFrameSize?() == true {
+            return
+        }
+        super.performZoom(sender)
+    }
+
+    override func zoom(_ sender: Any?) {
+        if onRestoreDefaultFrameSize?() == true {
+            return
+        }
+        super.zoom(sender)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -94,6 +111,7 @@ final class CPYPreferencesWindowController: NSWindowController {
         static let minimumPaneControlGap: CGFloat = 12
         static let minimumWidth: CGFloat = 560
         static let minimumHeight: CGFloat = 320
+        static let defaultFrameSize = NSSize(width: 600, height: 340)
         static let maximumPaneWidth: CGFloat = 700
     }
 
@@ -124,7 +142,7 @@ final class CPYPreferencesWindowController: NSWindowController {
     init() {
         let styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         let contentRect = NSWindow.contentRect(
-            forFrameRect: NSRect(x: 0, y: 0, width: 600, height: 340),
+            forFrameRect: NSRect(origin: .zero, size: Metrics.defaultFrameSize),
             styleMask: styleMask
         )
         let window = PasteraPreferencesWindow(
@@ -139,6 +157,9 @@ final class CPYPreferencesWindowController: NSWindowController {
         window.delegate = self
         window.onKeyDown = { [weak self] event in
             self?.handleKeyboardEvent(event) ?? false
+        }
+        window.onRestoreDefaultFrameSize = { [weak self] in
+            self?.restoreDefaultWindowFrameSize(animated: false) ?? false
         }
         setupContent()
         installOpacityObserver()
@@ -294,6 +315,9 @@ private extension CPYPreferencesWindowController {
         updateSidebarSelection(index)
         layoutSelectedPane(contentSize: paneSize)
         installKeyViewLoop()
+        if let syncViewController = viewController[index] as? CPYSyncPreferenceViewController {
+            syncViewController.refreshDefaultFolderAvailability()
+        }
         CPYWindowAppearance.apply(to: window)
     }
 
@@ -365,6 +389,34 @@ private extension CPYPreferencesWindowController {
             )
         }
         centerSelectedGeneralPaneContent(visibleHeight: visibleHeight)
+    }
+
+    @discardableResult
+    func restoreDefaultWindowFrameSize(animated: Bool) -> Bool {
+        guard let window else { return false }
+        window.setFrame(defaultWindowFrame(for: window), display: true, animate: animated)
+        layoutSelectedPane()
+        return true
+    }
+
+    func defaultWindowFrame(for window: NSWindow) -> NSRect {
+        guard let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            return centeredFrame(size: Metrics.defaultFrameSize, around: window.frame.center)
+        }
+        let targetSize = NSSize(
+            width: min(Metrics.defaultFrameSize.width, visibleFrame.width),
+            height: min(Metrics.defaultFrameSize.height, visibleFrame.height)
+        )
+        return centeredFrame(size: targetSize, around: window.frame.center).constrained(to: visibleFrame)
+    }
+
+    func centeredFrame(size: NSSize, around center: NSPoint) -> NSRect {
+        NSRect(
+            x: center.x - size.width / 2,
+            y: center.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
     }
 
     func selectedPaneOriginY(visibleHeight: CGFloat, contentHeight: CGFloat) -> CGFloat {
@@ -718,8 +770,31 @@ private enum PasteraPreferenceFocusableCollector {
     }
 }
 
+private extension NSRect {
+    var center: NSPoint {
+        NSPoint(x: midX, y: midY)
+    }
+
+    func constrained(to bounds: NSRect) -> NSRect {
+        var constrainedFrame = self
+        constrainedFrame.origin.x = min(
+            max(constrainedFrame.origin.x, bounds.minX),
+            bounds.maxX - constrainedFrame.width
+        )
+        constrainedFrame.origin.y = min(
+            max(constrainedFrame.origin.y, bounds.minY),
+            bounds.maxY - constrainedFrame.height
+        )
+        return constrainedFrame
+    }
+}
+
 #if DEBUG
 extension CPYPreferencesWindowController {
+    var defaultPreferenceWindowFrameSizeForTesting: NSSize {
+        Metrics.defaultFrameSize
+    }
+
     var rootBackgroundAlphaForTesting: CGFloat {
         CGFloat(rootView.layer?.backgroundColor?.alpha ?? 0)
     }

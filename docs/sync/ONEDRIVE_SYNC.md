@@ -1,6 +1,6 @@
 # Folder Sync
 
-## V3 Snapshot Model
+## V4 Snapshot Model
 
 Pastera sync uses ordinary files in a folder-sync provider. On macOS today that
 folder is a local OneDrive directory; the OneDrive desktop client handles cloud
@@ -38,21 +38,34 @@ Sync is intentionally non-destructive:
 ## Directory Layout
 
 `sync` is the protocol root. History and snippets are stored separately, and
-each device writes one SQLite snapshot per kind.
+each device writes one SQLite snapshot per kind. File assets are a separate
+directory domain: metadata lives in a JSON manifest, while payloads remain as
+ordinary files under the device's `assets` directory.
 
 ```text
 <OneDrive>/Pastera/sync/
   history/
+    protocol.json
     devices/
       <device-id>.sqlite
   snippets/
     devices/
       <device-id>.sqlite
+  files/
+    devices/
+      <device-id>/
+        manifest.json
+        assets/
+          <history-id>/
+            <asset-index>-<byte-count>-<version>-<filename>
 ```
 
 The old development protocol is not read. Pastera no longer reads
-`manifest.json`, `histories/*.json`, or `snippets/items|folders/*.json`.
-The first v3 write removes those known old paths from the selected sync root.
+the root-level `manifest.json`, `histories/*.json`, or
+`snippets/items|folders/*.json`. History sync is not backward-compatible during
+development: if `history/protocol.json` is missing, corrupt, or not
+`schemaVersion=4`, Pastera deletes and rebuilds only the `history` domain.
+The `files` domain is left intact.
 
 Each app installation uses a persistent app-level device UUID. macOS seeds that
 value from the machine UUID on first use when available, then stores it in
@@ -83,9 +96,9 @@ histories(
 CREATE INDEX histories_updatedAt_index ON histories(updatedAt DESC);
 ```
 
-History metadata includes `schemaVersion=3`, `deviceID`, `platform`,
-`generatedAt`, `historyLimit`, `maxTextBytes`, and
-`snapshotTextBudgetBytes`.
+History metadata includes `schemaVersion=4`, `deviceID`, `platform`,
+`generatedAt`, `historyLimit`, `maxTextBytes`, `snapshotTextBudgetBytes`, and
+`windowSignature`.
 
 History sync is text-only. `sourceKind` is one of:
 
@@ -95,6 +108,41 @@ History sync is text-only. `sourceKind` is one of:
 Images, files, PDFs, RTF, HTML, thumbnails, and raw pasteboard assets are not
 stored in history sync snapshots. The history protocol does not expose macOS
 `NSPasteboard` type names.
+
+File asset snapshot:
+
+```json
+{
+  "manifestVersion": 1,
+  "schemaVersion": 1,
+  "deviceID": "<device-id>",
+  "generatedAt": 1781970000,
+  "assetCount": 2,
+  "histories": [
+    {
+      "historyID": "<history-id>",
+      "updatedAt": 1781970000,
+      "assets": [
+        {
+          "assetIndex": 0,
+          "pasteboardType": "com.adobe.pdf",
+          "byteCount": 1234,
+          "modifiedAtNanoseconds": 1781970000000000000,
+          "relativePath": "assets/<history-id>/000-1234-1781970000000000000-document.pdf",
+          "originalFilename": "document.pdf"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The file manifest stores only metadata and relative file paths. Binary payloads
+are written directly as normal files under
+`files/devices/<device-id>/assets/<history-id>/`. File assets are versioned by
+asset index, byte count, source modification time when available, and the
+original filename. Pastera does not keep a separate local file index or hash file
+contents during file sync.
 
 Snippet snapshot:
 
@@ -123,9 +171,25 @@ reaches the 8 MiB text budget. The effective count is also limited by the local
 stored-history retention setting. New installs default that local retention to
 2000; explicit existing user settings are not force-reset.
 
+Pastera computes a lightweight window signature from exported row IDs,
+timestamps, source kinds, text byte counts, and sync limits. If the signature is
+unchanged and the current device snapshot still exists, Pastera skips rewriting
+the SQLite file so OneDrive has nothing new to upload.
+
 Snippet upload writes the current complete snippet library. Folder and snippet
 rows keep their `lastModifiedDeviceID`, so imported remote snippets do not
 become current-device changes.
+
+File upload writes this device's newest supported non-text clipboard assets.
+The file domain is independent from text history sync and snippet sync:
+
+- Supported file assets are images, PDF, and RTF/RTFD.
+- Plain text and non-file URL history stay in the text-only history protocol.
+- Finder file URL history is not part of OneDrive file sync.
+- Each device exports at most 10 file assets.
+- A single file asset larger than 25 MiB is skipped.
+- A multi-asset history is kept whole; if it would exceed the 10-asset budget
+  or contains a skipped asset, the whole history is skipped for file sync.
 
 Import reads SQLite snapshots from other devices only. Same-ID conflicts use
 last-write-wins by business timestamp:
@@ -144,6 +208,11 @@ Remote absence never deletes local data. Import counts report actual local
 writes; corrupt snapshots, locally suppressed IDs, and older/equal records are
 not counted as imported.
 
+Before opening a remote history SQLite file, Pastera compares its file size and
+modification time against the last successfully processed state for that app
+run. Unchanged remote snapshots are skipped without opening SQLite or running
+row-level import checks.
+
 ## Sync Switches
 
 The Sync pane separates automatic work into two main switches:
@@ -153,7 +222,7 @@ The Sync pane separates automatic work into two main switches:
 - `自动同步`: startup and timer passes may import snapshots written by other
   devices.
 
-Four detailed scope switches still control the exact work:
+Four detailed scope switches control text history and snippets:
 
 - `上传历史`
 - `同步历史`
@@ -161,12 +230,19 @@ Four detailed scope switches still control the exact work:
 - `同步片段`
 
 When `自动上传` is turned on and both upload scopes are off, Pastera enables
-history and snippet upload so the switch has meaningful work. When `自动同步`
-is turned on and both import scopes are off, Pastera enables history and
-snippet import.
+history and snippet upload so the switch has meaningful work. When
+`自动同步` is turned on and both import scopes are off, Pastera enables history
+and snippet import.
+
+File assets are controlled by compact icon checkboxes in the `文件类型` row of
+the OneDrive account section. The default is no selected file type; choosing
+image, PDF, or RTF/RTFD enables the separate `files` sync domain for the matching
+history direction. This keeps text history snapshots small and fast while still
+allowing selected binary assets to upload through the independent manifest/file
+path.
 
 Manual `立即同步` bypasses the two automatic main switches, but still respects
-the four detailed scope switches.
+the four text/snippet scope switches and the selected file types.
 
 ## Limits
 
@@ -174,3 +250,7 @@ History snapshots are capped at 2000 rows per device. A single history text
 value larger than 256 KiB is skipped rather than truncated. Each device snapshot
 also has an 8 MiB cumulative text budget. Items skipped by these sync limits
 remain in the local clipboard history when local retention allows them.
+
+File snapshots are capped at 10 file assets per device. A single file asset
+larger than 25 MiB is skipped. File skips and validation failures do not fail
+text history or snippet sync; Pastera reports them as sync warnings.

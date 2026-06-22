@@ -126,9 +126,16 @@ not enough.
 - OneDrive missing folder: point sync at a folder that is later moved or
   unavailable, trigger Sync Now, and confirm the status reports the problem
   while local data remains unchanged.
-- OneDrive large asset limit: copy an image or file payload larger than
-  `maxSyncedAssetBytes`, trigger upload, and confirm the item remains local-only
-  while smaller history records still sync.
+- OneDrive file asset sync: choose at least one `文件类型`, enable the matching
+  history direction (`上传历史`/`同步历史`), copy supported non-text assets
+  (image, PDF, RTF/RTFD), sync two local profiles, and confirm the remote
+  profile imports usable history entries.
+- OneDrive file limits: copy more than 10 file assets or one file asset larger
+  than 25 MiB, trigger upload, and confirm Pastera reports a file skip warning
+  while smaller text history records still sync.
+- OneDrive Finder file exclusion: copy a Finder file or folder, trigger upload,
+  and confirm it stays out of file sync without failing text history or snippet
+  sync.
 
 ## Release DMG Checks
 

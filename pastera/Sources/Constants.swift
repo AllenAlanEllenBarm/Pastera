@@ -44,6 +44,8 @@ struct Constants {
         static let storedHistoryLimit = "kCPYPrefStoredHistoryLimitKey"
         static let maxSyncedHistoryTextBytes = "kCPYPrefMaxSyncedHistoryTextBytesKey"
         static let maxHistorySnapshotTextBudgetBytes = "kCPYPrefMaxHistorySnapshotTextBudgetBytesKey"
+        static let maxSyncedFileBytes = "kCPYPrefMaxSyncedFileBytesKey"
+        static let syncedFileLimitPerDevice = "kCPYPrefSyncedFileLimitPerDeviceKey"
         static let syncDeviceID = "kCPYSyncDeviceIDKey"
         static let windowBackgroundOpacity = "kCPYPrefWindowBackgroundOpacityKey"
         static let storeTypes = "kCPYPrefStoreTypesKey"
@@ -78,6 +80,9 @@ struct Constants {
         static let syncHistoryImportEnabled = "kCPYSyncHistoryImportEnabled"
         static let syncSnippetUploadEnabled = "kCPYSyncSnippetUploadEnabled"
         static let syncSnippetImportEnabled = "kCPYSyncSnippetImportEnabled"
+        static let syncFileUploadEnabled = "kCPYSyncFileUploadEnabled"
+        static let syncFileImportEnabled = "kCPYSyncFileImportEnabled"
+        static let syncFileTypes = "kCPYSyncFileTypes"
         static let syncPollInterval = "kCPYSyncPollInterval"
     }
 

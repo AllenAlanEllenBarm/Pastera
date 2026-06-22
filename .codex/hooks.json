@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/feeyo/workspace/github.com/AllenAlanEllenBarm/pastera/script/codex_stop_install_if_changed.sh",
+            "command": "script/codex_stop_install_if_changed.sh",
             "timeoutSec": 1200,
             "statusMessage": "Installing Pastera locally"
           }

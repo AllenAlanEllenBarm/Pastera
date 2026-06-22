@@ -51,6 +51,7 @@ playground.xcworkspace
 # .swiftpm
 
 .build/
+.spm-cache/
 
 # CocoaPods
 #

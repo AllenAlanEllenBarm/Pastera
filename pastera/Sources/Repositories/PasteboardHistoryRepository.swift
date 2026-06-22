@@ -15,6 +15,8 @@ import Combine
 import Dependencies
 import SQLiteData
 
+// swiftlint:disable type_body_length file_length
+
 enum HistorySearchError: Error, Equatable {
     case invalidRegularExpression(String)
 }
@@ -121,6 +123,7 @@ struct PasteboardHistoryChangeToken: Equatable {
 
 protocol PasteboardHistoryRepositoryProtocol {
     func observeHistoryChanges() -> AnyPublisher<Void, Never>
+    func observeTextSyncCandidateChanges(currentDeviceID: String?) -> AnyPublisher<Void, Never>
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never>
     func hasHistories() -> Bool
     func fetchHistoryDetails(
@@ -149,8 +152,17 @@ protocol PasteboardHistoryRepositoryProtocol {
         maxTextBytes: Int,
         snapshotTextBudgetBytes: Int
     ) -> [PasteboardHistorySyncPayload]
+    func fetchFileSyncSnapshot(
+        currentDeviceID: String?,
+        limit: Int,
+        maxFileBytes: Int,
+        includedFileTypes: Set<PasteboardAvailableType>
+    ) -> FileSyncExportSnapshot
     @discardableResult
     func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool
+    func shouldImportFileSyncHistory(historyID: String, updatedAt: Int) -> Bool
+    @discardableResult
+    func upsertFileSyncHistory(_ payload: FileSyncHistoryPayload) -> Bool
     func suppressSyncedHistory(id: PasteboardHistory.ID)
 }
 
@@ -159,6 +171,10 @@ extension PasteboardHistoryRepositoryProtocol {
         observeHistories()
             .map { _ in () }
             .eraseToAnyPublisher()
+    }
+
+    func observeTextSyncCandidateChanges(currentDeviceID _: String?) -> AnyPublisher<Void, Never> {
+        observeHistoryChanges()
     }
 
     func fetchHistoryDetails(
@@ -183,7 +199,33 @@ extension PasteboardHistoryRepositoryProtocol {
         []
     }
 
+    func fetchFileSyncSnapshot(
+        currentDeviceID: String?,
+        limit: Int,
+        maxFileBytes: Int
+    ) -> FileSyncExportSnapshot {
+        fetchFileSyncSnapshot(
+            currentDeviceID: currentDeviceID,
+            limit: limit,
+            maxFileBytes: maxFileBytes,
+            includedFileTypes: Set(PasteboardAvailableType.syncFileTypes)
+        )
+    }
+
+    func fetchFileSyncSnapshot(
+        currentDeviceID: String?,
+        limit: Int,
+        maxFileBytes: Int,
+        includedFileTypes: Set<PasteboardAvailableType>
+    ) -> FileSyncExportSnapshot {
+        FileSyncExportSnapshot(histories: [], skippedAssetCount: 0)
+    }
+
     func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool { false }
+
+    func shouldImportFileSyncHistory(historyID: String, updatedAt: Int) -> Bool { true }
+
+    func upsertFileSyncHistory(_ payload: FileSyncHistoryPayload) -> Bool { false }
 
     func suppressSyncedHistory(id: PasteboardHistory.ID) {}
 }
@@ -211,6 +253,29 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
         return $historyChangeTokens.publisher
             .map { _ in () }
             .prepend(())
+            .eraseToAnyPublisher()
+    }
+
+    func observeTextSyncCandidateChanges(currentDeviceID: String?) -> AnyPublisher<Void, Never> {
+        guard let currentDeviceID else {
+            return Just(()).eraseToAnyPublisher()
+        }
+        @FetchAll(
+            PasteboardHistory
+                .all
+                .where { $0.deviceID.eq(currentDeviceID) }
+                .order { $0.updateAt.desc() }
+        )
+        var histories
+
+        return $histories.publisher
+            .map { histories in
+                histories
+                    .filter { Self.isTextSyncPasteboardTypes($0.pasteboardTypes) }
+                    .map { PasteboardHistoryChangeToken(id: $0.id, updateAt: $0.updateAt) }
+            }
+            .removeDuplicates()
+            .map { _ in () }
             .eraseToAnyPublisher()
     }
 
@@ -353,6 +418,9 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? {
         withErrorReporting {
             try database.read { database in
+                guard try PasteboardHistory.find(id).fetchOne(database) != nil else {
+                    return nil
+                }
                 let assets = try PasteboardHistoryAsset
                     .where { $0.pasteboardHistoryID.eq(id) }
                     .fetchAll(database)
@@ -461,41 +529,149 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
         maxTextBytes: Int,
         snapshotTextBudgetBytes: Int
     ) -> [PasteboardHistorySyncPayload] {
-        guard let currentDeviceID else { return [] }
+        guard let currentDeviceID, limit > 0 else { return [] }
         return withErrorReporting {
             try database.read { database in
-                let histories = try PasteboardHistory
-                    .all
-                    .order { $0.updateAt.desc() }
-                    .fetchAll(database)
-                    .filter {
-                        $0.deviceID == currentDeviceID
-                    }
+                let boundedLimit = max(0, limit)
+                let batchSize = max(50, min(500, boundedLimit * 2))
                 var remainingTextBudget = max(0, snapshotTextBudgetBytes)
                 var payloads = [PasteboardHistorySyncPayload]()
-                for history in histories {
-                    let assets = try PasteboardHistoryAsset
-                        .where { $0.pasteboardHistoryID.eq(history.id) }
+                var offset = 0
+                var shouldStop = false
+
+                while payloads.count < boundedLimit, !shouldStop {
+                    let histories = try PasteboardHistory
+                        .all
+                        .where { $0.deviceID.eq(currentDeviceID) }
+                        .order { $0.updateAt.desc() }
+                        .limit(batchSize, offset: offset)
                         .fetchAll(database)
-                    guard let textPayload = Self.textSyncPayload(from: assets) else { continue }
-                    let textByteCount = textPayload.text.lengthOfBytes(using: .utf8)
-                    guard textByteCount <= maxTextBytes else { continue }
-                    guard textByteCount <= remainingTextBudget else { break }
-                    remainingTextBudget -= textByteCount
-                    payloads.append(PasteboardHistorySyncPayload(
-                        id: history.id.rawValue,
-                        text: textPayload.text,
-                        updateAt: history.updateAt,
-                        deviceID: history.deviceID,
-                        sourceKind: textPayload.sourceKind
-                    ))
-                    if payloads.count >= max(0, limit) {
+                    guard !histories.isEmpty else { break }
+                    offset += histories.count
+
+                    let candidateHistories = histories.filter { Self.isTextSyncPasteboardTypes($0.pasteboardTypes) }
+                    let candidateIDs = candidateHistories.map(\.id)
+                    let assetsByHistoryID: [PasteboardHistory.ID: [PasteboardHistoryAsset]]
+                    if candidateIDs.isEmpty {
+                        assetsByHistoryID = [:]
+                    } else {
+                        let assets = try PasteboardHistoryAsset
+                            .where { $0.pasteboardHistoryID.in(candidateIDs) }
+                            .fetchAll(database)
+                        assetsByHistoryID = Dictionary(grouping: assets, by: \.pasteboardHistoryID)
+                    }
+
+                    for history in candidateHistories {
+                        let assets = assetsByHistoryID[history.id] ?? []
+                        guard let textPayload = Self.textSyncPayload(from: assets) else { continue }
+                        let textByteCount = textPayload.text.lengthOfBytes(using: .utf8)
+                        guard textByteCount <= maxTextBytes else { continue }
+                        guard textByteCount <= remainingTextBudget else {
+                            shouldStop = true
+                            break
+                        }
+                        remainingTextBudget -= textByteCount
+                        payloads.append(PasteboardHistorySyncPayload(
+                            id: history.id.rawValue,
+                            text: textPayload.text,
+                            updateAt: history.updateAt,
+                            deviceID: history.deviceID,
+                            sourceKind: textPayload.sourceKind
+                        ))
+                        if payloads.count >= boundedLimit {
+                            shouldStop = true
+                            break
+                        }
+                    }
+
+                    if histories.count < batchSize {
                         break
                     }
                 }
                 return payloads
             }
         } ?? []
+    }
+
+    func fetchFileSyncSnapshot(
+        currentDeviceID: String?,
+        limit: Int,
+        maxFileBytes: Int
+    ) -> FileSyncExportSnapshot {
+        fetchFileSyncSnapshot(
+            currentDeviceID: currentDeviceID,
+            limit: limit,
+            maxFileBytes: maxFileBytes,
+            includedFileTypes: Set(PasteboardAvailableType.syncFileTypes)
+        )
+    }
+
+    func fetchFileSyncSnapshot(
+        currentDeviceID: String?,
+        limit: Int,
+        maxFileBytes: Int,
+        includedFileTypes: Set<PasteboardAvailableType>
+    ) -> FileSyncExportSnapshot {
+        guard let currentDeviceID, limit > 0 else {
+            return FileSyncExportSnapshot(histories: [], skippedAssetCount: 0)
+        }
+        let boundedLimit = min(max(0, limit), 10)
+        let boundedMaxFileBytes = min(max(0, maxFileBytes), 25 * 1024 * 1024)
+        return withErrorReporting {
+            try database.read { database in
+                var remainingFileSlots = boundedLimit
+                var payloads = [FileSyncHistoryPayload]()
+                var skippedAssetCount = 0
+                var offset = 0
+                let batchSize = max(20, boundedLimit * 4)
+
+                while remainingFileSlots > 0 {
+                    let histories = try PasteboardHistory
+                        .all
+                        .where { $0.deviceID.eq(currentDeviceID) }
+                        .order { $0.updateAt.desc() }
+                        .limit(batchSize, offset: offset)
+                        .fetchAll(database)
+                    guard !histories.isEmpty else { break }
+                    offset += histories.count
+
+                    for history in histories where remainingFileSlots > 0 {
+                        guard history.pasteboardTypes.contains(where: Self.isFileSyncPasteboardType) else { continue }
+                        let storedAssets = try PasteboardHistoryAsset
+                            .where { $0.pasteboardHistoryID.eq(history.id) }
+                            .fetchAll(database)
+                        let extraction = Self.fileSyncAssets(
+                            from: storedAssets,
+                            maxFileBytes: boundedMaxFileBytes,
+                            includedFileTypes: includedFileTypes
+                        )
+                        guard extraction.isFileSyncHistory else { continue }
+                        if extraction.skippedAssetCount > 0 {
+                            skippedAssetCount += extraction.skippedAssetCount
+                            continue
+                        }
+                        guard !extraction.assets.isEmpty else { continue }
+                        guard extraction.assets.count <= remainingFileSlots else {
+                            skippedAssetCount += extraction.assets.count
+                            continue
+                        }
+                        payloads.append(FileSyncHistoryPayload(
+                            deviceID: history.deviceID,
+                            historyID: history.id.rawValue,
+                            updatedAt: history.updateAt,
+                            assets: extraction.assets
+                        ))
+                        remainingFileSlots -= extraction.assets.count
+                    }
+
+                    if histories.count < batchSize {
+                        break
+                    }
+                }
+
+                return FileSyncExportSnapshot(histories: payloads, skippedAssetCount: skippedAssetCount)
+            }
+        } ?? FileSyncExportSnapshot(histories: [], skippedAssetCount: 0)
     }
 
     @discardableResult
@@ -544,6 +720,72 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
         } ?? false
     }
 
+    @discardableResult
+    func upsertFileSyncHistory(_ payload: FileSyncHistoryPayload) -> Bool {
+        withErrorReporting {
+            let historyID = PasteboardHistory.ID(rawValue: payload.historyID)
+            return try database.write { database in
+                guard try SyncSuppression
+                    .find(syncIdentity(kind: .history, id: payload.historyID))
+                    .fetchOne(database) == nil else {
+                    return false
+                }
+                if let existingHistory = try PasteboardHistory.find(historyID).fetchOne(database),
+                   payload.updatedAt <= existingHistory.updateAt {
+                    return false
+                }
+                let assets = try Self.assets(from: payload)
+                guard !assets.isEmpty else { return false }
+                let content = PasteboardContent(assets: assets)
+                try PasteboardHistory
+                    .upsert {
+                        PasteboardHistory(
+                            id: historyID,
+                            title: content.stringValue[0...10000],
+                            pasteboardTypes: content.types,
+                            updateAt: payload.updatedAt,
+                            deviceID: payload.deviceID
+                        )
+                    }
+                    .execute(database)
+                try PasteboardHistoryAsset
+                    .delete()
+                    .where { $0.pasteboardHistoryID.eq(historyID) }
+                    .execute(database)
+                try PasteboardHistoryThumbnailAsset
+                    .delete()
+                    .where { $0.pasteboardHistoryID.eq(historyID) }
+                    .execute(database)
+                let drafts = content.assets.map {
+                    PasteboardHistoryAsset.Draft(pasteboardHistoryID: historyID, pasteboardType: $0.type, data: $0.data)
+                }
+                try PasteboardHistoryAsset.insert { drafts }.execute(database)
+                if let thumbnailAsset = thumbnailAsset(from: content, id: historyID) {
+                    try PasteboardHistoryThumbnailAsset.insert { thumbnailAsset }.execute(database)
+                }
+                return true
+            }
+        } ?? false
+    }
+
+    func shouldImportFileSyncHistory(historyID: String, updatedAt: Int) -> Bool {
+        withErrorReporting {
+            let recordID = PasteboardHistory.ID(rawValue: historyID)
+            return try database.read { database in
+                guard try SyncSuppression
+                    .find(syncIdentity(kind: .history, id: recordID.rawValue))
+                    .fetchOne(database) == nil else {
+                    return false
+                }
+                if let existingHistory = try PasteboardHistory.find(recordID).fetchOne(database),
+                   updatedAt <= existingHistory.updateAt {
+                    return false
+                }
+                return true
+            }
+        } ?? false
+    }
+
     private static func textSyncPayload(
         from assets: [PasteboardHistoryAsset]
     ) -> (text: String, sourceKind: HistoryTextSourceKind)? {
@@ -560,6 +802,14 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
             return (urlText, .url)
         }
         return nil
+    }
+
+    private static func isTextSyncPasteboardTypes(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard !types.isEmpty else { return false }
+        let typeSet = Set(types)
+        let plainTextTypes: Set<NSPasteboard.PasteboardType> = [.string, .deprecatedString]
+        let urlTypes: Set<NSPasteboard.PasteboardType> = [.URL, .deprecatedURL]
+        return typeSet.isSubset(of: plainTextTypes) || typeSet.isSubset(of: urlTypes)
     }
 
     private static func plainText(from asset: PasteboardHistoryAsset) -> String? {
@@ -601,7 +851,82 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     }
 }
 
+private struct FileSyncAssetExtraction {
+    let isFileSyncHistory: Bool
+    let assets: [FileSyncAssetPayload]
+    let skippedAssetCount: Int
+}
+
 private extension PasteboardHistoryRepository {
+    static func fileSyncAssets(
+        from assets: [PasteboardHistoryAsset],
+        maxFileBytes: Int,
+        includedFileTypes: Set<PasteboardAvailableType>
+    ) -> FileSyncAssetExtraction {
+        var fileAssets = [FileSyncAssetPayload]()
+        let candidateAssets = assets.enumerated().filter { isFileSyncPasteboardType($0.element.pasteboardType) }
+        let candidateCount = candidateAssets.count
+        let boundedMaxFileBytes = max(0, maxFileBytes)
+
+        guard candidateCount > 0 else {
+            return FileSyncAssetExtraction(isFileSyncHistory: false, assets: [], skippedAssetCount: 0)
+        }
+        guard !includedFileTypes.isEmpty,
+              candidateAssets.allSatisfy({
+                  guard let fileType = PasteboardAvailableType.syncFileType(for: $0.element.pasteboardType) else {
+                      return false
+                  }
+                  return includedFileTypes.contains(fileType)
+              }) else {
+            return FileSyncAssetExtraction(isFileSyncHistory: false, assets: [], skippedAssetCount: 0)
+        }
+
+        for (index, asset) in candidateAssets {
+            guard let payload = fileSyncAsset(
+                from: asset,
+                assetIndex: index,
+                maxFileBytes: boundedMaxFileBytes
+            ) else {
+                return FileSyncAssetExtraction(
+                    isFileSyncHistory: true,
+                    assets: [],
+                    skippedAssetCount: candidateCount
+                )
+            }
+            fileAssets.append(payload)
+        }
+
+        return FileSyncAssetExtraction(isFileSyncHistory: true, assets: fileAssets, skippedAssetCount: 0)
+    }
+
+    static func assets(from payload: FileSyncHistoryPayload) throws -> [PasteboardContent.Asset] {
+        guard payload.assets.allSatisfy({ $0.pasteboardType != .fileURL }) else {
+            return []
+        }
+        return payload.assets.sorted { $0.assetIndex < $1.assetIndex }.map { asset in
+            PasteboardContent.Asset(type: asset.pasteboardType, data: asset.data)
+        }
+    }
+
+    static func fileSyncAsset(
+        from asset: PasteboardHistoryAsset,
+        assetIndex: Int,
+        maxFileBytes: Int
+    ) -> FileSyncAssetPayload? {
+        guard asset.pasteboardType != .fileURL else { return nil }
+        guard asset.data.count <= maxFileBytes else { return nil }
+        return FileSyncAssetPayload(
+            assetIndex: assetIndex,
+            pasteboardType: asset.pasteboardType,
+            data: asset.data,
+            originalFilename: nil
+        )
+    }
+
+    static func isFileSyncPasteboardType(_ type: NSPasteboard.PasteboardType) -> Bool {
+        PasteboardAvailableType.syncFileType(for: type) != nil
+    }
+
     func fetchSearchCandidates(ascending: Bool) -> [PasteboardHistorySearchCandidate] {
         withErrorReporting {
             try database.read { database in

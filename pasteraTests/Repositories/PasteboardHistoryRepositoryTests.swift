@@ -433,6 +433,189 @@ struct PasteboardHistorySyncRepositoryTests {
     let repository = PasteboardHistoryRepository()
 
     @Test
+    func fileSyncSnapshotExportsSupportedNonTextAssetsWithoutAffectingTextHistory() throws {
+        let text = PasteboardContent("Text only")
+        let webURL = try #require(URL(string: "https://pastera.example"))
+        let urlContent = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .URL, data: webURL.dataRepresentation)]
+        )
+        let image = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47]))]
+        )
+        let pdf = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data("%PDF-1.7".utf8))]
+        )
+        let rtf = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .rtf, data: Data("{\\rtf1 file}".utf8))]
+        )
+        let fileURL = try writeTemporaryFile(name: "report.txt", data: Data("report".utf8))
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        let file = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
+        )
+        let tooLarge = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data(repeating: 1, count: 13))]
+        )
+        let folderURL = try writeTemporaryFolder(name: "folder")
+        defer { try? FileManager.default.removeItem(at: folderURL.deletingLastPathComponent()) }
+        let folder = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: folderURL.dataRepresentation)]
+        )
+
+        repository.save(id: PasteboardHistory.ID(rawValue: text.hash), content: text, updateAt: 80)
+        repository.save(id: PasteboardHistory.ID(rawValue: urlContent.hash), content: urlContent, updateAt: 70)
+        repository.save(id: PasteboardHistory.ID(rawValue: image.hash), content: image, updateAt: 60)
+        repository.save(id: PasteboardHistory.ID(rawValue: pdf.hash), content: pdf, updateAt: 50)
+        repository.save(id: PasteboardHistory.ID(rawValue: rtf.hash), content: rtf, updateAt: 40)
+        repository.save(id: PasteboardHistory.ID(rawValue: file.hash), content: file, updateAt: 30)
+        repository.save(id: PasteboardHistory.ID(rawValue: tooLarge.hash), content: tooLarge, updateAt: 20)
+        repository.save(id: PasteboardHistory.ID(rawValue: folder.hash), content: folder, updateAt: 10)
+
+        let snapshot = repository.fetchFileSyncSnapshot(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 10,
+            maxFileBytes: 12
+        )
+
+        #expect(snapshot.histories.map(\.historyID) == [
+            image.hash,
+            pdf.hash,
+            rtf.hash
+        ])
+        #expect(snapshot.assetCount == 3)
+        #expect(snapshot.skippedAssetCount == 1)
+        #expect(snapshot.histories.flatMap(\.assets).map(\.pasteboardType) == [.png, .pdf, .rtf])
+    }
+
+    @Test
+    func fileSyncSnapshotIncludesOnlySelectedFileTypes() throws {
+        let image = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47]))]
+        )
+        let pdf = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data("%PDF-1.7".utf8))]
+        )
+        let rtf = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .rtf, data: Data("{\\rtf1 file}".utf8))]
+        )
+        let fileURL = try writeTemporaryFile(name: "report.txt", data: Data("report".utf8))
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        let file = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
+        )
+        let tooLarge = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data(repeating: 1, count: 13))]
+        )
+
+        repository.save(id: PasteboardHistory.ID(rawValue: image.hash), content: image, updateAt: 50)
+        repository.save(id: PasteboardHistory.ID(rawValue: pdf.hash), content: pdf, updateAt: 40)
+        repository.save(id: PasteboardHistory.ID(rawValue: rtf.hash), content: rtf, updateAt: 30)
+        repository.save(id: PasteboardHistory.ID(rawValue: file.hash), content: file, updateAt: 20)
+        repository.save(id: PasteboardHistory.ID(rawValue: tooLarge.hash), content: tooLarge, updateAt: 10)
+
+        let snapshot = repository.fetchFileSyncSnapshot(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 10,
+            maxFileBytes: 12,
+            includedFileTypes: [.pdf]
+        )
+
+        #expect(snapshot.histories.map(\.historyID) == [pdf.hash])
+        #expect(snapshot.assetCount == 1)
+        #expect(snapshot.skippedAssetCount == 1)
+        #expect(snapshot.histories.flatMap(\.assets).map(\.pasteboardType) == [.pdf])
+    }
+
+    @Test
+    func fileSyncSnapshotIgnoresFinderFilesEvenWhenLegacyPreferenceContainsFilenames() throws {
+        let fileURL = try writeTemporaryFile(name: "report.txt", data: Data("report".utf8))
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        let file = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
+        )
+
+        repository.save(id: PasteboardHistory.ID(rawValue: file.hash), content: file, updateAt: 20)
+
+        let snapshot = repository.fetchFileSyncSnapshot(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 10,
+            maxFileBytes: 25 * 1024 * 1024,
+            includedFileTypes: [.filenames]
+        )
+
+        #expect(snapshot.histories.isEmpty)
+        #expect(snapshot.assetCount == 0)
+        #expect(snapshot.skippedAssetCount == 0)
+    }
+
+    @Test
+    func fileSyncSnapshotKeepsMultiAssetHistoriesWholeWhenLimitWouldBeExceeded() throws {
+        let newest = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .pdf, data: Data("a".utf8)),
+                PasteboardContent.Asset(type: .pdf, data: Data("b".utf8))
+            ]
+        )
+        let older = PasteboardContent(
+            assets: (0..<9).map { index in
+                PasteboardContent.Asset(type: .pdf, data: Data("older-\(index)".utf8))
+            }
+        )
+
+        repository.save(id: PasteboardHistory.ID(rawValue: newest.hash), content: newest, updateAt: 2)
+        repository.save(id: PasteboardHistory.ID(rawValue: older.hash), content: older, updateAt: 1)
+
+        let snapshot = repository.fetchFileSyncSnapshot(
+            currentDeviceID: CPYUtilities.deviceID,
+            limit: 10,
+            maxFileBytes: 25 * 1024 * 1024
+        )
+
+        #expect(snapshot.histories.map(\.historyID) == [newest.hash])
+        #expect(snapshot.assetCount == 2)
+        #expect(snapshot.skippedAssetCount == 9)
+    }
+
+    @Test
+    func fileSyncImportRestoresBinaryAssetsAndRejectsFinderFiles() throws {
+        let binaryPayload = FileSyncHistoryPayload(
+            deviceID: "remote-device",
+            historyID: "remote-pdf",
+            updatedAt: 20,
+            assets: [
+                FileSyncAssetPayload(
+                    assetIndex: 0,
+                    pasteboardType: .pdf,
+                    data: Data("%PDF".utf8),
+                    originalFilename: nil
+                )
+            ]
+        )
+        let finderPayload = FileSyncHistoryPayload(
+            deviceID: "remote-device",
+            historyID: "remote-file",
+            updatedAt: 30,
+            assets: [
+                FileSyncAssetPayload(
+                    assetIndex: 0,
+                    pasteboardType: .fileURL,
+                    data: Data("cached bytes".utf8),
+                    originalFilename: "remote.txt"
+                )
+            ]
+        )
+
+        #expect(repository.upsertFileSyncHistory(binaryPayload))
+        #expect(!repository.upsertFileSyncHistory(finderPayload))
+
+        let pdfContent = try #require(repository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-pdf")))
+        #expect(pdfContent.assets == [
+            PasteboardContent.Asset(type: .pdf, data: Data("%PDF".utf8))
+        ])
+        #expect(repository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-file")) == nil)
+    }
+
+    @Test
     func syncPayloadsExportNewestCurrentDeviceTextAndURLWindowOnly() throws {
         let current = PasteboardContent("Current")
         let old = PasteboardContent("Old")
@@ -511,6 +694,40 @@ struct PasteboardHistorySyncRepositoryTests {
         )
 
         #expect(payloads.map(\.id) == [newestID.rawValue])
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func observeTextSyncCandidateChangesIgnoresRemoteAndNonTextHistories() async throws {
+        var changeCount = 0
+        let cancellable = repository
+            .observeTextSyncCandidateChanges(currentDeviceID: CPYUtilities.deviceID)
+            .sink {
+                changeCount += 1
+            }
+        defer { _ = cancellable }
+
+        try await waitUntil { changeCount >= 1 }
+
+        repository.upsertSyncPayload(PasteboardHistorySyncPayload(
+            id: "remote-history",
+            text: "Remote",
+            updateAt: 10,
+            deviceID: "remote-device",
+            sourceKind: .plainText
+        ))
+        try await Task.sleep(for: .seconds(0.05))
+        #expect(changeCount == 1)
+
+        let image = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47]))]
+        )
+        repository.save(id: PasteboardHistory.ID(rawValue: image.hash), content: image, updateAt: 11)
+        try await Task.sleep(for: .seconds(0.05))
+        #expect(changeCount == 1)
+
+        let text = PasteboardContent("Local text")
+        repository.save(id: PasteboardHistory.ID(rawValue: text.hash), content: text, updateAt: 12)
+        try await waitUntil { changeCount >= 2 }
     }
 
     @Test
@@ -633,6 +850,23 @@ private func restore(_ value: Any?, forKey key: String, defaults: UserDefaults) 
     } else {
         defaults.removeObject(forKey: key)
     }
+}
+
+private func writeTemporaryFile(name: String, data: Data) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent(name)
+    try data.write(to: url)
+    return url
+}
+
+private func writeTemporaryFolder(name: String) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let folderURL = directory.appendingPathComponent(name, isDirectory: true)
+    try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+    return folderURL
 }
 
 private func makeTabEvent(shift: Bool = false) throws -> NSEvent {

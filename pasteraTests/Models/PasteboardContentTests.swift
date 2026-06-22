@@ -16,6 +16,8 @@ import SQLite3
 import Testing
 @testable import Pastera
 
+// swiftlint:disable type_body_length
+
 @MainActor
 @Suite
 struct PasteboardContentTests {
@@ -360,13 +362,18 @@ struct PasteboardContentTests {
 
         let snapshot = try #require(provider.loadHistorySnapshots(excludingDeviceID: "device-b").first)
         let sqliteURL = rootURL.appendingPathComponent("history/devices/device-a.sqlite")
+        let protocolURL = rootURL.appendingPathComponent("history/protocol.json")
         let sqliteData = try Data(contentsOf: sqliteURL)
+        let protocolData = try Data(contentsOf: protocolURL)
         #expect(snapshot.deviceID == "device-a")
         #expect(snapshot.payloads.count == 2000)
         #expect(snapshot.payloads.first?.id == "history-2004")
         #expect(snapshot.payloads.last?.id == "history-5")
+        #expect(protocolData.range(of: Data("\"schemaVersion\"".utf8)) != nil)
+        #expect(protocolData.range(of: Data("4".utf8)) != nil)
         #expect(sqliteData.starts(with: Data("SQLite format 3".utf8)))
         #expect(sqliteData.range(of: Data("schemaVersion".utf8)) != nil)
+        #expect(sqliteData.range(of: Data("windowSignature".utf8)) != nil)
         #expect(sqliteData.range(of: Data("History 2004".utf8)) != nil)
         #expect(sqliteData.range(of: Data("plainText".utf8)) != nil)
         #expect(sqliteData.range(of: Data("history_assets".utf8)) == nil)
@@ -381,6 +388,82 @@ struct PasteboardContentTests {
     }
 
     @Test
+    func oneDriveFolderSyncProviderReinitializesOldHistoryProtocolWithoutRemovingFilesDomain() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let oldHistoryDirectory = rootURL.appendingPathComponent("history/devices", isDirectory: true)
+        let filesDirectory = rootURL.appendingPathComponent("files/devices/device-a", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldHistoryDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: filesDirectory, withIntermediateDirectories: true)
+        try Data("{\"schemaVersion\":3}".utf8)
+            .write(to: rootURL.appendingPathComponent("history/protocol.json"))
+        try Data("old sqlite".utf8)
+            .write(to: oldHistoryDirectory.appendingPathComponent("old-device.sqlite"))
+        try Data("{\"manifestVersion\":1}".utf8)
+            .write(to: filesDirectory.appendingPathComponent("manifest.json"))
+        let payload = PasteboardHistorySyncPayload(
+            id: "history-1",
+            text: "History",
+            updateAt: 1,
+            deviceID: "device-a",
+            sourceKind: .plainText
+        )
+
+        try provider.saveHistorySnapshot(
+            [payload],
+            deviceID: "device-a",
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 8 * 1024 * 1024
+        )
+
+        let protocolData = try Data(contentsOf: rootURL.appendingPathComponent("history/protocol.json"))
+        #expect(protocolData.range(of: Data("\"schemaVersion\"".utf8)) != nil)
+        #expect(protocolData.range(of: Data("4".utf8)) != nil)
+        #expect(!FileManager.default.fileExists(
+            atPath: oldHistoryDirectory.appendingPathComponent("old-device.sqlite").path
+        ))
+        #expect(FileManager.default.fileExists(
+            atPath: rootURL.appendingPathComponent("history/devices/device-a.sqlite").path
+        ))
+        #expect(FileManager.default.fileExists(
+            atPath: filesDirectory.appendingPathComponent("manifest.json").path
+        ))
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderReportsHistorySnapshotFileStates() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let payload = PasteboardHistorySyncPayload(
+            id: "remote-history",
+            text: "Remote",
+            updateAt: 1,
+            deviceID: "remote-device",
+            sourceKind: .plainText
+        )
+        try provider.saveHistorySnapshot(
+            [payload],
+            deviceID: "remote-device",
+            limit: 2000,
+            maxTextBytes: 256 * 1024,
+            snapshotTextBudgetBytes: 8 * 1024 * 1024
+        )
+
+        let states = try provider.historySnapshotFileStates(excludingDeviceID: "local-device")
+
+        let state = try #require(states.first)
+        #expect(states.count == 1)
+        #expect(state.deviceID == "remote-device")
+        #expect(state.byteCount > 0)
+        #expect(state.modifiedAtNanoseconds > 0)
+    }
+
+    @Test
     func oneDriveFolderSyncProviderSkipsV2HistorySnapshots() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -391,12 +474,18 @@ struct PasteboardContentTests {
         let sqliteURL = historyDirectory.appendingPathComponent("remote.sqlite")
         var handle: OpaquePointer?
         sqlite3_open_v2(sqliteURL.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
-        defer { sqlite3_close(handle) }
+        defer {
+            if let handle {
+                sqlite3_close(handle)
+            }
+        }
         sqlite3_exec(handle, """
             CREATE TABLE metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
             INSERT INTO metadata(key, value) VALUES ('schemaVersion', '2'), ('deviceID', 'remote-device');
             CREATE TABLE histories (id TEXT PRIMARY KEY NOT NULL, updatedAt INTEGER NOT NULL, title TEXT NOT NULL);
             """, nil, nil, nil)
+        sqlite3_close(handle)
+        handle = nil
 
         #expect(try provider.loadHistorySnapshots(excludingDeviceID: "device-a").isEmpty)
     }
@@ -445,6 +534,318 @@ struct PasteboardContentTests {
     }
 
     @Test
+    func oneDriveFolderSyncProviderWritesFileManifestAndDirectAssetFiles() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-1",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("%PDF".utf8),
+                            originalFilename: "document.pdf"
+                        ),
+                        FileSyncAssetPayload(
+                            assetIndex: 1,
+                            pasteboardType: .png,
+                            data: Data([0x89, 0x50, 0x4E, 0x47]),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+
+        try provider.saveFileSnapshot(snapshot, deviceID: "device-a")
+
+        let loaded = try #require(provider.loadFileSnapshots(excludingDeviceID: "device-b").first)
+        let manifestURL = rootURL.appendingPathComponent("files/devices/device-a/manifest.json")
+        let manifestData = try Data(contentsOf: manifestURL)
+        let objectURLs = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL })
+
+        #expect(loaded.deviceID == "device-a")
+        #expect(loaded.histories == snapshot.histories)
+        let assetFiles = objectURLs.filter { ["pdf", "png"].contains($0.pathExtension) }
+        #expect(assetFiles.count == 2)
+        #expect(Set(assetFiles.map(\.pathExtension)) == ["pdf", "png"])
+        #expect(manifestData.range(of: Data("manifestVersion".utf8)) != nil)
+        #expect(manifestData.range(of: Data("document.pdf".utf8)) != nil)
+        #expect(manifestData.range(of: Data("sha256".utf8)) == nil)
+        #expect(manifestData.range(of: Data("%PDF".utf8)) == nil)
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("files/devices/device-a.sqlite").path))
+        #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("files/objects").path))
+
+        try provider.saveFileSnapshot(FileSyncExportSnapshot(histories: [], skippedAssetCount: 0), deviceID: "device-a")
+
+        let remainingObjects = try FileManager.default.contentsOfDirectory(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )
+        #expect(remainingObjects.isEmpty)
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderSkipsUnsupportedFinderFileAssets() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-file",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .fileURL,
+                            data: URL(fileURLWithPath: "/tmp/report.txt").dataRepresentation,
+                            originalFilename: "report.txt"
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+
+        try provider.saveFileSnapshot(snapshot, deviceID: "device-a")
+
+        let loaded = try #require(provider.loadFileSnapshots(excludingDeviceID: "device-b").first)
+        let assetURLs = FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL } ?? []
+        #expect(loaded.histories.isEmpty)
+        #expect(assetURLs.isEmpty)
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderReusesUnchangedDirectAssetFiles() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-1",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("%PDF stable".utf8),
+                            originalFilename: "document.pdf"
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+
+        try provider.saveFileSnapshot(snapshot, deviceID: "device-a")
+        let objectURL = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "pdf" })
+        let oldDate = Date(timeIntervalSince1970: 1_000)
+        try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: objectURL.path)
+
+        try provider.saveFileSnapshot(snapshot, deviceID: "device-a")
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: objectURL.path)
+        #expect(attributes[.modificationDate] as? Date == oldDate)
+        #expect(try Data(contentsOf: objectURL) == Data("%PDF stable".utf8))
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderCapsDirectAssetFileNames() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let longName = String(repeating: "a", count: 320) + ".pdf"
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-1",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("%PDF long name".utf8),
+                            originalFilename: longName
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+
+        try provider.saveFileSnapshot(snapshot, deviceID: "device-a")
+
+        let objectURL = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "pdf" })
+        #expect(objectURL.lastPathComponent.lengthOfBytes(using: .utf8) <= 255)
+        #expect(objectURL.lastPathComponent.hasSuffix(".pdf"))
+        let loaded = try #require(provider.loadFileSnapshots(excludingDeviceID: "device-b").first)
+        #expect(loaded.histories == snapshot.histories)
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderSkipsFileGroupsWhenFileValidationFails() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-1",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("%PDF".utf8),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+        try provider.saveFileSnapshot(snapshot, deviceID: "device-a")
+        let objectURL = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "pdf" })
+        try Data("tampered".utf8).write(to: objectURL)
+
+        let loaded = try #require(provider.loadFileSnapshots(excludingDeviceID: "device-b").first)
+        #expect(loaded.histories.isEmpty)
+        #expect(loaded.skippedAssetCount == 1)
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderPreservesPreviousManifestWhenReplacementFails() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let originalSnapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-original",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("original".utf8),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+        let replacementSnapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-replacement",
+                    updatedAt: 20,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("replacement".utf8),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+        try OneDriveFolderSyncProvider(rootURL: rootURL).saveFileSnapshot(originalSnapshot, deviceID: "device-a")
+        let failingProvider = OneDriveFolderSyncProvider(
+            rootURL: rootURL,
+            fileManager: MoveFailingFileManager(failingDestinationExtension: "json")
+        )
+
+        #expect(throws: Error.self) {
+            try failingProvider.saveFileSnapshot(replacementSnapshot, deviceID: "device-a")
+        }
+
+        let loaded = try #require(OneDriveFolderSyncProvider(rootURL: rootURL)
+            .loadFileSnapshots(excludingDeviceID: "device-b")
+            .first)
+        #expect(loaded.histories == originalSnapshot.histories)
+        let assetURLs = FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/device-a/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL } ?? []
+        #expect(!assetURLs.contains { $0.path.contains("history-replacement") })
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderPreservesPreviousFileWhenReplacementFails() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "device-a",
+                    historyID: "history-1",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("stable".utf8),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+        try OneDriveFolderSyncProvider(rootURL: rootURL).saveFileSnapshot(snapshot, deviceID: "device-a")
+        let failingProvider = OneDriveFolderSyncProvider(
+            rootURL: rootURL,
+            fileManager: MoveFailingFileManager(failingDestinationExtension: "pdf")
+        )
+
+        try failingProvider.saveFileSnapshot(snapshot, deviceID: "device-a")
+
+        let loaded = try #require(OneDriveFolderSyncProvider(rootURL: rootURL)
+            .loadFileSnapshots(excludingDeviceID: "device-b")
+            .first)
+        #expect(loaded.histories == snapshot.histories)
+        #expect(loaded.skippedAssetCount == 0)
+    }
+
+    @Test
     func oneDriveFolderSyncProviderSkipsCorruptSQLiteSnapshots() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -452,13 +853,17 @@ struct PasteboardContentTests {
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
         let historyDirectory = rootURL.appendingPathComponent("history/devices", isDirectory: true)
         let snippetDirectory = rootURL.appendingPathComponent("snippets/devices", isDirectory: true)
+        let fileDirectory = rootURL.appendingPathComponent("files/devices", isDirectory: true)
         try FileManager.default.createDirectory(at: historyDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: snippetDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: fileDirectory, withIntermediateDirectories: true)
         try Data("not sqlite".utf8).write(to: historyDirectory.appendingPathComponent("remote.sqlite"))
         try Data("not sqlite".utf8).write(to: snippetDirectory.appendingPathComponent("remote.sqlite"))
+        try Data("not sqlite".utf8).write(to: fileDirectory.appendingPathComponent("remote.sqlite"))
 
         #expect(try provider.loadHistorySnapshots(excludingDeviceID: "device-a").isEmpty)
         #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "device-a").isEmpty)
+        #expect(try provider.loadFileSnapshots(excludingDeviceID: "device-a").isEmpty)
     }
 }
 
@@ -497,6 +902,22 @@ struct OneDriveFolderSyncProviderDirectoryTests {
 }
 
 private let pngSignature = Data([0x89, 0x50, 0x4E, 0x47])
+
+private final class MoveFailingFileManager: FileManager {
+    private let failingDestinationExtension: String
+
+    init(failingDestinationExtension: String) {
+        self.failingDestinationExtension = failingDestinationExtension
+        super.init()
+    }
+
+    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+        if dstURL.pathExtension == failingDestinationExtension {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try super.moveItem(at: srcURL, to: dstURL)
+    }
+}
 
 private func legacyLengthPrefixedHash(for assets: [PasteboardContent.Asset]) -> String {
     var data = Data()

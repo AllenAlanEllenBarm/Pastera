@@ -68,6 +68,8 @@ final class CPYUtilities {
             NSNumber(value: 8 * 1024 * 1024),
             forKey: Constants.UserDefaults.maxHistorySnapshotTextBudgetBytes
         )
+        defaultValues.updateValue(NSNumber(value: 25 * 1024 * 1024), forKey: Constants.UserDefaults.maxSyncedFileBytes)
+        defaultValues.updateValue(NSNumber(value: 10), forKey: Constants.UserDefaults.syncedFileLimitPerDevice)
         defaultValues.updateValue(NSNumber(value: CPYWindowAppearance.defaultOpacity), forKey: Constants.UserDefaults.windowBackgroundOpacity)
         defaultValues.updateValue(NSNumber(value: 2), forKey: Constants.UserDefaults.showStatusItem)
         let storeTypes = PasteboardAvailableType.allCases.reduce(into: [:]) { $0[$1.rawValue] = NSNumber(value: true) }
@@ -99,6 +101,12 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncHistoryImportEnabled)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncSnippetImportEnabled)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncFileUploadEnabled)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.syncFileImportEnabled)
+        let syncFileTypes = PasteboardAvailableType.syncFileTypes.reduce(into: [:]) {
+            $0[$1.rawValue] = NSNumber(value: false)
+        }
+        defaultValues.updateValue(syncFileTypes, forKey: Constants.UserDefaults.syncFileTypes)
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.syncPollInterval)
 
         /* Updates */

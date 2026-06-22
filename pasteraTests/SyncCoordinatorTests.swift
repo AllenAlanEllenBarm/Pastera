@@ -11,10 +11,13 @@
 //
 
 import AppKit
+import Combine
 import DependenciesTestSupport
 import Foundation
 import Testing
 @testable import Pastera
+
+// swiftlint:disable type_body_length
 
 @MainActor
 @Suite(
@@ -45,6 +48,20 @@ struct SyncCoordinatorTests {
         let settings = UserDefaultsSyncSettingsStore(defaults: defaults).settings()
 
         #expect(settings.historyLimit == 2000)
+    }
+
+    @Test
+    func settingsStoreCapsFileSyncLimitsAtSupportedMaximums() throws {
+        let suiteName = "Pastera.SyncCoordinatorTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(250 * 1024 * 1024, forKey: Constants.UserDefaults.maxSyncedFileBytes)
+        defaults.set(99, forKey: Constants.UserDefaults.syncedFileLimitPerDevice)
+
+        let settings = UserDefaultsSyncSettingsStore(defaults: defaults).settings()
+
+        #expect(settings.maxSyncedFileBytes == 25 * 1024 * 1024)
+        #expect(settings.syncedFileLimitPerDevice == 10)
     }
 
     @Test
@@ -177,6 +194,326 @@ struct SyncCoordinatorTests {
     }
 
     @Test
+    func coordinatorSkipsUnchangedHistoryWindowUpload() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .string, data: Data("Stable history".utf8))
+            ]
+        )
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: content.hash), content: content, updateAt: 10)
+        let settings = makeSettings(rootURL: rootURL, historyUpload: true)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+        let sqliteURL = rootURL.appendingPathComponent("history/devices/\(currentDeviceID).sqlite")
+        let firstModificationDate = try #require(FileManager.default
+            .attributesOfItem(atPath: sqliteURL.path)[.modificationDate] as? Date)
+        Thread.sleep(forTimeInterval: 1.1)
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        let secondModificationDate = try #require(FileManager.default
+            .attributesOfItem(atPath: sqliteURL.path)[.modificationDate] as? Date)
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(coordinator.status.uploadedCount == 0)
+        #expect(secondModificationDate == firstModificationDate)
+    }
+
+    @Test
+    func coordinatorDoesNotPostStatusChangeForAutomaticHistoryNoOp() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .string, data: Data("Quiet no-op".utf8))
+            ]
+        )
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: content.hash), content: content, updateAt: 10)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL, historyUpload: true) },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+        var notificationCount = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: SyncCoordinator.statusDidChangeNotification,
+            object: coordinator,
+            queue: nil
+        ) { _ in
+            notificationCount += 1
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        coordinator.syncNow(reason: .manual, wait: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        notificationCount = 0
+
+        coordinator.syncNow(reason: .timer, wait: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        #expect(notificationCount == 0)
+        #expect(coordinator.status.uploadedCount == 1)
+    }
+
+    @Test
+    func coordinatorSkipsUnchangedRemoteHistorySnapshotBeforeUpsert() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        try provider.saveHistorySnapshot([
+            PasteboardHistorySyncPayload(
+                id: "remote-history",
+                text: "Remote",
+                updateAt: 10,
+                deviceID: "remote-device",
+                sourceKind: .plainText
+            )
+        ], deviceID: "remote-device", limit: 2000, maxTextBytes: 256 * 1024, snapshotTextBudgetBytes: 8 * 1024 * 1024)
+        let countingRepository = CountingHistoryRepository()
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL, historyImport: true) },
+            providerFactory: { _ in provider },
+            historyRepository: countingRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+        #expect(countingRepository.upsertedHistoryIDs == ["remote-history"])
+        countingRepository.upsertedHistoryIDs.removeAll()
+
+        coordinator.syncNow(reason: .timer, wait: true)
+
+        #expect(countingRepository.upsertedHistoryIDs.isEmpty)
+    }
+
+    @Test
+    func coordinatorHonorsIndependentFileSwitches() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let text = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .string, data: Data("Text history".utf8))]
+        )
+        let pdf = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data("%PDF".utf8))]
+        )
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: text.hash), content: text, updateAt: 20)
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: pdf.hash), content: pdf, updateAt: 10)
+
+        var settings = makeSettings(rootURL: rootURL, historyUpload: true, fileUpload: false)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
+        #expect(try provider.loadFileSnapshots(excludingDeviceID: "remote-device").isEmpty)
+
+        settings = makeSettings(rootURL: rootURL, historyUpload: false, fileUpload: true)
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
+        let fileSnapshot = try #require(provider.loadFileSnapshots(excludingDeviceID: "remote-device").first)
+        #expect(fileSnapshot.histories.map(\.historyID) == [pdf.hash])
+        #expect(fileSnapshot.histories.first?.assets.first?.pasteboardType == .pdf)
+        #expect(coordinator.status.uploadedCount == 1)
+    }
+
+    @Test
+    func coordinatorReportsSkippedFileWarningWithoutBlockingTextHistoryUpload() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let text = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .string, data: Data("Text still syncs".utf8))]
+        )
+        let tooLarge = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data(repeating: 1, count: 6))]
+        )
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: text.hash), content: text, updateAt: 20)
+        historyRepository.save(id: PasteboardHistory.ID(rawValue: tooLarge.hash), content: tooLarge, updateAt: 10)
+        let settings = makeSettings(
+            rootURL: rootURL,
+            historyUpload: true,
+            fileUpload: true,
+            maxSyncedFileBytes: 5
+        )
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
+        #expect(try provider.loadFileSnapshots(excludingDeviceID: "remote-device").first?.histories.isEmpty == true)
+        #expect(coordinator.status.statusText.contains("已跳过 1 个文件"))
+    }
+
+    @Test
+    func coordinatorReportsImportFileValidationWarningWithoutFailingSync() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "remote-device",
+                    historyID: "remote-file",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("%PDF".utf8),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+        try provider.saveFileSnapshot(snapshot, deviceID: "remote-device")
+        let objectURL = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/remote-device/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "pdf" })
+        try Data("tampered".utf8).write(to: objectURL)
+        let settings = makeSettings(rootURL: rootURL, fileImport: true)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(coordinator.status.importedCount == 0)
+        #expect(coordinator.status.statusText.contains("已跳过 1 个文件（缺失、超限或校验失败）"))
+    }
+
+    @Test
+    func coordinatorCapsImportedFilesPerRemoteDeviceBeforeReadingEverything() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let histories = (0..<11).map { index in
+            FileSyncHistoryPayload(
+                deviceID: "remote-device",
+                historyID: "remote-file-\(index)",
+                updatedAt: 100 - index,
+                assets: [
+                    FileSyncAssetPayload(
+                        assetIndex: 0,
+                        pasteboardType: .pdf,
+                        data: Data("PDF-\(index)".utf8),
+                        originalFilename: "remote-\(index).pdf"
+                    )
+                ]
+            )
+        }
+        try provider.saveFileSnapshot(FileSyncExportSnapshot(histories: histories, skippedAssetCount: 0), deviceID: "remote-device")
+        let settings = makeSettings(rootURL: rootURL, fileImport: true, syncedFileLimitPerDevice: 10)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(coordinator.status.importedCount == 10)
+        #expect(historyRepository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-file-0")) != nil)
+        #expect(historyRepository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-file-9")) != nil)
+        #expect(historyRepository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-file-10")) == nil)
+        #expect(coordinator.status.statusText.contains("已跳过 1 个文件"))
+    }
+
+    @Test
+    func coordinatorDoesNotReadOrWarnAboutUnselectedFileTypesDuringImport() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snapshot = FileSyncExportSnapshot(
+            histories: [
+                FileSyncHistoryPayload(
+                    deviceID: "remote-device",
+                    historyID: "remote-image",
+                    updatedAt: 20,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .png,
+                            data: Data([0x89, 0x50, 0x4E, 0x47]),
+                            originalFilename: nil
+                        )
+                    ]
+                ),
+                FileSyncHistoryPayload(
+                    deviceID: "remote-device",
+                    historyID: "remote-pdf",
+                    updatedAt: 10,
+                    assets: [
+                        FileSyncAssetPayload(
+                            assetIndex: 0,
+                            pasteboardType: .pdf,
+                            data: Data("%PDF".utf8),
+                            originalFilename: nil
+                        )
+                    ]
+                )
+            ],
+            skippedAssetCount: 0
+        )
+        try provider.saveFileSnapshot(snapshot, deviceID: "remote-device")
+        let imageObjectURL = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/remote-device/assets/remote-image", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "png" })
+        try Data("tampered image".utf8).write(to: imageObjectURL)
+        let settings = makeSettings(
+            rootURL: rootURL,
+            fileImport: true,
+            fileAssetTypes: [.pdf]
+        )
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(coordinator.status.importedCount == 1)
+        #expect(!coordinator.status.statusText.contains("已跳过"))
+        #expect(historyRepository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-image")) == nil)
+        #expect(historyRepository.fetchContent(id: PasteboardHistory.ID(rawValue: "remote-pdf"))?.assets.first?.type == .pdf)
+    }
+
+    @Test
     func coordinatorSeparatesAutomaticUploadAndSync() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
@@ -304,6 +641,53 @@ struct SyncCoordinatorTests {
     }
 
     @Test
+    func coordinatorDoesNotReadOlderRemoteFileAssets() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let sharedID = PasteboardHistory.ID(rawValue: "shared-file-history")
+        let localContent = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .pdf, data: Data("local newer pdf".utf8))]
+        )
+        historyRepository.save(id: sharedID, content: localContent, updateAt: 30)
+        let remotePayload = FileSyncHistoryPayload(
+            deviceID: "remote-device",
+            historyID: sharedID.rawValue,
+            updatedAt: 20,
+            assets: [
+                FileSyncAssetPayload(
+                    assetIndex: 0,
+                    pasteboardType: .pdf,
+                    data: Data("remote older pdf".utf8),
+                    originalFilename: "remote.pdf"
+                )
+            ]
+        )
+        try provider.saveFileSnapshot(
+            FileSyncExportSnapshot(histories: [remotePayload], skippedAssetCount: 0),
+            deviceID: "remote-device"
+        )
+        let objectURL = try #require(FileManager.default.enumerator(
+            at: rootURL.appendingPathComponent("files/devices/remote-device/assets", isDirectory: true),
+            includingPropertiesForKeys: nil
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "pdf" })
+        try Data("tampered remote bytes".utf8).write(to: objectURL)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL, fileImport: true) },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(coordinator.status.phase == .succeeded)
+        #expect(coordinator.status.importedCount == 0)
+        #expect(!coordinator.status.statusText.contains("已跳过"))
+        #expect(historyRepository.fetchContent(id: sharedID) == localContent)
+    }
+
+    @Test
     func coordinatorUploadsBusinessTimestampWithoutFallback() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
@@ -357,7 +741,12 @@ struct SyncCoordinatorTests {
         historyUpload: Bool = false,
         historyImport: Bool = false,
         snippetUpload: Bool = false,
-        snippetImport: Bool = false
+        snippetImport: Bool = false,
+        fileUpload: Bool = false,
+        fileImport: Bool = false,
+        fileAssetTypes: Set<PasteboardAvailableType> = Set(PasteboardAvailableType.syncFileTypes),
+        maxSyncedFileBytes: Int = 25 * 1024 * 1024,
+        syncedFileLimitPerDevice: Int = 10
     ) -> SyncSettings {
         SyncSettings(
             automaticUploadEnabled: automaticUpload,
@@ -367,14 +756,69 @@ struct SyncCoordinatorTests {
             historyImportEnabled: historyImport,
             snippetUploadEnabled: snippetUpload,
             snippetImportEnabled: snippetImport,
+            fileUploadEnabled: fileUpload,
+            fileImportEnabled: fileImport,
+            fileAssetTypes: fileAssetTypes,
             pollInterval: 300,
             maxSyncedHistoryTextBytes: 256 * 1024,
             maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024,
-            historyLimit: 2000
+            historyLimit: 2000,
+            maxSyncedFileBytes: maxSyncedFileBytes,
+            syncedFileLimitPerDevice: syncedFileLimitPerDevice
         )
     }
 
     private var currentDeviceID: String {
         CPYUtilities.deviceID ?? ProcessInfo.processInfo.hostName
     }
+}
+
+private final class CountingHistoryRepository: PasteboardHistoryRepositoryProtocol {
+    var upsertedHistoryIDs = [String]()
+
+    func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func hasHistories() -> Bool { false }
+
+    func fetchHistoryDetails(
+        ascending _: Bool,
+        includesThumbnailAsset _: Bool,
+        limit _: Int,
+        offset _: Int
+    ) -> [PasteboardHistoryDetail] {
+        []
+    }
+
+    func searchHistoryDetails(
+        query _: HistorySearchQuery,
+        includesThumbnailAsset _: Bool,
+        limit _: Int,
+        offset _: Int
+    ) throws -> [PasteboardHistoryDetail] {
+        []
+    }
+
+    func fetchHistory(id _: PasteboardHistory.ID) -> PasteboardHistory? { nil }
+
+    func fetchContent(id _: PasteboardHistory.ID) -> PasteboardContent? { nil }
+
+    func save(id _: PasteboardHistory.ID, content _: PasteboardContent, updateAt _: Int) {}
+
+    func deleteHistory(id _: PasteboardHistory.ID) {}
+
+    func deleteAll() {}
+
+    func deleteOverflowingHistories(maxHistorySize _: Int) {}
+
+    func pruneHistories(settings _: HistoryRetentionSettings) {}
+
+    @discardableResult
+    func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool {
+        upsertedHistoryIDs.append(payload.id)
+        return true
+    }
+
+    func suppressSyncedHistory(id _: PasteboardHistory.ID) {}
 }
