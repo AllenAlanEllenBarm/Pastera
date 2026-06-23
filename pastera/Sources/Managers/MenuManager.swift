@@ -11,6 +11,7 @@
 //
 
 import Cocoa
+import Carbon
 import Combine
 import Dependencies
 import Magnet
@@ -59,6 +60,9 @@ final class MenuManager: NSObject {
     var panelDismissLocalMonitor: Any?
     var panelDismissGlobalMonitor: Any?
     var secureEventInputStatusTimer: Timer?
+    var secureEventInputEnabledProvider: () -> Bool = {
+        IsSecureEventInputEnabled()
+    }
     static let panelDismissMouseEventMask: NSEvent.EventTypeMask = [
         .leftMouseDown,
         .rightMouseDown,
@@ -480,6 +484,18 @@ extension MenuManager {
 
     func makeMainMenuPanelItems() -> [MainMenuPanelItem] {
         var items = [MainMenuPanelItem]()
+
+        if secureEventInputEnabledProvider() {
+            items.append(.notice(
+                title: String(localized: "Shortcuts are paused"),
+                message: String(localized: "Secure Keyboard Entry is active in a password prompt. Finish or cancel it, then Pastera shortcuts will work again."),
+                image: menuPanelSymbol(
+                    "exclamationmark.triangle.fill",
+                    accessibilityDescription: String(localized: "Secure Keyboard Entry")
+                )
+            ))
+            items.append(.separator)
+        }
 
         let enabledSnippetFolders = snippetRepository.fetchFolders()
             .filter(\.isEnabled)

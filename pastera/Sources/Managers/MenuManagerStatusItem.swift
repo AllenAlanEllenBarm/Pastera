@@ -55,9 +55,16 @@ extension MenuManager {
     }
 
     func refreshSecureEventInputStatus() {
-        let toolTip = statusItemToolTip(isSecureEventInputEnabled: IsSecureEventInputEnabled())
+        let isSecureEventInputEnabled = secureEventInputEnabledProvider()
+        let toolTip = statusItemToolTip(isSecureEventInputEnabled: isSecureEventInputEnabled)
         statusItem?.toolTip = toolTip
         statusItem?.button?.toolTip = toolTip
+        statusItem?.button?.contentTintColor = isSecureEventInputEnabled ? .systemOrange : nil
+        statusItem?.button?.setAccessibilityLabel(
+            isSecureEventInputEnabled
+            ? String(localized: "Pastera, Secure Keyboard Entry active")
+            : Constants.Application.name
+        )
     }
 
     func statusItemToolTip(isSecureEventInputEnabled: Bool) -> String {
@@ -66,7 +73,7 @@ extension MenuManager {
 
         return [
             baseToolTip,
-            "Secure Keyboard Entry is active. macOS may block global shortcuts; click this menu bar icon to open Pastera."
+            String(localized: "Secure Keyboard Entry is active. macOS may block global shortcuts; click this menu bar icon to open Pastera.")
         ].joined(separator: "\n")
     }
 }

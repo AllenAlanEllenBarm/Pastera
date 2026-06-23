@@ -141,6 +141,56 @@
         }
       }
     },
+    "Pastera, Secure Keyboard Entry active" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pastera，安全键盘输入已启用"
+          }
+        }
+      }
+    },
+    "Secure Keyboard Entry" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全键盘输入"
+          }
+        }
+      }
+    },
+    "Secure Keyboard Entry is active. macOS may block global shortcuts; click this menu bar icon to open Pastera." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全键盘输入已启用。macOS 可能会阻止全局快捷键；点击这个菜单栏图标可打开 Pastera。"
+          }
+        }
+      }
+    },
+    "Secure Keyboard Entry is active in a password prompt. Finish or cancel it, then Pastera shortcuts will work again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码提示正在使用安全键盘输入。完成或取消后，Pastera 快捷键会恢复。"
+          }
+        }
+      }
+    },
+    "Shortcuts are paused" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快捷键暂不可用"
+          }
+        }
+      }
+    },
     "Show alert panel before clear history" : {
       "localizations" : {
         "de" : {

@@ -18,6 +18,7 @@ enum MainMenuPanelLayout {
     static let bottomInset: CGFloat = 6
     static let rowHeight: CGFloat = 26
     static let snippetFolderRowHeight: CGFloat = 26
+    static let noticeHeight: CGFloat = 66
     static let headerHeight: CGFloat = 32
     static let separatorHeight: CGFloat = 1
     static let separatorHorizontalInset: CGFloat = 10
@@ -47,6 +48,7 @@ struct MainMenuPanelBehavior {
 
 enum MainMenuPanelItem {
     case separator
+    case notice(title: String, message: String, image: NSImage?)
     case snippetFolder(title: String, image: NSImage?, shortcutText: String? = nil, onOpen: (NSRect?) -> Void)
     case action(title: String, image: NSImage?, shortcutText: String? = nil, onSelect: () -> Void)
 }
@@ -305,6 +307,16 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
                 currentY -= MainMenuPanelLayout.separatorVerticalInset
                 addSeparator(at: currentY)
                 currentY -= MainMenuPanelLayout.separatorVerticalInset
+            case let .notice(title, message, image):
+                currentY -= MainMenuPanelLayout.noticeHeight
+                let noticeView = MainMenuPanelNoticeView(title: title, message: message, image: image)
+                noticeView.frame = NSRect(
+                    x: 0,
+                    y: currentY,
+                    width: MainMenuPanelLayout.width,
+                    height: MainMenuPanelLayout.noticeHeight
+                )
+                contentView.addSubview(noticeView)
             case let .snippetFolder(title, image, shortcutText, onOpen):
                 currentY -= MainMenuPanelLayout.snippetFolderRowHeight
                 let rowView = MainMenuPanelRowView(
@@ -369,6 +381,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
             switch item {
             case .separator:
                 return total + MainMenuPanelLayout.separatorHeight + MainMenuPanelLayout.separatorVerticalInset * 2
+            case .notice:
+                return total + MainMenuPanelLayout.noticeHeight
             case .snippetFolder:
                 return total + MainMenuPanelLayout.snippetFolderRowHeight
             case .action:
@@ -548,6 +562,74 @@ extension MainMenuPanelController {
         if triggerChildPanel {
             keyboardEntries[index].openChildPanel?()
         }
+    }
+}
+
+private final class MainMenuPanelNoticeView: NSView {
+    private enum Metrics {
+        static let horizontalInset: CGFloat = 10
+        static let verticalInset: CGFloat = 8
+        static let iconSize: CGFloat = 16
+        static let iconSpacing: CGFloat = 7
+        static let titleMessageSpacing: CGFloat = 2
+    }
+
+    private let imageView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let messageLabel = NSTextField(labelWithString: "")
+
+    init(title: String, message: String, image: NSImage?) {
+        super.init(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: MainMenuPanelLayout.width,
+            height: MainMenuPanelLayout.noticeHeight
+        ))
+        setup(title: title, message: message, image: image)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    private func setup(title: String, message: String, image: NSImage?) {
+        wantsLayer = true
+        layer?.cornerRadius = PasteraDesignTokens.Metrics.compactRowCornerRadius
+        layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.12).cgColor
+
+        imageView.image = image
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.contentTintColor = .systemOrange
+
+        titleLabel.stringValue = title
+        titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        messageLabel.stringValue = message
+        messageLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
+        messageLabel.textColor = .secondaryLabelColor
+        messageLabel.maximumNumberOfLines = 3
+        messageLabel.lineBreakMode = .byWordWrapping
+
+        [imageView, titleLabel, messageLabel].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            addSubview($0)
+        }
+
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalInset),
+            imageView.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.verticalInset),
+            imageView.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
+            imageView.heightAnchor.constraint(equalToConstant: Metrics.iconSize),
+
+            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: Metrics.iconSpacing),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.verticalInset),
+
+            messageLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            messageLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: Metrics.titleMessageSpacing),
+            messageLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Metrics.verticalInset)
+        ])
     }
 }
 

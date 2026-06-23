@@ -29,6 +29,7 @@ extension MenuManager {
     var hasStatusItemForTesting: Bool { statusItem != nil }
     var statusItemImageForTesting: NSImage? { statusItem?.button?.image }
     var statusItemActionForTesting: Selector? { statusItem?.button?.action }
+    var statusItemTintColorForTesting: NSColor? { statusItem?.button?.contentTintColor }
     var mainMenuPanelBackgroundAlphaForTesting: CGFloat? { mainMenuPanelController?.contentBackgroundAlphaForTesting }
     var historyPanelBackgroundAlphaForTesting: CGFloat? { historyPanelController?.contentBackgroundAlphaForTesting }
     var snippetPanelBackgroundAlphaForTesting: CGFloat? { snippetPanelController?.contentBackgroundAlphaForTesting }
@@ -45,13 +46,22 @@ extension MenuManager {
     var mainMenuPanelShortcutTextsForTesting: [String: String] {
         makeMainMenuPanelItems().reduce(into: [:]) { result, item in
             switch item {
-            case .separator:
+            case .separator, .notice:
                 return
             case let .snippetFolder(title, _, shortcutText, _),
                  let .action(title, _, shortcutText, _):
                 guard let shortcutText else { return }
                 result[title] = shortcutText
             }
+        }
+    }
+
+    var mainMenuNoticeTitlesForTesting: [String] {
+        makeMainMenuPanelItems().compactMap { item in
+            if case let .notice(title, _, _) = item {
+                return title
+            }
+            return nil
         }
     }
 

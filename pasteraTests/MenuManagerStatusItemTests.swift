@@ -77,16 +77,51 @@ struct MenuManagerStatusItemTests {
     @Test
     func statusItemTooltipExplainsSecureKeyboardEntryFallback() throws {
         try withRegisteredDefaultEnvironment { _, _ in
-            #expect(EnableSecureEventInput() == noErr)
-            defer { DisableSecureEventInput() }
-
             let manager = MenuManager()
+            manager.secureEventInputEnabledProvider = { true }
             manager.setup()
             defer { manager.removeStatusItemForTesting() }
 
             let toolTip = try #require(manager.statusItem?.toolTip)
-            #expect(toolTip.contains("Secure Keyboard Entry is active"))
-            #expect(toolTip.contains("click this menu bar icon"))
+            #expect(toolTip.contains(String(localized: "Secure Keyboard Entry is active. macOS may block global shortcuts; click this menu bar icon to open Pastera.")))
+        }
+    }
+
+    @Test
+    func statusItemUsesWarningTintWhileSecureKeyboardEntryIsActive() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            var isSecureEventInputEnabled = true
+            let manager = MenuManager()
+            manager.secureEventInputEnabledProvider = { isSecureEventInputEnabled }
+            manager.setup()
+            defer { manager.removeStatusItemForTesting() }
+
+            #expect(manager.statusItemTintColorForTesting?.isEqual(NSColor.systemOrange) == true)
+
+            isSecureEventInputEnabled = false
+            manager.refreshSecureEventInputStatus()
+
+            #expect(manager.statusItemTintColorForTesting == nil)
+        }
+    }
+
+    @Test
+    func mainMenuShowsSecureKeyboardEntryNoticeWhenShortcutsAreBlocked() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+            manager.secureEventInputEnabledProvider = { true }
+
+            #expect(manager.mainMenuNoticeTitlesForTesting == [String(localized: "Shortcuts are paused")])
+        }
+    }
+
+    @Test
+    func mainMenuHidesSecureKeyboardEntryNoticeWhenShortcutsAreAvailable() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+            manager.secureEventInputEnabledProvider = { false }
+
+            #expect(manager.mainMenuNoticeTitlesForTesting.isEmpty)
         }
     }
 
