@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/pastera_process.sh"
+
+open_setup_guide_for_console_user
+
+exit 0

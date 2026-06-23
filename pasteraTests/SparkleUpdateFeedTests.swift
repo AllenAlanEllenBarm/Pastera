@@ -136,7 +136,7 @@ struct PasteraGitHubReleaseUpdateCheckerTests {
     }
 
     @Test
-    func prefersDmgAssetForManualDownloads() throws {
+    func prefersPkgAssetForManualDownloads() throws {
         let checker = PasteraGitHubReleaseUpdateChecker()
         let update = try #require(try checker.availableUpdate(
             currentVersion: "1.2.2beta",
@@ -145,13 +145,14 @@ struct PasteraGitHubReleaseUpdateCheckerTests {
                     tag: "v2.0.1-beta",
                     assets: [
                         "Pastera-2.0.1-beta-macOS.zip",
-                        "Pastera-2.0.1-beta-macOS.dmg"
+                        "Pastera-2.0.1-beta-macOS.dmg",
+                        "Pastera-2.0.1-beta-macOS.pkg"
                     ]
                 )
             ])
         ))
 
-        #expect(update.assetURL?.lastPathComponent == "Pastera-2.0.1-beta-macOS.dmg")
+        #expect(update.assetURL?.lastPathComponent == "Pastera-2.0.1-beta-macOS.pkg")
     }
 
     @Test

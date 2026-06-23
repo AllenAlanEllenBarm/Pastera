@@ -16,6 +16,7 @@ TARGET_BUILD_ROOT="${DERIVED_DATA_PATH}/AppTargetBuild"
 TARGET_PRODUCTS_DIR="${TARGET_BUILD_ROOT}/Products"
 TARGET_OBJROOT="${TARGET_BUILD_ROOT}/Intermediates.noindex"
 BUILT_APP="${TARGET_PRODUCTS_DIR}/${CONFIGURATION}/${APP_BUNDLE}"
+APP_PATH="${DEST_APP}"
 
 SHOULD_BUILD=1
 SHOULD_LAUNCH=1
@@ -68,6 +69,9 @@ while (($#)); do
     esac
     shift
 done
+
+# shellcheck source=/dev/null
+. "${ROOT_DIR}/script/pastera_process.sh"
 
 XCODEBUILD_ARGS=(
     CODE_SIGN_IDENTITY=-
@@ -134,35 +138,6 @@ refresh_app_registration() {
     /usr/bin/killall iconservicesd >/dev/null 2>&1 || true
 }
 
-quit_running_app() {
-    if ! pgrep -x "${APP_NAME}" >/dev/null; then
-        return
-    fi
-
-    /usr/bin/osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 &
-    local quit_pid=$!
-    for _ in {1..10}; do
-        if ! kill -0 "${quit_pid}" >/dev/null 2>&1; then
-            wait "${quit_pid}" >/dev/null 2>&1 || true
-            break
-        fi
-        sleep 0.2
-    done
-    if kill -0 "${quit_pid}" >/dev/null 2>&1; then
-        kill "${quit_pid}" >/dev/null 2>&1 || true
-        wait "${quit_pid}" >/dev/null 2>&1 || true
-    fi
-
-    for _ in {1..20}; do
-        if ! pgrep -x "${APP_NAME}" >/dev/null; then
-            return
-        fi
-        sleep 0.2
-    done
-
-    pkill -x "${APP_NAME}" >/dev/null 2>&1 || true
-}
-
 verify_launched_app() {
     local expected_executable="${DEST_APP}/Contents/MacOS/${APP_NAME}"
 
@@ -199,7 +174,7 @@ install_app() {
         exit 1
     fi
 
-    quit_running_app
+    quit_running_pastera
     rm -rf "${DEST_APP}"
     /usr/bin/ditto "${BUILT_APP}" "${DEST_APP}"
     /usr/bin/codesign --force --deep --sign - "${DEST_APP}"

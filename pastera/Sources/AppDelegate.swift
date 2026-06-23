@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     private let screenshotObserver = ScreenShotObserver()
     private let disposeBag = DisposeBag()
     private var historySearchWindowController: HistorySearchWindowController?
+    private var setupGuideWindowController: PasteraSetupGuideWindowController?
     private let syncCoordinator = SyncCoordinator.shared
 
     @Dependency(\.context)
@@ -111,8 +112,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
             NSSound.beep()
             return
         }
-        AppEnvironment.current.pasteService.copyToPasteboard(with: snippet.content)
-        AppEnvironment.current.pasteService.paste(restoring: selectionRequest?.targetContext)
+        AppEnvironment.current.pasteService.pasteText(snippet.content, restoring: selectionRequest?.targetContext)
     }
 
     func terminateApplication() {
@@ -305,6 +305,28 @@ private final class HistorySearchCellView: NSTableCellView {
 
 // MARK: - NSApplication Delegate
 extension AppDelegate: NSApplicationDelegate {
+    private func showSetupGuideIfNeeded() {
+        let accessibilityService = AppEnvironment.current.accessibilityService
+        let defaults = AppEnvironment.current.defaults
+        let policy = PasteraSetupGuidePolicy(
+            arguments: ProcessInfo.processInfo.arguments,
+            isAccessibilityTrusted: accessibilityService.isAccessibilityEnabled(isPrompt: false),
+            didDismissSetupGuide: defaults.bool(forKey: Constants.UserDefaults.setupGuideDismissed)
+        )
+        guard policy.shouldShowSetupGuide else { return }
+
+        let controller = PasteraSetupGuideWindowController(
+            accessibilityService: accessibilityService,
+            defaults: defaults
+        )
+        controller.onClose = { [weak self] in
+            self?.setupGuideWindowController = nil
+        }
+        setupGuideWindowController = controller
+        controller.showWindow(self)
+        controller.window?.makeKeyAndOrderFront(self)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Environments
@@ -318,8 +340,7 @@ extension AppDelegate: NSApplicationDelegate {
         // SDKs
         CPYUtilities.initSDKs()
         InstallationLocationService().showMoveToApplicationsAlertIfNeeded()
-        // Check Accessibility Permission
-        AppEnvironment.current.accessibilityService.isAccessibilityEnabled(isPrompt: true)
+        showSetupGuideIfNeeded()
 
         // Show Login Item
         if !AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.loginItem) && !AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.suppressAlertForLoginItem) {

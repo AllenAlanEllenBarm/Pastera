@@ -145,7 +145,9 @@ final class PasteraGitHubReleaseUpdateChecker {
             .max { $0.version < $1.version }
 
         guard let latest else { return nil }
-        let asset = latest.release.assets.first { $0.name.hasSuffix(".dmg") } ?? latest.release.assets.first
+        let asset = latest.release.assets.first { $0.name.hasSuffix(".pkg") }
+            ?? latest.release.assets.first { $0.name.hasSuffix(".dmg") }
+            ?? latest.release.assets.first
         return PasteraAvailableUpdate(
             version: latest.version.displayString,
             releasePageURL: latest.release.htmlURL,

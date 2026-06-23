@@ -42,6 +42,66 @@ struct ReleasePackagingConfigurationTests {
     }
 
     @Test
+    func releasePackagingScriptIncludesInstallGuide() throws {
+        let script = try projectText("script/package_release_dmg.sh")
+
+        #expect(script.contains("prepare_install_guide_assets"))
+        #expect(script.contains("configure_dmg_window"))
+        #expect(script.contains("render_dmg_install_guide.swift"))
+        #expect(script.contains(".background"))
+        #expect(script.contains("pastera-dmg-guide.png"))
+        #expect(script.contains("bounds of container window of volumeRoot to {120, 120, 980, 660}"))
+        #expect(script.contains("icon size of icon view options of container window of volumeRoot to 96"))
+        #expect(script.contains("position of item \"Pastera.app\" of volumeRoot to {210, 285}"))
+        #expect(script.contains("position of item \"Applications\" of volumeRoot to {650, 285}"))
+        #expect(script.contains("position of item \"Open Privacy & Security.webloc\" of volumeRoot to {430, 430}"))
+        #expect(script.contains("Pastera 安装说明.txt"))
+        #expect(script.contains("Open Privacy & Security.webloc"))
+        #expect(script.contains("Open Anyway"))
+        #expect(script.contains("Control-click"))
+        #expect(script.contains("Privacy & Security"))
+        #expect(script.contains("Accessibility"))
+    }
+
+    @Test
+    func releasePackagingScriptCreatesSignedNotarizedPkg() throws {
+        let script = try projectText("script/package_release_pkg.sh")
+
+        #expect(script.contains("DEVELOPER_ID_APPLICATION"))
+        #expect(script.contains("DEVELOPER_ID_INSTALLER"))
+        #expect(script.contains("NOTARY_KEYCHAIN_PROFILE"))
+        #expect(script.contains("pkgbuild"))
+        #expect(script.contains("productbuild"))
+        #expect(script.contains("productsign"))
+        #expect(script.contains("notarytool submit"))
+        #expect(script.contains("stapler validate"))
+        #expect(script.contains("spctl -a -vv -t install"))
+        #expect(script.contains("--skip-notarization"))
+        #expect(script.contains("postinstall"))
+        #expect(script.contains("installer-resources"))
+        #expect(script.contains("Pastera-${VERSION}-macOS.pkg"))
+        #expect(script.contains("--pastera-open-setup-guide"))
+    }
+
+    @Test
+    func installerQuitsRunningPasteraBeforeReplacingApp() throws {
+        let packageScript = try projectText("script/package_release_pkg.sh")
+        let preinstall = try projectText("script/installer-resources/pkg/scripts/preinstall")
+        let processHelper = try projectText("script/pastera_process.sh")
+        let localInstall = try projectText("script/install_local.sh")
+
+        #expect(packageScript.contains("${RESOURCES_DIR}/scripts/preinstall"))
+        #expect(packageScript.contains("pastera_process.sh"))
+        #expect(preinstall.contains("quit_running_pastera"))
+        #expect(processHelper.contains("osascript"))
+        #expect(processHelper.contains("pkill -TERM -x"))
+        #expect(processHelper.contains("pkill -KILL -x"))
+        #expect(processHelper.contains("launchctl asuser"))
+        #expect(localInstall.contains("script/pastera_process.sh"))
+        #expect(localInstall.contains("quit_running_pastera"))
+    }
+
+    @Test
     func releasePackagingScriptSupportsLocalAdHocDryRun() throws {
         let script = try projectText("script/package_release_dmg.sh")
 
@@ -82,6 +142,22 @@ struct ReleasePackagingConfigurationTests {
         let uploadRange = try #require(workflow.range(of: "gh release upload"))
         let appcastRange = try #require(workflow.range(of: "script/update_appcast_for_dmg.sh"))
         #expect(uploadRange.lowerBound < appcastRange.lowerBound)
+    }
+
+    @Test
+    func releaseWorkflowPublishesPkgAssetWithoutRemovingDmgWorkflow() throws {
+        let workflow = try projectText(".github/workflows/release-pkg.yml")
+
+        #expect(workflow.contains("Build signed notarized PKG"))
+        #expect(workflow.contains("script/package_release_pkg.sh"))
+        #expect(workflow.contains("DEVELOPER_ID_APPLICATION"))
+        #expect(workflow.contains("DEVELOPER_ID_INSTALLER"))
+        #expect(workflow.contains("NOTARY_KEYCHAIN_PROFILE"))
+        #expect(workflow.contains("gh release upload"))
+        #expect(workflow.contains("Pastera-${{ inputs.version }}-macOS.pkg"))
+        #expect(!workflow.contains("script/update_appcast_for_dmg.sh"))
+
+        _ = try projectText(".github/workflows/release-dmg.yml")
     }
 
     private func projectText(_ path: String) throws -> String {

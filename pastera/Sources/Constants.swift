@@ -73,6 +73,7 @@ struct Constants {
         static let excludeApplications = "kCPYExcludeApplications"
         static let collectCrashReport = "kCPYCollectCrashReport"
         static let showColorPreviewInTheMenu = "kCPYPrefShowColorPreviewInTheMenu"
+        static let setupGuideDismissed = "kPasteraSetupGuideDismissed"
         static let syncRootPath = "kCPYSyncRootPath"
         static let syncAutomaticUploadEnabled = "kCPYSyncAutomaticUploadEnabled"
         static let syncAutomaticEnabled = "kCPYSyncAutomaticEnabled"

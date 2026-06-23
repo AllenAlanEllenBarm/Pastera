@@ -139,6 +139,45 @@ not enough.
 
 ## Release DMG Checks
 
+For GitHub Release manual downloads, publish the signed and notarized PKG as
+the recommended installer. Keep the DMG available as a fallback and as the
+Sparkle update artifact.
+
+Before publishing a public PKG release, build and upload the signed and
+notarized installer with:
+
+```bash
+DEVELOPER_ID_APPLICATION="Developer ID Application: Name (TEAMID)" \
+DEVELOPER_ID_INSTALLER="Developer ID Installer: Name (TEAMID)" \
+DEVELOPMENT_TEAM="TEAMID" \
+NOTARY_KEYCHAIN_PROFILE="PasteraNotary" \
+script/package_release_pkg.sh \
+  --version "2.0.1-beta"
+```
+
+For a local PKG dry run without Apple notarization credentials or Developer ID
+certificates, use:
+
+```bash
+script/package_release_pkg.sh --version "2.0.1-beta" --skip-notarization
+```
+
+This dry run ad-hoc signs the app locally and creates a PKG, but the output is
+not suitable for public distribution.
+
+The PKG installs `Pastera.app` into `/Applications`, shows Chinese-first
+Installer pages, and runs a postinstall script that opens Pastera with
+`--pastera-open-setup-guide` when a foreground user session exists. CLI, MDM, or
+no-GUI installs skip the auto-open step.
+
+Validate a public PKG with:
+
+```bash
+pkgutil --check-signature Pastera.pkg
+spctl -a -vv -t install Pastera.pkg
+xcrun stapler validate Pastera.pkg
+```
+
 Before publishing a public release, build the signed and notarized DMG and
 update Sparkle appcast with:
 
@@ -162,6 +201,15 @@ script/package_release.sh --version "2.0.1-beta" --skip-notarization
 
 This dry run ad-hoc signs the app locally and creates a DMG, but the output is
 not suitable for public distribution.
+
+Every DMG opens to a Finder install guide with a generated
+`.background/pastera-dmg-guide.png` background, fixed icon positions, and the
+fallback files `Pastera 安装说明.txt` and `Open Privacy & Security.webloc`. For
+ad-hoc dry runs, confirm the guide explains the Gatekeeper "Apple cannot verify"
+path through System Settings > Privacy & Security > Open Anyway or Control-click
+> Open, and that the webloc opens the Privacy & Security pane. This guide is
+only a user-facing fallback; Developer ID signing and notarization are still
+required to avoid the Gatekeeper warning on a clean Mac.
 
 The packaging script validates the app and DMG with:
 
@@ -191,7 +239,12 @@ into the repository or release notes.
 - Clean install: download the DMG on a macOS 13+ machine, mount it, drag
   `Pastera.app` to `/Applications`, launch it from `/Applications`, trigger a
   snippet hotkey, grant Accessibility when prompted, restart Pastera, and
-  confirm the hotkey no longer repeats the Accessibility alert.
+  confirm the hotkey no longer repeats the Accessibility alert. If testing an
+  ad-hoc DMG, first confirm Finder opens to the visual install guide, the
+  `Pastera.app`, `Applications`, and `Open Privacy & Security.webloc` icons are
+  positioned without covering text, `.background/pastera-dmg-guide.png` exists,
+  `.DS_Store` exists, and `Pastera 安装说明.txt` fallback steps match the current
+  macOS UI.
 - Direct-from-DMG guard: launch `Pastera.app` from the mounted DMG and confirm
   Pastera prompts the user to move the app to Applications before enabling
   Accessibility.

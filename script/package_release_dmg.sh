@@ -35,6 +35,75 @@ Optional:
 EOF
 }
 
+prepare_install_guide_assets() {
+    local background_dir="${STAGING_DIR}/.background"
+    local background_path="${background_dir}/pastera-dmg-guide.png"
+    local icon_path="${ROOT_DIR}/Resources/pastera_logo.png"
+
+    mkdir -p "${background_dir}"
+    /usr/bin/swift "${ROOT_DIR}/script/render_dmg_install_guide.swift" "${background_path}" "${icon_path}"
+    /usr/bin/chflags hidden "${background_dir}" 2>/dev/null || true
+
+    cat > "${STAGING_DIR}/Pastera 安装说明.txt" <<'EOF'
+Pastera 安装说明 / Install Guide
+
+1. Drag Pastera.app to Applications.
+
+2. If macOS shows "Apple cannot verify Pastera.app" or offers only Done and
+   Move to Trash, Pastera has not been accepted by Gatekeeper on this Mac yet.
+   Use one of Apple's standard allow paths:
+
+   - Double-click Open Privacy & Security.webloc in this DMG, then click
+     Open Anyway for Pastera.
+   - Open System Settings > Privacy & Security, then click Open Anyway for
+     Pastera.
+   - Or Control-click /Applications/Pastera.app, choose Open, then confirm Open.
+
+3. After Pastera opens, macOS may ask for Accessibility permission. Open System
+   Settings > Privacy & Security > Accessibility, enable Pastera, then restart
+   Pastera if the hotkey still asks for permission.
+
+If this DMG is signed with Developer ID and notarized, the "cannot verify"
+warning should not appear. If it still appears, check that you downloaded the
+latest DMG from the official GitHub release page.
+EOF
+
+    cat > "${STAGING_DIR}/Open Privacy & Security.webloc" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>URL</key>
+  <string>x-apple.systempreferences:com.apple.preference.security?General</string>
+</dict>
+</plist>
+EOF
+}
+
+configure_dmg_window() {
+    local volume_path="$1"
+
+    /usr/bin/osascript <<EOF
+tell application "Finder"
+    set volumeRoot to POSIX file "${volume_path}" as alias
+    open volumeRoot
+    set current view of container window of volumeRoot to icon view
+    set toolbar visible of container window of volumeRoot to false
+    set statusbar visible of container window of volumeRoot to false
+    set bounds of container window of volumeRoot to {120, 120, 980, 660}
+    set icon size of icon view options of container window of volumeRoot to 96
+    set arrangement of icon view options of container window of volumeRoot to not arranged
+    set background picture of icon view options of container window of volumeRoot to file ".background:pastera-dmg-guide.png" of volumeRoot
+    set position of item "Pastera.app" of volumeRoot to {210, 285}
+    set position of item "Applications" of volumeRoot to {650, 285}
+    set position of item "Open Privacy & Security.webloc" of volumeRoot to {430, 430}
+    update volumeRoot without registering applications
+    close container window of volumeRoot
+end tell
+EOF
+}
+
 while (($#)); do
     case "$1" in
         --version)
@@ -84,6 +153,7 @@ fi
 DMG_NAME="${APP_NAME}-${VERSION}-macOS.dmg"
 DMG_PATH="${OUTPUT_DIR}/${DMG_NAME}"
 APP_ZIP_PATH="${BUILD_ROOT}/${APP_NAME}-${VERSION}-macOS-app.zip"
+RW_DMG_PATH="${BUILD_ROOT}/${APP_NAME}-${VERSION}-macOS-rw.dmg"
 
 XCODEBUILD_ARGS=(
     -project "${PROJECT_PATH}"
@@ -147,8 +217,29 @@ rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}" "${OUTPUT_DIR}"
 /usr/bin/ditto "${APP_PATH}" "${STAGING_DIR}/${APP_NAME}.app"
 ln -s /Applications "${STAGING_DIR}/Applications"
+prepare_install_guide_assets
 rm -f "${DMG_PATH}"
-hdiutil create -volname "${APP_NAME}" -srcfolder "${STAGING_DIR}" -ov -format UDZO "${DMG_PATH}"
+rm -f "${RW_DMG_PATH}"
+hdiutil create -volname "${APP_NAME}" -srcfolder "${STAGING_DIR}" -ov -format UDRW "${RW_DMG_PATH}"
+
+MOUNT_DIR="$(mktemp -d "${BUILD_ROOT}/dmg-mount.XXXXXX")"
+cleanup_mount() {
+    if [[ -n "${MOUNT_DIR:-}" && -d "${MOUNT_DIR}" ]]; then
+        /usr/bin/hdiutil detach "${MOUNT_DIR}" >/dev/null 2>&1 || /usr/bin/hdiutil detach -force "${MOUNT_DIR}" >/dev/null 2>&1 || true
+        rmdir "${MOUNT_DIR}" 2>/dev/null || true
+    fi
+}
+trap cleanup_mount EXIT
+
+hdiutil attach -readwrite -noverify -noautoopen -mountpoint "${MOUNT_DIR}" "${RW_DMG_PATH}"
+configure_dmg_window "${MOUNT_DIR}"
+/bin/sync
+hdiutil detach "${MOUNT_DIR}"
+rmdir "${MOUNT_DIR}" 2>/dev/null || true
+MOUNT_DIR=""
+hdiutil convert "${RW_DMG_PATH}" -format UDZO -imagekey zlib-level=9 -o "${DMG_PATH}"
+rm -f "${RW_DMG_PATH}"
+trap - EXIT
 
 if [[ "${SKIP_NOTARIZATION}" != "1" ]]; then
     /usr/bin/codesign --force --sign "${DEVELOPER_ID_APPLICATION}" --timestamp "${DMG_PATH}"

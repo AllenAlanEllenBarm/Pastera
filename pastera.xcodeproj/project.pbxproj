@@ -44,6 +44,9 @@
 		C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100012FD750000B7C0DE /* InstallationLocationService.swift */; };
 		C5B100032FD750000B7C0DE /* InstallationLocationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */; };
 		C5B100052FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */; };
+		C5D100002FE010000B7C0DE /* PasteraSetupGuideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100012FE010000B7C0DE /* PasteraSetupGuideTests.swift */; };
+		C5D100022FE010000B7C0DE /* PasteraSetupGuideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */; };
+		C5D100042FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */; };
 		C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000012FD870000B7C0DE /* SyncCoordinator.swift */; };
 		C5C000022FD870000B7C0DE /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */; };
 		C5C000042FD870000B7C0DE /* CPYSyncPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */; };
@@ -243,6 +246,9 @@
 		C5B100012FD750000B7C0DE /* InstallationLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationLocationService.swift; sourceTree = "<group>"; };
 		C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationLocationServiceTests.swift; sourceTree = "<group>"; };
 		C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleasePackagingConfigurationTests.swift; sourceTree = "<group>"; };
+		C5D100012FE010000B7C0DE /* PasteraSetupGuideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideTests.swift; sourceTree = "<group>"; };
+		C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideService.swift; sourceTree = "<group>"; };
+		C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideStepRowView.swift; sourceTree = "<group>"; };
 		C5C000012FD870000B7C0DE /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
 		C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinatorTests.swift; sourceTree = "<group>"; };
 		C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSyncPreferenceViewController.swift; sourceTree = "<group>"; };
@@ -444,6 +450,8 @@
 				FA1189321E4CD58C00244F12 /* ExcludeAppService.swift */,
 				FAA4BCCB2163DC9100FF5D18 /* AccessibilityService.swift */,
 				C5B100012FD750000B7C0DE /* InstallationLocationService.swift */,
+				C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */,
+				C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */,
 				C5C000012FD870000B7C0DE /* SyncCoordinator.swift */,
 			);
 			path = Services;
@@ -717,6 +725,7 @@
 				C5A920012FD230000B7C0DE /* OpacityPreferenceTests.swift */,
 				C5B100022FD750000B7C0DE /* InstallationLocationServiceTests.swift */,
 				C5B100042FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift */,
+				C5D100012FE010000B7C0DE /* PasteraSetupGuideTests.swift */,
 				C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */,
 				FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */,
 				FA6167931D3ACCB90049FA14 /* DraggedDataTests.swift */,
@@ -892,6 +901,8 @@
 				FA1DB4BA1DDCB452007F95C8 /* NSUserDefaults+ArchiveData.swift in Sources */,
 				FAA4BCCC2163DC9100FF5D18 /* AccessibilityService.swift in Sources */,
 				C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */,
+				C5D100022FE010000B7C0DE /* PasteraSetupGuideService.swift in Sources */,
+				C5D100042FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift in Sources */,
 					C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */,
 					FA1DB4D31DDCB479007F95C8 /* CPYClip.swift in Sources */,
 					C5C000062FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift in Sources */,
@@ -981,6 +992,7 @@
 				C5A920002FD230000B7C0DE /* OpacityPreferenceTests.swift in Sources */,
 				C5B100032FD750000B7C0DE /* InstallationLocationServiceTests.swift in Sources */,
 				C5B100052FD750000B7C0DE /* ReleasePackagingConfigurationTests.swift in Sources */,
+				C5D100002FE010000B7C0DE /* PasteraSetupGuideTests.swift in Sources */,
 				C5C000022FD870000B7C0DE /* SyncCoordinatorTests.swift in Sources */,
 				C5A915002FD1A10000B7C0DE /* PasteboardHistorySearchPerformanceTests.swift in Sources */,
 				C5A916002FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift in Sources */,

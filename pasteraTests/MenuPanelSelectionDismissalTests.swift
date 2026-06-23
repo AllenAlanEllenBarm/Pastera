@@ -382,6 +382,45 @@ struct PasteServiceTargetRestoreTests {
         #expect(probe.events == ["schedule", "paste"])
     }
 
+    @Test
+    func secureEventInputPasteTextTypesSnippetTextAfterRestoringTarget() {
+        let context = makeTargetContext(processIdentifier: 7_575)
+        var isTargetFrontmost = false
+        let probe = PasteRestoreProbe()
+        let service = makePasteService(
+            context: context,
+            isTargetFrontmost: { isTargetFrontmost },
+            probe: probe,
+            isSecureEventInputEnabled: { true }
+        )
+
+        service.pasteText("ssh-password", restoring: context)
+
+        #expect(probe.events == ["activate", "schedule"])
+        isTargetFrontmost = true
+        probe.scheduledWork.removeFirst()()
+        #expect(probe.events == ["activate", "schedule", "focus", "schedule"])
+        probe.scheduledWork.removeFirst()()
+        #expect(probe.events == ["activate", "schedule", "focus", "schedule", "type:ssh-password"])
+    }
+
+    @Test
+    func pasteTextUsesPasteCommandWhenSecureEventInputIsNotActive() {
+        let context = makeTargetContext(processIdentifier: 8_686)
+        let probe = PasteRestoreProbe()
+        let service = makePasteService(
+            context: context,
+            isTargetFrontmost: { true },
+            probe: probe,
+            isSecureEventInputEnabled: { false }
+        )
+
+        service.pasteText("normal-snippet", restoring: context)
+        probe.scheduledWork.removeFirst()()
+
+        #expect(probe.events == ["activate", "focus", "schedule", "paste"])
+    }
+
     private func makeTargetContext(processIdentifier: pid_t) -> PasteTargetContext {
         PasteTargetContext(
             processIdentifier: processIdentifier,
@@ -394,7 +433,8 @@ struct PasteServiceTargetRestoreTests {
     private func makePasteService(
         context: PasteTargetContext,
         isTargetFrontmost: @escaping () -> Bool,
-        probe: PasteRestoreProbe
+        probe: PasteRestoreProbe,
+        isSecureEventInputEnabled: @escaping () -> Bool = { false }
     ) -> PasteService {
         PasteService(
             inputPasteCommandEnabledProvider: { true },
@@ -406,6 +446,8 @@ struct PasteServiceTargetRestoreTests {
             targetApplicationActivator: { _ in probe.events.append("activate") },
             focusedElementRestorer: { _ in probe.events.append("focus") },
             pasteCommandSender: { probe.events.append("paste") },
+            secureEventInputEnabledProvider: isSecureEventInputEnabled,
+            textInputSender: { text in probe.events.append("type:\(text)") },
             scheduleAfter: { delay, work in
                 #expect(delay == 0.02 || delay == 0.04)
                 probe.delays.append(delay)

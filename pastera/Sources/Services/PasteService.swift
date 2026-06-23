@@ -11,6 +11,7 @@
 //
 
 import Cocoa
+import Carbon
 import Dependencies
 import Foundation
 import Sauce
@@ -84,6 +85,8 @@ final class PasteService {
     var targetApplicationActivator: (PasteTargetContext) -> Void
     var focusedElementRestorer: (PasteTargetContext) -> Void
     var pasteCommandSender: () -> Void
+    var secureEventInputEnabledProvider: () -> Bool
+    var textInputSender: (String) -> Void
     var scheduleAfter: (TimeInterval, @escaping () -> Void) -> Void
 
     init(
@@ -106,6 +109,12 @@ final class PasteService {
         pasteCommandSender: @escaping () -> Void = {
             PasteService.postPasteCommand()
         },
+        secureEventInputEnabledProvider: @escaping () -> Bool = {
+            IsSecureEventInputEnabled()
+        },
+        textInputSender: @escaping (String) -> Void = { text in
+            PasteService.postTextInput(text)
+        },
         scheduleAfter: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
@@ -117,6 +126,8 @@ final class PasteService {
         self.targetApplicationActivator = targetApplicationActivator
         self.focusedElementRestorer = focusedElementRestorer
         self.pasteCommandSender = pasteCommandSender
+        self.secureEventInputEnabledProvider = secureEventInputEnabledProvider
+        self.textInputSender = textInputSender
         self.scheduleAfter = scheduleAfter
     }
 
@@ -271,6 +282,24 @@ extension PasteService {
     }
 
     func paste(restoring targetContext: PasteTargetContext?) {
+        paste(restoring: targetContext) { [weak self] in
+            self?.pasteCommandSender()
+        }
+    }
+
+    func pasteText(_ text: String, restoring targetContext: PasteTargetContext?) {
+        copyToPasteboard(with: text)
+        paste(restoring: targetContext) { [weak self] in
+            guard let self else { return }
+            if self.secureEventInputEnabledProvider() {
+                self.textInputSender(text)
+            } else {
+                self.pasteCommandSender()
+            }
+        }
+    }
+
+    private func paste(restoring targetContext: PasteTargetContext?, sendPaste: @escaping () -> Void) {
         guard inputPasteCommandEnabledProvider() else { return }
         // Check Accessibility Permission
         guard accessibilityEnabledProvider() else {
@@ -280,30 +309,36 @@ extension PasteService {
 
         guard let targetContext else {
             scheduleAfter(0) { [weak self] in
-                self?.pasteCommandSender()
+                guard self != nil else { return }
+                sendPaste()
             }
             return
         }
 
         targetApplicationActivator(targetContext)
-        waitForTargetAndPaste(targetContext, attempt: 0)
+        waitForTargetAndPaste(targetContext, attempt: 0, sendPaste: sendPaste)
     }
 
-    private func waitForTargetAndPaste(_ targetContext: PasteTargetContext, attempt: Int) {
+    private func waitForTargetAndPaste(
+        _ targetContext: PasteTargetContext,
+        attempt: Int,
+        sendPaste: @escaping () -> Void
+    ) {
         if frontmostProcessIdentifierProvider() == targetContext.processIdentifier || attempt >= RestoreMetrics.maxAttempts {
-            restoreFocusThenPaste(targetContext)
+            restoreFocusThenPaste(targetContext, sendPaste: sendPaste)
             return
         }
 
         scheduleAfter(RestoreMetrics.interval) { [weak self] in
-            self?.waitForTargetAndPaste(targetContext, attempt: attempt + 1)
+            self?.waitForTargetAndPaste(targetContext, attempt: attempt + 1, sendPaste: sendPaste)
         }
     }
 
-    private func restoreFocusThenPaste(_ targetContext: PasteTargetContext) {
+    private func restoreFocusThenPaste(_ targetContext: PasteTargetContext, sendPaste: @escaping () -> Void) {
         focusedElementRestorer(targetContext)
         scheduleAfter(RestoreMetrics.focusSettleDelay) { [weak self] in
-            self?.pasteCommandSender()
+            guard self != nil else { return }
+            sendPaste()
         }
     }
 
@@ -334,5 +369,27 @@ extension PasteService {
         // Post Paste Command
         keyVDown?.post(tap: .cgAnnotatedSessionEventTap)
         keyVUp?.post(tap: .cgAnnotatedSessionEventTap)
+    }
+
+    private static func postTextInput(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        let source = CGEventSource(stateID: .combinedSessionState)
+        source?.setLocalEventsFilterDuringSuppressionState(
+            [.permitLocalMouseEvents, .permitSystemDefinedEvents],
+            state: .eventSuppressionStateSuppressionInterval
+        )
+
+        for character in text {
+            let utf16 = Array(String(character).utf16)
+            utf16.withUnsafeBufferPointer { buffer in
+                let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
+                keyDown?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: buffer.baseAddress)
+                let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+                keyUp?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: buffer.baseAddress)
+                keyDown?.post(tap: .cgAnnotatedSessionEventTap)
+                keyUp?.post(tap: .cgAnnotatedSessionEventTap)
+            }
+        }
     }
 }
