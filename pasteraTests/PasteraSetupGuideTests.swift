@@ -16,6 +16,7 @@ struct PasteraSetupGuideTests {
         let policy = PasteraSetupGuidePolicy(
             arguments: [],
             isAccessibilityTrusted: true,
+            isAutomaticPasteEnabled: false,
             didDismissSetupGuide: false
         )
 
@@ -27,6 +28,7 @@ struct PasteraSetupGuideTests {
         let policy = PasteraSetupGuidePolicy(
             arguments: ["Pastera", "--pastera-open-setup-guide"],
             isAccessibilityTrusted: true,
+            isAutomaticPasteEnabled: false,
             didDismissSetupGuide: true
         )
 
@@ -34,10 +36,23 @@ struct PasteraSetupGuideTests {
     }
 
     @Test
-    func firstUnauthorizedLaunchShowsSetupGuide() {
+    func unauthorizedLaunchDoesNotShowSetupGuideWhenAutomaticPasteIsDisabled() {
         let policy = PasteraSetupGuidePolicy(
             arguments: [],
             isAccessibilityTrusted: false,
+            isAutomaticPasteEnabled: false,
+            didDismissSetupGuide: false
+        )
+
+        #expect(!policy.shouldShowSetupGuide)
+    }
+
+    @Test
+    func unauthorizedLaunchShowsSetupGuideWhenAutomaticPasteIsEnabled() {
+        let policy = PasteraSetupGuidePolicy(
+            arguments: [],
+            isAccessibilityTrusted: false,
+            isAutomaticPasteEnabled: true,
             didDismissSetupGuide: false
         )
 
@@ -49,6 +64,7 @@ struct PasteraSetupGuideTests {
         let policy = PasteraSetupGuidePolicy(
             arguments: [],
             isAccessibilityTrusted: false,
+            isAutomaticPasteEnabled: true,
             didDismissSetupGuide: true
         )
 

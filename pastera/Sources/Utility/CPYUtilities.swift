@@ -74,7 +74,7 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: 2), forKey: Constants.UserDefaults.showStatusItem)
         let storeTypes = PasteboardAvailableType.allCases.reduce(into: [:]) { $0[$1.rawValue] = NSNumber(value: true) }
         defaultValues.updateValue(storeTypes, forKey: Constants.UserDefaults.storeTypes)
-        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.inputPasteCommand)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.inputPasteCommand)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.reorderClipsAfterPasting)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.collectCrashReport)
 

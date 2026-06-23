@@ -356,6 +356,11 @@ struct GeneralPreferenceMergedMenuTests {
             in: buttonFrames
         )
         let colorPreviewFrame = try frame(of: ["Show color code preview", "为颜色代码显示预览"], in: buttonFrames)
+        let automaticPasteFrame = try frame(of: ["Automatic Paste", "自动粘贴"], in: buttonFrames)
+        let automaticPasteInfoFrame = try frame(
+            of: ["Automatic Paste Permission Info", "自动粘贴权限说明"],
+            in: buttonFrames
+        )
         let opacityFrame = try textFrame(of: ["Transparency", "透明度"], in: textFields)
         let menuTitleLengthFrame = try textFrame(
             of: ["Number of characters in the menu:", "菜单中字符的个数："],
@@ -368,7 +373,9 @@ struct GeneralPreferenceMergedMenuTests {
             menuTitleLengthFrame,
             reorderFrame,
             moveFrame,
-            colorPreviewFrame
+            colorPreviewFrame,
+            automaticPasteFrame,
+            automaticPasteInfoFrame
         ].reduce(NSRect.null) { $0.union($1) }
 
         #expect(!sidebarButtonTitles.contains { ["Menu", "菜单"].contains($0) })
@@ -383,11 +390,33 @@ struct GeneralPreferenceMergedMenuTests {
             menuTitleLengthFrame,
             reorderFrame,
             moveFrame,
-            colorPreviewFrame
+            colorPreviewFrame,
+            automaticPasteFrame,
+            automaticPasteInfoFrame
         ] {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
         }
+        #expect(automaticPasteInfoFrame.minX > automaticPasteFrame.minX)
+        #expect(abs(automaticPasteInfoFrame.midY - automaticPasteFrame.midY) <= 2)
+    }
+
+    @Test
+    func enablingAutomaticPasteRequestsAccessibilityGuidance() throws {
+        let controller = CPYGeneralPreferenceViewController(nibName: "CPYGeneralPreferenceViewController", bundle: nil)
+        var requestCount = 0
+        controller.automaticPastePermissionRequester = {
+            requestCount += 1
+        }
+
+        _ = controller.view
+        let automaticPasteButton = try #require(preferenceButtons(in: controller.view)
+            .first { ["Automatic Paste", "自动粘贴"].contains($0.accessibilityLabel() ?? $0.title) })
+
+        automaticPasteButton.state = .off
+        automaticPasteButton.performClick(nil)
+
+        #expect(requestCount == 1)
     }
 
     private let removedButtonTitles: Set<String> = [
@@ -438,7 +467,10 @@ struct GeneralPreferenceMergedMenuTests {
 
     private func preferenceButtonFrames(in view: NSView) -> [(title: String, frame: NSRect)] {
         preferenceButtons(in: view).map { button in
-            (title: button.title, frame: view.convert(button.frame, from: button.superview))
+            (
+                title: button.accessibilityLabel() ?? button.title,
+                frame: view.convert(button.frame, from: button.superview)
+            )
         }
     }
 

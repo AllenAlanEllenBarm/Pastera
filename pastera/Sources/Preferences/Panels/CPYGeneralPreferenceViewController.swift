@@ -29,8 +29,21 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         target: nil,
         action: nil
     )
+    private let automaticPasteButton = NSButton(
+        checkboxWithTitle: localizedPreferenceString("Automatic Paste"),
+        target: nil,
+        action: nil
+    )
+    private let automaticPasteInfoButton = NSButton(title: "", target: nil, action: nil)
     private var didInstallAdditionalControls = false
     private weak var launchOnLoginButton: NSButton?
+    var automaticPastePermissionRequester: () -> Void = {
+        let accessibilityService = AppEnvironment.current.accessibilityService
+        guard !accessibilityService.isAccessibilityEnabled(isPrompt: false) else { return }
+
+        _ = accessibilityService.isAccessibilityEnabled(isPrompt: true)
+        _ = accessibilityService.openAccessibilitySettingWindow()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -46,6 +59,23 @@ final class CPYGeneralPreferenceViewController: NSViewController {
     @objc private func opacitySliderChanged(_ sender: NSSlider) {
         CPYWindowAppearance.setOpacity(sender.doubleValue)
         updateOpacityControls()
+    }
+
+    @objc private func automaticPasteButtonChanged(_ sender: NSButton) {
+        guard sender.state == .on else { return }
+        automaticPastePermissionRequester()
+    }
+
+    @objc private func showAutomaticPasteInfo(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = localizedPreferenceString(
+            "Why Accessibility is required",
+            value: "Why Accessibility is required"
+        )
+        alert.informativeText = automaticPastePermissionDescription()
+        alert.addButton(withTitle: localizedPreferenceString("OK", value: "OK"))
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func installAdditionalControls() {
@@ -92,6 +122,16 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         overwriteSameHistoryButton.bindEnabled(to: Constants.UserDefaults.copySameHistory)
         menuTitleLengthField.bindValue(to: Constants.UserDefaults.maxMenuItemTitleLength)
         showColorPreviewButton.bindValue(to: Constants.UserDefaults.showColorPreviewInTheMenu)
+        automaticPasteButton.bindValue(to: Constants.UserDefaults.inputPasteCommand)
+        automaticPasteButton.target = self
+        automaticPasteButton.action = #selector(automaticPasteButtonChanged(_:))
+        automaticPasteButton.setAccessibilityLabel(localizedPreferenceString("Automatic Paste"))
+
+        automaticPasteInfoButton.bezelStyle = .helpButton
+        automaticPasteInfoButton.target = self
+        automaticPasteInfoButton.action = #selector(showAutomaticPasteInfo(_:))
+        automaticPasteInfoButton.toolTip = automaticPastePermissionDescription()
+        automaticPasteInfoButton.setAccessibilityLabel(localizedPreferenceString("Automatic Paste Permission Info"))
 
         [
             clearHistoryButton,
@@ -103,7 +143,9 @@ final class CPYGeneralPreferenceViewController: NSViewController {
             menuTitleLengthUnitLabel,
             copySameHistoryButton,
             overwriteSameHistoryButton,
-            showColorPreviewButton
+            showColorPreviewButton,
+            automaticPasteButton,
+            automaticPasteInfoButton
         ].forEach {
             $0.autoresizingMask = [.maxXMargin, .maxYMargin]
             CPYWindowAppearance.apply(to: $0)
@@ -125,10 +167,12 @@ final class CPYGeneralPreferenceViewController: NSViewController {
 
     private func layoutAdditionalControls() {
         let contentLeftX: CGFloat = 59
-        let topY: CGFloat = 230
+        let topY: CGFloat = 245
         let controlMaxX = min(view.bounds.width - 18, 438)
         let checkboxHeight: CGFloat = 18
         let checkboxWidth = max(180, controlMaxX - contentLeftX)
+        let automaticPasteWidth: CGFloat = 150
+        let helpButtonSize = NSSize(width: 20, height: 20)
         let clearHistoryButtonSize = NSSize(width: 118, height: 24)
         let numberFieldSize = NSSize(width: 58, height: 22)
         let unitLabelSize = NSSize(width: 58, height: 14)
@@ -167,6 +211,13 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         copySameHistoryButton.frame = NSRect(x: contentLeftX, y: topY - 136, width: checkboxWidth, height: checkboxHeight)
         overwriteSameHistoryButton.frame = NSRect(x: contentLeftX + 15, y: topY - 166, width: checkboxWidth - 15, height: checkboxHeight)
         showColorPreviewButton.frame = NSRect(x: contentLeftX, y: topY - 196, width: checkboxWidth, height: checkboxHeight)
+        automaticPasteButton.frame = NSRect(x: contentLeftX, y: topY - 226, width: automaticPasteWidth, height: checkboxHeight)
+        automaticPasteInfoButton.frame = NSRect(
+            x: contentLeftX + automaticPasteWidth + 4,
+            y: topY - 228,
+            width: helpButtonSize.width,
+            height: helpButtonSize.height
+        )
     }
 
     private func updateOpacityControls(opacity: Double = CPYWindowAppearance.opacity()) {
@@ -176,8 +227,15 @@ final class CPYGeneralPreferenceViewController: NSViewController {
     }
 }
 
-private func localizedPreferenceString(_ key: String) -> String {
-    Bundle.main.localizedString(forKey: key, value: key, table: "CPYGeneralPreferenceViewController")
+private func automaticPastePermissionDescription() -> String {
+    localizedPreferenceString(
+        "Automatic Paste Permission Description",
+        value: "When Automatic Paste is enabled, Pastera restores the target app and sends Command+V after you choose a history item or snippet. macOS requires Accessibility permission for that action. When this is off, Pastera only copies to the clipboard and you paste manually."
+    )
+}
+
+private func localizedPreferenceString(_ key: String, value: String? = nil) -> String {
+    Bundle.main.localizedString(forKey: key, value: value ?? key, table: "CPYGeneralPreferenceViewController")
 }
 
 private extension NSControl {

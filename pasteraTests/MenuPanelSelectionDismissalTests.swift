@@ -353,11 +353,41 @@ struct PasteServiceTargetRestoreTests {
     }
 
     @Test
-    func defaultPasteServicePastesEvenWhenLegacyPreferenceWasDisabled() throws {
-        let suiteName = "PasteServiceTargetRestoreTests.directPaste.\(UUID().uuidString)"
+    func defaultPasteServiceSkipsAutomaticPasteWhenPreferenceIsDisabled() throws {
+        let suiteName = "PasteServiceTargetRestoreTests.autoPasteDisabled.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(false, forKey: Constants.UserDefaults.inputPasteCommand)
+        AppEnvironment.push(defaults: defaults)
+        defer { _ = AppEnvironment.popLast() }
+
+        let probe = PasteRestoreProbe()
+        let service = PasteService(
+            accessibilityEnabledProvider: { true },
+            accessibilityAlertPresenter: { probe.events.append("alert") },
+            frontmostProcessIdentifierProvider: { 0 },
+            targetApplicationActivator: { _ in probe.events.append("activate") },
+            focusedElementRestorer: { _ in probe.events.append("focus") },
+            pasteCommandSender: { probe.events.append("paste") },
+            scheduleAfter: { delay, work in
+                probe.delays.append(delay)
+                probe.events.append("schedule")
+                work()
+            }
+        )
+
+        service.paste()
+
+        #expect(probe.delays.isEmpty)
+        #expect(probe.events.isEmpty)
+    }
+
+    @Test
+    func defaultPasteServiceSendsPasteWhenAutomaticPasteIsEnabled() throws {
+        let suiteName = "PasteServiceTargetRestoreTests.autoPasteEnabled.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: Constants.UserDefaults.inputPasteCommand)
         AppEnvironment.push(defaults: defaults)
         defer { _ = AppEnvironment.popLast() }
 

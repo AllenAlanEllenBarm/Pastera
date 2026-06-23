@@ -6,6 +6,7 @@ struct PasteraSetupGuidePolicy {
 
     let arguments: [String]
     let isAccessibilityTrusted: Bool
+    let isAutomaticPasteEnabled: Bool
     let didDismissSetupGuide: Bool
 
     var shouldShowSetupGuide: Bool {
@@ -13,6 +14,9 @@ struct PasteraSetupGuidePolicy {
             return true
         }
         if isAccessibilityTrusted {
+            return false
+        }
+        guard isAutomaticPasteEnabled else {
             return false
         }
         return !didDismissSetupGuide

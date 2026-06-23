@@ -251,7 +251,7 @@ struct OpacityPreferenceTests {
     }
 
     @Test
-    func simplifiedGeneralDefaultsKeepDirectPasteAndNoCrashReports() throws {
+    func simplifiedGeneralDefaultsKeepAutomaticPasteOffAndNoCrashReports() throws {
         let suiteName = "OpacityPreferenceTests.simplifiedDefaults.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -260,7 +260,7 @@ struct OpacityPreferenceTests {
 
         CPYUtilities.registerUserDefaultKeys()
 
-        #expect(defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand))
+        #expect(!defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand))
         #expect(defaults.object(forKey: Constants.UserDefaults.showAlertBeforeClearHistory) == nil)
         #expect(!defaults.bool(forKey: Constants.UserDefaults.collectCrashReport))
         #expect(defaults.bool(forKey: Constants.Beta.observerScreenshot))

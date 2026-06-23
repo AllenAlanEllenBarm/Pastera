@@ -311,6 +311,7 @@ extension AppDelegate: NSApplicationDelegate {
         let policy = PasteraSetupGuidePolicy(
             arguments: ProcessInfo.processInfo.arguments,
             isAccessibilityTrusted: accessibilityService.isAccessibilityEnabled(isPrompt: false),
+            isAutomaticPasteEnabled: defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand),
             didDismissSetupGuide: defaults.bool(forKey: Constants.UserDefaults.setupGuideDismissed)
         )
         guard policy.shouldShowSetupGuide else { return }
