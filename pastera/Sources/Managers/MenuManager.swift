@@ -738,13 +738,22 @@ extension MenuManager {
 
         menuItem.image = presentation.image
 
-        menuItem.view = HistoryMenuRowView(title: menuItem.title, image: menuItem.image, shortcutText: shortcutText) { [weak menuItem] in
-            guard let menuItem else { return }
-            menuItem.menu?.cancelTracking()
-            DispatchQueue.main.async {
-                NSApp.sendAction(#selector(AppDelegate.selectClipMenuItem(_:)), to: nil, from: menuItem)
+        menuItem.view = HistoryMenuRowView(
+            title: menuItem.title,
+            image: menuItem.image,
+            shortcutText: shortcutText,
+            onDelete: { [weak self, weak menuItem] in
+                menuItem?.menu?.cancelTracking()
+                self?.deleteHistory(history.id)
+            },
+            onConfirm: { [weak menuItem] in
+                guard let menuItem else { return }
+                menuItem.menu?.cancelTracking()
+                DispatchQueue.main.async {
+                    NSApp.sendAction(#selector(AppDelegate.selectClipMenuItem(_:)), to: nil, from: menuItem)
+                }
             }
-        }
+        )
 
         return menuItem
     }
@@ -757,7 +766,13 @@ extension MenuManager {
             listNumber: listNumber,
             usesLeadingNumber: false
         )
-        return HistoryMenuRowView(title: presentation.title, image: presentation.image, shortcutText: shortcutText, onConfirm: onConfirm)
+        return HistoryMenuRowView(
+            title: presentation.title,
+            image: presentation.image,
+            shortcutText: shortcutText,
+            onDelete: { [weak self] in self?.deleteHistory(historyDetail.history.id) },
+            onConfirm: onConfirm
+        )
     }
 
     func makeHistoryItemPresentation(
@@ -820,6 +835,10 @@ extension MenuManager {
         selectionActionScheduler(SelectionActionMetrics.delay) {
             NSApp.sendAction(#selector(AppDelegate.selectClipMenuItem(_:)), to: nil, from: menuItem)
         }
+    }
+
+    func deleteHistory(_ historyID: PasteboardHistory.ID) {
+        pasteboardHistoryRepository.deleteHistory(id: historyID)
     }
 }
 

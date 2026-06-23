@@ -554,6 +554,11 @@ private final class SnippetBrowserFolderRowView: NSControl {
 }
 
 private final class SnippetBrowserSnippetRowView: NSControl {
+    private enum Metrics {
+        static let horizontalInset: CGFloat = 14
+        static let shortcutSpacing: CGFloat = 8
+    }
+
     private let titleLabel = NSTextField(labelWithString: "")
     private let shortcutBadge = PasteraShortcutBadgeView()
     private let onConfirm: () -> Void
@@ -601,18 +606,21 @@ private final class SnippetBrowserSnippetRowView: NSControl {
         shortcutBadge.style = .itemNumber
         shortcutBadge.shortcutText = shortcutText
 
-        [titleLabel, shortcutBadge].forEach {
+        [shortcutBadge, titleLabel].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
 
-        NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        let hasShortcut = shortcutText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let shortcutSpacing = hasShortcut ? Metrics.shortcutSpacing : 0
 
-            shortcutBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor)
+        NSLayoutConstraint.activate([
+            shortcutBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalInset),
+            shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            titleLabel.leadingAnchor.constraint(equalTo: shortcutBadge.trailingAnchor, constant: shortcutSpacing),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Metrics.horizontalInset),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
 
         updateAppearance()

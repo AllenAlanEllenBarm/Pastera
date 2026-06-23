@@ -96,7 +96,7 @@ struct SnippetBrowserPanelTests {
             #expect(controller.rowTitlesForTesting == ["Ask GPT"])
             #expect(controller.rowShortcutTextsForTesting == ["1"])
             #expect(controller.rowShortcutStylesForTesting == [.itemNumber])
-            #expect(controller.rowTextValuesForTesting == [["Ask GPT", "1"]])
+            #expect(controller.rowTextValuesForTesting == [["1", "Ask GPT"]])
             #expect(!controller.rowTextValuesForTesting.flatMap { $0 }.contains("Summarize this"))
             #expect(SnippetBrowserLayout.rowHeight == 24)
             #expect(controller.visibleFrame?.height == 36)
@@ -215,29 +215,6 @@ struct SnippetBrowserPanelTests {
         #expect(shortcuts[String(localized: "Edit Snippets")] == nil)
         #expect(shortcuts[String(localized: "Preferences")] == nil)
         #expect(shortcuts[String(localized: "Quit Pastera")] == nil)
-    }
-
-    @Test
-    func historyRowDisplaysNumericShortcutOnRightWithoutTitlePrefix() throws {
-        try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
-            let manager = MenuManager()
-            let detail = PasteboardHistoryDetail(
-                history: PasteboardHistory(
-                    id: PasteboardHistory.ID("history-1"),
-                    title: "First History",
-                    pasteboardTypes: [.string],
-                    updateAt: 1,
-                    deviceID: CPYUtilities.deviceID
-                ),
-                thumbnailAsset: nil
-            )
-
-            let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
-
-            #expect(row.textValuesForTesting.contains("First History"))
-            #expect(row.textValuesForTesting.contains("1"))
-            #expect(!row.textValuesForTesting.contains("1. First History"))
-        }
     }
 
     @Test
@@ -478,6 +455,108 @@ struct SnippetBrowserPanelTests {
 
 }
 
+extension SnippetBrowserPanelTests {
+    @Test
+    func historyRowDisplaysNumericShortcutOnLeftWithoutTitlePrefix() throws {
+        try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
+            let manager = MenuManager()
+            let detail = PasteboardHistoryDetail(
+                history: PasteboardHistory(
+                    id: PasteboardHistory.ID("history-1"),
+                    title: "First History",
+                    pasteboardTypes: [.string],
+                    updateAt: 1,
+                    deviceID: CPYUtilities.deviceID
+                ),
+                thumbnailAsset: nil
+            )
+
+            let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
+            row.layoutSubtreeIfNeeded()
+            let titleLabel = try #require(row.subviews.compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == "First History" })
+            let shortcutBadge = try #require(row.subviews.compactMap { $0 as? PasteraShortcutBadgeView }
+                .first { $0.shortcutTextForTesting == "1" })
+
+            #expect(row.textValuesForTesting.contains("First History"))
+            #expect(row.textValuesForTesting.contains("1"))
+            #expect(!row.textValuesForTesting.contains("1. First History"))
+            #expect(shortcutBadge.frame.minX < titleLabel.frame.minX)
+        }
+    }
+
+    @Test
+    func historyRowDeleteButtonDeletesHistoryFromRightEdge() throws {
+        try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
+            let historyID = PasteboardHistory.ID("history-delete")
+            let detail = PasteboardHistoryDetail(
+                history: PasteboardHistory(
+                    id: historyID,
+                    title: "Delete Me",
+                    pasteboardTypes: [.string],
+                    updateAt: 1,
+                    deviceID: CPYUtilities.deviceID
+                ),
+                thumbnailAsset: nil
+            )
+            let repository = RecordingHistoryDeletionRepository(details: [detail])
+
+            let managerAndRow = withDependencies {
+                $0.pasteboardHistoryRepository = repository
+            } operation: {
+                let manager = MenuManager()
+                return (manager, manager.makeHistoryRowViewForTesting(detail, index: 0))
+            }
+            let row = managerAndRow.1
+            row.layoutSubtreeIfNeeded()
+            let titleLabel = try #require(row.subviews.compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == "Delete Me" })
+            let deleteButton = try #require(row.subviews.compactMap { $0 as? NSButton }
+                .first { $0.identifier?.rawValue == "historyRowDeleteButton" })
+
+            #expect(deleteButton.image != nil)
+            #expect(deleteButton.frame.minX > titleLabel.frame.maxX)
+
+            withExtendedLifetime(managerAndRow.0) {
+                deleteButton.performClick(nil)
+            }
+
+            #expect(repository.deletedHistoryIDs == [historyID])
+        }
+    }
+
+    @Test
+    func deletingHistoryDoesNotReloadVisiblePanelBeforeRepositoryChange() throws {
+        let historyID = PasteboardHistory.ID("history-delete-no-reload")
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: historyID,
+                title: "Delete Without Extra Reload",
+                pasteboardTypes: [.string],
+                updateAt: 1,
+                deviceID: CPYUtilities.deviceID
+            ),
+            thumbnailAsset: nil
+        )
+        let repository = RecordingHistoryDeletionRepository(details: [detail])
+
+        withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let manager = MenuManager()
+            manager.showHistoryBrowserPanelForTesting(at: NSPoint(x: 200, y: 500))
+            defer { manager.closeHistoryBrowserPanelForTesting() }
+
+            let initialSearchCount = repository.searchHistoryDetailsCallCount
+
+            manager.deleteHistory(historyID)
+
+            #expect(repository.deletedHistoryIDs == [historyID])
+            #expect(repository.searchHistoryDetailsCallCount == initialSearchCount)
+        }
+    }
+}
+
 @MainActor
 private func withSnippetFolderPanel(
     folderID: SnippetFolder.ID,
@@ -522,6 +601,57 @@ private struct EmptyHistoryRepository: PasteboardHistoryRepositoryProtocol {
     func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
     func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {}
     func deleteHistory(id: PasteboardHistory.ID) {}
+    func deleteAll() {}
+    func deleteOverflowingHistories(maxHistorySize: Int) {}
+    func pruneHistories(settings: HistoryRetentionSettings) {}
+}
+
+private final class RecordingHistoryDeletionRepository: PasteboardHistoryRepositoryProtocol {
+    let details: [PasteboardHistoryDetail]
+    private(set) var deletedHistoryIDs = [PasteboardHistory.ID]()
+    private(set) var searchHistoryDetailsCallCount = 0
+
+    init(details: [PasteboardHistoryDetail]) {
+        self.details = details
+    }
+
+    func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
+        Just(details.map(\.history)).eraseToAnyPublisher()
+    }
+
+    func hasHistories() -> Bool { !details.isEmpty }
+
+    func fetchHistoryDetails(
+        ascending: Bool,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) -> [PasteboardHistoryDetail] {
+        Array(details.dropFirst(offset).prefix(limit))
+    }
+
+    func searchHistoryDetails(
+        query: HistorySearchQuery,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) throws -> [PasteboardHistoryDetail] {
+        searchHistoryDetailsCallCount += 1
+        return fetchHistoryDetails(
+            ascending: true,
+            includesThumbnailAsset: includesThumbnailAsset,
+            limit: limit,
+            offset: offset
+        )
+    }
+
+    func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? {
+        details.first { $0.history.id == id }?.history
+    }
+
+    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
+    func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {}
+    func deleteHistory(id: PasteboardHistory.ID) { deletedHistoryIDs.append(id) }
     func deleteAll() {}
     func deleteOverflowingHistories(maxHistorySize: Int) {}
     func pruneHistories(settings: HistoryRetentionSettings) {}

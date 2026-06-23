@@ -21,6 +21,8 @@ final class HistoryMenuRowView: NSControl {
         static let imageWidth: CGFloat = 52
         static let imageHeight: CGFloat = 32
         static let textSpacing: CGFloat = 10
+        static let shortcutSpacing: CGFloat = 8
+        static let deleteButtonSize: CGFloat = 24
     }
 
     private static let imagePreviewController = HistoryMenuImagePreviewController()
@@ -28,7 +30,9 @@ final class HistoryMenuRowView: NSControl {
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let shortcutBadge = PasteraShortcutBadgeView()
+    private let deleteButton = NSButton()
     private let onConfirm: () -> Void
+    private let onDelete: (() -> Void)?
     private let previewImage: NSImage?
     private var trackingArea: NSTrackingArea?
     private var isMouseInside = false
@@ -36,8 +40,15 @@ final class HistoryMenuRowView: NSControl {
     var onLogicalFocusChange: (() -> Void)?
     var onKeyboardEvent: ((NSEvent) -> Bool)?
 
-    init(title: String, image: NSImage?, shortcutText: String? = nil, onConfirm: @escaping () -> Void) {
+    init(
+        title: String,
+        image: NSImage?,
+        shortcutText: String? = nil,
+        onDelete: (() -> Void)? = nil,
+        onConfirm: @escaping () -> Void
+    ) {
         self.onConfirm = onConfirm
+        self.onDelete = onDelete
         self.previewImage = image
         let height = image == nil ? Metrics.textRowHeight : Metrics.imageRowHeight
         super.init(frame: NSRect(x: 0, y: 0, width: Metrics.width, height: height))
@@ -89,6 +100,7 @@ final class HistoryMenuRowView: NSControl {
     override func mouseUp(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         guard bounds.contains(location) else { return }
+        guard deleteButton.isHidden || !deleteButton.frame.contains(location) else { return }
         confirm()
     }
 
@@ -153,23 +165,49 @@ final class HistoryMenuRowView: NSControl {
         shortcutBadge.style = .itemNumber
         shortcutBadge.shortcutText = shortcutText
 
-        [imageView, titleLabel, shortcutBadge].forEach {
+        deleteButton.identifier = NSUserInterfaceItemIdentifier("historyRowDeleteButton")
+        deleteButton.setButtonType(.momentaryPushIn)
+        deleteButton.bezelStyle = .inline
+        deleteButton.isBordered = false
+        deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        deleteButton.imagePosition = .imageOnly
+        deleteButton.contentTintColor = .tertiaryLabelColor
+        deleteButton.toolTip = String(localized: "Delete History")
+        deleteButton.setAccessibilityLabel(String(localized: "Delete History"))
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteButtonClicked(_:))
+        deleteButton.isHidden = onDelete == nil
+
+        [shortcutBadge, imageView, titleLabel, deleteButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
 
+        let hasShortcut = shortcutText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let shortcutSpacing: CGFloat = hasShortcut ? Metrics.shortcutSpacing : 0
+        let deleteButtonWidth: CGFloat = onDelete == nil ? 0 : Metrics.deleteButtonSize
+        let deleteButtonSpacing: CGFloat = onDelete == nil ? 0 : -6
+
         NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalInset),
+            shortcutBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalInset),
+            shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            imageView.leadingAnchor.constraint(equalTo: shortcutBadge.trailingAnchor, constant: shortcutSpacing),
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: hasImage ? Metrics.imageWidth : 0),
             imageView.heightAnchor.constraint(equalToConstant: hasImage ? Metrics.imageHeight : 0),
 
-            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: hasImage ? Metrics.textSpacing : 0),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
+            titleLabel.leadingAnchor.constraint(
+                equalTo: hasImage ? imageView.trailingAnchor : shortcutBadge.trailingAnchor,
+                constant: hasImage ? Metrics.textSpacing : shortcutSpacing
+            ),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: deleteButton.leadingAnchor, constant: deleteButtonSpacing),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            shortcutBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
-            shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor)
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
+            deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            deleteButton.widthAnchor.constraint(equalToConstant: deleteButtonWidth),
+            deleteButton.heightAnchor.constraint(equalToConstant: Metrics.deleteButtonSize)
         ])
         updateAppearance()
     }
@@ -182,6 +220,7 @@ final class HistoryMenuRowView: NSControl {
         layer?.backgroundColor = backgroundColor.cgColor
         titleLabel.textColor = isFocused ? .selectedMenuItemTextColor : .labelColor
         shortcutBadge.setState(isEmphasized: isFocused || isMouseInside)
+        deleteButton.contentTintColor = isFocused || isMouseInside ? .secondaryLabelColor : .tertiaryLabelColor
         updatePreviewVisibility(isFocused: isFocused)
     }
 
@@ -208,6 +247,11 @@ final class HistoryMenuRowView: NSControl {
         isMouseInside = false
         Self.hideImagePreview()
         onConfirm()
+    }
+
+    @objc private func deleteButtonClicked(_ sender: NSButton) {
+        Self.hideImagePreview()
+        onDelete?()
     }
 }
 
