@@ -130,6 +130,37 @@ struct ReleasePackagingConfigurationTests {
     }
 
     @Test
+    func homebrewCaskInstallsReleaseDmg() throws {
+        let cask = try projectText("Casks/pastera.rb")
+
+        #expect(cask.contains("cask \"pastera\" do"))
+        #expect(cask.contains("version \"2.0.1-beta\""))
+        #expect(cask.contains("sha256 \"e05b40aad31547b03d59d04b7a4c96249de32fe262eb2bfc78269c617f953f60\""))
+        #expect(cask.contains("https://github.com/pastera-app/Pastera/releases/download/v#{version}/Pastera-#{version}-macOS.dmg"))
+        #expect(cask.contains("app \"Pastera.app\""))
+        #expect(cask.contains("uninstall quit: \"com.pastera-app.Pastera\""))
+        #expect(cask.contains("zap trash:"))
+        #expect(cask.contains("Automatic Paste"))
+        #expect(!cask.contains("pkg \""))
+        #expect(!cask.contains(".pkg"))
+    }
+
+    @Test
+    func homebrewCaskUpdateScriptRefreshesDmgMetadata() throws {
+        let script = try projectText("script/update_homebrew_cask.sh")
+
+        #expect(script.contains("Casks/pastera.rb"))
+        #expect(script.contains("shasum -a 256"))
+        #expect(script.contains("Pastera-${VERSION}-macOS.dmg"))
+        #expect(script.contains("https://github.com/pastera-app/Pastera/releases/download/${TAG}/Pastera-${VERSION}-macOS.dmg"))
+        #expect(script.contains("PASTERA_CASK_VERSION=\"${VERSION}\""))
+        #expect(script.contains("PASTERA_CASK_SHA256=\"${SHA256}\""))
+        #expect(script.contains("s/version \"[^\"]+\"/version \"$version\"/"))
+        #expect(script.contains("s/sha256 \"[^\"]+\"/sha256 \"$sha256\"/"))
+        #expect(script.contains("--check-url"))
+    }
+
+    @Test
     func releaseWorkflowPublishesDmgAsset() throws {
         let workflow = try projectText(".github/workflows/release-dmg.yml")
 

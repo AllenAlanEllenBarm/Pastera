@@ -45,8 +45,31 @@ model for fast pasteback.
 - 同步协议简化为明文 JSON beta 格式，方便排查 OneDrive 冲突副本；旧加密同步记录会被跳过。
 - 修正同步正确性：按更新时间做 LWW 导入、导入计数只统计实际写入，并在片段导出时补齐父文件夹上下文。
 - 精简设置页：移除失效菜单项、同步口令和自定义同步目录，清空历史警告迁回通用页。
-- 菜单选择默认直接粘贴，崩溃报告发送选项默认关闭，减少首次使用时的额外决策。
+- 自动粘贴默认关闭；需要自动发送 Command+V 时可在通用设置里开启，并由系统引导授权辅助功能。
 - 增加 DMG 发布脚本、GitHub Release workflow 和启动位置提示，降低从临时目录运行带来的权限问题。
+
+## Install
+
+Download the unsigned beta DMG from the
+[2.0.1-beta release](https://github.com/pastera-app/Pastera/releases/tag/v2.0.1-beta),
+or install through the repository-local Homebrew Cask once the release DMG asset
+is uploaded:
+
+```bash
+brew install --cask ./Casks/pastera.rb
+```
+
+Maintainers can refresh the cask after building a DMG:
+
+```bash
+./script/update_homebrew_cask.sh \
+  --version "2.0.1-beta" \
+  --dmg ".build/release-artifacts/Pastera-2.0.1-beta-macOS.dmg"
+```
+
+For local unsigned beta preparation before the DMG exists on GitHub, pass
+`--no-check-url`. The resulting cask still requires the matching DMG to be
+uploaded before other users can install it from the release URL.
 
 ## Build
 
