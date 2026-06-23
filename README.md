@@ -7,7 +7,11 @@
   ·
   <a href="#latest-beta-201-beta">更新说明</a>
   ·
+  <a href="#project-status">Status</a>
+  ·
   <a href="#build">Build</a>
+  ·
+  <a href="#community-and-governance">Governance</a>
   ·
   <a href="#license">License</a>
 </p>
@@ -19,6 +23,18 @@ Pastera is a refined macOS clipboard manager forked from
 workflow, then adds searchable history, snippet folders, image pasteboard
 compatibility, a polished translucent interface, and a keyboard-first operating
 model for fast pasteback.
+
+## Project Status
+
+Pastera is an active beta fork. The project is maintained in the
+`pastera-app/Pastera` GitHub organization and follows upstream Clipy development
+where it makes sense, while shipping fork-specific clipboard search, snippets,
+sync, installer guidance, and permission controls.
+
+Current public beta builds are unsigned and not notarized yet. macOS may show a
+Gatekeeper warning on first launch. The project is working toward a compliant
+Developer ID signing and notarization path so users can install releases without
+manual trust bypass steps.
 
 ## Highlights
 
@@ -32,6 +48,22 @@ model for fast pasteback.
   with shortcuts, arrows, Tab, and Return.
 - **Native macOS feel**: lightweight menu-bar app, semantic colors, translucent
   surfaces, and no heavy background effects.
+
+## Why This Fork Exists
+
+Pastera is derived from Clipy, but it is not a rebranded binary. The fork exists
+to explore a focused macOS clipboard workflow with:
+
+- Search and storage behavior separated from the compact menu display limit.
+- Snippet folders and item shortcuts for prompt and text reuse.
+- Optional OneDrive folder sync that keeps local data non-destructive.
+- Opt-in automatic paste, with Accessibility permission requested only when the
+  user enables that behavior.
+- Distribution work for DMG packaging, Homebrew Cask metadata, and future
+  notarized releases.
+
+See `docs/development/PASTERA_FORK_PLAN.md` for the current fork direction and
+upstream alignment notes.
 
 ## Requirements
 
@@ -70,6 +102,15 @@ Maintainers can refresh the cask after building a DMG:
 For local unsigned beta preparation before the DMG exists on GitHub, pass
 `--no-check-url`. The resulting cask still requires the matching DMG to be
 uploaded before other users can install it from the release URL.
+
+## Funding
+
+Pastera has applied to Open Source Collective fiscal hosting. If accepted,
+project funds will be used transparently for open-source maintenance needs such
+as Apple Developer Program membership, Developer ID signing, notarization,
+release infrastructure, and testing hardware or services.
+
+See `docs/funding/OPEN_COLLECTIVE.md` for the intended funding policy.
 
 ## Build
 
@@ -112,6 +153,17 @@ build-relevant app paths changed since the last local install.
 Pastera is derived from Clipy and keeps the original MIT license terms. The
 fork uses a different product name in line with the upstream distribution
 request not to ship derived work as `Clipy` or `ClipMenu`.
+
+## Community And Governance
+
+Pastera is maintained in public on GitHub. Contributions are welcome through
+issues and pull requests, with a focus on small, reviewable changes that keep
+clipboard behavior reliable and privacy-conscious.
+
+- Contributing guide: `.github/CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Governance: `GOVERNANCE.md`
+- Security reporting: `SECURITY.md`
 
 ## License
 
