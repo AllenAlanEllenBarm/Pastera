@@ -23,9 +23,12 @@ final class HistoryMenuRowView: NSControl {
         static let textSpacing: CGFloat = 10
         static let shortcutSpacing: CGFloat = 8
         static let deleteButtonSize: CGFloat = 24
+        static let textPreviewDelay: TimeInterval = 0.45
+        static let maxPreviewTextLength = 1200
     }
 
     private static let imagePreviewController = HistoryMenuImagePreviewController()
+    private static let textPreviewController = HistoryMenuTextPreviewController()
 
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
@@ -34,7 +37,9 @@ final class HistoryMenuRowView: NSControl {
     private let onConfirm: () -> Void
     private let onDelete: (() -> Void)?
     private let previewImage: NSImage?
+    private let previewText: String?
     private var trackingArea: NSTrackingArea?
+    private var textPreviewWorkItem: DispatchWorkItem?
     private var isMouseInside = false
     private var isFocused = false
     var onLogicalFocusChange: (() -> Void)?
@@ -44,12 +49,14 @@ final class HistoryMenuRowView: NSControl {
         title: String,
         image: NSImage?,
         shortcutText: String? = nil,
+        previewText: String? = nil,
         onDelete: (() -> Void)? = nil,
         onConfirm: @escaping () -> Void
     ) {
         self.onConfirm = onConfirm
         self.onDelete = onDelete
         self.previewImage = image
+        self.previewText = Self.boundedPreviewText(previewText)
         let height = image == nil ? Metrics.textRowHeight : Metrics.imageRowHeight
         super.init(frame: NSRect(x: 0, y: 0, width: Metrics.width, height: height))
         setup(title: title, image: image, shortcutText: shortcutText)
@@ -85,10 +92,12 @@ final class HistoryMenuRowView: NSControl {
         onLogicalFocusChange?()
         isMouseInside = true
         updateAppearance()
+        scheduleTextPreview()
     }
 
     override func mouseExited(with event: NSEvent) {
         isMouseInside = false
+        cancelTextPreview()
         updateAppearance()
     }
 
@@ -109,8 +118,9 @@ final class HistoryMenuRowView: NSControl {
         if window == nil {
             isFocused = false
             isMouseInside = false
+            cancelTextPreview()
             updateAppearance()
-            Self.hideImagePreview()
+            Self.hidePreviews()
         }
     }
 
@@ -138,6 +148,15 @@ final class HistoryMenuRowView: NSControl {
 
     static func hideImagePreview() {
         imagePreviewController.hide()
+    }
+
+    static func hideTextPreview() {
+        textPreviewController.hide()
+    }
+
+    static func hidePreviews() {
+        hideImagePreview()
+        hideTextPreview()
     }
 
     private func setup(title: String, image: NSImage?, shortcutText: String?) {
@@ -242,16 +261,56 @@ final class HistoryMenuRowView: NSControl {
         }
     }
 
+    private func scheduleTextPreview() {
+        cancelTextPreview()
+        guard previewImage == nil,
+              let previewText,
+              !previewText.isEmpty else {
+            return
+        }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.showTextPreviewIfNeeded()
+        }
+        textPreviewWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.textPreviewDelay, execute: workItem)
+    }
+
+    private func showTextPreviewIfNeeded() {
+        guard isMouseInside,
+              window?.isVisible == true,
+              let previewText,
+              !previewText.isEmpty else {
+            Self.hideTextPreview()
+            return
+        }
+        Self.textPreviewController.show(text: previewText, relativeTo: bounds, in: self)
+    }
+
+    private func cancelTextPreview() {
+        textPreviewWorkItem?.cancel()
+        textPreviewWorkItem = nil
+        Self.hideTextPreview()
+    }
+
     private func confirm() {
         isFocused = false
         isMouseInside = false
+        cancelTextPreview()
         Self.hideImagePreview()
         onConfirm()
     }
 
     @objc private func deleteButtonClicked(_ sender: NSButton) {
+        cancelTextPreview()
         Self.hideImagePreview()
         onDelete?()
+    }
+
+    private static func boundedPreviewText(_ text: String?) -> String? {
+        let trimmedText = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedText, !trimmedText.isEmpty else { return nil }
+        guard trimmedText.utf16.count > Metrics.maxPreviewTextLength else { return trimmedText }
+        return (trimmedText as NSString).substring(to: Metrics.maxPreviewTextLength - 1) + "…"
     }
 }
 
@@ -259,6 +318,14 @@ final class HistoryMenuRowView: NSControl {
 extension HistoryMenuRowView {
     static var isImagePreviewVisibleForTesting: Bool {
         imagePreviewController.isVisibleForTesting
+    }
+
+    static var isTextPreviewVisibleForTesting: Bool {
+        textPreviewController.isVisibleForTesting
+    }
+
+    static var textPreviewValueForTesting: String {
+        textPreviewController.textValueForTesting
     }
 
     var textValuesForTesting: [String] {

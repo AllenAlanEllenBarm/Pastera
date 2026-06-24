@@ -35,6 +35,17 @@ final class HistoryMenuFocusableButton: NSButton {
     }
 }
 
+extension NSButton {
+    func updateHistoryShortcutToolTip(_ label: String, shortcut: HistoryPanelShortcut) {
+        let shortcutText = PasteraShortcutFormatter.string(
+            for: AppEnvironment.current.hotKeyService.historyPanelKeyCombo(for: shortcut)
+        )
+        let toolTip = shortcutText.map { "\(label) (\($0))" } ?? label
+        self.toolTip = toolTip
+        setAccessibilityLabel(toolTip)
+    }
+}
+
 final class HistoryMenuPinButton: NSButton {
     override var acceptsFirstResponder: Bool { false }
 }

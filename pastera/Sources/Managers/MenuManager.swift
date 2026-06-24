@@ -33,6 +33,7 @@ struct HistoryItemPresentation {
     let title: String
     let image: NSImage?
     let toolTip: String?
+    let previewText: String?
 }
 
 final class MenuManager: NSObject {
@@ -742,6 +743,7 @@ extension MenuManager {
             title: menuItem.title,
             image: menuItem.image,
             shortcutText: shortcutText,
+            previewText: presentation.previewText,
             onDelete: { [weak self, weak menuItem] in
                 menuItem?.menu?.cancelTracking()
                 self?.deleteHistory(history.id)
@@ -770,6 +772,7 @@ extension MenuManager {
             title: presentation.title,
             image: presentation.image,
             shortcutText: shortcutText,
+            previewText: presentation.previewText,
             onDelete: { [weak self] in self?.deleteHistory(historyDetail.history.id) },
             onConfirm: onConfirm
         )
@@ -786,18 +789,27 @@ extension MenuManager {
         let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
         let primaryPboardType = history.primaryType
         let clipString = history.title
+        let displayTitle = trimTitle(clipString, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength)
+        var previewText = textPreviewText(
+            originalTitle: clipString,
+            displayedTitle: displayTitle,
+            primaryPboardType: primaryPboardType
+        )
         var title = menuItemTitle(
-            trimTitle(clipString, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength),
+            displayTitle,
             listNumber: listNumber,
             isMarkWithNumber: isMarkWithNumber
         )
 
         if primaryPboardType?.isClipyImageType == true {
             title = menuItemTitle("(Image)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+            previewText = nil
         } else if primaryPboardType == .pdf || primaryPboardType == .deprecatedPDF {
             title = menuItemTitle("(PDF)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+            previewText = nil
         } else if primaryPboardType == .fileURL {
             title = menuItemTitle("(Files)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+            previewText = nil
         }
 
         let toolTip: String?
@@ -818,7 +830,24 @@ extension MenuManager {
             image = nil
         }
 
-        return HistoryItemPresentation(title: title, image: image, toolTip: toolTip)
+        return HistoryItemPresentation(title: title, image: image, toolTip: toolTip, previewText: previewText)
+    }
+
+    private func textPreviewText(
+        originalTitle: String,
+        displayedTitle: String,
+        primaryPboardType: NSPasteboard.PasteboardType?
+    ) -> String? {
+        if primaryPboardType?.isClipyImageType == true ||
+            primaryPboardType == .pdf ||
+            primaryPboardType == .deprecatedPDF ||
+            primaryPboardType == .fileURL {
+            return nil
+        }
+
+        let previewText = originalTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !previewText.isEmpty, previewText != displayedTitle else { return nil }
+        return previewText
     }
 
     func numericShortcutText(forRowIndex index: Int) -> String? {

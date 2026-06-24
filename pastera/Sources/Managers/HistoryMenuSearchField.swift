@@ -13,11 +13,32 @@
 import Cocoa
 
 final class HistoryMenuSearchField: NSSearchField {
+    private static let basePlaceholder = "Keyword"
     private var trackingArea: NSTrackingArea?
     var onMouseEntered: (() -> Void)?
     var onPanelShortcutKeyDown: ((NSEvent) -> Bool)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        updateHistoryShortcutPlaceholder()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        updateHistoryShortcutPlaceholder()
+    }
+
+    func updateHistoryShortcutPlaceholder() {
+        let shortcutText = PasteraShortcutFormatter.string(
+            for: AppEnvironment.current.hotKeyService.historyPanelKeyCombo(for: .search)
+        )
+        let placeholder = shortcutText.map { "\(Self.basePlaceholder) (\($0))" } ?? Self.basePlaceholder
+        placeholderString = placeholder
+        toolTip = placeholder
+        setAccessibilityLabel(placeholder)
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

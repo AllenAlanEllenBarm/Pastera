@@ -1459,6 +1459,55 @@ struct HistoryMenuHeaderViewTests {
     }
 }
 
+@Suite(.serialized)
+struct HistoryMenuTextPreviewTests {
+    @Test @MainActor
+    func historyRowShowsTextPreviewAfterStableHoverDelay() async throws {
+        let previewText = "A longer clipboard history entry that has been shortened in the row but should be readable on hover."
+        let row = HistoryMenuRowView(
+            title: "A longer clipboard history...",
+            image: nil,
+            previewText: previewText
+        ) {}
+        let window = makeHistoryMenuTestWindow(width: 352, height: 40)
+        window.contentView = row
+        window.orderFront(nil)
+        defer { closeHistoryMenuTestWindow(window) }
+
+        row.mouseEntered(with: try makeMouseEnteredEvent())
+        #expect(!HistoryMenuRowView.isTextPreviewVisibleForTesting)
+
+        try await Task.sleep(for: .seconds(0.55))
+
+        #expect(HistoryMenuRowView.isTextPreviewVisibleForTesting)
+        #expect(HistoryMenuRowView.textPreviewValueForTesting == previewText)
+
+        row.mouseExited(with: try makeMouseEnteredEvent())
+
+        #expect(!HistoryMenuRowView.isTextPreviewVisibleForTesting)
+    }
+
+    @Test @MainActor
+    func historyRowCancelsTextPreviewWhenHoverEndsBeforeDelay() async throws {
+        let row = HistoryMenuRowView(
+            title: "Shortened...",
+            image: nil,
+            previewText: "Full text should not appear after the pointer leaves."
+        ) {}
+        let window = makeHistoryMenuTestWindow(width: 352, height: 40)
+        window.contentView = row
+        window.orderFront(nil)
+        defer { closeHistoryMenuTestWindow(window) }
+
+        row.mouseEntered(with: try makeMouseEnteredEvent())
+        try await Task.sleep(for: .seconds(0.2))
+        row.mouseExited(with: try makeMouseEnteredEvent())
+        try await Task.sleep(for: .seconds(0.4))
+
+        #expect(!HistoryMenuRowView.isTextPreviewVisibleForTesting)
+    }
+}
+
 private extension PasteboardHistory {
     init(id: PasteboardHistory.ID, title: String, updateAt: Int) {
         self.init(

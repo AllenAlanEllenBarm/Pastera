@@ -354,12 +354,15 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         if searchField.stringValue != state.query {
             searchField.stringValue = state.query
         }
+        searchField.updateHistoryShortcutPlaceholder()
         regexOptionControl.setSelected(state.mode == .regex, forSegment: 0)
         caseSensitiveOptionControl.setSelected(state.caseSensitive, forSegment: 0)
         typeSegmentedControl.selectedSegment = state.typeFilter.rawValue
         previousButton.isEnabled = state.pageIndex > 0
         nextButton.isEnabled = hasNextPage
         pageLabel.stringValue = "\(state.displayPage)"
+        previousButton.updateHistoryShortcutToolTip("Previous Page", shortcut: .previousPage)
+        nextButton.updateHistoryShortcutToolTip("Next Page", shortcut: .nextPage)
         updatePinnedState(isPinned)
         configureKeyViewLoop()
     }
@@ -393,7 +396,6 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        searchField.placeholderString = "Keyword"
         searchField.controlSize = .regular
         searchField.font = .systemFont(ofSize: 13)
         searchField.delegate = self
@@ -401,7 +403,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         searchField.sendsWholeSearchString = true
         searchField.target = self
         searchField.action = #selector(searchFieldChanged(_:))
-        searchField.toolTip = "Keyword"
+        searchField.updateHistoryShortcutPlaceholder()
 
         configureButton(previousButton, symbolName: "chevron.left", accessibilityLabel: "Previous Page", action: #selector(previousPage(_:)))
         configureButton(nextButton, symbolName: "chevron.right", accessibilityLabel: "Next Page", action: #selector(nextPage(_:)))

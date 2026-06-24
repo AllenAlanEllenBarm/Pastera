@@ -60,6 +60,40 @@ struct HistoryBrowserPanelShortcutTests {
     }
 
     @Test
+    func paginationButtonsShowShortcutsInTooltips() throws {
+        let service = HotKeyService()
+        AppEnvironment.push(hotKeyService: service)
+        defer { _ = AppEnvironment.popLast() }
+        service.changeHistoryPanelKeyCombo(.previousPage, keyCombo: HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
+
+        let headerView = HistoryMenuHeaderView()
+        headerView.configure(state: HistoryMenuPaginationState(pageIndex: 1), hasNextPage: true)
+        let buttons = headerView.subviews.compactMap { $0 as? NSButton }
+        let previousButton = try #require(buttons.first)
+        let nextButton = try #require(buttons.dropFirst().first)
+
+        #expect(previousButton.toolTip == "Previous Page (⌘←)")
+        #expect(nextButton.toolTip == "Next Page (⌘→)")
+    }
+
+    @Test
+    func searchFieldShowsSearchShortcutInEmptyPlaceholder() throws {
+        let service = HotKeyService()
+        AppEnvironment.push(hotKeyService: service)
+        defer { _ = AppEnvironment.popLast() }
+        service.changeHistoryPanelKeyCombo(.search, keyCombo: HistoryPanelShortcut.search.defaultKeyCombo)
+
+        let headerView = HistoryMenuHeaderView()
+        headerView.configure(state: HistoryMenuPaginationState(), hasNextPage: false)
+        let searchField = try #require(headerView.subviews.compactMap { $0 as? NSSearchField }.first)
+
+        #expect(searchField.stringValue.isEmpty)
+        #expect(searchField.placeholderString == "Keyword (⌘F)")
+        #expect(searchField.toolTip == "Keyword (⌘F)")
+    }
+
+    @Test
     func commandArrowShortcutsTakePriorityOverMainMenuChildNavigation() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)

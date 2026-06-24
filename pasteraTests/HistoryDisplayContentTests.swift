@@ -34,6 +34,46 @@ struct HistoryDisplayContentTests {
     }
 
     @Test
+    func historyItemPresentationProvidesPreviewOnlyForShortenedText() throws {
+        try withRegisteredDefaultEnvironment { _ in
+            let manager = MenuManager()
+            let longText = Array(repeating: "Long clipboard text", count: 8).joined(separator: " ")
+            let longPresentation = manager.makeHistoryItemPresentation(
+                PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("long-history"),
+                        title: longText,
+                        pasteboardTypes: [.string],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                ),
+                listNumber: 1,
+                usesLeadingNumber: false
+            )
+            let shortPresentation = manager.makeHistoryItemPresentation(
+                PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("short-history"),
+                        title: "Short clipboard text",
+                        pasteboardTypes: [.string],
+                        updateAt: 2,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                ),
+                listNumber: 2,
+                usesLeadingNumber: false
+            )
+
+            #expect(longPresentation.title.hasSuffix("..."))
+            #expect(longPresentation.previewText == longText)
+            #expect(shortPresentation.previewText == nil)
+        }
+    }
+
+    @Test
     func imageHistoryRowShowsThumbnailWhenRetiredImagePreferenceWasDisabled() throws {
         try withRegisteredDefaultEnvironment { defaults in
             defaults.set(false, forKey: Constants.UserDefaults.showImageInTheMenu)
