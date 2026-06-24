@@ -118,6 +118,8 @@ struct ReleasePackagingConfigurationTests {
         #expect(script.contains("script/update_appcast_for_dmg.sh"))
         #expect(script.contains("--update-appcast"))
         #expect(script.contains("--skip-notarization"))
+        #expect(script.contains("--update-appcast requires a signed and notarized DMG"))
+        #expect(script.contains("do not combine it with --skip-notarization"))
     }
 
     @Test
@@ -168,10 +170,15 @@ struct ReleasePackagingConfigurationTests {
         #expect(workflow.contains("script/update_appcast_for_dmg.sh"))
         #expect(workflow.contains("gh release upload"))
         #expect(workflow.contains("Pastera-${{ inputs.version }}-macOS.dmg"))
+        #expect(workflow.contains("Build signed notarized DMG"))
+        #expect(workflow.contains("Publish appcast to feed branch"))
+        #expect(workflow.contains("SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}"))
         #expect(!workflow.contains("- name: Update appcast for DMG"))
 
+        let buildRange = try #require(workflow.range(of: "Build signed notarized DMG"))
         let uploadRange = try #require(workflow.range(of: "gh release upload"))
         let appcastRange = try #require(workflow.range(of: "script/update_appcast_for_dmg.sh"))
+        #expect(buildRange.lowerBound < uploadRange.lowerBound)
         #expect(uploadRange.lowerBound < appcastRange.lowerBound)
     }
 

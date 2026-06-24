@@ -65,6 +65,21 @@ struct SparkleUpdateFeedTests {
         #expect(enclosure.attribute(forName: "type")?.stringValue?.isEmpty == false)
     }
 
+    @Test
+    func manualUpdateCheckUsesSparkleWithoutGitHubDownloadFallback() throws {
+        let source = try String(
+            contentsOf: projectRoot()
+                .appendingPathComponent("pastera/Sources/Preferences/Panels/CPYUpdatesPreferenceViewController.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("updaterController?.checkForUpdates(sender)"))
+        #expect(!source.contains("PasteraGitHubReleaseUpdateChecker"))
+        #expect(!source.contains("api.github.com/repos/pastera-app/Pastera/releases"))
+        #expect(!source.contains("NSWorkspace.shared.open"))
+        #expect(!source.contains("Open the GitHub release page to download this version."))
+    }
+
     private func infoPlistValue(forKey key: String) throws -> String {
         let plistURL = projectRoot().appendingPathComponent("pastera/Supporting Files/Info.plist")
         let plist = try #require(NSDictionary(contentsOf: plistURL) as? [String: Any])
@@ -80,107 +95,5 @@ struct SparkleUpdateFeedTests {
             url.deleteLastPathComponent()
         }
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    }
-}
-
-@Suite
-struct PasteraGitHubReleaseUpdateCheckerTests {
-    @Test
-    func detectsNewerGitHubReleaseWhenSparkleAppcastIsStale() throws {
-        let checker = PasteraGitHubReleaseUpdateChecker()
-        let update = try #require(try checker.availableUpdate(
-            currentVersion: "1.2.2beta",
-            from: releasesJSON([
-                release(tag: "v2.0.1-beta", asset: "Pastera-2.0.1-beta-macOS.dmg"),
-                release(tag: "v1.2.2-beta", asset: "Pastera-1.2.2beta-macOS.zip")
-            ])
-        ))
-
-        #expect(update.version == "2.0.1-beta")
-        #expect(update.releasePageURL.absoluteString == "https://github.com/pastera-app/Pastera/releases/tag/v2.0.1-beta")
-        #expect(update.assetURL?.absoluteString == "https://github.com/pastera-app/Pastera/releases/download/v2.0.1-beta/Pastera-2.0.1-beta-macOS.dmg")
-    }
-
-    @Test
-    func ignoresDraftsAndDoesNotOfferOlderReleases() throws {
-        let checker = PasteraGitHubReleaseUpdateChecker()
-        let update = try checker.availableUpdate(
-            currentVersion: "2.0.1-beta",
-            from: releasesJSON([
-                release(tag: "v3.0.0-beta", asset: "Pastera-3.0.0-beta-macOS.dmg", draft: true),
-                release(tag: "v1.2.2-beta", asset: "Pastera-1.2.2beta-macOS.dmg")
-            ])
-        )
-
-        #expect(update == nil)
-    }
-
-    @Test
-    func stillReportsLatestReleaseWhenNoUpdateIsAvailable() throws {
-        let checker = PasteraGitHubReleaseUpdateChecker()
-        let data = try releasesJSON([
-            release(tag: "v2.0.1-beta", asset: "Pastera-2.0.1-beta-macOS.dmg")
-        ])
-
-        #expect(try checker.availableUpdate(currentVersion: "2.0.1-beta", from: data) == nil)
-        #expect(try checker.latestRelease(from: data)?.version == "2.0.1-beta")
-    }
-
-    @Test
-    func comparesReleaseVersionForManualUpdateChecks() {
-        let checker = PasteraGitHubReleaseUpdateChecker()
-
-        #expect(checker.isUpdateAvailable(currentVersion: "1.2.2beta", releaseVersion: "2.0.1-beta"))
-        #expect(!checker.isUpdateAvailable(currentVersion: "2.0.1-beta", releaseVersion: "2.0.1-beta"))
-        #expect(!checker.isUpdateAvailable(currentVersion: "2.0.1", releaseVersion: "2.0.1-beta"))
-    }
-
-    @Test
-    func prefersPkgAssetForManualDownloads() throws {
-        let checker = PasteraGitHubReleaseUpdateChecker()
-        let update = try #require(try checker.availableUpdate(
-            currentVersion: "1.2.2beta",
-            from: releasesJSON([
-                release(
-                    tag: "v2.0.1-beta",
-                    assets: [
-                        "Pastera-2.0.1-beta-macOS.zip",
-                        "Pastera-2.0.1-beta-macOS.dmg",
-                        "Pastera-2.0.1-beta-macOS.pkg"
-                    ]
-                )
-            ])
-        ))
-
-        #expect(update.assetURL?.lastPathComponent == "Pastera-2.0.1-beta-macOS.pkg")
-    }
-
-    @Test
-    func comparesExistingBetaVersionSpellings() {
-        #expect(PasteraReleaseVersion("2.0.1-beta") > PasteraReleaseVersion("1.2.2beta"))
-        #expect(PasteraReleaseVersion("2.0.1") > PasteraReleaseVersion("2.0.1-beta"))
-        #expect(!(PasteraReleaseVersion("v1.2.2-beta") > PasteraReleaseVersion("1.2.2beta")))
-    }
-
-    private func release(tag: String, asset: String, draft: Bool = false) -> [String: Any] {
-        release(tag: tag, assets: [asset], draft: draft)
-    }
-
-    private func release(tag: String, assets: [String], draft: Bool = false) -> [String: Any] {
-        [
-            "tag_name": tag,
-            "html_url": "https://github.com/pastera-app/Pastera/releases/tag/\(tag)",
-            "draft": draft,
-            "assets": assets.map {
-                [
-                    "name": $0,
-                    "browser_download_url": "https://github.com/pastera-app/Pastera/releases/download/\(tag)/\($0)"
-                ]
-            }
-        ]
-    }
-
-    private func releasesJSON(_ releases: [[String: Any]]) throws -> Data {
-        try JSONSerialization.data(withJSONObject: releases)
     }
 }

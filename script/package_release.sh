@@ -76,6 +76,11 @@ if [[ "${UPDATE_APPCAST}" == "1" && -z "${TAG}" ]]; then
     exit 2
 fi
 
+if [[ "${UPDATE_APPCAST}" == "1" && "${SKIP_NOTARIZATION}" == "1" ]]; then
+    echo "--update-appcast requires a signed and notarized DMG; do not combine it with --skip-notarization." >&2
+    exit 2
+fi
+
 package_args=(
     --version "${VERSION}"
     --output-dir "${OUTPUT_DIR}"
