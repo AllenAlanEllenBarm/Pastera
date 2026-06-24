@@ -137,7 +137,7 @@ struct ReleasePackagingConfigurationTests {
 
         #expect(cask.contains("cask \"pastera\" do"))
         #expect(cask.contains("version \"2.0.1-beta\""))
-        #expect(cask.contains("sha256 \"0fc376493894760197ffb4f45536588216107ce36be174bf205da0cfc45dceac\""))
+        #expect(cask.contains("sha256 \"1a4fc7b2ef07ccc2f0c353f10a83fe23b293c3bf91a91e894ede3a8e41f4bb89\""))
         #expect(cask.contains("https://github.com/pastera-app/Pastera/releases/download/v#{version}/Pastera-#{version}-macOS.dmg"))
         #expect(cask.contains("app \"Pastera.app\""))
         #expect(cask.contains("uninstall quit: \"com.pastera-app.Pastera\""))
