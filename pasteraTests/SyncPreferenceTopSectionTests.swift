@@ -50,8 +50,6 @@ struct SyncPreferenceTopSectionTests {
             defaults.synchronize()
         }
 
-        defaults.set(true, forKey: Constants.UserDefaults.syncAutomaticUploadEnabled)
-        defaults.set(false, forKey: Constants.UserDefaults.syncAutomaticEnabled)
         defaults.set(true, forKey: Constants.UserDefaults.syncHistoryUploadEnabled)
         defaults.set(false, forKey: Constants.UserDefaults.syncHistoryImportEnabled)
         defaults.set(true, forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
@@ -74,8 +72,6 @@ struct SyncPreferenceTopSectionTests {
         let syncButtonTitles: Set<String> = ["i", "修改", "显示", "立即同步"]
         let fileTypeLabels: Set<String> = ["图片", "PDF", "RTF", "RTFD"]
         let syncSwitchLabels: Set<String> = [
-            "自动上传",
-            "自动同步",
             "上传历史",
             "同步历史",
             "上传片段",
@@ -108,6 +104,9 @@ struct SyncPreferenceTopSectionTests {
                 contentView.convert(button.frame, from: button.superview)
             }
         let infoButton = preferenceButtons(in: contentView).first { $0.title == "i" }
+        let redetectButton = preferenceButtons(in: contentView).first {
+            $0.accessibilityLabel() == "重新检测 OneDrive"
+        }
         let syncSwitchFrames = preferenceSwitchButtons(in: contentView, labels: syncSwitchLabels).map { switchControl in
             contentView.convert(switchControl.frame, from: switchControl.superview)
         }
@@ -144,12 +143,20 @@ struct SyncPreferenceTopSectionTests {
         let syncNowFrame = try #require(preferenceButtons(in: contentView).first { $0.title == "立即同步" }.map {
             contentView.convert($0.frame, from: $0.superview)
         })
+        let infoFrame = try #require(infoButton.map {
+            contentView.convert($0.frame, from: $0.superview)
+        })
+        let redetectFrame = try #require(redetectButton.map {
+            contentView.convert($0.frame, from: $0.superview)
+        })
 
         #expect(expectedTexts.isSubset(of: visibleTexts))
         #expect(!visibleTexts.contains("云同步"))
         #expect(!visibleTexts.contains("OneDrive 状态"))
         #expect(!visibleTexts.contains("可用"))
         #expect(!visibleTexts.contains("不可用"))
+        #expect(!visibleTexts.contains("自动上传"))
+        #expect(!visibleTexts.contains("自动同步"))
         #expect(!visibleTexts.contains(guidanceText))
         #expect(!visibleTexts.contains("已选择 OneDrive 同步位置"))
         #expect(!visibleTexts.contains(where: { $0.contains(" > Pastera > sync") }))
@@ -160,12 +167,13 @@ struct SyncPreferenceTopSectionTests {
         #expect(!preferenceButtons(in: contentView).contains { $0.accessibilityLabel() == "文件类型" })
         #expect(!preferenceButtons(in: contentView).contains { $0.accessibilityLabel() == "Finder 文件" })
         #expect(infoButton?.toolTip?.contains("OneDrive 文件夹") == true)
+        #expect(redetectButton?.toolTip?.contains("重新检测") == true)
         #expect(syncButtonFrames.count == syncButtonTitles.count)
         #expect(fileTypeFrames.count == fileTypeLabels.count)
         #expect(syncSwitchFrames.count == syncSwitchLabels.count)
         #expect(nativeSyncSwitches.isEmpty)
-        #expect(switchRows.count <= 4)
-        #expect(switchColumns.count >= 2)
+        #expect(switchRows.count == 2)
+        #expect(switchColumns.count == 2)
         #expect(removedButtons.isEmpty)
         #expect(!visibleTexts.contains("同步口令"))
         #expect(!visibleTexts.contains("位置操作"))
@@ -173,10 +181,16 @@ struct SyncPreferenceTopSectionTests {
         #expect(oneDriveStatusFrame.width >= oneDriveStatusField.intrinsicWidth)
         #expect(oneDriveBadgeFrame.width <= 132)
         #expect(abs(oneDriveLabelFrame.midY - oneDriveBadgeFrame.midY) <= 1)
+        #expect(abs(redetectFrame.midY - oneDriveBadgeFrame.midY) <= 1)
+        #expect(abs(infoFrame.midY - oneDriveBadgeFrame.midY) <= 1)
         #expect(abs(oneDriveLabelFrame.midY - manualSyncFrame.midY) <= 1)
         #expect(abs(manualSyncFrame.midY - syncNowFrame.midY) <= 1)
         #expect(abs(folderLabelFrame.midY - changeFrame.midY) <= 1)
         #expect(abs(changeFrame.midY - showFrame.midY) <= 1)
+        #expect(redetectFrame.minX >= oneDriveBadgeFrame.maxX + 4)
+        #expect(redetectFrame.minX <= oneDriveBadgeFrame.maxX + 10)
+        #expect(infoFrame.minX >= redetectFrame.maxX + 4)
+        #expect(infoFrame.minX <= redetectFrame.maxX + 10)
         #expect(manualSyncFrame.minX >= oneDriveBadgeFrame.maxX + 24)
         #expect(manualSyncFrame.minY > folderLabelFrame.minY)
         #expect(abs(changeFrame.minX - oneDriveBadgeFrame.minX) <= 20)
@@ -184,7 +198,7 @@ struct SyncPreferenceTopSectionTests {
         #expect(showFrame.maxX <= manualSyncFrame.minX - 16)
         #expect(showFrame.width <= 60)
         #expect(syncNowFrame.width <= 100)
-        for frame in syncButtonFrames + syncSwitchFrames + fileTypeFrames {
+        for frame in syncButtonFrames + syncSwitchFrames + fileTypeFrames + [redetectFrame] {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
         }
@@ -237,6 +251,49 @@ struct SyncPreferenceTopSectionTests {
         #expect(visibleTexts.contains("未检测到 OneDrive"))
         #expect(!visibleTexts.contains("OneDrive 状态"))
         #expect(!visibleTexts.contains("请先安装并登录 OneDrive。"))
+    }
+
+    @Test
+    func syncPaneManualRedetectDiscoversDefaultOneDriveLocation() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let oneDriveRootURL = cloudStorageURL(homeURL: homeURL).appendingPathComponent("OneDrive", isDirectory: true)
+        let defaultRootURL = oneDriveRootURL
+            .appendingPathComponent("Pastera", isDirectory: true)
+            .appendingPathComponent("sync", isDirectory: true)
+        try FileManager.default.createDirectory(at: oneDriveRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        var resolution = SyncDefaultFolderResolution.notFound
+
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(defaultFolderResolutionProvider: { resolution })
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            var visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(visibleTexts.contains("未检测到 OneDrive"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == nil)
+
+            resolution = .found(SyncDefaultFolderCandidate(
+                oneDriveRootURL: oneDriveRootURL,
+                syncRootURL: defaultRootURL,
+                displayName: "OneDrive",
+                isOneDriveBacked: true
+            ))
+            let redetectButton = try #require(preferenceButtons(in: controller.view).first {
+                $0.accessibilityLabel() == "重新检测 OneDrive"
+            })
+
+            redetectButton.performClick(nil)
+            controller.view.layoutSubtreeIfNeeded()
+
+            visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(visibleTexts.contains("OneDrive 可用"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
+            #expect(FileManager.default.fileExists(atPath: defaultRootURL.path))
+        }
     }
 
     private func preferenceTextFieldFrames(
@@ -293,5 +350,45 @@ struct SyncPreferenceTopSectionTests {
         preferenceButtons(in: view).filter {
             labels.contains($0.accessibilityLabel() ?? "")
         }
+    }
+
+    private func cloudStorageURL(homeURL: URL) -> URL {
+        homeURL
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("CloudStorage", isDirectory: true)
+    }
+
+    private func withPreservedSyncDefaults(_ work: () throws -> Void) throws {
+        let defaults = AppEnvironment.current.defaults
+        let syncKeys = [
+            Constants.UserDefaults.syncAutomaticUploadEnabled,
+            Constants.UserDefaults.syncAutomaticEnabled,
+            Constants.UserDefaults.syncRootPath,
+            Constants.UserDefaults.syncHistoryUploadEnabled,
+            Constants.UserDefaults.syncHistoryImportEnabled,
+            Constants.UserDefaults.syncSnippetUploadEnabled,
+            Constants.UserDefaults.syncSnippetImportEnabled,
+            Constants.UserDefaults.syncFileUploadEnabled,
+            Constants.UserDefaults.syncFileImportEnabled,
+            Constants.UserDefaults.syncFileTypes
+        ]
+        let previousValues = syncKeys.reduce(into: [String: Any]()) { values, key in
+            if let value = defaults.object(forKey: key) {
+                values[key] = value
+            }
+        }
+        syncKeys.forEach { defaults.removeObject(forKey: $0) }
+        defaults.synchronize()
+        defer {
+            syncKeys.forEach { key in
+                if let value = previousValues[key] {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+            defaults.synchronize()
+        }
+        try work()
     }
 }

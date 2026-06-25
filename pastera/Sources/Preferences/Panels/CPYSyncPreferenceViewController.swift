@@ -136,16 +136,13 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static var height: CGFloat {
             topInset
                 + bottomInset
-                + sectionGap * 2
+                + sectionGap
                 + sectionHeight(rowCount: accountRowCount)
-                + sectionHeight(rowCount: 1)
                 + sectionHeight(rowCount: 2)
         }
     }
 
     private enum Text {
-        static let automaticUpload = "自动上传"
-        static let automaticSync = "自动同步"
         static let uploadHistory = "上传历史"
         static let importHistory = "同步历史"
         static let uploadSnippets = "上传片段"
@@ -154,6 +151,8 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let syncInfo = "i"
         static let syncInfoLabel = "同步说明"
         static let syncInfoText = "Pastera 使用你电脑上的 OneDrive 文件夹同步，不连接 Microsoft 账号。选择同步位置时会检查它是否在 OneDrive 文件夹内，并确认 Pastera 可以写入检测文件；云端是否上传完成，请看 OneDrive 客户端状态。"
+        static let redetectOneDrive = "重新检测 OneDrive"
+        static let redetectOneDriveTooltip = "重新检测本地 OneDrive 文件夹和写入权限。"
         static let switchOn = "开"
         static let switchOff = "关"
         static let changeFolder = "修改"
@@ -179,7 +178,6 @@ final class CPYSyncPreferenceViewController: NSViewController {
         (row: PasteraSettingsRowView, label: NSTextField, stateLabel: NSTextField, control: PasteraSyncSwitch)
     ]()
     private weak var accountSection: PasteraSettingsSectionView?
-    private weak var automationSection: PasteraSettingsSectionView?
     private weak var switchesSection: PasteraSettingsSectionView?
     private weak var oneDriveStatusRow: PasteraSettingsRowView?
     private weak var folderRow: PasteraSettingsRowView?
@@ -188,8 +186,7 @@ final class CPYSyncPreferenceViewController: NSViewController {
     private weak var syncNowRow: PasteraSettingsRowView?
 
     private let syncInfoButton = NSButton(title: Text.syncInfo, target: nil, action: nil)
-    private let automaticUploadSwitch = PasteraSyncSwitch()
-    private let automaticSyncSwitch = PasteraSyncSwitch()
+    private let redetectOneDriveButton = NSButton(title: "", target: nil, action: nil)
     private let historyUploadSwitch = PasteraSyncSwitch()
     private let historyImportSwitch = PasteraSyncSwitch()
     private let snippetUploadSwitch = PasteraSyncSwitch()
@@ -288,21 +285,24 @@ final class CPYSyncPreferenceViewController: NSViewController {
         syncInfoButton.font = .systemFont(ofSize: 11, weight: .semibold)
         syncInfoButton.setAccessibilityLabel(Text.syncInfoLabel)
         syncInfoButton.toolTip = Text.syncInfoText
+        redetectOneDriveButton.bezelStyle = .circular
+        redetectOneDriveButton.image = NSImage(
+            systemSymbolName: "arrow.clockwise",
+            accessibilityDescription: Text.redetectOneDrive
+        )
+        redetectOneDriveButton.imagePosition = .imageOnly
+        redetectOneDriveButton.setAccessibilityLabel(Text.redetectOneDrive)
+        redetectOneDriveButton.toolTip = Text.redetectOneDriveTooltip
         let accountSection = makeSection(rowCount: Layout.accountRowCount)
         self.accountSection = accountSection
         oneDriveStatusRow = makeRow(in: accountSection, index: 0)
         oneDriveStatusRow?.addSubview(makeLabel(Text.oneDriveStatus))
         oneDriveStatusRow?.addSubview(oneDriveStatusBadge)
+        oneDriveStatusRow?.addSubview(redetectOneDriveButton)
         oneDriveStatusRow?.addSubview(syncInfoButton)
         addFolderRow(to: accountSection, index: 0)
         addSyncNowRow(to: accountSection, index: 1)
         host.addSubview(accountSection)
-
-        let automationSection = makeSection(rowCount: 1)
-        self.automationSection = automationSection
-        addSwitchRow(title: Text.automaticUpload, control: automaticUploadSwitch, to: automationSection, index: 0)
-        addSwitchRow(title: Text.automaticSync, control: automaticSyncSwitch, to: automationSection, index: 1)
-        host.addSubview(automationSection)
 
         let switchesSection = makeSection(rowCount: 2)
         self.switchesSection = switchesSection
@@ -415,10 +415,6 @@ extension CPYSyncPreferenceViewController {
 
 private extension CPYSyncPreferenceViewController {
     func bindActions() {
-        automaticUploadSwitch.target = self
-        automaticUploadSwitch.action = #selector(toggleAutomaticUpload(_:))
-        automaticSyncSwitch.target = self
-        automaticSyncSwitch.action = #selector(toggleAutomaticSync(_:))
         historyUploadSwitch.target = self
         historyUploadSwitch.action = #selector(toggleHistoryUpload(_:))
         historyImportSwitch.target = self
@@ -429,6 +425,8 @@ private extension CPYSyncPreferenceViewController {
         snippetImportSwitch.action = #selector(toggleSnippetImport(_:))
         syncInfoButton.target = self
         syncInfoButton.action = #selector(showSyncInfo(_:))
+        redetectOneDriveButton.target = self
+        redetectOneDriveButton.action = #selector(redetectOneDrive)
         changeFolderButton.target = self
         changeFolderButton.action = #selector(changeFolder)
         showFolderButton.target = self
@@ -461,40 +459,8 @@ private extension CPYSyncPreferenceViewController {
         infoPopover = popover
     }
 
-    @objc func toggleAutomaticUpload(_ sender: PasteraSyncSwitch) {
-        let enabled = sender.state == .on
-        guard enabled else {
-            settingsStore.setAutomaticUploadEnabled(false)
-            updateControls()
-            return
-        }
-        guard ensureDefaultFolderAvailable() else {
-            settingsStore.setAutomaticUploadEnabled(false)
-            sender.state = .off
-            updateControls()
-            return
-        }
-        settingsStore.enableUploadScopesIfNeeded()
-        settingsStore.setAutomaticUploadEnabled(true)
-        updateControls()
-    }
-
-    @objc func toggleAutomaticSync(_ sender: PasteraSyncSwitch) {
-        let enabled = sender.state == .on
-        guard enabled else {
-            settingsStore.setAutomaticSyncEnabled(false)
-            updateControls()
-            return
-        }
-        guard ensureDefaultFolderAvailable() else {
-            settingsStore.setAutomaticSyncEnabled(false)
-            sender.state = .off
-            updateControls()
-            return
-        }
-        settingsStore.enableImportScopesIfNeeded()
-        settingsStore.setAutomaticSyncEnabled(true)
-        updateControls()
+    @objc func redetectOneDrive() {
+        refreshDefaultFolderAvailability()
     }
 
     @objc func showFolderInFinder() {
@@ -578,8 +544,6 @@ private extension CPYSyncPreferenceViewController {
     @discardableResult
     func updateControls() -> Bool {
         let settings = settingsStore.settings()
-        updateSwitch(automaticUploadSwitch, isOn: settings.automaticUploadEnabled)
-        updateSwitch(automaticSyncSwitch, isOn: settings.automaticSyncEnabled)
         let rootIsAvailable = updateOneDriveStatus(rootURL: settings.rootURL)
         showFolderButton.isEnabled = rootIsAvailable
         updateSwitch(historyUploadSwitch, isOn: settings.historyUploadEnabled)
@@ -785,9 +749,6 @@ private extension CPYSyncPreferenceViewController {
         layoutSyncNowRow()
 
         sectionTopY -= Layout.sectionGap
-        sectionTopY = layoutSection(automationSection, rowCount: 1, topY: sectionTopY, contentWidth: contentWidth)
-        layoutSwitchRows(in: automationSection)
-        sectionTopY -= Layout.sectionGap
         sectionTopY = layoutSection(switchesSection, rowCount: 2, topY: sectionTopY, contentWidth: contentWidth)
         layoutSwitchRows(in: switchesSection)
     }
@@ -899,11 +860,14 @@ private extension CPYSyncPreferenceViewController {
         guard let row = oneDriveStatusRow else { return }
         let label = row.subviews.compactMap { $0 as? NSTextField }.first
         let badgeSize = oneDriveStatusBadge.intrinsicContentSize
+        let iconGroupWidth = Layout.infoButtonSize * 2 + Layout.infoButtonGap * 2
+        let preferredBadgeX = min(Layout.accountLabelWidth, row.bounds.width)
+        let minimumBadgeX = min(preferredBadgeX, max(0, Layout.accountLabelWidth - 20))
         let badgeX = min(
-            Layout.accountLabelWidth,
-            max(0, row.bounds.width - badgeSize.width - Layout.infoButtonSize - Layout.infoButtonGap)
+            preferredBadgeX,
+            max(minimumBadgeX, row.bounds.width - badgeSize.width - iconGroupWidth)
         )
-        let maxBadgeWidth = max(1, row.bounds.width - badgeX - Layout.infoButtonSize - Layout.infoButtonGap)
+        let maxBadgeWidth = max(1, row.bounds.width - badgeX - iconGroupWidth)
         let badgeWidth = min(maxBadgeWidth, badgeSize.width)
         label?.frame = NSRect(x: 0, y: centeredY(height: 18, in: row), width: badgeX, height: 18)
         oneDriveStatusBadge.frame = NSRect(
@@ -912,8 +876,14 @@ private extension CPYSyncPreferenceViewController {
             width: badgeWidth,
             height: badgeSize.height
         )
-        syncInfoButton.frame = NSRect(
+        redetectOneDriveButton.frame = NSRect(
             x: oneDriveStatusBadge.frame.maxX + Layout.infoButtonGap,
+            y: centeredY(height: Layout.infoButtonSize, in: row),
+            width: Layout.infoButtonSize,
+            height: Layout.infoButtonSize
+        )
+        syncInfoButton.frame = NSRect(
+            x: redetectOneDriveButton.frame.maxX + Layout.infoButtonGap,
             y: centeredY(height: Layout.infoButtonSize, in: row),
             width: Layout.infoButtonSize,
             height: Layout.infoButtonSize

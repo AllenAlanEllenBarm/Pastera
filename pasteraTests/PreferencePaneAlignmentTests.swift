@@ -797,7 +797,7 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
     }
 
     @Test
-    func syncPaneFirstAutomaticEnableTurnsOnHistoryAndSnippetScopesOnly() throws {
+    func syncPaneGranularScopeSwitchesWriteTheirDefaultsWithoutAutomaticFlags() throws {
         let defaults = AppEnvironment.current.defaults
         let homeURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -818,32 +818,34 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             controller.loadView()
             controller.viewDidLoad()
             controller.view.layoutSubtreeIfNeeded()
-            let automaticUploadSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
-                $0.accessibilityLabel() == "自动上传"
+            let historyUploadSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
+                $0.accessibilityLabel() == "上传历史"
             })
-            let automaticSyncSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
-                $0.accessibilityLabel() == "自动同步"
+            let historyImportSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
+                $0.accessibilityLabel() == "同步历史"
             })
 
-            automaticUploadSwitch.performClick(nil)
+            historyUploadSwitch.performClick(nil)
 
-            #expect(defaults.bool(forKey: Constants.UserDefaults.syncAutomaticUploadEnabled))
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryUploadEnabled))
-            #expect(defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncAutomaticUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncAutomaticEnabled))
 
-            automaticSyncSwitch.performClick(nil)
+            historyImportSwitch.performClick(nil)
 
-            #expect(defaults.bool(forKey: Constants.UserDefaults.syncAutomaticEnabled))
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryUploadEnabled))
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled))
-            #expect(defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled))
-            #expect(defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncSnippetUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncSnippetImportEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncAutomaticUploadEnabled))
+            #expect(!defaults.bool(forKey: Constants.UserDefaults.syncAutomaticEnabled))
         }
     }
 
@@ -986,8 +988,6 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
 
     private func preferenceSwitchButtons(in view: NSView) -> [NSButton] {
         let switchLabels: Set<String> = [
-            "自动上传",
-            "自动同步",
             "上传历史",
             "同步历史",
             "上传片段",

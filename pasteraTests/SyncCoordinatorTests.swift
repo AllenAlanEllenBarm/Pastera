@@ -34,8 +34,6 @@ struct SyncCoordinatorTests {
         #expect(SyncCoordinatorError.noEnabledWork.localizedDescription == "请先开启至少一个同步开关。")
         #expect(SyncCoordinatorError.missingOneDrive.localizedDescription == "请先安装并登录 OneDrive。")
         #expect(SyncCoordinatorError.folderUnavailable.localizedDescription == "所选 OneDrive 文件夹不可用。")
-        #expect(SyncCoordinatorError.automaticUploadDisabled.localizedDescription == "自动上传未开启。")
-        #expect(SyncCoordinatorError.automaticSyncDisabled.localizedDescription == "自动同步未开启。")
     }
 
     @Test
@@ -514,7 +512,7 @@ struct SyncCoordinatorTests {
     }
 
     @Test
-    func coordinatorSeparatesAutomaticUploadAndSync() throws {
+    func coordinatorTimerUsesGranularUploadAndImportScopes() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
@@ -536,10 +534,8 @@ struct SyncCoordinatorTests {
         ], deviceID: "remote-device", limit: 2000, maxTextBytes: 256 * 1024, snapshotTextBudgetBytes: 8 * 1024 * 1024)
         var settings = makeSettings(
             rootURL: rootURL,
-            automaticUpload: true,
-            automaticSync: false,
             historyUpload: true,
-            historyImport: true
+            historyImport: false
         )
         let coordinator = SyncCoordinator(
             settingsProvider: { settings },
@@ -556,9 +552,7 @@ struct SyncCoordinatorTests {
 
         settings = makeSettings(
             rootURL: rootURL,
-            automaticUpload: false,
-            automaticSync: true,
-            historyUpload: true,
+            historyUpload: false,
             historyImport: true
         )
         coordinator.syncNow(reason: .timer, wait: true)
@@ -569,7 +563,7 @@ struct SyncCoordinatorTests {
     }
 
     @Test
-    func coordinatorSkipsLocalChangeUploadWhenAutomaticUploadIsOffButAllowsManualSync() throws {
+    func coordinatorLocalChangeUploadsWhenUploadScopeIsOn() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
         let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
@@ -579,7 +573,7 @@ struct SyncCoordinatorTests {
             ]
         )
         historyRepository.save(id: PasteboardHistory.ID(rawValue: content.hash), content: content, updateAt: 10)
-        let settings = makeSettings(rootURL: rootURL, automaticUpload: false, automaticSync: false, historyUpload: true)
+        let settings = makeSettings(rootURL: rootURL, historyUpload: true)
         let coordinator = SyncCoordinator(
             settingsProvider: { settings },
             providerFactory: { _ in provider },
@@ -589,14 +583,37 @@ struct SyncCoordinatorTests {
 
         coordinator.syncNow(reason: .localChange, wait: true)
 
-        #expect(coordinator.status.phase == .skipped)
-        #expect(coordinator.status.statusText == "自动上传未开启。")
-        #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").isEmpty)
-
-        coordinator.syncNow(reason: .manual, wait: true)
-
         #expect(coordinator.status.phase == .succeeded)
         #expect(try provider.loadHistorySnapshots(excludingDeviceID: "remote-device").first?.payloads.count == 1)
+    }
+
+    @Test
+    func coordinatorLocalChangeDoesNotImportWhenOnlyImportScopeIsOn() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let remoteID = PasteboardHistory.ID(rawValue: "remote-import-only")
+        try provider.saveHistorySnapshot([
+            PasteboardHistorySyncPayload(
+                id: remoteID.rawValue,
+                text: "Remote import only",
+                updateAt: 20,
+                deviceID: "remote-device",
+                sourceKind: .plainText
+            )
+        ], deviceID: "remote-device", limit: 2000, maxTextBytes: 256 * 1024, snapshotTextBudgetBytes: 8 * 1024 * 1024)
+        let settings = makeSettings(rootURL: rootURL, historyImport: true)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { settings },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .localChange, wait: true)
+
+        #expect(coordinator.status.phase == .idle)
+        #expect(historyRepository.fetchHistory(id: remoteID) == nil)
     }
 
     @Test
@@ -736,8 +753,6 @@ struct SyncCoordinatorTests {
 
     private func makeSettings(
         rootURL: URL,
-        automaticUpload: Bool = true,
-        automaticSync: Bool = true,
         historyUpload: Bool = false,
         historyImport: Bool = false,
         snippetUpload: Bool = false,
@@ -749,8 +764,6 @@ struct SyncCoordinatorTests {
         syncedFileLimitPerDevice: Int = 10
     ) -> SyncSettings {
         SyncSettings(
-            automaticUploadEnabled: automaticUpload,
-            automaticSyncEnabled: automaticSync,
             rootURL: rootURL,
             historyUploadEnabled: historyUpload,
             historyImportEnabled: historyImport,

@@ -14,8 +14,6 @@ import Combine
 import Foundation
 
 struct SyncSettings: Equatable {
-    let automaticUploadEnabled: Bool
-    let automaticSyncEnabled: Bool
     let rootURL: URL?
     let historyUploadEnabled: Bool
     let historyImportEnabled: Bool
@@ -109,8 +107,6 @@ enum SyncCoordinatorError: LocalizedError {
     case noEnabledWork
     case missingOneDrive
     case folderUnavailable
-    case automaticUploadDisabled
-    case automaticSyncDisabled
 
     var errorDescription: String? {
         switch self {
@@ -120,10 +116,6 @@ enum SyncCoordinatorError: LocalizedError {
             return "请先安装并登录 OneDrive。"
         case .folderUnavailable:
             return "所选 OneDrive 文件夹不可用。"
-        case .automaticUploadDisabled:
-            return "自动上传未开启。"
-        case .automaticSyncDisabled:
-            return "自动同步未开启。"
         }
     }
 }
@@ -141,8 +133,6 @@ final class UserDefaultsSyncSettingsStore {
         let retentionSettings = HistoryRetentionSettings.current(defaults: defaults)
         let fileAssetTypes = fileAssetTypes()
         return SyncSettings(
-            automaticUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncAutomaticUploadEnabled),
-            automaticSyncEnabled: defaults.bool(forKey: Constants.UserDefaults.syncAutomaticEnabled),
             rootURL: rootPath.map { URL(fileURLWithPath: $0, isDirectory: true) },
             historyUploadEnabled: defaults.bool(forKey: Constants.UserDefaults.syncHistoryUploadEnabled),
             historyImportEnabled: defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled),
@@ -158,14 +148,6 @@ final class UserDefaultsSyncSettingsStore {
             maxSyncedFileBytes: maxSyncedFileBytes(),
             syncedFileLimitPerDevice: syncedFileLimitPerDevice()
         )
-    }
-
-    func setAutomaticUploadEnabled(_ enabled: Bool) {
-        defaults.set(enabled, forKey: Constants.UserDefaults.syncAutomaticUploadEnabled)
-    }
-
-    func setAutomaticSyncEnabled(_ enabled: Bool) {
-        defaults.set(enabled, forKey: Constants.UserDefaults.syncAutomaticEnabled)
     }
 
     func setRootURL(_ url: URL?) {
@@ -200,22 +182,6 @@ final class UserDefaultsSyncSettingsStore {
 
     func setFileImportEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncFileImportEnabled)
-    }
-
-    func enableUploadScopesIfNeeded() {
-        let settings = settings()
-        guard !settings.hasEnabledUploadWork else { return }
-        setHistoryUploadEnabled(true)
-        setSnippetUploadEnabled(true)
-        updateDerivedFileScopes()
-    }
-
-    func enableImportScopesIfNeeded() {
-        let settings = settings()
-        guard !settings.hasEnabledImportWork else { return }
-        setHistoryImportEnabled(true)
-        setSnippetImportEnabled(true)
-        updateDerivedFileScopes()
     }
 
     func setFileTypeEnabled(_ type: PasteboardAvailableType, enabled: Bool) {
@@ -523,10 +489,7 @@ final class SyncCoordinator {
             setSkipped(error: SyncCoordinatorError.noEnabledWork)
             return
         }
-        guard let directionPlan = directionPlan(reason: reason, settings: settings) else {
-            setSkipped(error: disabledAutomaticError(reason: reason, settings: settings))
-            return
-        }
+        let directionPlan = directionPlan(reason: reason, settings: settings)
 
         if reason == .manual {
             setStatus(SyncStatus(
@@ -740,25 +703,10 @@ final class SyncCoordinator {
         CPYUtilities.deviceID ?? ProcessInfo.processInfo.hostName
     }
 
-    private func directionPlan(reason: Reason, settings: SyncSettings) -> DirectionPlan? {
-        let wantsUpload = settings.hasEnabledUploadWork
-        let wantsImport = reason == .localChange ? false : settings.hasEnabledImportWork
-        guard wantsUpload || wantsImport else { return nil }
-        let uploadAllowed = reason == .manual || settings.automaticUploadEnabled
-        let importAllowed = reason == .manual || settings.automaticSyncEnabled
-        let upload = wantsUpload && uploadAllowed
-        let importRemote = wantsImport && importAllowed
-        guard upload || importRemote else { return nil }
-        return DirectionPlan(upload: upload, importRemote: importRemote)
-    }
-
-    private func disabledAutomaticError(reason: Reason, settings: SyncSettings) -> SyncCoordinatorError {
-        if reason == .localChange, settings.hasEnabledUploadWork {
-            return .automaticUploadDisabled
-        }
-        if settings.hasEnabledUploadWork, !settings.automaticUploadEnabled {
-            return .automaticUploadDisabled
-        }
-        return .automaticSyncDisabled
+    private func directionPlan(reason: Reason, settings: SyncSettings) -> DirectionPlan {
+        DirectionPlan(
+            upload: settings.hasEnabledUploadWork,
+            importRemote: reason == .localChange ? false : settings.hasEnabledImportWork
+        )
     }
 }
