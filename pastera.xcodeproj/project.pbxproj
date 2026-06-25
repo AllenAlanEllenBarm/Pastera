@@ -10,6 +10,7 @@
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
+		C5E000002FE700000B7C0DE /* GeneralPreferenceHelpButtonLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E000012FE700000B7C0DE /* GeneralPreferenceHelpButtonLayoutTests.swift */; };
 		C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */; };
 		C5A921002FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A921012FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift */; };
 		C5A901002FD0B00000B7C0DE /* HistoryMenuPaginationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */; };
@@ -212,6 +213,7 @@
 		C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYWindowAppearance.swift; sourceTree = "<group>"; };
 		C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYGeneralPreferenceViewController.swift; sourceTree = "<group>"; };
 		C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYWindowAppearanceTests.swift; sourceTree = "<group>"; };
+		C5E000012FE700000B7C0DE /* GeneralPreferenceHelpButtonLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralPreferenceHelpButtonLayoutTests.swift; sourceTree = "<group>"; };
 		C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuPaginationState.swift; sourceTree = "<group>"; };
 		C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuKeyEquivalentTests.swift; sourceTree = "<group>"; };
 		C5A921012FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryBrowserPanelShortcutTests.swift; sourceTree = "<group>"; };
@@ -705,6 +707,7 @@
 				C571000C2FCEB03000C8F965 /* Models */,
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
 				C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */,
+				C5E000012FE700000B7C0DE /* GeneralPreferenceHelpButtonLayoutTests.swift */,
 				C5A902012FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift */,
 				C5A921012FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift */,
 				C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */,
@@ -973,6 +976,7 @@
 				FA6167941D3ACCB90049FA14 /* DraggedDataTests.swift in Sources */,
 				C571000A2FCEB03000C8F965 /* PasteboardContentTests.swift in Sources */,
 				C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */,
+				C5E000002FE700000B7C0DE /* GeneralPreferenceHelpButtonLayoutTests.swift in Sources */,
 				C5A902002FD0B80000B7C0DE /* HistoryMenuKeyEquivalentTests.swift in Sources */,
 				C5A921002FD240000B7C0DE /* HistoryBrowserPanelShortcutTests.swift in Sources */,
 				C5A90B002FD1400000B7C0DE /* SnippetBrowserPanelTests.swift in Sources */,

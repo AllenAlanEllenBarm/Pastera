@@ -171,7 +171,7 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         let controlMaxX = min(view.bounds.width - 18, 438)
         let checkboxHeight: CGFloat = 18
         let checkboxWidth = max(180, controlMaxX - contentLeftX)
-        let automaticPasteWidth: CGFloat = 150
+        let automaticPasteWidth = max(1, ceil(automaticPasteButton.intrinsicContentSize.width))
         let helpButtonSize = NSSize(width: 20, height: 20)
         let clearHistoryButtonSize = NSSize(width: 118, height: 24)
         let numberFieldSize = NSSize(width: 58, height: 22)
