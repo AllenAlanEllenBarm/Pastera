@@ -11,6 +11,7 @@
 //
 
 import Combine
+import Dependencies
 import DependenciesTestSupport
 import Foundation
 import SQLiteData
@@ -98,7 +99,7 @@ struct SnippetRepositoryTests {
         #expect(repository.fetchSnippet(id: snippet2.id) == snippet2)
 
         let folder2 = try #require(repository.insertFolder())
-        #expect(folder2.title == "untitled folder")
+        #expect(folder2.title == "untitled folder 2")
         #expect(folder2.index == 1)
         #expect(folder2.isEnabled)
 
@@ -109,6 +110,17 @@ struct SnippetRepositoryTests {
             ]
         )
         #expect(repository.fetchFolderDetail(id: folder2.id) == SnippetFolderDetail(folder: folder2, snippets: []))
+    }
+
+    @Test
+    func insertFolderUsesNextAvailableDefaultTitle() throws {
+        let folder = try #require(repository.insertFolder())
+        let folder2 = try #require(repository.insertFolder())
+        let folder3 = try #require(repository.insertFolder())
+
+        #expect(folder.title == "untitled folder")
+        #expect(folder2.title == "untitled folder 2")
+        #expect(folder3.title == "untitled folder 3")
     }
 
     @Test
@@ -166,7 +178,7 @@ struct SnippetRepositoryTests {
     func updateFolder() throws {
         let folder = try #require(repository.insertFolder())
 
-        repository.updateFolderTitle(folder.id, title: "Updated")
+        #expect(repository.updateFolderTitle(folder.id, title: "Updated"))
         #expect(repository.fetchFolderDetail(id: folder.id)?.folder.title == "Updated")
 
         repository.updateFolderIsEnabled(folder.id, isEnabled: false)
@@ -177,6 +189,19 @@ struct SnippetRepositoryTests {
         #expect(repository.fetchFolderDetail(id: folder2.id)?.folder.index == 0)
         #expect(repository.fetchFolderDetail(id: folder.id)?.folder.index == 1)
         #expect(repository.fetchFolderDetails().map(\.folder.id) == [folder2.id, folder.id])
+    }
+
+    @Test
+    func updateFolderTitleRejectsExactDuplicateButAllowsCaseDifference() throws {
+        let folder = try #require(repository.insertFolder())
+        let folder2 = try #require(repository.insertFolder())
+
+        #expect(repository.updateFolderTitle(folder.id, title: "AI Prompt"))
+        #expect(!repository.updateFolderTitle(folder2.id, title: "AI Prompt"))
+        #expect(repository.fetchFolderDetail(id: folder2.id)?.folder.title == "untitled folder 2")
+
+        #expect(repository.updateFolderTitle(folder2.id, title: "ai prompt"))
+        #expect(repository.fetchFolderDetails().map(\.folder.title) == ["AI Prompt", "ai prompt"])
     }
 
     @Test
@@ -197,7 +222,7 @@ struct SnippetRepositoryTests {
         repository.updateSnippetTitle(snippet.id, title: "Updated")
         #expect(repository.fetchSnippet(id: snippet.id)?.title == "Updated")
 
-        repository.updateSnippetContent(snippet.id, content: "Updated Content")
+        #expect(repository.updateSnippetContent(snippet.id, content: "Updated Content"))
         #expect(repository.fetchSnippet(id: snippet.id)?.content == "Updated Content")
 
         repository.updateSnippetIsEnabled(snippet.id, isEnabled: false)
@@ -208,6 +233,22 @@ struct SnippetRepositoryTests {
         #expect(repository.fetchSnippet(id: snippet2.id)?.index == 0)
         #expect(repository.fetchSnippet(id: snippet.id)?.index == 1)
         #expect(repository.fetchFolderDetail(id: folder.id)?.snippets.map(\.id) == [snippet2.id, snippet.id])
+    }
+
+    @Test
+    func updateSnippetContentRejectsSameFolderDuplicateButAllowsOtherFolders() throws {
+        let folder = try #require(repository.insertFolder())
+        let snippet = try #require(repository.insertSnippet(to: folder.id))
+        let snippet2 = try #require(repository.insertSnippet(to: folder.id))
+        let folder2 = try #require(repository.insertFolder())
+        let snippetInOtherFolder = try #require(repository.insertSnippet(to: folder2.id))
+
+        #expect(repository.updateSnippetContent(snippet.id, content: "shared"))
+        #expect(!repository.updateSnippetContent(snippet2.id, content: "shared"))
+        #expect(repository.fetchSnippet(id: snippet2.id)?.content == "")
+
+        #expect(repository.updateSnippetContent(snippetInOtherFolder.id, content: "shared"))
+        #expect(repository.fetchSnippet(id: snippetInOtherFolder.id)?.content == "shared")
     }
 
     @Test
@@ -510,6 +551,130 @@ struct SnippetRepositorySyncTests {
 
         #expect(repository.fetchFolderDetail(id: syncedFolderID) == nil)
         #expect(repository.fetchSnippet(id: syncedSnippetID) == nil)
+    }
+
+    @Test
+    func syncImportMergesSameTitleFolderIDsAndDeduplicatesSameFolderContent() throws {
+        let localFolder = try #require(repository.insertFolder())
+        #expect(repository.updateFolderTitle(localFolder.id, title: "AI Prompt"))
+        let localSnippet = try #require(repository.insertSnippet(to: localFolder.id))
+        #expect(repository.updateSnippetContent(localSnippet.id, content: "shared"))
+
+        let remoteFolderID = UUID()
+        let remoteDuplicateSnippetID = UUID()
+        let remoteUniqueSnippetID = UUID()
+        let snapshot = SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(
+                    id: remoteFolderID.uuidString,
+                    title: "AI Prompt",
+                    index: 0,
+                    isEnabled: true,
+                    updatedAt: localFolder.updatedAt + 10,
+                    deviceID: "remote-device"
+                )
+            ],
+            snippets: [
+                SnippetSyncPayload(
+                    id: remoteDuplicateSnippetID.uuidString,
+                    folderID: remoteFolderID.uuidString,
+                    title: "Duplicate content",
+                    content: "shared",
+                    index: 0,
+                    isEnabled: true,
+                    updatedAt: localFolder.updatedAt + 10,
+                    deviceID: "remote-device"
+                ),
+                SnippetSyncPayload(
+                    id: remoteUniqueSnippetID.uuidString,
+                    folderID: remoteFolderID.uuidString,
+                    title: "Unique content",
+                    content: "unique",
+                    index: 1,
+                    isEnabled: true,
+                    updatedAt: localFolder.updatedAt + 10,
+                    deviceID: "remote-device"
+                )
+            ]
+        )
+
+        #expect(repository.upsertSyncSnapshot(snapshot) == 1)
+        #expect(repository.fetchFolderDetails().map(\.folder.title) == ["AI Prompt"])
+        let detail = try #require(repository.fetchFolderDetail(id: localFolder.id))
+        #expect(Set(detail.snippets.map(\.content)) == ["shared", "unique"])
+        #expect(repository.fetchFolderDetail(id: SnippetFolder.ID(rawValue: remoteFolderID)) == nil)
+        #expect(repository.fetchSnippet(id: Snippet.ID(rawValue: remoteDuplicateSnippetID)) == nil)
+        #expect(repository.fetchSnippet(id: Snippet.ID(rawValue: remoteUniqueSnippetID)) != nil)
+
+        #expect(repository.upsertSyncSnapshot(snapshot) == 0)
+    }
+
+    @Test
+    func syncImportAllowsSameContentInDifferentFolders() throws {
+        let folderID = UUID()
+        let folder2ID = UUID()
+        let snippetID = UUID()
+        let snippet2ID = UUID()
+
+        #expect(repository.upsertSyncSnapshot(SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(id: folderID.uuidString, title: "A", index: 0, isEnabled: true, updatedAt: 10),
+                SnippetFolderSyncPayload(id: folder2ID.uuidString, title: "B", index: 1, isEnabled: true, updatedAt: 10)
+            ],
+            snippets: [
+                SnippetSyncPayload(id: snippetID.uuidString, folderID: folderID.uuidString, title: "Shared", content: "same", index: 0, isEnabled: true, updatedAt: 10),
+                SnippetSyncPayload(id: snippet2ID.uuidString, folderID: folder2ID.uuidString, title: "Shared", content: "same", index: 0, isEnabled: true, updatedAt: 10)
+            ]
+        )) == 4)
+
+        #expect(repository.fetchFolderDetails().count == 2)
+        #expect(repository.fetchFolderDetails().flatMap(\.snippets).map(\.content) == ["same", "same"])
+    }
+
+    @Test
+    func removeDuplicateFoldersAndSnippetsMergesExistingBadData() throws {
+        let olderFolderID = SnippetFolder.ID(rawValue: UUID())
+        let canonicalFolderID = SnippetFolder.ID(rawValue: UUID())
+        let lowerCaseFolderID = SnippetFolder.ID(rawValue: UUID())
+        let olderSharedSnippetID = Snippet.ID(rawValue: UUID())
+        let olderUniqueSnippetID = Snippet.ID(rawValue: UUID())
+        let canonicalSharedSnippetID = Snippet.ID(rawValue: UUID())
+        let canonicalUniqueSnippetID = Snippet.ID(rawValue: UUID())
+        try insertDuplicateFixture(
+            folders: [
+                SnippetFolder(id: olderFolderID, title: "AI Prompt", index: 0, isEnabled: true, updatedAt: 10),
+                SnippetFolder(id: canonicalFolderID, title: "AI Prompt", index: 0, isEnabled: true, updatedAt: 20),
+                SnippetFolder(id: lowerCaseFolderID, title: "ai prompt", index: 1, isEnabled: true, updatedAt: 30)
+            ],
+            snippets: [
+                Snippet(id: olderSharedSnippetID, folderID: olderFolderID, title: "Old shared", content: "shared", index: 0, isEnabled: true, updatedAt: 10),
+                Snippet(id: olderUniqueSnippetID, folderID: olderFolderID, title: "Old unique", content: "old", index: 1, isEnabled: true, updatedAt: 10),
+                Snippet(id: canonicalSharedSnippetID, folderID: canonicalFolderID, title: "New shared", content: "shared", index: 0, isEnabled: true, updatedAt: 20),
+                Snippet(id: canonicalUniqueSnippetID, folderID: canonicalFolderID, title: "New unique", content: "new", index: 1, isEnabled: true, updatedAt: 20)
+            ]
+        )
+
+        #expect(repository.removeDuplicateFoldersAndSnippets() == 2)
+
+        #expect(repository.fetchFolderDetail(id: olderFolderID) == nil)
+        let canonicalDetail = try #require(repository.fetchFolderDetail(id: canonicalFolderID))
+        #expect(repository.fetchFolderDetail(id: lowerCaseFolderID) != nil)
+        #expect(Set(canonicalDetail.snippets.map(\.content)) == ["shared", "old", "new"])
+        #expect(repository.fetchSnippet(id: olderSharedSnippetID) == nil)
+        #expect(repository.fetchSnippet(id: olderUniqueSnippetID)?.folderID == canonicalFolderID)
+        #expect(repository.fetchSnippet(id: canonicalSharedSnippetID) != nil)
+    }
+}
+
+private func insertDuplicateFixture(folders: [SnippetFolder], snippets: [Snippet]) throws {
+    @Dependency(\.defaultDatabase) var database
+    try database.write { database in
+        for folder in folders {
+            try SnippetFolder.upsert { folder }.execute(database)
+        }
+        for snippet in snippets {
+            try Snippet.upsert { snippet }.execute(database)
+        }
     }
 }
 

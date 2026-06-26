@@ -10,6 +10,8 @@
 //  Copyright © 2015-2018 Clipy Project.
 //
 
+// swiftlint:disable file_length
+
 import Cocoa
 import Dependencies
 import KeyHolder
@@ -66,6 +68,18 @@ final class CPYSnippetsEditorWindowController: NSWindowController {
     private var hasShownWindow = false
     private var defaultsObserver: NSObjectProtocol?
     private var isEditingOutlineTitle = false
+    private lazy var duplicateWarningPresenter: (String, String) -> Void = { [weak self] title, message in
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "OK"))
+        if let window = self?.window, window.isVisible {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
     private var selectedFolder: EditorSnippetFolder? {
         guard let item = outlineView.item(atRow: outlineView.selectedRow) else { return nil }
         return item as? EditorSnippetFolder ?? outlineView.parent(forItem: item) as? EditorSnippetFolder
@@ -841,17 +855,53 @@ extension CPYSnippetsEditorWindowController: NSOutlineViewDelegate {
         guard !text.isEmpty else { return false }
         guard let outlineView = control as? NSOutlineView else { return false }
         guard let item = outlineView.item(atRow: outlineView.selectedRow) else { return false }
+
+        let didCommit = commitOutlineTitle(text, item: item)
+        if !didCommit {
+            fieldEditor.string = currentOutlineTitle(for: item)
+            outlineView.reloadItem(item)
+            changeItemFocus()
+            isEditingOutlineTitle = false
+        }
+        return true
+    }
+
+    @discardableResult
+    private func commitOutlineTitle(_ text: String, item: Any) -> Bool {
+        let normalizedTitle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty else { return false }
         if let folder = item as? EditorSnippetFolder {
-            folder.title = text
-            snippetRepository.updateFolderTitle(folder.id, title: text)
+            guard snippetRepository.updateFolderTitle(folder.id, title: normalizedTitle) else {
+                presentDuplicateWarning(
+                    title: "文件夹已存在",
+                    message: "当前片段文件夹中已有同名文件夹。"
+                )
+                return false
+            }
+            folder.title = normalizedTitle
         } else if let snippet = item as? EditorSnippet {
-            snippet.title = text
-            snippetRepository.updateSnippetTitle(snippet.id, title: text)
+            snippet.title = normalizedTitle
+            snippetRepository.updateSnippetTitle(snippet.id, title: normalizedTitle)
         }
         outlineView.reloadItem(item)
         changeItemFocus()
         isEditingOutlineTitle = false
         return true
+    }
+
+    private func currentOutlineTitle(for item: Any) -> String {
+        if let folder = item as? EditorSnippetFolder {
+            return folder.title
+        }
+        if let snippet = item as? EditorSnippet {
+            return snippet.title
+        }
+        return ""
+    }
+
+    private func presentDuplicateWarning(title: String, message: String) {
+        NSSound.beep()
+        duplicateWarningPresenter(title, message)
     }
 }
 
@@ -943,6 +993,44 @@ extension CPYSnippetsEditorWindowController {
         window?.makeFirstResponder(outlineView)
     }
 
+    func setDuplicateWarningPresenterForTesting(_ presenter: @escaping (String, String) -> Void) {
+        duplicateWarningPresenter = presenter
+    }
+
+    func selectFolderForTesting(id: SnippetFolder.ID) {
+        loadFoldersIfNeeded()
+        guard let folder = folders.first(where: { $0.id == id }) else { return }
+        let row = outlineView.row(forItem: folder)
+        guard row >= 0 else { return }
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        window?.makeFirstResponder(outlineView)
+        changeItemFocus()
+    }
+
+    func commitSelectedOutlineTitleForTesting(_ title: String) -> Bool {
+        loadFoldersIfNeeded()
+        guard let item = outlineView.item(atRow: outlineView.selectedRow) else { return false }
+        return commitOutlineTitle(title, item: item)
+    }
+
+    func replaceSelectedSnippetContentForTesting(_ content: String) -> Bool {
+        loadFoldersIfNeeded()
+        guard let snippet = outlineView.item(atRow: outlineView.selectedRow) as? EditorSnippet else {
+            return false
+        }
+        return commitSnippetContent(content, snippet: snippet)
+    }
+
+    func folderTitleForTesting(id: SnippetFolder.ID) -> String? {
+        loadFoldersIfNeeded()
+        return folders.first { $0.id == id }?.title
+    }
+
+    func snippetContentForTesting(id: Snippet.ID) -> String? {
+        loadFoldersIfNeeded()
+        return folders.flatMap(\.snippets).first { $0.id == id }?.content
+    }
+
     private func perceivedBrightness(for cgColor: CGColor?) -> CGFloat {
         guard let cgColor,
               let color = NSColor(cgColor: cgColor)?.usingColorSpace(.deviceRGB) else {
@@ -962,9 +1050,19 @@ extension CPYSnippetsEditorWindowController: NSTextViewDelegate {
         guard let snippet = outlineView.item(atRow: outlineView.selectedRow) as? EditorSnippet else { return false }
 
         let string = (textView.string as NSString).replacingCharacters(in: affectedCharRange, with: replacementString)
-        snippet.content = string
-        snippetRepository.updateSnippetContent(snippet.id, content: string)
+        return commitSnippetContent(string, snippet: snippet)
+    }
 
+    @discardableResult
+    private func commitSnippetContent(_ content: String, snippet: EditorSnippet) -> Bool {
+        guard snippetRepository.updateSnippetContent(snippet.id, content: content) else {
+            presentDuplicateWarning(
+                title: "片段内容已存在",
+                message: "当前文件夹中已有相同内容的片段。"
+            )
+            return false
+        }
+        snippet.content = content
         return true
     }
 }

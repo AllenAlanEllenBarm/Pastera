@@ -332,6 +332,50 @@ struct SyncCoordinatorTests {
     }
 
     @Test
+    func coordinatorCleansDuplicateSnippetsBeforeExport() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let snippetRepository = SyncSnippetRepository(
+            snapshot: makeSnippetSnapshot(title: "AI Prompt", content: "Prompt")
+        )
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL, snippetUpload: true) },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(snippetRepository.removeDuplicateCallCount == 1)
+        #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "remote-device").first?.snapshot.folders.count == 1)
+        #expect(try provider.loadSnippetSnapshots(excludingDeviceID: "remote-device").first?.snapshot.snippets.count == 1)
+    }
+
+    @Test
+    func coordinatorCleansDuplicateSnippetsBeforeImport() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let remoteSnapshot = makeSnippetSnapshot(title: "AI Prompt", content: "Prompt")
+        try provider.saveSnippetSnapshot(remoteSnapshot, deviceID: "remote-device")
+        let snippetRepository = SyncSnippetRepository(upsertResult: 1)
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL, snippetImport: true) },
+            providerFactory: { _ in provider },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(snippetRepository.removeDuplicateCallCount == 1)
+        #expect(snippetRepository.upsertedSnapshots == [remoteSnapshot])
+        #expect(coordinator.status.importedCount == 1)
+    }
+
+    @Test
     func coordinatorReportsSkippedFileWarningWithoutBlockingTextHistoryUpload() throws {
         let rootURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: rootURL) }
@@ -781,9 +825,82 @@ struct SyncCoordinatorTests {
         )
     }
 
+    private func makeSnippetSnapshot(title: String, content: String) -> SnippetSyncSnapshot {
+        let folderID = UUID().uuidString
+        return SnippetSyncSnapshot(
+            folders: [
+                SnippetFolderSyncPayload(
+                    id: folderID,
+                    title: title,
+                    index: 0,
+                    isEnabled: true,
+                    updatedAt: 10,
+                    deviceID: "test-device"
+                )
+            ],
+            snippets: [
+                SnippetSyncPayload(
+                    id: UUID().uuidString,
+                    folderID: folderID,
+                    title: "Snippet",
+                    content: content,
+                    index: 0,
+                    isEnabled: true,
+                    updatedAt: 10,
+                    deviceID: "test-device"
+                )
+            ]
+        )
+    }
+
     private var currentDeviceID: String {
         CPYUtilities.deviceID ?? ProcessInfo.processInfo.hostName
     }
+}
+
+private final class SyncSnippetRepository: SnippetRepositoryProtocol {
+    private let snapshot: SnippetSyncSnapshot
+    private let upsertResult: Int
+    private(set) var removeDuplicateCallCount = 0
+    private(set) var upsertedSnapshots = [SnippetSyncSnapshot]()
+
+    init(
+        snapshot: SnippetSyncSnapshot = SnippetSyncSnapshot(folders: [], snippets: []),
+        upsertResult: Int = 0
+    ) {
+        self.snapshot = snapshot
+        self.upsertResult = upsertResult
+    }
+
+    func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func fetchFolderDetails() -> [SnippetFolderDetail] { [] }
+    func fetchFolderDetail(id _: SnippetFolder.ID) -> SnippetFolderDetail? { nil }
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot { snapshot }
+    func insertFolder() -> SnippetFolder? { nil }
+    func insertFolders(_: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int {
+        upsertedSnapshots.append(snapshot)
+        return upsertResult
+    }
+    func removeDuplicateFoldersAndSnippets() -> Int {
+        removeDuplicateCallCount += 1
+        return 0
+    }
+    func updateFolderTitle(_: SnippetFolder.ID, title _: String) -> Bool { true }
+    func updateFolderIsEnabled(_: SnippetFolder.ID, isEnabled _: Bool) {}
+    func updateFolderIndexes(_: [SnippetFolder.ID]) {}
+    func deleteFolder(_: SnippetFolder.ID) {}
+    func fetchSnippet(id _: Snippet.ID) -> Snippet? { nil }
+    func insertSnippet(to _: SnippetFolder.ID) -> Snippet? { nil }
+    func updateSnippetTitle(_: Snippet.ID, title _: String) {}
+    func updateSnippetContent(_: Snippet.ID, content _: String) -> Bool { true }
+    func updateSnippetIsEnabled(_: Snippet.ID, isEnabled _: Bool) {}
+    func updateSnippetIndexes(_: [Snippet.ID]) {}
+    func moveSnippet(_: Snippet.ID, to _: SnippetFolder.ID, snippetIDs _: [Snippet.ID]) {}
+    func deleteSnippet(_: Snippet.ID) {}
 }
 
 private final class CountingHistoryRepository: PasteboardHistoryRepositoryProtocol {

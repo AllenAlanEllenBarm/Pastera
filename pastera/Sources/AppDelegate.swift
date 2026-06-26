@@ -46,6 +46,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
         prepareDependencies { values in
             try! values.bootstrapDatabase()
         }
+        _ = snippetRepository.removeDuplicateFoldersAndSnippets()
     }
 
     // MARK: - NSMenuItem Validation

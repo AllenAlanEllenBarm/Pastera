@@ -480,7 +480,8 @@ private struct SnippetEditorKeyboardRepository: SnippetRepositoryProtocol {
     }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
+    func removeDuplicateFoldersAndSnippets() -> Int { 0 }
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool { true }
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
     func deleteFolder(_ id: SnippetFolder.ID) {}
@@ -489,7 +490,7 @@ private struct SnippetEditorKeyboardRepository: SnippetRepositoryProtocol {
     }
     func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
     func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
-    func updateSnippetContent(_ id: Snippet.ID, content: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool { true }
     func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {
         onUpdateSnippetEnabled(id, isEnabled)
     }

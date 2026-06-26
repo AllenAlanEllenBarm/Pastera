@@ -13,6 +13,7 @@ import Testing
 @testable import Pastera
 
 @Suite(.serialized)
+// swiftlint:disable:next type_body_length
 struct CPYWindowAppearanceTests {
     @Test
     func designTokensExposeReadableNativePalette() {
@@ -476,6 +477,83 @@ struct CPYWindowAppearanceTests {
         }
     }
 
+    @Test @MainActor
+    func snippetEditorRejectsDuplicateFolderRenameWithAlert() {
+        let folderID = SnippetFolder.ID(rawValue: UUID())
+        let detail = SnippetFolderDetail(
+            folder: SnippetFolder(id: folderID, title: "AI Prompt", index: 0, isEnabled: true),
+            snippets: []
+        )
+        let repository = SnippetEditorRejectRepo(
+            details: [detail],
+            updateFolderTitleResult: false
+        )
+        var warning: (title: String, message: String)?
+
+        withDependencies {
+            $0.snippetRepository = repository
+        } operation: {
+            let controller = CPYSnippetsEditorWindowController()
+            defer { controller.close() }
+            controller.setDuplicateWarningPresenterForTesting { title, message in
+                warning = (title, message)
+            }
+
+            controller.showWindow(nil)
+            controller.selectFolderForTesting(id: folderID)
+
+            #expect(controller.commitSelectedOutlineTitleForTesting("AI Prompt") == false)
+            #expect(controller.folderTitleForTesting(id: folderID) == "AI Prompt")
+        }
+
+        #expect(repository.folderTitleUpdates.map { $0.title } == ["AI Prompt"])
+        #expect(warning?.title == "文件夹已存在")
+        #expect(warning?.message == "当前片段文件夹中已有同名文件夹。")
+    }
+
+    @Test @MainActor
+    func snippetEditorRejectsDuplicateSnippetContentWithAlert() {
+        let folderID = SnippetFolder.ID(rawValue: UUID())
+        let snippetID = Snippet.ID(rawValue: UUID())
+        let detail = SnippetFolderDetail(
+            folder: SnippetFolder(id: folderID, title: "AI Prompt", index: 0, isEnabled: true),
+            snippets: [
+                Snippet(
+                    id: snippetID,
+                    folderID: folderID,
+                    title: "First",
+                    content: "original",
+                    index: 0,
+                    isEnabled: true
+                )
+            ]
+        )
+        let repository = SnippetEditorRejectRepo(
+            details: [detail],
+            updateSnippetContentResult: false
+        )
+        var warning: (title: String, message: String)?
+
+        withDependencies {
+            $0.snippetRepository = repository
+        } operation: {
+            let controller = CPYSnippetsEditorWindowController()
+            defer { controller.close() }
+            controller.setDuplicateWarningPresenterForTesting { title, message in
+                warning = (title, message)
+            }
+
+            controller.showWindow(nil)
+            controller.selectSnippetForTesting(id: snippetID)
+
+            #expect(controller.replaceSelectedSnippetContentForTesting("duplicated") == false)
+            #expect(controller.snippetContentForTesting(id: snippetID) == "original")
+        }
+
+        #expect(repository.snippetContentUpdates.map { $0.content } == ["duplicated"])
+        #expect(warning?.title == "片段内容已存在")
+        #expect(warning?.message == "当前文件夹中已有相同内容的片段。")
+    }
 }
 
 @MainActor
@@ -579,14 +657,15 @@ private struct SnippetEditorInsertingSnippetRepository: SnippetRepositoryProtoco
     func insertFolder() -> SnippetFolder? { folder }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
+    func removeDuplicateFoldersAndSnippets() -> Int { 0 }
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool { true }
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
     func deleteFolder(_ id: SnippetFolder.ID) {}
     func fetchSnippet(id: Snippet.ID) -> Snippet? { nil }
     func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
     func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
-    func updateSnippetContent(_ id: Snippet.ID, content: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool { true }
     func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
     func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
     func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
@@ -606,14 +685,63 @@ private struct SnippetEditorStaticSnippetRepository: SnippetRepositoryProtocol {
     func insertFolder() -> SnippetFolder? { nil }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
-    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {}
+    func removeDuplicateFoldersAndSnippets() -> Int { 0 }
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool { true }
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
     func deleteFolder(_ id: SnippetFolder.ID) {}
     func fetchSnippet(id: Snippet.ID) -> Snippet? { nil }
     func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
     func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
-    func updateSnippetContent(_ id: Snippet.ID, content: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool { true }
+    func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
+    func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
+    func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
+    func deleteSnippet(_ id: Snippet.ID) {}
+}
+
+private final class SnippetEditorRejectRepo: SnippetRepositoryProtocol {
+    let details: [SnippetFolderDetail]
+    let updateFolderTitleResult: Bool
+    let updateSnippetContentResult: Bool
+    private(set) var folderTitleUpdates = [(id: SnippetFolder.ID, title: String)]()
+    private(set) var snippetContentUpdates = [(id: Snippet.ID, content: String)]()
+
+    init(
+        details: [SnippetFolderDetail],
+        updateFolderTitleResult: Bool = true,
+        updateSnippetContentResult: Bool = true
+    ) {
+        self.details = details
+        self.updateFolderTitleResult = updateFolderTitleResult
+        self.updateSnippetContentResult = updateSnippetContentResult
+    }
+
+    func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
+        Just(details).eraseToAnyPublisher()
+    }
+
+    func fetchFolderDetails() -> [SnippetFolderDetail] { details }
+    func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail? { details.first { $0.folder.id == id } }
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
+    func insertFolder() -> SnippetFolder? { nil }
+    func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
+    func removeDuplicateFoldersAndSnippets() -> Int { 0 }
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool {
+        folderTitleUpdates.append((id, title))
+        return updateFolderTitleResult
+    }
+    func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
+    func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
+    func deleteFolder(_ id: SnippetFolder.ID) {}
+    func fetchSnippet(id: Snippet.ID) -> Snippet? { details.flatMap(\.snippets).first { $0.id == id } }
+    func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
+    func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool {
+        snippetContentUpdates.append((id, content))
+        return updateSnippetContentResult
+    }
     func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
     func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
     func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}

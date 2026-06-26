@@ -144,11 +144,12 @@ final class HotKeyService: NSObject {
 
     private static let defaultMainKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey)!
-    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey)!
+    private static let oldOptionCommandSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey)!
+    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
     private static let legacyDefaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey)!
     private static let legacyDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultSnippetFolderHotKeyModifiers = cmdKey | optionKey
-    private static let defaultSnippetFolderHotKeyCodes = [12, 13, 14, 15, 0, 1, 2, 3]
+    private static let defaultSnippetFolderHotKeyCodes = [12, 13, 14, 15, 0, 1, 2]
 
     fileprivate(set) var mainKeyCombo: KeyCombo?
     fileprivate(set) var historyKeyCombo: KeyCombo?
@@ -235,6 +236,7 @@ extension HotKeyService {
             AppEnvironment.current.defaults.synchronize()
         }
         migrateOptionCommandDefaultKeyCombosIfNeeded()
+        migrateSnippetDefaultKeyComboToFIfNeeded()
         migrateHistoryPanelShortcutDefaultsIfNeeded()
         migrateHistoryPanelDefaultsV2IfNeeded()
         migrateHistoryPanelCanonicalDefaultsIfNeeded()
@@ -340,6 +342,18 @@ extension HotKeyService {
     private func migrateDefaultKeyComboIfNeeded(forKey key: String, legacyDefault: KeyCombo, newDefault: KeyCombo) {
         guard savedKeyCombo(forKey: key) == legacyDefault else { return }
         AppEnvironment.current.defaults.set(newDefault.archive(), forKey: key)
+    }
+
+    private func migrateSnippetDefaultKeyComboToFIfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard !defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF) else { return }
+        migrateDefaultKeyComboIfNeeded(
+            forKey: Constants.HotKey.snippetKeyCombo,
+            legacyDefault: Self.oldOptionCommandSnippetKeyCombo,
+            newDefault: Self.defaultSnippetKeyCombo
+        )
+        defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
+        defaults.synchronize()
     }
 
     private func migrateHistoryPanelShortcutDefaultsIfNeeded() {

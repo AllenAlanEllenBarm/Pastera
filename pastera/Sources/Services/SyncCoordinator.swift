@@ -588,7 +588,8 @@ final class SyncCoordinator {
     }
 
     private func importSnippets(provider: OneDriveFolderSyncProvider) throws -> Int {
-        try provider.loadSnippetSnapshots(excludingDeviceID: currentDeviceID).reduce(0) { importedCount, snapshot in
+        _ = snippetRepository.removeDuplicateFoldersAndSnippets()
+        return try provider.loadSnippetSnapshots(excludingDeviceID: currentDeviceID).reduce(0) { importedCount, snapshot in
             importedCount + snippetRepository.upsertSyncSnapshot(snapshot.snapshot)
         }
     }
@@ -659,6 +660,7 @@ final class SyncCoordinator {
     }
 
     private func exportSnippets(provider: OneDriveFolderSyncProvider) throws -> Int {
+        _ = snippetRepository.removeDuplicateFoldersAndSnippets()
         let snapshot = snippetRepository.fetchSyncSnapshot()
         try provider.saveSnippetSnapshot(snapshot, deviceID: currentDeviceID)
         return snapshot.folders.count + snapshot.snippets.count

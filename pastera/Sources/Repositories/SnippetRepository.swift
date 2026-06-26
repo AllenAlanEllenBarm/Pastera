@@ -112,7 +112,10 @@ protocol SnippetRepositoryProtocol {
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]?
     @discardableResult
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int
-    func updateFolderTitle(_ id: SnippetFolder.ID, title: String)
+    @discardableResult
+    func removeDuplicateFoldersAndSnippets() -> Int
+    @discardableResult
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool)
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID])
     func deleteFolder(_ id: SnippetFolder.ID)
@@ -120,7 +123,8 @@ protocol SnippetRepositoryProtocol {
     func fetchSnippet(id: Snippet.ID) -> Snippet?
     func insertSnippet(to id: SnippetFolder.ID) -> Snippet?
     func updateSnippetTitle(_ id: Snippet.ID, title: String)
-    func updateSnippetContent(_ id: Snippet.ID, content: String)
+    @discardableResult
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool
     func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool)
     func updateSnippetIndexes(_ snippetIDs: [Snippet.ID])
     func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID])
@@ -217,8 +221,9 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                 let lastIndex = try SnippetFolder.order { $0.index.desc() }
                     .select { $0.index }
                     .fetchOne(database) ?? -1
+                let title = try availableFolderTitle(database: database)
                 let folder = SnippetFolder.Draft(
-                    title: "untitled folder",
+                    title: title,
                     index: lastIndex + 1,
                     isEnabled: true,
                     createdAt: currentUnixTime(),
@@ -238,6 +243,19 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                     .fetchOne(database) ?? -1
                 var details = [SnippetFolderDetail]()
                 try folders.enumerated().forEach { index, folders in
+                    if let existingFolder = try folder(title: folders.title, database: database) {
+                        _ = try insertMissingSnippets(
+                            folders.snippets,
+                            to: existingFolder.id,
+                            startingAt: lastSnippetIndex(folderID: existingFolder.id, database: database) + 1,
+                            database: database
+                        )
+                        let snippets = try Snippet.where { $0.folderID.eq(existingFolder.id) }
+                            .order(by: \.index)
+                            .fetchAll(database)
+                        details.append(SnippetFolderDetail(folder: existingFolder, snippets: snippets))
+                        return
+                    }
                     let folder = SnippetFolder.Draft(
                         title: folders.title,
                         index: lastIndex + index + 1,
@@ -249,19 +267,12 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                     guard let insertedFolder = try SnippetFolder.insert(values: { folder }).returning(\.self).fetchOne(database) else {
                         return
                     }
-                    let snippets = folders.snippets.enumerated().map { snippetIndex, snippet in
-                        Snippet.Draft(
-                            folderID: insertedFolder.id,
-                            title: snippet.title,
-                            content: snippet.content,
-                            index: snippetIndex,
-                            isEnabled: true,
-                            createdAt: currentUnixTime(),
-                            updatedAt: currentUnixTime(),
-                            lastModifiedDeviceID: CPYUtilities.deviceID
-                        )
-                    }
-                    let insertedSnippets = try Snippet.insert { snippets }.returning(\.self).fetchAll(database)
+                    let insertedSnippets = try insertMissingSnippets(
+                        folders.snippets,
+                        to: insertedFolder.id,
+                        startingAt: 0,
+                        database: database
+                    )
                     details.append(SnippetFolderDetail(folder: insertedFolder, snippets: insertedSnippets))
                 }
                 return details
@@ -273,17 +284,31 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int {
         withErrorReporting {
             try database.write { database in
+                _ = try removeDuplicateFoldersAndSnippets(database: database)
                 var writtenCount = 0
+                var folderIDMap = [String: SnippetFolder.ID]()
                 for payload in snapshot.folders {
-                    guard try !isSuppressed(kind: .snippetFolder, id: payload.id, database: database),
-                          let folder = payload.snippetFolder else {
+                    guard let folder = payload.snippetFolder else {
+                        continue
+                    }
+                    if try isSuppressed(kind: .snippetFolder, id: payload.id, database: database) {
+                        if let existingFolder = try self.folder(title: payload.title, database: database) {
+                            folderIDMap[payload.id] = existingFolder.id
+                        }
                         continue
                     }
                     if let existingFolder = try SnippetFolder.find(folder.id).fetchOne(database),
                        payload.updatedAt <= existingFolder.updatedAt {
+                        folderIDMap[payload.id] = existingFolder.id
+                        continue
+                    }
+                    if let existingFolder = try self.folder(title: payload.title, excluding: folder.id, database: database) {
+                        folderIDMap[payload.id] = existingFolder.id
+                        try suppress(kind: .snippetFolder, id: payload.id, database: database)
                         continue
                     }
                     try SnippetFolder.upsert { folder }.execute(database)
+                    folderIDMap[payload.id] = folder.id
                     writtenCount += 1
                 }
                 for payload in snapshot.snippets {
@@ -291,11 +316,38 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                           let snippet = payload.snippet else {
                         continue
                     }
+                    let targetFolderID = folderIDMap[payload.folderID] ?? snippet.folderID
+                    guard try SnippetFolder.find(targetFolderID).fetchOne(database) != nil else {
+                        continue
+                    }
+                    let mappedSnippet = Snippet(
+                        id: snippet.id,
+                        folderID: targetFolderID,
+                        title: snippet.title,
+                        content: snippet.content,
+                        index: snippet.index,
+                        isEnabled: snippet.isEnabled,
+                        createdAt: snippet.createdAt,
+                        updatedAt: snippet.updatedAt,
+                        lastModifiedDeviceID: snippet.lastModifiedDeviceID
+                    )
                     if let existingSnippet = try Snippet.find(snippet.id).fetchOne(database),
                        payload.updatedAt <= existingSnippet.updatedAt {
                         continue
                     }
-                    try Snippet.upsert { snippet }.execute(database)
+                    if try hasSnippetContent(
+                        mappedSnippet.content,
+                        in: targetFolderID,
+                        excluding: mappedSnippet.id,
+                        database: database
+                    ) {
+                        try suppress(kind: .snippet, id: payload.id, database: database)
+                        if try Snippet.find(mappedSnippet.id).fetchOne(database) != nil {
+                            try Snippet.delete().where { $0.id.eq(mappedSnippet.id) }.execute(database)
+                        }
+                        continue
+                    }
+                    try Snippet.upsert { mappedSnippet }.execute(database)
                     writtenCount += 1
                 }
                 return writtenCount
@@ -303,9 +355,22 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         } ?? 0
     }
 
-    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) {
+    @discardableResult
+    func removeDuplicateFoldersAndSnippets() -> Int {
         withErrorReporting {
             try database.write { database in
+                try removeDuplicateFoldersAndSnippets(database: database)
+            }
+        } ?? 0
+    }
+
+    @discardableResult
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool {
+        withErrorReporting {
+            try database.write { database in
+                guard try folder(title: title, excluding: id, database: database) == nil else {
+                    return false
+                }
                 try SnippetFolder.where { $0.id.eq(id) }
                     .update {
                         $0.title = title
@@ -313,8 +378,9 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                         $0.lastModifiedDeviceID = CPYUtilities.deviceID
                     }
                     .execute(database)
+                return true
             }
-        }
+        } ?? false
     }
 
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {
@@ -407,9 +473,14 @@ final class SnippetRepository: SnippetRepositoryProtocol {
         }
     }
 
-    func updateSnippetContent(_ id: Snippet.ID, content: String) {
+    @discardableResult
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool {
         withErrorReporting {
             try database.write { database in
+                guard let snippet = try Snippet.find(id).fetchOne(database),
+                      try !hasSnippetContent(content, in: snippet.folderID, excluding: id, database: database) else {
+                    return false
+                }
                 try Snippet.where { $0.id.eq(id) }
                     .update {
                         $0.content = content
@@ -417,8 +488,9 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                         $0.lastModifiedDeviceID = CPYUtilities.deviceID
                     }
                     .execute(database)
+                return true
             }
-        }
+        } ?? false
     }
 
     func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {
@@ -533,6 +605,162 @@ private extension Snippet.ID {
 }
 
 private extension SnippetRepository {
+    func availableFolderTitle(baseTitle: String = "untitled folder", database: Database) throws -> String {
+        let titles = Set(try SnippetFolder.all.select { $0.title }.fetchAll(database))
+        guard titles.contains(baseTitle) else { return baseTitle }
+
+        var suffix = 2
+        while titles.contains("\(baseTitle) \(suffix)") {
+            suffix += 1
+        }
+        return "\(baseTitle) \(suffix)"
+    }
+
+    func folder(
+        title: String,
+        excluding excludedID: SnippetFolder.ID? = nil,
+        database: Database
+    ) throws -> SnippetFolder? {
+        try SnippetFolder.where { $0.title.eq(title) }
+            .fetchAll(database)
+            .first { folder in
+                guard let excludedID else { return true }
+                return folder.id != excludedID
+            }
+    }
+
+    func hasSnippetContent(
+        _ content: String,
+        in folderID: SnippetFolder.ID,
+        excluding excludedID: Snippet.ID? = nil,
+        database: Database
+    ) throws -> Bool {
+        try Snippet.where { $0.folderID.eq(folderID) }
+            .fetchAll(database)
+            .contains { snippet in
+                guard snippet.content == content else { return false }
+                guard let excludedID else { return true }
+                return snippet.id != excludedID
+            }
+    }
+
+    func lastSnippetIndex(folderID: SnippetFolder.ID, database: Database) throws -> Int {
+        try Snippet.where { $0.folderID.eq(folderID) }
+            .order { $0.index.desc() }
+            .select { $0.index }
+            .fetchOne(database) ?? -1
+    }
+
+    func insertMissingSnippets(
+        _ snippets: [(title: String, content: String)],
+        to folderID: SnippetFolder.ID,
+        startingAt index: Int,
+        database: Database
+    ) throws -> [Snippet] {
+        var insertedSnippets = [Snippet]()
+        var nextIndex = index
+        for snippet in snippets {
+            guard try !hasSnippetContent(snippet.content, in: folderID, database: database) else {
+                continue
+            }
+            let draft = Snippet.Draft(
+                folderID: folderID,
+                title: snippet.title,
+                content: snippet.content,
+                index: nextIndex,
+                isEnabled: true,
+                createdAt: currentUnixTime(),
+                updatedAt: currentUnixTime(),
+                lastModifiedDeviceID: CPYUtilities.deviceID
+            )
+            if let insertedSnippet = try Snippet.insert { draft }.returning(\.self).fetchOne(database) {
+                insertedSnippets.append(insertedSnippet)
+                nextIndex += 1
+            }
+        }
+        return insertedSnippets
+    }
+
+    func removeDuplicateFoldersAndSnippets(database: Database) throws -> Int {
+        var changedCount = 0
+        let folders = try SnippetFolder.all.order(by: \.index).fetchAll(database)
+        let foldersByTitle = Dictionary(grouping: folders, by: \.title)
+        for duplicateFolders in foldersByTitle.values where duplicateFolders.count > 1 {
+            let canonicalFolder = duplicateFolders.sorted(by: isPreferredFolder).first
+            guard let canonicalFolder else { continue }
+
+            for duplicateFolder in duplicateFolders where duplicateFolder.id != canonicalFolder.id {
+                try suppress(kind: .snippetFolder, id: duplicateFolder.id.rawValue.uuidString, database: database)
+                let duplicateSnippets = try Snippet.where { $0.folderID.eq(duplicateFolder.id) }
+                    .order(by: \.index)
+                    .fetchAll(database)
+                for snippet in duplicateSnippets {
+                    if try hasSnippetContent(snippet.content, in: canonicalFolder.id, database: database) {
+                        try suppress(kind: .snippet, id: snippet.id.rawValue.uuidString, database: database)
+                        try Snippet.delete().where { $0.id.eq(snippet.id) }.execute(database)
+                        changedCount += 1
+                    } else {
+                        let nextIndex = try lastSnippetIndex(folderID: canonicalFolder.id, database: database) + 1
+                        try Snippet.where { $0.id.eq(snippet.id) }
+                            .update {
+                                $0.folderID = canonicalFolder.id
+                                $0.index = nextIndex
+                                $0.updatedAt = currentUnixTime()
+                                $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                            }
+                            .execute(database)
+                    }
+                }
+                try SnippetFolder.delete().where { $0.id.eq(duplicateFolder.id) }.execute(database)
+                changedCount += 1
+            }
+        }
+
+        let remainingFolders = try SnippetFolder.all.fetchAll(database)
+        for folder in remainingFolders {
+            changedCount += try removeDuplicateSnippets(in: folder.id, database: database)
+        }
+        return changedCount
+    }
+
+    func removeDuplicateSnippets(in folderID: SnippetFolder.ID, database: Database) throws -> Int {
+        var changedCount = 0
+        let snippets = try Snippet.where { $0.folderID.eq(folderID) }
+            .order(by: \.index)
+            .fetchAll(database)
+        let snippetsByContent = Dictionary(grouping: snippets, by: \.content)
+        for duplicateSnippets in snippetsByContent.values where duplicateSnippets.count > 1 {
+            let canonicalSnippet = duplicateSnippets.sorted(by: isPreferredSnippet).first
+            guard let canonicalSnippet else { continue }
+            for snippet in duplicateSnippets where snippet.id != canonicalSnippet.id {
+                try suppress(kind: .snippet, id: snippet.id.rawValue.uuidString, database: database)
+                try Snippet.delete().where { $0.id.eq(snippet.id) }.execute(database)
+                changedCount += 1
+            }
+        }
+        return changedCount
+    }
+
+    func isPreferredFolder(_ lhs: SnippetFolder, _ rhs: SnippetFolder) -> Bool {
+        if lhs.index != rhs.index {
+            return lhs.index < rhs.index
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        return lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+    }
+
+    func isPreferredSnippet(_ lhs: Snippet, _ rhs: Snippet) -> Bool {
+        if lhs.index != rhs.index {
+            return lhs.index < rhs.index
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        return lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+    }
+
     func currentUnixTime() -> Int {
         Int(Date().timeIntervalSince1970)
     }
