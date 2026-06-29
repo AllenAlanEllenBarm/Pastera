@@ -146,6 +146,7 @@ protocol PasteboardHistoryRepositoryProtocol {
     func deleteAll()
     func deleteOverflowingHistories(maxHistorySize: Int)
     func pruneHistories(settings: HistoryRetentionSettings)
+    func compactOversizedThumbnailAssets(maxBytes: Int) -> Int
     func fetchSyncPayloads(
         currentDeviceID: String?,
         limit: Int,
@@ -228,6 +229,8 @@ extension PasteboardHistoryRepositoryProtocol {
     func upsertFileSyncHistory(_ payload: FileSyncHistoryPayload) -> Bool { false }
 
     func suppressSyncedHistory(id: PasteboardHistory.ID) {}
+
+    func compactOversizedThumbnailAssets(maxBytes: Int) -> Int { 0 }
 }
 
 final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
@@ -436,7 +439,7 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {
         let history = PasteboardHistory(
             id: id,
-            title: content.stringValue[0...10000],
+            title: content.historyTitle[0...10000],
             pasteboardTypes: content.types,
             updateAt: updateAt,
             deviceID: CPYUtilities.deviceID
@@ -521,6 +524,125 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
 
     func pruneHistories(settings: HistoryRetentionSettings) {
         deleteOverflowingHistories(maxHistorySize: settings.storedHistoryLimit)
+    }
+
+    func compactOversizedThumbnailAssets(maxBytes: Int) -> Int {
+        let boundedMaxBytes = max(0, maxBytes)
+        guard boundedMaxBytes > 0 else { return 0 }
+        return withErrorReporting {
+            let writer = database
+            let compactedCount = try writer.write { database in
+                var imageThumbnailCursor = try #sql(
+                    """
+                    SELECT "pasteboardHistoryID", "kind", "data"
+                    FROM "pasteboardHistoryThumbnailAssets"
+                    WHERE "kind" = 'image'
+                    """,
+                    as: PasteboardHistoryThumbnailAsset.self
+                )
+                .fetchCursor(database)
+                var compactedCount = 0
+                while let thumbnail = try imageThumbnailCursor.next() {
+                    let didCompact = try autoreleasepool { () throws -> Bool in
+                        let storedAssets = try PasteboardHistoryAsset
+                            .where { $0.pasteboardHistoryID.eq(thumbnail.pasteboardHistoryID) }
+                            .fetchAll(database)
+                        let content = PasteboardContent(
+                            assets: storedAssets.map {
+                                PasteboardContent.Asset(type: $0.pasteboardType, data: $0.data)
+                            }
+                        )
+                        let thumbnailMaxBytes = imageThumbnailMaxBytes(for: content, maxBytes: boundedMaxBytes)
+                        guard shouldRebuildImageThumbnail(thumbnail, maxBytes: thumbnailMaxBytes),
+                              let compactThumbnail = thumbnailAsset(
+                                from: content,
+                                id: thumbnail.pasteboardHistoryID,
+                                maxBytes: boundedMaxBytes
+                              ),
+                              shouldReplaceImageThumbnail(
+                                thumbnail,
+                                with: compactThumbnail,
+                                maxBytes: thumbnailMaxBytes
+                              ) else {
+                            return false
+                        }
+                        try PasteboardHistoryThumbnailAsset
+                            .upsert { compactThumbnail }
+                            .execute(database)
+                        return true
+                    }
+                    if didCompact {
+                        compactedCount += 1
+                    }
+                }
+                return compactedCount
+            }
+            if compactedCount > 0 {
+                try writer.vacuum()
+            }
+            return compactedCount
+        } ?? 0
+    }
+
+    private func shouldRebuildImageThumbnail(
+        _ thumbnail: PasteboardHistoryThumbnailAsset,
+        maxBytes: Int
+    ) -> Bool {
+        if thumbnail.data.count > maxBytes {
+            return true
+        }
+        guard let pixelSize = imagePixelSize(thumbnail.data) else {
+            return true
+        }
+        let expectedSize = expectedHoverPreviewPixelSize(for: pixelSize)
+        return pixelSize.width < expectedSize.width || pixelSize.height < expectedSize.height
+    }
+
+    private func shouldReplaceImageThumbnail(
+        _ currentThumbnail: PasteboardHistoryThumbnailAsset,
+        with replacementThumbnail: PasteboardHistoryThumbnailAsset,
+        maxBytes: Int
+    ) -> Bool {
+        guard replacementThumbnail.kind == .image else { return false }
+        guard replacementThumbnail.data.count <= maxBytes else { return false }
+        if replacementThumbnail.data.count < currentThumbnail.data.count {
+            return true
+        }
+        return imagePixelArea(replacementThumbnail.data) > imagePixelArea(currentThumbnail.data)
+    }
+
+    private func imagePixelArea(_ data: Data) -> Int {
+        guard let pixelSize = imagePixelSize(data) else { return 0 }
+        return pixelSize.width * pixelSize.height
+    }
+
+    private func imagePixelSize(_ data: Data) -> (width: Int, height: Int)? {
+        guard let bitmap = NSBitmapImageRep(data: data) else { return nil }
+        return (bitmap.pixelsWide, bitmap.pixelsHigh)
+    }
+
+    private func expectedHoverPreviewPixelSize(
+        for currentSize: (width: Int, height: Int)
+    ) -> (width: Int, height: Int) {
+        let width = CGFloat(currentSize.width)
+        let height = CGFloat(currentSize.height)
+        guard width > 0, height > 0 else {
+            return (Constants.Thumbnail.hoverPreviewPixelWidth, Constants.Thumbnail.hoverPreviewPixelHeight)
+        }
+
+        let aspect = width / height
+        let targetWidth = CGFloat(Constants.Thumbnail.hoverPreviewPixelWidth)
+        let targetHeight = CGFloat(Constants.Thumbnail.hoverPreviewPixelHeight)
+        let fittedWidth: CGFloat
+        let fittedHeight: CGFloat
+        if aspect >= targetWidth / targetHeight {
+            fittedWidth = targetWidth
+            fittedHeight = targetWidth / aspect
+        } else {
+            fittedHeight = targetHeight
+            fittedWidth = targetHeight * aspect
+        }
+        return (Int(fittedWidth.rounded(.down)), Int(fittedHeight.rounded(.down)))
     }
 
     func fetchSyncPayloads(
@@ -741,7 +863,7 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                     .upsert {
                         PasteboardHistory(
                             id: historyID,
-                            title: content.stringValue[0...10000],
+                            title: content.historyTitle[0...10000],
                             pasteboardTypes: content.types,
                             updateAt: payload.updatedAt,
                             deviceID: payload.deviceID
@@ -971,10 +1093,17 @@ private extension PasteboardHistoryRepository {
         }
     }
 
-    func thumbnailAsset(from content: PasteboardContent, id: PasteboardHistory.ID) -> PasteboardHistoryThumbnailAsset? {
+    func thumbnailAsset(
+        from content: PasteboardContent,
+        id: PasteboardHistory.ID,
+        maxBytes: Int = Constants.Thumbnail.maxEncodedBytes
+    ) -> PasteboardHistoryThumbnailAsset? {
         var asset: PasteboardHistoryThumbnailAsset?
         if let thumbnailImage = content.thumbnailImage,
-           let thumbnailData = PasteraImageEncoding.pngData(from: thumbnailImage) ?? thumbnailImage.tiffRepresentation {
+           let thumbnailData = imageThumbnailData(
+            from: thumbnailImage,
+            maxBytes: imageThumbnailMaxBytes(for: content, maxBytes: maxBytes)
+           ) {
             asset = PasteboardHistoryThumbnailAsset(
                 pasteboardHistoryID: id,
                 kind: .image,
@@ -990,6 +1119,26 @@ private extension PasteboardHistoryRepository {
             )
         }
         return asset
+    }
+
+    func imageThumbnailData(from image: NSImage, maxBytes: Int) -> Data? {
+        guard maxBytes > 0,
+              let thumbnailData = PasteraImageEncoding.pngData(from: image, maxBytes: maxBytes) ?? image.tiffRepresentation,
+              thumbnailData.count <= maxBytes else {
+            return nil
+        }
+        return thumbnailData
+    }
+
+    func imageThumbnailMaxBytes(for content: PasteboardContent, maxBytes: Int) -> Int {
+        let boundedMaxBytes = max(0, maxBytes)
+        guard let sourceImageBytes = content.assets
+            .first(where: { $0.type.isClipyImageType })?
+            .data
+            .count else {
+            return boundedMaxBytes
+        }
+        return min(boundedMaxBytes, sourceImageBytes)
     }
 
     func syncIdentity(kind: SyncEntityKind, id: String) -> String {

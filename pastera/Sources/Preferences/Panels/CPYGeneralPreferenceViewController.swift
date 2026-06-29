@@ -35,6 +35,14 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         action: nil
     )
     private let automaticPasteInfoButton = NSButton(title: "", target: nil, action: nil)
+    private let suspendRemoteHotKeysButton = NSButton(
+        checkboxWithTitle: localizedPreferenceString(
+            "Pause shortcuts during remote control",
+            value: "Pause shortcuts during remote control"
+        ),
+        target: nil,
+        action: nil
+    )
     private var didInstallAdditionalControls = false
     private weak var launchOnLoginButton: NSButton?
     var automaticPastePermissionRequester: () -> Void = {
@@ -126,6 +134,11 @@ final class CPYGeneralPreferenceViewController: NSViewController {
         automaticPasteButton.target = self
         automaticPasteButton.action = #selector(automaticPasteButtonChanged(_:))
         automaticPasteButton.setAccessibilityLabel(localizedPreferenceString("Automatic Paste"))
+        suspendRemoteHotKeysButton.bindValue(to: Constants.HotKey.suspendDuringRemoteSession)
+        suspendRemoteHotKeysButton.setAccessibilityLabel(localizedPreferenceString(
+            "Pause shortcuts during remote control",
+            value: "Pause shortcuts during remote control"
+        ))
 
         automaticPasteInfoButton.bezelStyle = .helpButton
         automaticPasteInfoButton.target = self
@@ -145,7 +158,8 @@ final class CPYGeneralPreferenceViewController: NSViewController {
             overwriteSameHistoryButton,
             showColorPreviewButton,
             automaticPasteButton,
-            automaticPasteInfoButton
+            automaticPasteInfoButton,
+            suspendRemoteHotKeysButton
         ].forEach {
             $0.autoresizingMask = [.maxXMargin, .maxYMargin]
             CPYWindowAppearance.apply(to: $0)
@@ -167,7 +181,7 @@ final class CPYGeneralPreferenceViewController: NSViewController {
 
     private func layoutAdditionalControls() {
         let contentLeftX: CGFloat = 59
-        let topY: CGFloat = 245
+        let topY: CGFloat = 260
         let controlMaxX = min(view.bounds.width - 18, 438)
         let checkboxHeight: CGFloat = 18
         let checkboxWidth = max(180, controlMaxX - contentLeftX)
@@ -217,6 +231,12 @@ final class CPYGeneralPreferenceViewController: NSViewController {
             y: topY - 228,
             width: helpButtonSize.width,
             height: helpButtonSize.height
+        )
+        suspendRemoteHotKeysButton.frame = NSRect(
+            x: contentLeftX,
+            y: topY - 258,
+            width: checkboxWidth,
+            height: checkboxHeight
         )
     }
 

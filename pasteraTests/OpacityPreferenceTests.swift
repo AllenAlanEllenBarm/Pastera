@@ -263,7 +263,8 @@ struct OpacityPreferenceTests {
         #expect(!defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand))
         #expect(defaults.object(forKey: Constants.UserDefaults.showAlertBeforeClearHistory) == nil)
         #expect(!defaults.bool(forKey: Constants.UserDefaults.collectCrashReport))
-        #expect(defaults.bool(forKey: Constants.Beta.observerScreenshot))
+        let removedDefaultsPrefix = "kCPY" + "Beta"
+        #expect(!defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix(removedDefaultsPrefix) })
     }
 }
 

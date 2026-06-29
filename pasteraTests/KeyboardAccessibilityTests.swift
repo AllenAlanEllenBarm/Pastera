@@ -38,7 +38,7 @@ struct KeyboardAccessibilityTests {
 
         controller.showWindow(nil)
 
-        for paneTitle in ["General", "Types", "Shortcuts", "Update", "Beta"] {
+        for paneTitle in ["General", "Types", "Shortcuts", "Update"] {
             controller.showPreferencePaneForTesting(title: paneTitle)
             let minimumGap = try #require(controller.minimumVisibleControlVerticalGapForTesting)
             #expect(minimumGap >= 8, "\(paneTitle) pane controls are visually cramped: \(minimumGap)")
@@ -104,7 +104,7 @@ struct KeyboardAccessibilityTests {
         #expect(initialFrameSize == NSSize(width: 600, height: 340))
         #expect(controller.window?.minSize == NSSize(width: 560, height: 320))
 
-        for paneTitle in ["General", "Types", "Exclude", "Shortcuts", "Update", "Beta"] {
+        for paneTitle in ["General", "Types", "Exclude", "Shortcuts", "Update"] {
             controller.showPreferencePaneForTesting(title: paneTitle)
 
             #expect(controller.window?.frame.size == initialFrameSize)
@@ -158,18 +158,24 @@ struct KeyboardAccessibilityTests {
 
         let contentView = try #require(controller.window?.contentView)
         let expectedTitles = [
-            "Plain Text",
-            "Rich Text Format (RTF)",
-            "Rich Text Format Directory (RTFD)",
-            "PDF",
-            "Filenames",
-            "URL",
-            "TIFF Image"
+            "文本",
+            "富文本",
+            "富文本附件",
+            "文档",
+            "文件",
+            "链接",
+            "图片内容",
+            "图片",
+            "常用文本文件类型"
         ]
         let buttons = preferenceButtons(in: contentView)
             .filter { expectedTitles.contains($0.title) }
 
         #expect(buttons.count == expectedTitles.count)
+        #expect(!preferenceButtons(in: contentView).contains { button in
+            ["Plain Text", "Rich Text Format (RTF)", "Rich Text Format Directory (RTFD)", "Filenames", "TIFF Image"]
+                .contains(button.title)
+        })
         for button in buttons {
             let containerBounds = try #require(button.superview?.bounds)
             #expect(button.frame.minX >= 0, "\(button.title) is clipped on the leading edge")
@@ -201,10 +207,10 @@ struct KeyboardAccessibilityTests {
         let spaceEvent = try makeKeyEvent(keyCode: 49, characters: " ")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(returnEvent))
-        #expect(controller.focusedPreferencePaneControlTitleForTesting == "Plain Text")
+        #expect(controller.focusedPreferencePaneControlTitleForTesting == "文本")
 
         let contentView = try #require(controller.window?.contentView)
-        let plainTextButton = try #require(preferenceButtons(in: contentView).first { $0.title == "Plain Text" })
+        let plainTextButton = try #require(preferenceButtons(in: contentView).first { $0.title == "文本" })
         let initialState = plainTextButton.state
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(spaceEvent))
@@ -232,7 +238,7 @@ struct KeyboardAccessibilityTests {
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.focusPreferenceSidebarForTesting(title: "Beta")
+        controller.focusPreferenceSidebarForTesting(title: "Update")
 
         let tabEvent = try makeKeyEvent(keyCode: 48, characters: "\t")
         let shiftTabEvent = try makeKeyEvent(keyCode: 48, characters: "\t", modifierFlags: [.shift])
@@ -241,7 +247,7 @@ struct KeyboardAccessibilityTests {
         #expect(controller.focusedPreferencePaneControlTitleForTesting != nil)
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(shiftTabEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Beta")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Update")
     }
 
     @Test
@@ -256,11 +262,11 @@ struct KeyboardAccessibilityTests {
         let downEvent = try makeKeyEvent(keyCode: 125, characters: "\u{F701}")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(returnEvent))
-        let firstControl = try #require(controller.focusedPreferencePaneControlTitleForTesting)
+        let firstControl = try #require(controller.window?.firstResponder as? NSView)
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(downEvent))
-        let secondControl = try #require(controller.focusedPreferencePaneControlTitleForTesting)
-        #expect(secondControl != firstControl)
+        let secondControl = try #require(controller.window?.firstResponder as? NSView)
+        #expect(secondControl !== firstControl)
     }
 
     @Test

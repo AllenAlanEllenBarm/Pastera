@@ -67,7 +67,10 @@ final class HistoryMenuRowView: NSControl {
     override var acceptsFirstResponder: Bool { true }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        moveHistoryMenuFocus(with: event) || super.performKeyEquivalent(with: event)
+        if isCommandDeleteShortcut(event) {
+            return deleteFromKeyboard()
+        }
+        return moveHistoryMenuFocus(with: event) || super.performKeyEquivalent(with: event)
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -125,6 +128,9 @@ final class HistoryMenuRowView: NSControl {
     }
 
     override func keyDown(with event: NSEvent) {
+        if isCommandDeleteShortcut(event), deleteFromKeyboard() {
+            return
+        }
         if onKeyboardEvent?(event) == true {
             return
         }
@@ -144,6 +150,13 @@ final class HistoryMenuRowView: NSControl {
 
     func confirmFromKeyboard() {
         confirm()
+    }
+
+    @discardableResult
+    func deleteFromKeyboard() -> Bool {
+        guard onDelete != nil else { return false }
+        delete()
+        return true
     }
 
     static func hideImagePreview() {
@@ -191,8 +204,9 @@ final class HistoryMenuRowView: NSControl {
         deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         deleteButton.imagePosition = .imageOnly
         deleteButton.contentTintColor = .tertiaryLabelColor
-        deleteButton.toolTip = String(localized: "Delete History")
-        deleteButton.setAccessibilityLabel(String(localized: "Delete History"))
+        let deleteShortcutTitle = "\(String(localized: "Delete History")) (⌘D)"
+        deleteButton.toolTip = deleteShortcutTitle
+        deleteButton.setAccessibilityLabel(deleteShortcutTitle)
         deleteButton.target = self
         deleteButton.action = #selector(deleteButtonClicked(_:))
         deleteButton.isHidden = onDelete == nil
@@ -301,9 +315,19 @@ final class HistoryMenuRowView: NSControl {
     }
 
     @objc private func deleteButtonClicked(_ sender: NSButton) {
+        delete()
+    }
+
+    private func delete() {
         cancelTextPreview()
         Self.hideImagePreview()
         onDelete?()
+    }
+
+    private func isCommandDeleteShortcut(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
+        return flags == .command && event.charactersIgnoringModifiers?.lowercased() == "d"
     }
 
     private static func boundedPreviewText(_ text: String?) -> String? {

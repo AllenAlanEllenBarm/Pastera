@@ -16,7 +16,7 @@ import SQLite3
 import Testing
 @testable import Pastera
 
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 
 @MainActor
 @Suite
@@ -111,7 +111,7 @@ struct PasteboardContentTests {
         let image = NSImage.create(with: .blue, size: NSSize(width: 20, height: 10))
         let content = PasteboardContent(image: image)
 
-        #expect(content?.thumbnailImage?.size == NSSize(width: 8, height: 4))
+        #expect(content?.thumbnailImage?.size == NSSize(width: 20, height: 10))
     }
 
     @Test
@@ -143,7 +143,135 @@ struct PasteboardContentTests {
             ]
         )
 
-        #expect(content.thumbnailImage?.size == NSSize(width: 8, height: 4))
+        #expect(content.thumbnailImage?.size == NSSize(width: 20, height: 10))
+    }
+
+    @Test
+    func thumbnailEncodingUsesResampledBitmapInsteadOfOriginalRepresentation() throws {
+        let defaults = UserDefaults.standard
+        let previousWidth = defaults.object(forKey: Constants.UserDefaults.thumbnailWidth)
+        let previousHeight = defaults.object(forKey: Constants.UserDefaults.thumbnailHeight)
+        defer {
+            if let previousWidth {
+                defaults.set(previousWidth, forKey: Constants.UserDefaults.thumbnailWidth)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.thumbnailWidth)
+            }
+            if let previousHeight {
+                defaults.set(previousHeight, forKey: Constants.UserDefaults.thumbnailHeight)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.thumbnailHeight)
+            }
+        }
+        defaults.set(100, forKey: Constants.UserDefaults.thumbnailWidth)
+        defaults.set(32, forKey: Constants.UserDefaults.thumbnailHeight)
+
+        let image = try makeNoisyImage(width: 1200, height: 800)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .tiff, data: try #require(image.tiffRepresentation))
+            ]
+        )
+
+        let thumbnail = try #require(content.thumbnailImage)
+        let pngData = try #require(PasteraImageEncoding.pngData(
+            from: thumbnail,
+            maxBytes: Constants.Thumbnail.maxEncodedBytes
+        ))
+        let encodedBitmap = try #require(NSBitmapImageRep(data: pngData))
+
+        #expect(encodedBitmap.pixelsWide <= Constants.Thumbnail.hoverPreviewPixelWidth)
+        #expect(encodedBitmap.pixelsHigh <= Constants.Thumbnail.hoverPreviewPixelHeight)
+        #expect(encodedBitmap.pixelsWide > 100)
+        #expect(encodedBitmap.pixelsHigh > 32)
+        #expect(pngData.count < Constants.Thumbnail.maxEncodedBytes)
+    }
+
+    @Test
+    func screenshotThumbnailKeepsEnoughPixelsForHoverPreview() throws {
+        let defaults = UserDefaults.standard
+        let previousWidth = defaults.object(forKey: Constants.UserDefaults.thumbnailWidth)
+        let previousHeight = defaults.object(forKey: Constants.UserDefaults.thumbnailHeight)
+        defer {
+            if let previousWidth {
+                defaults.set(previousWidth, forKey: Constants.UserDefaults.thumbnailWidth)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.thumbnailWidth)
+            }
+            if let previousHeight {
+                defaults.set(previousHeight, forKey: Constants.UserDefaults.thumbnailHeight)
+            } else {
+                defaults.removeObject(forKey: Constants.UserDefaults.thumbnailHeight)
+            }
+        }
+        defaults.set(100, forKey: Constants.UserDefaults.thumbnailWidth)
+        defaults.set(32, forKey: Constants.UserDefaults.thumbnailHeight)
+
+        let image = try makeScreenshotLikeImage(width: 1200, height: 800)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .tiff, data: try #require(image.tiffRepresentation))
+            ]
+        )
+
+        let thumbnail = try #require(content.thumbnailImage)
+        let pngData = try #require(PasteraImageEncoding.pngData(
+            from: thumbnail,
+            maxBytes: Constants.Thumbnail.maxEncodedBytes
+        ))
+        let encodedBitmap = try #require(NSBitmapImageRep(data: pngData))
+
+        #expect(encodedBitmap.pixelsWide >= 800)
+        #expect(encodedBitmap.pixelsHigh >= 530)
+        #expect(pngData.count < Constants.Thumbnail.maxEncodedBytes)
+    }
+
+    @Test
+    func filePreviewClassifierRecognizesImageFilesWithoutFixedExtensionList() throws {
+        let image = NSImage.create(with: .purple, size: NSSize(width: 18, height: 12))
+        let pngData = try makeImageData(image, type: .png)
+        let url = try writeTemporaryImage(data: pngData, extension: "customimage")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        #expect(PasteraFileTypeClassifier.kind(for: url) == .image)
+        #expect(PasteraFileTypeClassifier.canCreateImageThumbnail(from: url))
+    }
+
+    @Test
+    func filePreviewClassifierReadsBoundedTextPreviewAndRejectsBinaryFiles() throws {
+        let textURL = try writeTemporaryFile(
+            name: "notes.unknown",
+            data: Data(("First line\n" + String(repeating: "Second line\n", count: 200)).utf8)
+        )
+        let binaryURL = try writeTemporaryFile(
+            name: "archive.unknown",
+            data: Data([0x00, 0x01, 0x02, 0x03, 0x04])
+        )
+        defer {
+            try? FileManager.default.removeItem(at: textURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: binaryURL.deletingLastPathComponent())
+        }
+
+        let preview = try #require(PasteraFileTypeClassifier.textPreview(from: textURL, maxBytes: 16))
+
+        #expect(preview == "First line\nSecon")
+        #expect(PasteraFileTypeClassifier.kind(for: textURL) == .commonText)
+        #expect(PasteraFileTypeClassifier.kind(for: binaryURL) == nil)
+        #expect(PasteraFileTypeClassifier.textPreview(from: binaryURL) == nil)
+    }
+
+    @Test
+    func fileURLContentKeepsOriginalAssetAndCreatesDisplayTitleForCommonTextFiles() throws {
+        let textURL = try writeTemporaryFile(name: "notes.unknown", data: Data("Hello from file".utf8))
+        defer { try? FileManager.default.removeItem(at: textURL.deletingLastPathComponent()) }
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .fileURL, data: textURL.dataRepresentation)
+            ]
+        )
+
+        #expect(content.assets == [PasteboardContent.Asset(type: .fileURL, data: textURL.dataRepresentation)])
+        #expect(content.historyTitle == "notes.unknown\nHello from file")
     }
 
     @Test
@@ -531,6 +659,43 @@ struct PasteboardContentTests {
         #expect(sqliteData.starts(with: Data("SQLite format 3".utf8)))
         #expect(!FileManager.default.fileExists(atPath: sqliteURL.path + "-wal"))
         #expect(!FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("snippets/items").path))
+    }
+
+    @Test
+    func oneDriveFolderSyncProviderRoundTripsSnippetDeletionTombstones() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let provider = OneDriveFolderSyncProvider(rootURL: rootURL)
+        let folderID = UUID().uuidString
+        let snippetID = UUID().uuidString
+        let snapshot = SnippetSyncSnapshot(
+            folders: [],
+            snippets: [],
+            deletedFolders: [
+                SnippetFolderDeletionSyncPayload(
+                    id: folderID,
+                    title: "AI Prompt",
+                    deletedAt: 30,
+                    deviceID: "device-a"
+                )
+            ],
+            deletedSnippets: [
+                SnippetDeletionSyncPayload(
+                    id: snippetID,
+                    folderID: folderID,
+                    folderTitle: "AI Prompt",
+                    content: "removed content",
+                    deletedAt: 40,
+                    deviceID: "device-a"
+                )
+            ]
+        )
+
+        try provider.saveSnippetSnapshot(snapshot, deviceID: "device-a")
+
+        let loaded = try #require(provider.loadSnippetSnapshots(excludingDeviceID: "device-b").first)
+        #expect(loaded.snapshot == snapshot)
     }
 
     @Test
@@ -936,11 +1101,65 @@ private func makeImageData(_ image: NSImage, type: NSBitmapImageRep.FileType) th
     return try #require(bitmap.representation(using: type, properties: [:]))
 }
 
+private func makeNoisyImage(width: Int, height: Int) throws -> NSImage {
+    let bitmap = try #require(NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ))
+    for row in 0..<height {
+        for column in 0..<width {
+            let red = CGFloat((column * 37 + row * 17) % 256) / 255
+            let green = CGFloat((column * 11 + row * 53) % 256) / 255
+            let blue = CGFloat((column * 23 + row * 29) % 256) / 255
+            bitmap.setColor(NSColor(red: red, green: green, blue: blue, alpha: 1), atX: column, y: row)
+        }
+    }
+    let image = NSImage(size: NSSize(width: width, height: height))
+    image.addRepresentation(bitmap)
+    return image
+}
+
+private func makeScreenshotLikeImage(width: Int, height: Int) throws -> NSImage {
+    let image = NSImage(size: NSSize(width: width, height: height))
+    image.lockFocus()
+    defer { image.unlockFocus() }
+
+    NSColor(calibratedRed: 0.12, green: 0.13, blue: 0.17, alpha: 1).setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.monospacedSystemFont(ofSize: 30, weight: .regular),
+        .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 1)
+    ]
+    for row in 0..<16 {
+        let text = "Pastera thumbnail preview line \(row) - 411 tests in 47 suites passed"
+        text.draw(at: NSPoint(x: 36, y: height - 70 - row * 44), withAttributes: attributes)
+    }
+    return image
+}
+
 private func writeTemporaryImage(data: Data, extension pathExtension: String) throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let url = directory.appendingPathComponent("image").appendingPathExtension(pathExtension)
+    try data.write(to: url)
+    return url
+}
+
+private func writeTemporaryFile(name: String, data: Data) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent(name)
     try data.write(to: url)
     return url
 }

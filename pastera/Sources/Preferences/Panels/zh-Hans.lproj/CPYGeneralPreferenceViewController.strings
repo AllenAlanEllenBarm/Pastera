@@ -39,6 +39,7 @@
 "Show color code preview" = "为颜色代码显示预览";
 "Automatic Paste" = "自动粘贴";
 "Automatic Paste Permission Info" = "自动粘贴权限说明";
+"Pause shortcuts during remote control" = "远程控制时暂停本机快捷键";
 "Why Accessibility is required" = "为什么需要辅助功能权限";
 "Automatic Paste Permission Description" = "开启自动粘贴后，Pastera 会在你选择历史或片段时恢复目标应用并发送 Command+V。macOS 要求这类操作获得“辅助功能”权限；关闭后只复制到剪贴板，需要你手动粘贴。";
 "OK" = "知道了";

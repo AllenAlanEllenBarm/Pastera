@@ -37,11 +37,12 @@ struct PreferenceSidebarTests {
         let syncIndex = try #require(titles.firstIndex(of: "同步"))
         let updateIndex = try #require(titles.firstIndex(of: "更新"))
 
-        #expect(titles == ["通用", "类型", "排除", "快捷键", "同步", "更新", "测试"])
+        #expect(titles == ["通用", "类型", "排除", "快捷键", "同步", "更新"])
         #expect(!titles.contains("Types"))
         #expect(!titles.contains("Exclude"))
         #expect(!titles.contains("Update"))
         #expect(!titles.contains("Beta"))
+        #expect(!titles.contains("测试"))
         #expect(symbolNames.count == titles.count)
         #expect(symbolNames[syncIndex] != symbolNames[updateIndex])
     }
@@ -119,9 +120,6 @@ struct PreferencePaneAlignmentTests {
         let historyPanelTitle = try #require(textFrames.first {
             ["History Panel Shortcuts", "历史面板快捷键"].contains($0.text)
         })
-        let snippetsLabel = try #require(rowLabels.first {
-            ["Snippets:", "片段："].contains($0.text)
-        })
         let searchLabel = try #require(rowLabels.first {
             ["Search:", "搜索："].contains($0.text)
         })
@@ -141,84 +139,20 @@ struct PreferencePaneAlignmentTests {
         #expect(!textFrames.contains {
             ["Clear History:", "清空历史：", "清除历史："].contains($0.text)
         })
-        #expect(menuTitle.frame.maxY > snippetsLabel.frame.maxY)
-        #expect(snippetsLabel.frame.maxY > historyPanelTitle.frame.maxY)
-        #expect(historyPanelTitle.frame.maxY > searchLabel.frame.maxY)
+        #expect(abs(menuTitle.frame.midY - historyPanelTitle.frame.midY) <= 1)
+        #expect(menuTitle.frame.minX < historyPanelTitle.frame.minX)
         #expect(searchLabel.frame.maxY > previousPageLabel.frame.maxY)
         #expect(previousPageLabel.frame.maxY > nextPageLabel.frame.maxY)
         #expect(nextPageFrameInPane.minY >= -0.5)
         #expect(nextPageFrameInPane.maxY <= controller.selectedPaneDocumentHeightForTesting + 0.5)
 
-        let labelMinX = try #require(rowLabels.map(\.frame.minX).min())
-        for label in rowLabels {
-            #expect(abs(label.frame.minX - labelMinX) <= 1)
-        }
-
-        let recordMinX = try #require(recordFrames.map(\.minX).min())
+        let labelColumns = Set(rowLabels.map { Int(($0.frame.minX / 2).rounded()) })
+        let recordColumns = Set(recordFrames.map { Int(($0.minX / 2).rounded()) })
         let paneMaxX = paneFrame.maxX
+        #expect(labelColumns.count == 2)
+        #expect(recordColumns.count == 2)
         for frame in recordFrames {
-            #expect(abs(frame.minX - recordMinX) <= 1)
-            #expect(frame.maxX >= paneMaxX - 4)
-        }
-    }
-
-    @Test
-    func betaPaneIntroIsCenteredAndFormColumnsAlign() throws {
-        let controller = CPYPreferencesWindowController()
-        defer { controller.close() }
-
-        controller.showWindow(nil)
-        controller.showPreferencePaneForTesting(title: "Beta")
-
-        let contentView = try #require(controller.window?.contentView)
-        contentView.layoutSubtreeIfNeeded()
-        let paneFrame = controller.selectedPaneFrameInContentViewForTesting
-        let paneMinX = paneFrame.minX - 1
-        let textFrames = preferenceTextFieldFrames(in: contentView)
-            .filter { $0.frame.minX >= paneMinX }
-        let introFrame = try #require(textFrames.first {
-            [
-                "Beta settings might be moved to a different pane in future versions.",
-                "Beta 测试设置将来可能会被移到其它面板。"
-            ].contains($0.text)
-        }?.frame)
-        let actionFrame = try #require(textFrames.first { ["Action", "操作"].contains($0.text) }?.frame)
-        let checkboxFrames = preferenceButtons(in: contentView)
-            .filter {
-                [
-                    "Paste as PlainText",
-                    "Delete history",
-                    "Paste and delete history",
-                    "以纯文本格式粘贴",
-                    "删除历史",
-                    "粘贴并删除历史"
-                ].contains($0.title)
-            }
-            .map { contentView.convert($0.frame, from: $0.superview) }
-            .filter { $0.minX >= paneMinX }
-        let removedScreenshotTexts: Set<String> = [
-            "Screenshot",
-            "屏幕截图"
-        ]
-        let removedScreenshotButtons: Set<String> = [
-            "Save screenshots in history",
-            "在历史中保存屏幕截图"
-        ]
-        let popupFrames = preferencePopUpFrames(in: contentView)
-            .filter { $0.minX >= paneMinX }
-
-        #expect(abs(introFrame.midX - paneFrame.midX) <= 1)
-        #expect(!textFrames.contains { removedScreenshotTexts.contains($0.text) })
-        #expect(!preferenceButtons(in: contentView).contains { removedScreenshotButtons.contains($0.title) })
-        #expect(checkboxFrames.count == 3)
-        #expect(popupFrames.count == 3)
-        for frame in [actionFrame] + checkboxFrames {
-            #expect(abs(frame.minX - actionFrame.minX) <= 1)
-        }
-        #expect(controller.selectedPaneDocumentHeightForTesting <= 172)
-        let paneMaxX = paneFrame.maxX
-        for frame in popupFrames {
-            #expect(frame.maxX >= paneMaxX - 4)
+            #expect(frame.maxX <= paneMaxX)
         }
     }
 
@@ -361,6 +295,7 @@ struct GeneralPreferenceMergedMenuTests {
             of: ["Automatic Paste Permission Info", "自动粘贴权限说明"],
             in: buttonFrames
         )
+        let remoteFrame = try frame(of: ["Pause shortcuts during remote control", "远程控制时暂停本机快捷键"], in: buttonFrames)
         let opacityFrame = try textFrame(of: ["Transparency", "透明度"], in: textFields)
         let menuTitleLengthFrame = try textFrame(
             of: ["Number of characters in the menu:", "菜单中字符的个数："],
@@ -375,7 +310,8 @@ struct GeneralPreferenceMergedMenuTests {
             moveFrame,
             colorPreviewFrame,
             automaticPasteFrame,
-            automaticPasteInfoFrame
+            automaticPasteInfoFrame,
+            remoteFrame
         ].reduce(NSRect.null) { $0.union($1) }
 
         #expect(!sidebarButtonTitles.contains { ["Menu", "菜单"].contains($0) })
@@ -392,7 +328,8 @@ struct GeneralPreferenceMergedMenuTests {
             moveFrame,
             colorPreviewFrame,
             automaticPasteFrame,
-            automaticPasteInfoFrame
+            automaticPasteInfoFrame,
+            remoteFrame
         ] {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
@@ -874,12 +811,15 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             let labels = Set(preferenceSwitchButtons(in: controller.view).compactMap { $0.accessibilityLabel() })
             #expect(!labels.contains("上传文件"))
             #expect(!labels.contains("同步文件"))
-            let fileTypeLabels: Set<String> = ["图片", "PDF", "RTF", "RTFD"]
+            let fileTypeLabels: Set<String> = ["图片", "常用文本文件类型"]
             let fileTypeCheckboxes = preferenceButtons(in: controller.view).filter {
                 fileTypeLabels.contains($0.accessibilityLabel() ?? "")
             }
-            #expect(fileTypeCheckboxes.count == 4)
+            #expect(fileTypeCheckboxes.count == 2)
             #expect(!preferenceButtons(in: controller.view).contains { $0.accessibilityLabel() == "Finder 文件" })
+            #expect(!preferenceButtons(in: controller.view).contains {
+                ["PDF", "RTF", "RTFD"].contains($0.accessibilityLabel() ?? "")
+            })
             #expect(fileTypeCheckboxes.allSatisfy { $0.state == .off })
 
             let historyUploadSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
@@ -888,8 +828,8 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             let historyImportSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
                 $0.accessibilityLabel() == "同步历史"
             })
-            let pdfCheckbox = try #require(fileTypeCheckboxes.first {
-                $0.accessibilityLabel() == "PDF"
+            let commonTextCheckbox = try #require(fileTypeCheckboxes.first {
+                $0.accessibilityLabel() == "常用文本文件类型"
             })
 
             historyUploadSwitch.performClick(nil)
@@ -897,9 +837,9 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
 
-            pdfCheckbox.performClick(nil)
+            commonTextCheckbox.performClick(nil)
 
-            #expect(pdfCheckbox.state == .on)
+            #expect(commonTextCheckbox.state == .on)
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
 
@@ -907,9 +847,9 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncHistoryImportEnabled))
             #expect(defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
 
-            pdfCheckbox.performClick(nil)
+            commonTextCheckbox.performClick(nil)
 
-            #expect(pdfCheckbox.state == .off)
+            #expect(commonTextCheckbox.state == .off)
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileUploadEnabled))
             #expect(!defaults.bool(forKey: Constants.UserDefaults.syncFileImportEnabled))
         }

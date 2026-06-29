@@ -182,7 +182,7 @@ final class HotKeyServiceTests {
     }
 
     @Test
-    func migratesKnownIncorrectBetaHistoryPanelShortcutsToCommandDefaults() throws {
+    func migratesKnownIncorrectLegacyHistoryPanelShortcutsToCommandDefaults() throws {
         let defaults = UserDefaults.standard
         let incorrectSearch = try #require(KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | optionKey))
         let incorrectPreviousPage = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | optionKey))
@@ -486,7 +486,19 @@ final class HotKeyServiceTests {
     }
 
     @Test
-    func remoteSessionPolicySuspendsLocalHotkeysForScreenSharing() {
+    func remoteSessionPolicyDoesNotSuspendByDefault() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: Constants.HotKey.suspendDuringRemoteSession)
+
+        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"))
+    }
+
+    @Test
+    func remoteSessionPolicySuspendsWhenPreferenceIsEnabled() {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: Constants.HotKey.suspendDuringRemoteSession)
+        defer { defaults.removeObject(forKey: Constants.HotKey.suspendDuringRemoteSession) }
+
         #expect(RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"))
         #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.finder"))
         #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: nil))

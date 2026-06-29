@@ -62,7 +62,6 @@ final class CPYPreferencesWindowController: NSWindowController {
         case shortcuts
         case sync
         case updates
-        case beta
 
         var title: String {
             switch self {
@@ -78,8 +77,6 @@ final class CPYPreferencesWindowController: NSWindowController {
                 return "同步"
             case .updates:
                 return "更新"
-            case .beta:
-                return "测试"
             }
         }
 
@@ -97,8 +94,6 @@ final class CPYPreferencesWindowController: NSWindowController {
                 return "arrow.up.arrow.down.circle"
             case .updates:
                 return "arrow.triangle.2.circlepath"
-            case .beta:
-                return "testtube.2"
             }
         }
     }
@@ -129,8 +124,7 @@ final class CPYPreferencesWindowController: NSWindowController {
         CPYExcludeAppPreferenceViewController(nibName: "CPYExcludeAppPreferenceViewController", bundle: nil),
         CPYShortcutsPreferenceViewController(nibName: "CPYShortcutsPreferenceViewController", bundle: nil),
         CPYSyncPreferenceViewController(),
-        CPYUpdatesPreferenceViewController(nibName: "CPYUpdatesPreferenceViewController", bundle: nil),
-        CPYBetaPreferenceViewController(nibName: "CPYBetaPreferenceViewController", bundle: nil)
+        CPYUpdatesPreferenceViewController(nibName: "CPYUpdatesPreferenceViewController", bundle: nil)
     ]
     private var selectedView: NSView?
     private var selectedTabIndex = -1
@@ -201,6 +195,10 @@ extension CPYPreferencesWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if let viewController = viewController[Pane.type.rawValue] as? CPYTypePreferenceViewController {
             AppEnvironment.current.defaults.set(viewController.storeTypes, forKey: Constants.UserDefaults.storeTypes)
+            AppEnvironment.current.defaults.set(
+                viewController.filePreviewTypes,
+                forKey: Constants.UserDefaults.filePreviewTypes
+            )
             AppEnvironment.current.defaults.synchronize()
         }
         if let window = window, !window.makeFirstResponder(window) {
@@ -454,8 +452,6 @@ private extension CPYPreferencesWindowController {
             return .exclude
         case .shortcuts:
             return .shortcuts
-        case .beta:
-            return .beta
         case .general, .type, .sync, .updates:
             return nil
         }
@@ -1014,8 +1010,6 @@ extension CPYPreferencesWindowController {
             return .sync
         case "update":
             return .updates
-        case "beta":
-            return .beta
         default:
             return Pane.allCases.first { $0.title == title }
         }
@@ -1035,8 +1029,6 @@ extension CPYPreferencesWindowController {
             return "Sync"
         case .updates:
             return "Update"
-        case .beta:
-            return "Beta"
         }
     }
 }

@@ -15,26 +15,18 @@ import Cocoa
 
 extension NSImage {
     func resizeImage(_ width: CGFloat, _ height: CGFloat) -> NSImage? {
-
-        let representations = self.representations
-        var bitmapRep: NSBitmapImageRep?
-
-        for rep in representations {
-            if let rep = rep as? NSBitmapImageRep {
-                bitmapRep = rep
-                break
-            }
-        }
-
-        if bitmapRep == nil {
+        guard width > 0, height > 0 else {
             return nil
         }
 
-        let origWidth = CGFloat(bitmapRep!.pixelsWide)
-        let origHeight = CGFloat(bitmapRep!.pixelsHigh)
+        let sourceBitmap = representations.compactMap { $0 as? NSBitmapImageRep }.first
+        var proposedRect = NSRect(origin: .zero, size: size)
+        let sourceCGImage = cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        let origWidth = CGFloat(sourceBitmap?.pixelsWide ?? sourceCGImage?.width ?? Int(size.width.rounded()))
+        let origHeight = CGFloat(sourceBitmap?.pixelsHigh ?? sourceCGImage?.height ?? Int(size.height.rounded()))
+        guard origWidth > 0, origHeight > 0 else { return nil }
 
-        let aspect = CGFloat(origWidth) / CGFloat(origHeight)
-
+        let aspect = origWidth / origHeight
         let targetWidth = width
         let targetHeight = height
         var newWidth: CGFloat
@@ -65,14 +57,43 @@ extension NSImage {
             newHeight = origHeight
         }
 
-        let newImageRep = self.bestRepresentation(for: NSRect(x: 0, y: 0, width: newWidth, height: newHeight), context: nil, hints: nil)
-        if newImageRep == nil {
+        let pixelWidth = max(1, Int(newWidth.rounded()))
+        let pixelHeight = max(1, Int(newHeight.rounded()))
+        guard let resizedBitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelWidth,
+            pixelsHigh: pixelHeight,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
             return nil
         }
+        resizedBitmap.size = NSSize(width: newWidth, height: newHeight)
 
         let thumbnail = NSImage(size: NSSize(width: newWidth, height: newHeight))
-        thumbnail.addRepresentation(newImageRep!)
+        guard let context = NSGraphicsContext(bitmapImageRep: resizedBitmap) else { return nil }
 
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: newWidth, height: newHeight).fill()
+        draw(
+            in: NSRect(x: 0, y: 0, width: newWidth, height: newHeight),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+        NSGraphicsContext.restoreGraphicsState()
+
+        thumbnail.addRepresentation(resizedBitmap)
         return thumbnail
     }
 }

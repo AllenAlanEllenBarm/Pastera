@@ -68,6 +68,9 @@ final class CPYSnippetsEditorWindowController: NSWindowController {
     private var hasShownWindow = false
     private var defaultsObserver: NSObjectProtocol?
     private var isEditingOutlineTitle = false
+    private var deleteConfirmationRunner: (PasteraConfirmationOptions, NSWindow?) -> PasteraConfirmationResult = {
+        PasteraConfirmationController.runModal(options: $0, sourceWindow: $1)
+    }
     private lazy var duplicateWarningPresenter: (String, String) -> Void = { [weak self] title, message in
         let alert = NSAlert()
         alert.messageText = title
@@ -169,13 +172,13 @@ extension CPYSnippetsEditorWindowController {
         }
 
         if requiresConfirmation {
-            let result = PasteraConfirmationController.runModal(options: PasteraConfirmationOptions(
+            let result = deleteConfirmationRunner(PasteraConfirmationOptions(
                 title: String(localized: "Delete Item"),
                 message: String(localized: "Are you sure want to delete this item?"),
                 confirmTitle: String(localized: "Delete Item"),
                 cancelTitle: String(localized: "Cancel"),
                 isDestructive: true
-            ))
+            ), window)
             guard result.confirmed else { return }
         }
 
@@ -646,6 +649,10 @@ private extension CPYSnippetsEditorWindowController {
     }
 
     func handleKeyboardEvent(_ event: NSEvent) -> Bool {
+        if isCommandDeleteShortcut(event) {
+            deleteSelectedItem(requiresConfirmation: true)
+            return true
+        }
         if event.keyCode == 48, !event.modifierFlags.contains(.option) {
             let chain: [NSView] = toolbarButtons + [outlineView, folderSettingView.isHidden ? textView : folderShortcutRecordView]
             guard let responder = window?.firstResponder as? NSView,
@@ -685,6 +692,12 @@ private extension CPYSnippetsEditorWindowController {
         default:
             return false
         }
+    }
+
+    private func isCommandDeleteShortcut(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
+        return flags == .command && event.charactersIgnoringModifiers?.lowercased() == "d"
     }
 
     var shouldHandleOutlineKeyEvent: Bool {
@@ -995,6 +1008,12 @@ extension CPYSnippetsEditorWindowController {
 
     func setDuplicateWarningPresenterForTesting(_ presenter: @escaping (String, String) -> Void) {
         duplicateWarningPresenter = presenter
+    }
+
+    func setDeleteConfirmationRunnerForTesting(
+        _ runner: @escaping (PasteraConfirmationOptions, NSWindow?) -> PasteraConfirmationResult
+    ) {
+        deleteConfirmationRunner = runner
     }
 
     func selectFolderForTesting(id: SnippetFolder.ID) {

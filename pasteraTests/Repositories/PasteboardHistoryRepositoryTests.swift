@@ -14,6 +14,7 @@
 
 import AppKit
 import Combine
+import Dependencies
 import DependenciesTestSupport
 import SQLiteData
 import Testing
@@ -213,6 +214,85 @@ struct PasteboardHistoryRepositoryTests {
         )
         #expect(detailsWithoutThumbnailAssets.map(\.history.id) == [imageID, colorID, textID])
         #expect(detailsWithoutThumbnailAssets.allSatisfy { $0.thumbnailAsset == nil })
+    }
+
+    @Test
+    func compactOversizedThumbnailAssetsRebuildsImageThumbnailsFromStoredAssets() throws {
+        let image = try makeRepositoryNoisyImage(width: 1200, height: 800)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .tiff, data: try #require(image.tiffRepresentation))
+            ]
+        )
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+        repository.save(id: id, content: content, updateAt: 1)
+
+        @Dependency(\.defaultDatabase) var database
+        try database.write { database in
+            try PasteboardHistoryThumbnailAsset.upsert {
+                PasteboardHistoryThumbnailAsset(
+                    pasteboardHistoryID: id,
+                    kind: .image,
+                    data: Data(repeating: 0x7F, count: 512 * 1024)
+                )
+            }
+            .execute(database)
+        }
+
+        let rebuiltCount = repository.compactOversizedThumbnailAssets(maxBytes: Constants.Thumbnail.maxEncodedBytes)
+        let thumbnail = try #require(repository
+            .fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1)
+            .first?
+            .thumbnailAsset)
+        let bitmap = try #require(NSBitmapImageRep(data: thumbnail.data))
+
+        #expect(rebuiltCount == 1)
+        #expect(thumbnail.kind == .image)
+        #expect(thumbnail.data.count < Constants.Thumbnail.maxEncodedBytes)
+        #expect(bitmap.pixelsWide <= Constants.Thumbnail.hoverPreviewPixelWidth)
+        #expect(bitmap.pixelsHigh <= Constants.Thumbnail.hoverPreviewPixelHeight)
+        #expect(bitmap.pixelsWide > 100)
+        #expect(bitmap.pixelsHigh > 32)
+    }
+
+    @Test
+    func compactOversizedThumbnailAssetsRefreshesUndersizedImageThumbnails() throws {
+        let image = try makeRepositoryScreenshotLikeImage(width: 1200, height: 800)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .tiff, data: try #require(image.tiffRepresentation))
+            ]
+        )
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+        repository.save(id: id, content: content, updateAt: 1)
+        let imageData = try #require(image.tiffRepresentation)
+        let decodedImage = try #require(NSImage(data: imageData))
+        let undersizedThumbnail = try #require(decodedImage.resizeImage(100, 32))
+        let undersizedData = try #require(PasteraImageEncoding.pngData(from: undersizedThumbnail))
+
+        @Dependency(\.defaultDatabase) var database
+        try database.write { database in
+            try PasteboardHistoryThumbnailAsset.upsert {
+                PasteboardHistoryThumbnailAsset(
+                    pasteboardHistoryID: id,
+                    kind: .image,
+                    data: undersizedData
+                )
+            }
+            .execute(database)
+        }
+
+        let rebuiltCount = repository.compactOversizedThumbnailAssets(maxBytes: Constants.Thumbnail.maxEncodedBytes)
+        let thumbnail = try #require(repository
+            .fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1)
+            .first?
+            .thumbnailAsset)
+        let bitmap = try #require(NSBitmapImageRep(data: thumbnail.data))
+
+        #expect(rebuiltCount == 1)
+        #expect(thumbnail.data.count < Constants.Thumbnail.maxEncodedBytes)
+        #expect(bitmap.pixelsWide >= 800)
+        #expect(bitmap.pixelsHigh >= 530)
     }
 
     @Test
@@ -794,6 +874,142 @@ struct PasteboardHistorySyncRepositoryTests {
     }
 }
 
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct PasteboardHistoryThumbnailByteLimitTests {
+    let repository: PasteboardHistoryRepository
+
+    init() {
+        self.repository = PasteboardHistoryRepository()
+    }
+
+    @Test
+    func saveImageThumbnailDoesNotExceedSourceImageBytes() throws {
+        let pngData = try makeRepositoryCompactGradientPNGData(width: 900, height: 520)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .png, data: pngData)
+            ]
+        )
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+
+        repository.save(id: id, content: content, updateAt: 1)
+
+        let thumbnail = try #require(repository
+            .fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1)
+            .first?
+            .thumbnailAsset)
+
+        #expect(thumbnail.kind == .image)
+        #expect(thumbnail.data.count <= pngData.count)
+        #expect(thumbnail.data.count <= Constants.Thumbnail.maxEncodedBytes)
+    }
+
+    @Test
+    func compactOversizedThumbnailAssetsShrinksThumbnailsThatExceedSourceImageBytes() throws {
+        let pngData = try makeRepositoryCompactGradientPNGData(width: 900, height: 520)
+        let content = PasteboardContent(
+            assets: [
+                PasteboardContent.Asset(type: .png, data: pngData)
+            ]
+        )
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+        repository.save(id: id, content: content, updateAt: 1)
+        let inflatedThumbnailData = try #require(content.thumbnailImage.flatMap(PasteraImageEncoding.pngData(from:)))
+        #expect(inflatedThumbnailData.count > pngData.count)
+        #expect(inflatedThumbnailData.count < Constants.Thumbnail.maxEncodedBytes)
+
+        @Dependency(\.defaultDatabase) var database
+        try database.write { database in
+            try PasteboardHistoryThumbnailAsset.upsert {
+                PasteboardHistoryThumbnailAsset(
+                    pasteboardHistoryID: id,
+                    kind: .image,
+                    data: inflatedThumbnailData
+                )
+            }
+            .execute(database)
+        }
+
+        let rebuiltCount = repository.compactOversizedThumbnailAssets(maxBytes: Constants.Thumbnail.maxEncodedBytes)
+        let thumbnail = try #require(repository
+            .fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1)
+            .first?
+            .thumbnailAsset)
+
+        #expect(rebuiltCount == 1)
+        #expect(thumbnail.kind == .image)
+        #expect(thumbnail.data.count <= pngData.count)
+    }
+}
+
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct PasteboardHistoryFilePreviewTests {
+    let repository: PasteboardHistoryRepository
+
+    init() {
+        self.repository = PasteboardHistoryRepository()
+    }
+
+    @Test
+    func fileURLHistoryStoresTextFileTitleAndKeepsOriginalFileURLAsset() throws {
+        let fileURL = try writeTemporaryFile(name: "notes.unknown", data: Data("Hello searchable file".utf8))
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        let content = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
+        )
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+
+        repository.save(id: id, content: content, updateAt: 2)
+
+        let history = try #require(repository.fetchHistory(id: id))
+        #expect(history.title == "notes.unknown\nHello searchable file")
+        #expect(repository.fetchContent(id: id)?.assets == content.assets)
+
+        let searchResults = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "searchable", mode: .plain),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        #expect(searchResults.map(\.history.id).contains(id))
+    }
+
+    @Test
+    func fileURLHistoryCreatesThumbnailForImageFilesWithoutImportingFileContent() throws {
+        let image = NSImage.create(with: .orange, size: NSSize(width: 24, height: 16))
+        let tiffData = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: tiffData))
+        let imageData = try #require(bitmap.representation(using: .png, properties: [:]))
+        let fileURL = try writeTemporaryFile(name: "capture.customimage", data: imageData)
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        let content = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
+        )
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+
+        repository.save(id: id, content: content, updateAt: 3)
+
+        let detail = try #require(
+            repository
+                .fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 10)
+                .first { $0.history.id == id }
+        )
+        #expect(detail.history.title == "capture.customimage")
+        #expect(detail.thumbnailAsset?.kind == .image)
+        #expect(repository.fetchContent(id: id)?.assets == content.assets)
+    }
+}
+
 private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     private(set) var savedContents = [PasteboardContent]()
 
@@ -867,6 +1083,77 @@ private func writeTemporaryFolder(name: String) throws -> URL {
     let folderURL = directory.appendingPathComponent(name, isDirectory: true)
     try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
     return folderURL
+}
+
+private func makeRepositoryNoisyImage(width: Int, height: Int) throws -> NSImage {
+    let bitmap = try #require(NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ))
+    for row in 0..<height {
+        for column in 0..<width {
+            let red = CGFloat((column * 37 + row * 17) % 256) / 255
+            let green = CGFloat((column * 11 + row * 53) % 256) / 255
+            let blue = CGFloat((column * 23 + row * 29) % 256) / 255
+            bitmap.setColor(NSColor(red: red, green: green, blue: blue, alpha: 1), atX: column, y: row)
+        }
+    }
+    let image = NSImage(size: NSSize(width: width, height: height))
+    image.addRepresentation(bitmap)
+    return image
+}
+
+private func makeRepositoryCompactGradientPNGData(width: Int, height: Int) throws -> Data {
+    let bitmap = try #require(NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: width * 4,
+        bitsPerPixel: 32
+    ))
+    let bitmapData = try #require(bitmap.bitmapData)
+    for row in 0..<height {
+        for column in 0..<width {
+            let index = row * bitmap.bytesPerRow + column * 4
+            bitmapData[index + 0] = UInt8(column % 256)
+            bitmapData[index + 1] = UInt8((row * 2) % 256)
+            bitmapData[index + 2] = UInt8((column ^ row) % 256)
+            bitmapData[index + 3] = 255
+        }
+    }
+    return try #require(bitmap.representation(using: .png, properties: [:]))
+}
+
+private func makeRepositoryScreenshotLikeImage(width: Int, height: Int) throws -> NSImage {
+    let image = NSImage(size: NSSize(width: width, height: height))
+    image.lockFocus()
+    defer { image.unlockFocus() }
+
+    NSColor(calibratedRed: 0.12, green: 0.13, blue: 0.17, alpha: 1).setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.monospacedSystemFont(ofSize: 30, weight: .regular),
+        .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 1)
+    ]
+    for row in 0..<16 {
+        let text = "Pastera thumbnail preview line \(row) - 411 tests in 47 suites passed"
+        text.draw(at: NSPoint(x: 36, y: height - 70 - row * 44), withAttributes: attributes)
+    }
+    return image
 }
 
 private func makeTabEvent(shift: Bool = false) throws -> NSEvent {
@@ -1454,7 +1741,7 @@ struct HistoryMenuHeaderViewTests {
         let panel = try #require(controller.panel)
         #expect(panel.styleMask.contains(.nonactivatingPanel))
         #expect(panel.level == .popUpMenu)
-        #expect(panel.contentView?.frame.size == NSSize(width: 260, height: 180))
+        #expect(panel.contentView?.frame.size == NSSize(width: 420, height: 290))
         controller.hide()
     }
 }

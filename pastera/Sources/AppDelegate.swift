@@ -20,6 +20,11 @@ import RxSwift
 import Screeen
 import Sparkle
 
+private enum ThumbnailCompactionMaintenance {
+    static let version = 6
+    static let maxThumbnailBytes = Constants.Thumbnail.maxEncodedBytes
+}
+
 @NSApplicationMain
 class AppDelegate: NSObject, NSMenuItemValidation {
 
@@ -88,7 +93,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
             confirmTitle: String(localized: "Clear History"),
             cancelTitle: String(localized: "Cancel"),
             isDestructive: true
-        ))
+        ), sourceWindow: NSApp.keyWindow ?? NSApp.mainWindow)
         guard result.confirmed else { return }
 
         AppEnvironment.current.clipService.clearAll()
@@ -380,12 +385,33 @@ extension AppDelegate: NSApplicationDelegate {
                 self?.pasteboardHistoryRepository.pruneHistories(settings: HistoryRetentionSettings.current())
             })
             .disposed(by: disposeBag)
+
+        compactThumbnailAssetsIfNeeded()
     }
 
 }
 
 // MARK: - Bind
 private extension AppDelegate {
+    func compactThumbnailAssetsIfNeeded() {
+        let defaults = AppEnvironment.current.defaults
+        guard defaults.integer(forKey: Constants.UserDefaults.thumbnailCompactionVersion) <
+            ThumbnailCompactionMaintenance.version else {
+            return
+        }
+
+        let repository = pasteboardHistoryRepository
+        DispatchQueue.global(qos: .utility).async {
+            _ = repository.compactOversizedThumbnailAssets(
+                maxBytes: ThumbnailCompactionMaintenance.maxThumbnailBytes
+            )
+            defaults.set(
+                ThumbnailCompactionMaintenance.version,
+                forKey: Constants.UserDefaults.thumbnailCompactionVersion
+            )
+        }
+    }
+
     func bind() {
         // Login Item
         AppEnvironment.current.defaults.rx.observe(Bool.self, Constants.UserDefaults.loginItem, retainSelf: false)

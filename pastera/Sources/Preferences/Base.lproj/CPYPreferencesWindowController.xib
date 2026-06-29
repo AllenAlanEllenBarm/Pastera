@@ -7,9 +7,6 @@
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="CPYPreferencesWindowController" customModule="Pastera" customModuleProvider="target">
             <connections>
-                <outlet property="betaButton" destination="Tkb-uY-5PB" id="rSr-MA-qFL"/>
-                <outlet property="betaImageView" destination="KnF-V7-1F2" id="Oip-8w-DfJ"/>
-                <outlet property="betaTextField" destination="CsY-pN-2dE" id="sjM-r5-llZ"/>
                 <outlet property="excludeButton" destination="3Tt-yV-IoW" id="aJp-CT-giL"/>
                 <outlet property="excludeImageView" destination="STs-Fa-lKT" id="wmF-tb-M1n"/>
                 <outlet property="excludeTextField" destination="xXO-mt-VmD" id="KZV-ph-V2x"/>
@@ -321,50 +318,6 @@
                                     <constraint firstAttribute="trailing" secondItem="bGH-iV-ocf" secondAttribute="trailing" constant="3" id="pvp-ce-oEr"/>
                                 </constraints>
                             </customView>
-                            <customView translatesAutoresizingMaskIntoConstraints="NO" id="LzX-pA-tjM">
-                                <rect key="frame" x="309" y="0.0" width="50" height="56"/>
-                                <subviews>
-                                    <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" tag="4" translatesAutoresizingMaskIntoConstraints="NO" id="KnF-V7-1F2">
-                                        <rect key="frame" x="7" y="24" width="36" height="24"/>
-                                        <constraints>
-                                            <constraint firstAttribute="height" constant="24" id="9NY-zz-MS5"/>
-                                            <constraint firstAttribute="width" constant="36" id="eSL-bF-m0o"/>
-                                        </constraints>
-                                        <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" image="pref_beta" id="kO5-Zw-jbK"/>
-                                    </imageView>
-                                    <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="NO" translatesAutoresizingMaskIntoConstraints="NO" id="CsY-pN-2dE">
-                                        <rect key="frame" x="1" y="8" width="48" height="12"/>
-                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="center" title="Beta" id="Fxs-BH-hPx">
-                                            <font key="font" size="9" name="HiraKakuProN-W6"/>
-                                            <color key="textColor" red="0.2666666667" green="0.2666666667" blue="0.2666666667" alpha="1" colorSpace="calibratedRGB"/>
-                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                        </textFieldCell>
-                                    </textField>
-                                    <button verticalHuggingPriority="750" tag="6" translatesAutoresizingMaskIntoConstraints="NO" id="Tkb-uY-5PB">
-                                        <rect key="frame" x="0.0" y="0.0" width="50" height="56"/>
-                                        <buttonCell key="cell" type="square" bezelStyle="shadowlessSquare" alignment="center" transparent="YES" imageScaling="proportionallyDown" inset="2" id="Loo-mm-qBT">
-                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                            <font key="font" metaFont="system"/>
-                                        </buttonCell>
-                                        <connections>
-                                            <action selector="toolBarItemTapped:" target="-2" id="s0g-X3-6tk"/>
-                                        </connections>
-                                    </button>
-                                </subviews>
-                                <constraints>
-                                    <constraint firstItem="Tkb-uY-5PB" firstAttribute="leading" secondItem="LzX-pA-tjM" secondAttribute="leading" id="EBh-D3-J6E"/>
-                                    <constraint firstItem="CsY-pN-2dE" firstAttribute="leading" secondItem="LzX-pA-tjM" secondAttribute="leading" constant="3" id="EmR-fZ-4Cu"/>
-                                    <constraint firstAttribute="bottom" secondItem="Tkb-uY-5PB" secondAttribute="bottom" id="F2a-C4-7Vl"/>
-                                    <constraint firstItem="CsY-pN-2dE" firstAttribute="top" secondItem="KnF-V7-1F2" secondAttribute="bottom" constant="4" id="GIA-KK-EA4"/>
-                                    <constraint firstAttribute="trailing" secondItem="Tkb-uY-5PB" secondAttribute="trailing" id="HPq-c7-3Nd"/>
-                                    <constraint firstAttribute="bottom" secondItem="CsY-pN-2dE" secondAttribute="bottom" constant="8" id="I2k-Ie-C3i"/>
-                                    <constraint firstAttribute="width" relation="greaterThanOrEqual" constant="50" id="LDn-hs-5PO"/>
-                                    <constraint firstAttribute="trailing" secondItem="CsY-pN-2dE" secondAttribute="trailing" constant="3" id="V5x-nn-Uls"/>
-                                    <constraint firstItem="KnF-V7-1F2" firstAttribute="centerX" secondItem="LzX-pA-tjM" secondAttribute="centerX" id="jJN-bH-3dF"/>
-                                    <constraint firstItem="Tkb-uY-5PB" firstAttribute="top" secondItem="LzX-pA-tjM" secondAttribute="top" id="nR3-MJ-Ipi"/>
-                                    <constraint firstItem="KnF-V7-1F2" firstAttribute="top" secondItem="LzX-pA-tjM" secondAttribute="top" constant="8" id="q7l-tP-IgV"/>
-                                </constraints>
-                            </customView>
                             <customView translatesAutoresizingMaskIntoConstraints="NO" id="RKs-Gr-vpv" customClass="CPYDesignableView" customModule="Pastera" customModuleProvider="target">
                                 <rect key="frame" x="0.0" y="0.0" width="480" height="1"/>
                                 <constraints>
@@ -382,7 +335,6 @@
                             <constraint firstItem="Tm1-Ve-7A5" firstAttribute="leading" secondItem="d0L-ue-dHf" secondAttribute="trailing" id="52d-xJ-1DS"/>
                             <constraint firstAttribute="bottom" secondItem="Eo5-Xw-WPV" secondAttribute="bottom" id="9sN-gD-RZf"/>
                             <constraint firstItem="d0L-ue-dHf" firstAttribute="top" secondItem="DB4-0I-ThE" secondAttribute="top" id="ELH-C6-9VC"/>
-                            <constraint firstItem="LzX-pA-tjM" firstAttribute="top" secondItem="DB4-0I-ThE" secondAttribute="top" id="EhD-HN-Ae6"/>
                             <constraint firstAttribute="bottom" secondItem="qLI-td-kAj" secondAttribute="bottom" id="HEg-HL-K8y"/>
                             <constraint firstAttribute="bottom" secondItem="oZv-f1-ez4" secondAttribute="bottom" id="Hlq-hj-fhd"/>
                             <constraint firstItem="qLI-td-kAj" firstAttribute="top" secondItem="DB4-0I-ThE" secondAttribute="top" id="NEk-eZ-6z2"/>
@@ -393,13 +345,11 @@
                             <constraint firstItem="oZv-f1-ez4" firstAttribute="top" secondItem="DB4-0I-ThE" secondAttribute="top" id="dsY-m0-zED"/>
                             <constraint firstItem="oZv-f1-ez4" firstAttribute="leading" secondItem="Eo5-Xw-WPV" secondAttribute="trailing" id="eeC-iS-g5z"/>
                             <constraint firstAttribute="bottom" secondItem="d0L-ue-dHf" secondAttribute="bottom" id="fc1-Il-8He"/>
-                            <constraint firstItem="LzX-pA-tjM" firstAttribute="leading" secondItem="bgn-yY-thR" secondAttribute="trailing" id="k3i-xi-Nzt"/>
                             <constraint firstItem="Tm1-Ve-7A5" firstAttribute="top" secondItem="DB4-0I-ThE" secondAttribute="top" id="mLx-hj-SgI"/>
                             <constraint firstItem="d0L-ue-dHf" firstAttribute="leading" secondItem="qLI-td-kAj" secondAttribute="trailing" id="ok5-iH-56k"/>
                             <constraint firstItem="Eo5-Xw-WPV" firstAttribute="top" secondItem="DB4-0I-ThE" secondAttribute="top" id="pmH-u2-Tu6"/>
                             <constraint firstAttribute="bottom" secondItem="RKs-Gr-vpv" secondAttribute="bottom" id="tZz-pU-r8k"/>
                             <constraint firstItem="qLI-td-kAj" firstAttribute="leading" secondItem="oZv-f1-ez4" secondAttribute="trailing" id="ufE-IM-cub"/>
-                            <constraint firstAttribute="bottom" secondItem="LzX-pA-tjM" secondAttribute="bottom" id="uke-85-OUo"/>
                             <constraint firstItem="Eo5-Xw-WPV" firstAttribute="leading" secondItem="DB4-0I-ThE" secondAttribute="leading" id="v17-rx-F6g"/>
                             <constraint firstAttribute="bottom" secondItem="bgn-yY-thR" secondAttribute="bottom" id="yhs-N3-ukR"/>
                             <constraint firstAttribute="height" constant="56" id="zEv-xk-Ocs"/>
@@ -421,7 +371,6 @@
         </window>
     </objects>
     <resources>
-        <image name="pref_beta" width="36" height="24"/>
         <image name="pref_excluded" width="36" height="24"/>
         <image name="pref_general_on" width="36" height="24"/>
         <image name="pref_menu" width="36" height="24"/>

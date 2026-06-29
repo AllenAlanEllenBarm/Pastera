@@ -95,9 +95,75 @@ struct SnippetSyncPayload: Codable, Equatable {
     }
 }
 
+struct SnippetFolderDeletionSyncPayload: Codable, Equatable {
+    let id: String
+    let title: String
+    let deletedAt: Int
+    let deviceID: String?
+
+    init(
+        id: String,
+        title: String,
+        deletedAt: Int,
+        deviceID: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.deletedAt = deletedAt
+        self.deviceID = deviceID
+    }
+}
+
+struct SnippetDeletionSyncPayload: Codable, Equatable {
+    let id: String
+    let folderID: String
+    let folderTitle: String
+    let content: String
+    let deletedAt: Int
+    let deviceID: String?
+
+    init(
+        id: String,
+        folderID: String,
+        folderTitle: String,
+        content: String,
+        deletedAt: Int,
+        deviceID: String? = nil
+    ) {
+        self.id = id
+        self.folderID = folderID
+        self.folderTitle = folderTitle
+        self.content = content
+        self.deletedAt = deletedAt
+        self.deviceID = deviceID
+    }
+}
+
 struct SnippetSyncSnapshot: Codable, Equatable {
     let folders: [SnippetFolderSyncPayload]
     let snippets: [SnippetSyncPayload]
+    let deletedFolders: [SnippetFolderDeletionSyncPayload]
+    let deletedSnippets: [SnippetDeletionSyncPayload]
+
+    init(
+        folders: [SnippetFolderSyncPayload],
+        snippets: [SnippetSyncPayload],
+        deletedFolders: [SnippetFolderDeletionSyncPayload] = [],
+        deletedSnippets: [SnippetDeletionSyncPayload] = []
+    ) {
+        self.folders = folders
+        self.snippets = snippets
+        self.deletedFolders = deletedFolders
+        self.deletedSnippets = deletedSnippets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.folders = try container.decode([SnippetFolderSyncPayload].self, forKey: .folders)
+        self.snippets = try container.decode([SnippetSyncPayload].self, forKey: .snippets)
+        self.deletedFolders = try container.decodeIfPresent([SnippetFolderDeletionSyncPayload].self, forKey: .deletedFolders) ?? []
+        self.deletedSnippets = try container.decodeIfPresent([SnippetDeletionSyncPayload].self, forKey: .deletedSnippets) ?? []
+    }
 }
 
 protocol SnippetRepositoryProtocol {
@@ -210,7 +276,13 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                 let snippets = try Snippet.all.order(by: \.index)
                     .fetchAll(database)
                     .map(SnippetSyncPayload.init(snippet:))
-                return SnippetSyncSnapshot(folders: folders, snippets: snippets)
+                let deletions = try SnippetSyncDeletion.all.fetchAll(database)
+                return SnippetSyncSnapshot(
+                    folders: folders,
+                    snippets: snippets,
+                    deletedFolders: Self.deletedFolderPayloads(from: deletions),
+                    deletedSnippets: Self.deletedSnippetPayloads(from: deletions)
+                )
             }
         } ?? SnippetSyncSnapshot(folders: [], snippets: [])
     }
@@ -284,73 +356,7 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int {
         withErrorReporting {
             try database.write { database in
-                _ = try removeDuplicateFoldersAndSnippets(database: database)
-                var writtenCount = 0
-                var folderIDMap = [String: SnippetFolder.ID]()
-                for payload in snapshot.folders {
-                    guard let folder = payload.snippetFolder else {
-                        continue
-                    }
-                    if try isSuppressed(kind: .snippetFolder, id: payload.id, database: database) {
-                        if let existingFolder = try self.folder(title: payload.title, database: database) {
-                            folderIDMap[payload.id] = existingFolder.id
-                        }
-                        continue
-                    }
-                    if let existingFolder = try SnippetFolder.find(folder.id).fetchOne(database),
-                       payload.updatedAt <= existingFolder.updatedAt {
-                        folderIDMap[payload.id] = existingFolder.id
-                        continue
-                    }
-                    if let existingFolder = try self.folder(title: payload.title, excluding: folder.id, database: database) {
-                        folderIDMap[payload.id] = existingFolder.id
-                        try suppress(kind: .snippetFolder, id: payload.id, database: database)
-                        continue
-                    }
-                    try SnippetFolder.upsert { folder }.execute(database)
-                    folderIDMap[payload.id] = folder.id
-                    writtenCount += 1
-                }
-                for payload in snapshot.snippets {
-                    guard try !isSuppressed(kind: .snippet, id: payload.id, database: database),
-                          let snippet = payload.snippet else {
-                        continue
-                    }
-                    let targetFolderID = folderIDMap[payload.folderID] ?? snippet.folderID
-                    guard try SnippetFolder.find(targetFolderID).fetchOne(database) != nil else {
-                        continue
-                    }
-                    let mappedSnippet = Snippet(
-                        id: snippet.id,
-                        folderID: targetFolderID,
-                        title: snippet.title,
-                        content: snippet.content,
-                        index: snippet.index,
-                        isEnabled: snippet.isEnabled,
-                        createdAt: snippet.createdAt,
-                        updatedAt: snippet.updatedAt,
-                        lastModifiedDeviceID: snippet.lastModifiedDeviceID
-                    )
-                    if let existingSnippet = try Snippet.find(snippet.id).fetchOne(database),
-                       payload.updatedAt <= existingSnippet.updatedAt {
-                        continue
-                    }
-                    if try hasSnippetContent(
-                        mappedSnippet.content,
-                        in: targetFolderID,
-                        excluding: mappedSnippet.id,
-                        database: database
-                    ) {
-                        try suppress(kind: .snippet, id: payload.id, database: database)
-                        if try Snippet.find(mappedSnippet.id).fetchOne(database) != nil {
-                            try Snippet.delete().where { $0.id.eq(mappedSnippet.id) }.execute(database)
-                        }
-                        continue
-                    }
-                    try Snippet.upsert { mappedSnippet }.execute(database)
-                    writtenCount += 1
-                }
-                return writtenCount
+                try upsertSyncSnapshot(snapshot, database: database)
             }
         } ?? 0
     }
@@ -416,13 +422,32 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     func deleteFolder(_ id: SnippetFolder.ID) {
         withErrorReporting {
             try database.write { database in
+                guard let folder = try SnippetFolder.find(id).fetchOne(database) else {
+                    return
+                }
+                let deletedAt = currentUnixTime()
+                try recordFolderDeletion(
+                    id: folder.id.rawValue.uuidString,
+                    title: folder.title,
+                    deletedAt: deletedAt,
+                    deviceID: CPYUtilities.deviceID,
+                    database: database
+                )
                 try suppress(kind: .snippetFolder, id: id.rawValue.uuidString, database: database)
-                let snippetIDs = try Snippet
+                let snippets = try Snippet
                     .where { $0.folderID.eq(id) }
-                    .select { $0.id }
                     .fetchAll(database)
-                try snippetIDs.forEach { snippetID in
-                    try suppress(kind: .snippet, id: snippetID.rawValue.uuidString, database: database)
+                try snippets.forEach { snippet in
+                    try recordSnippetDeletion(
+                        id: snippet.id.rawValue.uuidString,
+                        folderID: folder.id.rawValue.uuidString,
+                        folderTitle: folder.title,
+                        content: snippet.content,
+                        deletedAt: deletedAt,
+                        deviceID: CPYUtilities.deviceID,
+                        database: database
+                    )
+                    try suppress(kind: .snippet, id: snippet.id.rawValue.uuidString, database: database)
                 }
                 try SnippetFolder.delete().where { $0.id.eq(id) }.execute(database)
             }
@@ -549,6 +574,19 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     func deleteSnippet(_ id: Snippet.ID) {
         withErrorReporting {
             try database.write { database in
+                guard let snippet = try Snippet.find(id).fetchOne(database),
+                      let folder = try SnippetFolder.find(snippet.folderID).fetchOne(database) else {
+                    return
+                }
+                try recordSnippetDeletion(
+                    id: snippet.id.rawValue.uuidString,
+                    folderID: folder.id.rawValue.uuidString,
+                    folderTitle: folder.title,
+                    content: snippet.content,
+                    deletedAt: currentUnixTime(),
+                    deviceID: CPYUtilities.deviceID,
+                    database: database
+                )
                 try suppress(kind: .snippet, id: id.rawValue.uuidString, database: database)
                 try Snippet.delete().where { $0.id.eq(id) }.execute(database)
             }
@@ -556,7 +594,7 @@ final class SnippetRepository: SnippetRepositoryProtocol {
     }
 }
 
-private extension SnippetFolderSyncPayload {
+extension SnippetFolderSyncPayload {
     var snippetFolder: SnippetFolder? {
         guard let id = SnippetFolder.ID(uuidString: id) else { return nil }
         return SnippetFolder(
@@ -571,7 +609,7 @@ private extension SnippetFolderSyncPayload {
     }
 }
 
-private extension SnippetSyncPayload {
+extension SnippetSyncPayload {
     var snippet: Snippet? {
         guard let id = Snippet.ID(uuidString: id), let folderID = SnippetFolder.ID(uuidString: folderID) else {
             return nil
@@ -590,21 +628,21 @@ private extension SnippetSyncPayload {
     }
 }
 
-private extension SnippetFolder.ID {
+extension SnippetFolder.ID {
     init?(uuidString: String) {
         guard let uuid = UUID(uuidString: uuidString) else { return nil }
         self.init(rawValue: uuid)
     }
 }
 
-private extension Snippet.ID {
+extension Snippet.ID {
     init?(uuidString: String) {
         guard let uuid = UUID(uuidString: uuidString) else { return nil }
         self.init(rawValue: uuid)
     }
 }
 
-private extension SnippetRepository {
+extension SnippetRepository {
     func availableFolderTitle(baseTitle: String = "untitled folder", database: Database) throws -> String {
         let titles = Set(try SnippetFolder.all.select { $0.title }.fetchAll(database))
         guard titles.contains(baseTitle) else { return baseTitle }
@@ -781,6 +819,12 @@ private extension SnippetRepository {
         try SyncSuppression
             .find(syncIdentity(kind: kind, id: id))
             .fetchOne(database) != nil
+    }
+
+    func unsuppress(kind: SyncEntityKind, id: String, database: Database) throws {
+        try SyncSuppression.delete()
+            .where { $0.syncIdentity.eq(syncIdentity(kind: kind, id: id)) }
+            .execute(database)
     }
 
     func syncIdentity(kind: SyncEntityKind, id: String) -> String {

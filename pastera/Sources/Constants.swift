@@ -37,6 +37,12 @@ struct Constants {
         static let draggedDataType = "public.data"
     }
 
+    struct Thumbnail {
+        static let hoverPreviewPixelWidth = 808
+        static let hoverPreviewPixelHeight = 548
+        static let maxEncodedBytes = 384 * 1024
+    }
+
     struct UserDefaults {
         static let hotKeys = "kCPYPrefHotKeysKey"
         static let menuIconSize = "kCPYPrefMenuIconSizeKey"
@@ -49,6 +55,7 @@ struct Constants {
         static let syncDeviceID = "kCPYSyncDeviceIDKey"
         static let windowBackgroundOpacity = "kCPYPrefWindowBackgroundOpacityKey"
         static let storeTypes = "kCPYPrefStoreTypesKey"
+        static let filePreviewTypes = "kPasteraFilePreviewTypes"
         static let inputPasteCommand = "kCPYPrefInputPasteCommandKey"
         static let numberOfItemsPlaceInline = "kCPYPrefNumberOfItemsPlaceInlineKey"
         static let numberOfItemsPlaceInsideFolder = "kCPYPrefNumberOfItemsPlaceInsideFolderKey"
@@ -85,16 +92,7 @@ struct Constants {
         static let syncFileImportEnabled = "kCPYSyncFileImportEnabled"
         static let syncFileTypes = "kCPYSyncFileTypes"
         static let syncPollInterval = "kCPYSyncPollInterval"
-    }
-
-    struct Beta {
-        static let pastePlainText = "kCPYBetaPastePlainText"
-        static let pastePlainTextModifier = "kCPYBetaPastePlainTextModifier"
-        static let deleteHistory = "kCPYBetaDeleteHistory"
-        static let deleteHistoryModifier = "kCPYBetaDeleteHistoryModifier"
-        static let pasteAndDeleteHistory = "kCPYBetaPasteAndDeleteHistory"
-        static let pasteAndDeleteHistoryModifier = "kCPYBetapasteAndDeleteHistoryModifier"
-        static let observerScreenshot = "kCPYBetaObserveScreenshot"
+        static let thumbnailCompactionVersion = "kCPYThumbnailCompactionVersion"
     }
 
     struct Update {
@@ -134,6 +132,7 @@ struct Constants {
         static let historyPreviousPageKeyCombo = "kCPYHistoryPreviousPageKeyCombo"
         static let folderKeyCombos = "kCPYFolderKeyCombos"
         static let clearHistoryKeyCombo = "kCPYClearHistoryKeyCombo"
+        static let suspendDuringRemoteSession = "kPasteraSuspendHotKeysDuringRemoteSession"
     }
 
 }

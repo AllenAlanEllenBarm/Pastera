@@ -126,6 +126,26 @@ struct MenuManagerStatusItemTests {
     }
 
     @Test
+    func secureKeyboardEntryUsesLegacyMenuFallbackForHotkeyPopups() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+            manager.secureEventInputEnabledProvider = { true }
+
+            #expect(manager.shouldUseLegacyMenuFallbackForTesting)
+        }
+    }
+
+    @Test
+    func normalInputUsesPanelPresentationForHotkeyPopups() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+            manager.secureEventInputEnabledProvider = { false }
+
+            #expect(!manager.shouldUseLegacyMenuFallbackForTesting)
+        }
+    }
+
+    @Test
     func setupUsesTemplateStatusItemWhenPreferenceIsLegacyWhite() throws {
         try withRegisteredDefaultEnvironment { defaults, _ in
             defaults.set(2, forKey: Constants.UserDefaults.showStatusItem)

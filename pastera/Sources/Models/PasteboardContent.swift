@@ -12,8 +12,10 @@
 
 import Cocoa
 import CryptoKit
+import ImageIO
 import SQLite3
 import SwiftHEXColors
+import UniformTypeIdentifiers
 
 // swiftlint:disable type_body_length file_length
 
@@ -35,22 +37,44 @@ struct PasteboardContent: Equatable {
         guard let data = data(for: .string) ?? data(for: .deprecatedString) else { return "" }
         return String(data: data, encoding: .utf8) ?? ""
     }
+    var historyTitle: String {
+        let text = stringValue
+        if !text.isEmpty { return text }
+        return fileURLHistoryTitle ?? ""
+    }
     var colorCodeImage: NSImage? {
         guard let color = NSColor(hexString: stringValue) else { return nil }
         return NSImage.create(with: color, size: NSSize(width: 20, height: 20))
     }
     var thumbnailImage: NSImage? {
         let defaults = UserDefaults.standard
-        let width = defaults.integer(forKey: Constants.UserDefaults.thumbnailWidth)
-        let height = defaults.integer(forKey: Constants.UserDefaults.thumbnailHeight)
+        let width = max(
+            defaults.integer(forKey: Constants.UserDefaults.thumbnailWidth),
+            Constants.Thumbnail.hoverPreviewPixelWidth
+        )
+        let height = max(
+            defaults.integer(forKey: Constants.UserDefaults.thumbnailHeight),
+            Constants.Thumbnail.hoverPreviewPixelHeight
+        )
 
         let imageURL = assets.filter { $0.type == .fileURL }
             .compactMap { URL(dataRepresentation: $0.data, relativeTo: nil) }
-            .first(where: { ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "heic", "webp"].contains($0.pathExtension.lowercased()) })
+            .first(where: {
+                PasteraFilePreviewKind.isEnabled(.image)
+                    && PasteraFileTypeClassifier.kind(for: $0) == .image
+            })
         if let imageURL {
-            return NSImage(contentsOf: imageURL)?.resizeImage(CGFloat(width), CGFloat(height))
+            return PasteraImageEncoding.thumbnailImage(
+                from: imageURL,
+                maxPixelWidth: width,
+                maxPixelHeight: height
+            )
         } else if let data = assets.first(where: { $0.type.isClipyImageType })?.data {
-            return NSImage(data: data)?.resizeImage(CGFloat(width), CGFloat(height))
+            return PasteraImageEncoding.thumbnailImage(
+                from: data,
+                maxPixelWidth: width,
+                maxPixelHeight: height
+            )
         }
         return nil
     }
@@ -108,6 +132,132 @@ private extension PasteboardContent {
     func data(for type: NSPasteboard.PasteboardType) -> Data? {
         assets.first(where: { $0.type == type })?.data
     }
+
+    var fileURLs: [URL] {
+        assets.filter { $0.type == .fileURL }
+            .compactMap { URL(dataRepresentation: $0.data, relativeTo: nil) }
+    }
+
+    var fileURLHistoryTitle: String? {
+        guard let url = fileURLs.first else { return nil }
+        switch PasteraFileTypeClassifier.kind(for: url) {
+        case .image where PasteraFilePreviewKind.isEnabled(.image):
+            return url.lastPathComponent
+        case .commonText where PasteraFilePreviewKind.isEnabled(.commonText):
+            guard let preview = PasteraFileTypeClassifier.textPreview(from: url) else {
+                return url.lastPathComponent
+            }
+            return "\(url.lastPathComponent)\n\(preview)"
+        default:
+            return nil
+        }
+    }
+}
+
+enum PasteraFilePreviewKind: String, CaseIterable {
+    case image
+    case commonText
+
+    static func defaultStates() -> [String: NSNumber] {
+        allCases.reduce(into: [String: NSNumber]()) { states, kind in
+            states[kind.rawValue] = NSNumber(value: true)
+        }
+    }
+
+    static func isEnabled(_ kind: PasteraFilePreviewKind, defaults: UserDefaults = AppEnvironment.current.defaults) -> Bool {
+        let values = defaults.object(forKey: Constants.UserDefaults.filePreviewTypes) as? [String: Any] ?? [:]
+        if let number = values[kind.rawValue] as? NSNumber {
+            return number.boolValue
+        }
+        if let bool = values[kind.rawValue] as? Bool {
+            return bool
+        }
+        return true
+    }
+
+    static func states(defaults: UserDefaults = AppEnvironment.current.defaults) -> [String: NSNumber] {
+        let values = defaults.object(forKey: Constants.UserDefaults.filePreviewTypes) as? [String: Any] ?? [:]
+        return allCases.reduce(into: [String: NSNumber]()) { result, kind in
+            if let number = values[kind.rawValue] as? NSNumber {
+                result[kind.rawValue] = number
+            } else if let bool = values[kind.rawValue] as? Bool {
+                result[kind.rawValue] = NSNumber(value: bool)
+            } else {
+                result[kind.rawValue] = NSNumber(value: true)
+            }
+        }
+    }
+}
+
+enum PasteraFileTypeClassifier {
+    private static let textPreviewMaxBytes = 256 * 1024
+
+    static func kind(for url: URL) -> PasteraFilePreviewKind? {
+        guard url.isFileURL, !isDirectory(url) else { return nil }
+        if isImageFile(url) {
+            return .image
+        }
+        if textPreview(from: url) != nil {
+            return .commonText
+        }
+        return nil
+    }
+
+    static func textPreview(from url: URL, maxBytes: Int = textPreviewMaxBytes) -> String? {
+        guard url.isFileURL, maxBytes > 0, !isDirectory(url),
+              let data = readPrefix(from: url, maxBytes: maxBytes),
+              !data.isEmpty,
+              !looksBinary(data),
+              let text = decodeText(data) else {
+            return nil
+        }
+        let preview = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return preview.isEmpty ? nil : preview
+    }
+
+    static func canCreateImageThumbnail(from url: URL) -> Bool {
+        PasteraImageEncoding.thumbnailImage(from: url, maxPixelWidth: 64, maxPixelHeight: 64) != nil
+    }
+
+    private static func isImageFile(_ url: URL) -> Bool {
+        if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image) {
+            return true
+        }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [
+            kCGImageSourceShouldCache: false
+        ] as CFDictionary) else {
+            return false
+        }
+        return CGImageSourceGetCount(source) > 0
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    private static func readPrefix(from url: URL, maxBytes: Int) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.read(upToCount: maxBytes)
+    }
+
+    private static func looksBinary(_ data: Data) -> Bool {
+        if data.contains(0) {
+            return true
+        }
+        let allowedControls: Set<UInt8> = [0x09, 0x0A, 0x0D]
+        let controlCount = data.reduce(0) { count, byte in
+            byte < 0x20 && !allowedControls.contains(byte) ? count + 1 : count
+        }
+        return controlCount > max(2, data.count / 20)
+    }
+
+    private static func decodeText(_ data: Data) -> String? {
+        [.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian]
+            .lazy
+            .compactMap { String(data: data, encoding: $0) }
+            .first
+    }
 }
 
 private extension SHA256 {
@@ -120,11 +270,134 @@ private extension SHA256 {
 }
 
 enum PasteraImageEncoding {
+    static func thumbnailImage(from url: URL, maxPixelWidth: Int, maxPixelHeight: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [
+            kCGImageSourceShouldCache: false
+        ] as CFDictionary) else {
+            return nil
+        }
+        return thumbnailImage(from: source, maxPixelWidth: maxPixelWidth, maxPixelHeight: maxPixelHeight)
+    }
+
+    static func thumbnailImage(from data: Data, maxPixelWidth: Int, maxPixelHeight: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [
+            kCGImageSourceShouldCache: false
+        ] as CFDictionary) else {
+            return nil
+        }
+        return thumbnailImage(from: source, maxPixelWidth: maxPixelWidth, maxPixelHeight: maxPixelHeight)
+    }
+
     static func pngData(from image: NSImage) -> Data? {
+        if let bitmap = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+           let pngData = bitmap.representation(using: .png, properties: [:]) {
+            return pngData
+        }
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        if let cgImage = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) {
+            let bitmap = NSBitmapImageRep(cgImage: cgImage)
+            if let pngData = bitmap.representation(using: .png, properties: [:]) {
+                return pngData
+            }
+        }
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData)
         else { return nil }
         return bitmap.representation(using: .png, properties: [:])
+    }
+
+    static func pngData(from image: NSImage, maxBytes: Int) -> Data? {
+        guard maxBytes > 0 else { return pngData(from: image) }
+        var candidate = image
+        var candidateData = pngData(from: candidate)
+        while let data = candidateData,
+              data.count > maxBytes,
+              let downsizedImage = downsizedImage(from: candidate) {
+            candidate = downsizedImage
+            candidateData = pngData(from: candidate)
+        }
+        return candidateData
+    }
+
+    private static func downsizedImage(from image: NSImage) -> NSImage? {
+        guard let pixelSize = bitmapPixelSize(of: image),
+              pixelSize.width > 32 || pixelSize.height > 32 else {
+            return nil
+        }
+
+        let nextWidth = max(1, Int((CGFloat(pixelSize.width) * 0.85).rounded(.down)))
+        let nextHeight = max(1, Int((CGFloat(pixelSize.height) * 0.85).rounded(.down)))
+        guard nextWidth < pixelSize.width || nextHeight < pixelSize.height else { return nil }
+        return image.resizeImage(CGFloat(nextWidth), CGFloat(nextHeight))
+    }
+
+    private static func bitmapPixelSize(of image: NSImage) -> (width: Int, height: Int)? {
+        if let bitmap = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first {
+            return (bitmap.pixelsWide, bitmap.pixelsHigh)
+        }
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        if let cgImage = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) {
+            return (cgImage.width, cgImage.height)
+        }
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        return (Int(size.width.rounded()), Int(size.height.rounded()))
+    }
+
+    private static func thumbnailImage(
+        from source: CGImageSource,
+        maxPixelWidth: Int,
+        maxPixelHeight: Int
+    ) -> NSImage? {
+        guard maxPixelWidth > 0,
+              maxPixelHeight > 0,
+              let sourcePixelSize = imagePixelSize(of: source) else {
+            return nil
+        }
+
+        let maxPixelLength = fittingMaxPixelLength(
+            sourcePixelSize: sourcePixelSize,
+            maxPixelWidth: maxPixelWidth,
+            maxPixelHeight: maxPixelHeight
+        )
+        guard maxPixelLength > 0 else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelLength
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        let image = NSImage(
+            cgImage: cgImage,
+            size: NSSize(width: cgImage.width, height: cgImage.height)
+        )
+        return image.resizeImage(CGFloat(cgImage.width), CGFloat(cgImage.height)) ?? image
+    }
+
+    private static func imagePixelSize(of source: CGImageSource) -> (width: Int, height: Int)? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.intValue > 0,
+              height.intValue > 0 else {
+            return nil
+        }
+        return (width.intValue, height.intValue)
+    }
+
+    private static func fittingMaxPixelLength(
+        sourcePixelSize: (width: Int, height: Int),
+        maxPixelWidth: Int,
+        maxPixelHeight: Int
+    ) -> Int {
+        let sourceAspect = CGFloat(sourcePixelSize.width) / CGFloat(sourcePixelSize.height)
+        let targetAspect = CGFloat(maxPixelWidth) / CGFloat(maxPixelHeight)
+        return sourceAspect >= targetAspect ? maxPixelWidth : maxPixelHeight
     }
 }
 
@@ -460,9 +733,23 @@ final class OneDriveFolderSyncProvider {
                   updatedAt INTEGER NOT NULL,
                   lastModifiedDeviceID TEXT
                 );
+                CREATE TABLE deletedFolders (
+                  id TEXT PRIMARY KEY NOT NULL,
+                  title TEXT NOT NULL,
+                  deletedAt INTEGER NOT NULL,
+                  deviceID TEXT
+                );
+                CREATE TABLE deletedSnippets (
+                  id TEXT PRIMARY KEY NOT NULL,
+                  folderID TEXT NOT NULL,
+                  folderTitle TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  deletedAt INTEGER NOT NULL,
+                  deviceID TEXT
+                );
                 """)
             try writeMetadata([
-                "schemaVersion": "2",
+                "schemaVersion": "3",
                 "deviceID": deviceID,
                 "generatedAt": "\(Int(Date().timeIntervalSince1970))"
             ], database: database)
@@ -473,6 +760,14 @@ final class OneDriveFolderSyncProvider {
             let snippetStatement = try database.prepare("""
                 INSERT INTO snippets(id, folderID, title, content, displayIndex, isEnabled, updatedAt, lastModifiedDeviceID)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """)
+            let deletedFolderStatement = try database.prepare("""
+                INSERT INTO deletedFolders(id, title, deletedAt, deviceID)
+                VALUES (?, ?, ?, ?)
+                """)
+            let deletedSnippetStatement = try database.prepare("""
+                INSERT INTO deletedSnippets(id, folderID, folderTitle, content, deletedAt, deviceID)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """)
             for folder in snapshot.folders {
                 try folderStatement.reset()
@@ -495,6 +790,24 @@ final class OneDriveFolderSyncProvider {
                 try snippetStatement.bind(snippet.updatedAt, at: 7)
                 try snippetStatement.bind(snippet.deviceID, at: 8)
                 try snippetStatement.stepToCompletion()
+            }
+            for folder in snapshot.deletedFolders {
+                try deletedFolderStatement.reset()
+                try deletedFolderStatement.bind(folder.id, at: 1)
+                try deletedFolderStatement.bind(folder.title, at: 2)
+                try deletedFolderStatement.bind(folder.deletedAt, at: 3)
+                try deletedFolderStatement.bind(folder.deviceID, at: 4)
+                try deletedFolderStatement.stepToCompletion()
+            }
+            for snippet in snapshot.deletedSnippets {
+                try deletedSnippetStatement.reset()
+                try deletedSnippetStatement.bind(snippet.id, at: 1)
+                try deletedSnippetStatement.bind(snippet.folderID, at: 2)
+                try deletedSnippetStatement.bind(snippet.folderTitle, at: 3)
+                try deletedSnippetStatement.bind(snippet.content, at: 4)
+                try deletedSnippetStatement.bind(snippet.deletedAt, at: 5)
+                try deletedSnippetStatement.bind(snippet.deviceID, at: 6)
+                try deletedSnippetStatement.stepToCompletion()
             }
         }
     }
@@ -648,7 +961,10 @@ final class OneDriveFolderSyncProvider {
     private func loadSnippetSnapshot(at url: URL) throws -> SnippetDeviceSyncSnapshot {
         let database = try SyncSQLiteDatabase(url: url)
         let metadata = try readMetadata(database: database)
-        guard metadata["schemaVersion"] == "2" else { throw SyncSQLiteError.missingMetadata("schemaVersion") }
+        guard let schemaVersion = metadata["schemaVersion"],
+              ["2", "3"].contains(schemaVersion) else {
+            throw SyncSQLiteError.missingMetadata("schemaVersion")
+        }
         guard let deviceID = metadata["deviceID"] else { throw SyncSQLiteError.missingMetadata("deviceID") }
         let foldersStatement = try database.prepare("""
             SELECT id, title, displayIndex, isEnabled, updatedAt, lastModifiedDeviceID
@@ -684,9 +1000,46 @@ final class OneDriveFolderSyncProvider {
                 deviceID: snippetsStatement.columnOptionalString(at: 7)
             ))
         }
+        var deletedFolders = [SnippetFolderDeletionSyncPayload]()
+        var deletedSnippets = [SnippetDeletionSyncPayload]()
+        if schemaVersion == "3" {
+            let deletedFoldersStatement = try database.prepare("""
+                SELECT id, title, deletedAt, deviceID
+                FROM deletedFolders
+                ORDER BY deletedAt ASC, id ASC
+                """)
+            while try deletedFoldersStatement.step() {
+                deletedFolders.append(SnippetFolderDeletionSyncPayload(
+                    id: deletedFoldersStatement.columnString(at: 0),
+                    title: deletedFoldersStatement.columnString(at: 1),
+                    deletedAt: deletedFoldersStatement.columnInt(at: 2),
+                    deviceID: deletedFoldersStatement.columnOptionalString(at: 3)
+                ))
+            }
+            let deletedSnippetsStatement = try database.prepare("""
+                SELECT id, folderID, folderTitle, content, deletedAt, deviceID
+                FROM deletedSnippets
+                ORDER BY deletedAt ASC, id ASC
+                """)
+            while try deletedSnippetsStatement.step() {
+                deletedSnippets.append(SnippetDeletionSyncPayload(
+                    id: deletedSnippetsStatement.columnString(at: 0),
+                    folderID: deletedSnippetsStatement.columnString(at: 1),
+                    folderTitle: deletedSnippetsStatement.columnString(at: 2),
+                    content: deletedSnippetsStatement.columnString(at: 3),
+                    deletedAt: deletedSnippetsStatement.columnInt(at: 4),
+                    deviceID: deletedSnippetsStatement.columnOptionalString(at: 5)
+                ))
+            }
+        }
         return SnippetDeviceSyncSnapshot(
             deviceID: deviceID,
-            snapshot: SnippetSyncSnapshot(folders: folders, snippets: snippets)
+            snapshot: SnippetSyncSnapshot(
+                folders: folders,
+                snippets: snippets,
+                deletedFolders: deletedFolders,
+                deletedSnippets: deletedSnippets
+            )
         )
     }
 

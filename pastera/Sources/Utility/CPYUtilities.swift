@@ -58,6 +58,7 @@ final class CPYUtilities {
         var defaultValues = [String: Any]()
 
         defaultValues.updateValue(HotKeyService.defaultKeyCombos, forKey: Constants.UserDefaults.hotKeys)
+        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.HotKey.suspendDuringRemoteSession)
         /* General */
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.loginItem)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.suppressAlertForLoginItem)
@@ -74,6 +75,7 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: 2), forKey: Constants.UserDefaults.showStatusItem)
         let storeTypes = PasteboardAvailableType.allCases.reduce(into: [:]) { $0[$1.rawValue] = NSNumber(value: true) }
         defaultValues.updateValue(storeTypes, forKey: Constants.UserDefaults.storeTypes)
+        defaultValues.updateValue(PasteraFilePreviewKind.defaultStates(), forKey: Constants.UserDefaults.filePreviewTypes)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.inputPasteCommand)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.reorderClipsAfterPasting)
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.collectCrashReport)
@@ -112,15 +114,6 @@ final class CPYUtilities {
         /* Updates */
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Update.enableAutomaticCheck)
         defaultValues.updateValue(NSNumber(value: 86400), forKey: Constants.Update.checkInterval)
-
-        /* Beta */
-        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Beta.pastePlainText)
-        defaultValues.updateValue(NSNumber(value: 0), forKey: Constants.Beta.pastePlainTextModifier)
-        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.Beta.deleteHistory)
-        defaultValues.updateValue(NSNumber(value: 0), forKey: Constants.Beta.deleteHistoryModifier)
-        defaultValues.updateValue(NSNumber(value: false), forKey: Constants.Beta.pasteAndDeleteHistory)
-        defaultValues.updateValue(NSNumber(value: 0), forKey: Constants.Beta.pasteAndDeleteHistoryModifier)
-        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Beta.observerScreenshot)
 
         AppEnvironment.current.defaults.register(defaults: defaultValues)
         AppEnvironment.current.defaults.synchronize()

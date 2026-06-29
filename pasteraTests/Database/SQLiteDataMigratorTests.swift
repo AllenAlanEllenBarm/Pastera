@@ -36,6 +36,7 @@ struct SQLiteDataMigratorTests {
             )
             .fetchAll(database)
             #expect(tables.contains("syncSuppressions"))
+            #expect(tables.contains("snippetSyncDeletions"))
         }
 
         try database.read { database in
@@ -66,6 +67,23 @@ struct SQLiteDataMigratorTests {
             #expect(snippetColumns.contains("createdAt"))
             #expect(snippetColumns.contains("updatedAt"))
             #expect(snippetColumns.contains("lastModifiedDeviceID"))
+        }
+
+        try database.read { database in
+            let deletionColumns = try #sql(
+                """
+                SELECT "name"
+                FROM pragma_table_info('snippetSyncDeletions')
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(deletionColumns.contains("recordID"))
+            #expect(deletionColumns.contains("folderID"))
+            #expect(deletionColumns.contains("folderTitle"))
+            #expect(deletionColumns.contains("content"))
+            #expect(deletionColumns.contains("deletedAt"))
         }
     }
 

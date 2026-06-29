@@ -118,6 +118,11 @@ final class MenuManager: NSObject {
 // MARK: - Popup Menu
 extension MenuManager {
     func popUpMenu(_ type: MenuType, triggerKeyCombo: KeyCombo? = nil) {
+        if shouldUseLegacyMenuFallback {
+            popUpLegacyMenu(type)
+            return
+        }
+
         if type == .main {
             showMainMenuPanel(at: NSEvent.mouseLocation)
             return
@@ -138,14 +143,25 @@ extension MenuManager {
             )
             return
         }
+    }
 
+    var shouldUseLegacyMenuFallback: Bool {
+        secureEventInputEnabledProvider()
+    }
+
+    private func popUpLegacyMenu(_ type: MenuType) {
         let menu: NSMenu?
         switch type {
         case .main:
+            if clipMenu == nil {
+                createClipMenu()
+            }
             menu = clipMenu
         case .history:
-            menu = historyMenu
+            menu = makeHistoryBrowserMenu()
         case .snippet:
+            let snippetMenu = NSMenu(title: String(localized: "Snippet"))
+            addSnippetItems(snippetMenu, separateMenu: false)
             menu = snippetMenu
         }
         menu?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
@@ -808,8 +824,17 @@ extension MenuManager {
             title = menuItemTitle("(PDF)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
             previewText = nil
         } else if primaryPboardType == .fileURL {
-            title = menuItemTitle("(Files)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
-            previewText = nil
+            if let filePresentation = fileURLPresentation(from: clipString) {
+                title = menuItemTitle(
+                    trimTitle(filePresentation.title, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength),
+                    listNumber: listNumber,
+                    isMarkWithNumber: isMarkWithNumber
+                )
+                previewText = filePresentation.previewText
+            } else {
+                title = menuItemTitle("(Files)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+                previewText = nil
+            }
         }
 
         let toolTip: String?
@@ -831,6 +856,17 @@ extension MenuManager {
         }
 
         return HistoryItemPresentation(title: title, image: image, toolTip: toolTip, previewText: previewText)
+    }
+
+    private func fileURLPresentation(from title: String) -> (title: String, previewText: String?)? {
+        var lines = title.components(separatedBy: .newlines)
+        guard let firstLine = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !firstLine.isEmpty else {
+            return nil
+        }
+        lines.removeFirst()
+        let previewText = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (firstLine, previewText.isEmpty ? nil : previewText)
     }
 
     private func textPreviewText(

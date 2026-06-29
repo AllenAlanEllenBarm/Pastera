@@ -133,39 +133,6 @@ final class PasteService {
         self.scheduleAfter = scheduleAfter
     }
 
-    fileprivate var isPastePlainText: Bool {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.Beta.pastePlainText) else { return false }
-
-        let modifierSetting = AppEnvironment.current.defaults.integer(forKey: Constants.Beta.pastePlainTextModifier)
-        return isPressedModifier(modifierSetting)
-    }
-    fileprivate var isDeleteHistory: Bool {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.Beta.deleteHistory) else { return false }
-
-        let modifierSetting = AppEnvironment.current.defaults.integer(forKey: Constants.Beta.deleteHistoryModifier)
-        return isPressedModifier(modifierSetting)
-    }
-    fileprivate var isPasteAndDeleteHistory: Bool {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.Beta.pasteAndDeleteHistory) else { return false }
-
-        let modifierSetting = AppEnvironment.current.defaults.integer(forKey: Constants.Beta.pasteAndDeleteHistoryModifier)
-        return isPressedModifier(modifierSetting)
-    }
-
-    // MARK: - Modifiers
-    private func isPressedModifier(_ flag: Int) -> Bool {
-        let flags = NSEvent.modifierFlags
-        if flag == 0 && flags.contains(.command) {
-            return true
-        } else if flag == 1 && flags.contains(.shift) {
-            return true
-        } else if flag == 2 && flags.contains(.control) {
-            return true
-        } else if flag == 3 && flags.contains(.option) {
-            return true
-        }
-        return false
-    }
 }
 
 // MARK: - Copy
@@ -177,32 +144,8 @@ extension PasteService {
     func paste(with history: PasteboardHistory, restoring targetContext: PasteTargetContext?) {
         guard let content = pasteboardHistoryRepository.fetchContent(id: history.id) else { return }
 
-        // Handling modifier actions
-        let isPastePlainText = self.isPastePlainText
-        let isPasteAndDeleteHistory = self.isPasteAndDeleteHistory
-        let isDeleteHistory = self.isDeleteHistory
-        guard isPastePlainText || isPasteAndDeleteHistory || isDeleteHistory else {
-            copyToPasteboard(with: content)
-            paste(restoring: targetContext)
-            return
-        }
-
-        // Increment change count for don't copy paste item
-        if isPasteAndDeleteHistory {
-            AppEnvironment.current.clipService.incrementChangeCount()
-        }
-        // Paste history
-        if isPastePlainText {
-            copyToPasteboard(with: content.stringValue)
-            paste(restoring: targetContext)
-        } else if isPasteAndDeleteHistory {
-            copyToPasteboard(with: content)
-            paste(restoring: targetContext)
-        }
-        // Delete clip
-        if isDeleteHistory || isPasteAndDeleteHistory {
-            AppEnvironment.current.clipService.delete(with: history)
-        }
+        copyToPasteboard(with: content)
+        paste(restoring: targetContext)
     }
 
     func copyToPasteboard(with string: String) {
@@ -214,11 +157,6 @@ extension PasteService {
     }
 
     private func copyToPasteboard(with content: PasteboardContent) {
-        if isPastePlainText {
-            copyToPasteboard(with: content.stringValue)
-            return
-        }
-
         copyContentToPasteboard(content, to: .general)
     }
 

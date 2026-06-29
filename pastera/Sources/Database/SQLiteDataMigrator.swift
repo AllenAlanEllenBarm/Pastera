@@ -16,6 +16,7 @@ extension DatabaseMigrator {
     mutating func registerMigration() {
         registerMigrationV1()
         registerMigrationV2()
+        registerMigrationV3()
     }
 
     // swiftlint:disable:next function_body_length
@@ -208,6 +209,34 @@ extension DatabaseMigrator {
                 """
                 CREATE INDEX "index_syncSuppressions_on_kind_recordID"
                 ON "syncSuppressions" ("kind", "recordID")
+                """
+            )
+            .execute(database)
+        }
+    }
+
+    mutating func registerMigrationV3() {
+        registerMigration("Add snippet deletion sync tombstones") { database in
+            try #sql(
+                """
+                CREATE TABLE "snippetSyncDeletions" (
+                  "syncIdentity" TEXT PRIMARY KEY NOT NULL,
+                  "kind" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "recordID" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "folderID" TEXT,
+                  "folderTitle" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "content" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "deletedAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0,
+                  "deviceID" TEXT
+                ) STRICT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                CREATE INDEX "index_snippetSyncDeletions_on_kind_recordID"
+                ON "snippetSyncDeletions" ("kind", "recordID")
                 """
             )
             .execute(database)

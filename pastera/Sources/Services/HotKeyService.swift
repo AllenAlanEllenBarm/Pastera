@@ -23,6 +23,9 @@ struct RemoteSessionHotKeyPolicy {
     ]
 
     static func shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier bundleIdentifier: String?) -> Bool {
+        guard AppEnvironment.current.defaults.bool(forKey: Constants.HotKey.suspendDuringRemoteSession) else {
+            return false
+        }
         guard let bundleIdentifier else { return false }
         return remoteSessionBundleIdentifiers.contains(bundleIdentifier)
     }
@@ -77,7 +80,7 @@ enum HistoryPanelShortcut: CaseIterable, Hashable {
         }
     }
 
-    var incorrectBetaDefaultKeyCombos: [KeyCombo] {
+    var incorrectLegacyDefaultKeyCombos: [KeyCombo] {
         switch self {
         case .search:
             return [KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | optionKey)!]
@@ -98,7 +101,7 @@ enum HistoryPanelShortcut: CaseIterable, Hashable {
         if keyCombo == optionCommandDefaultKeyCombo {
             return true
         }
-        if incorrectBetaDefaultKeyCombos.contains(keyCombo) {
+        if incorrectLegacyDefaultKeyCombos.contains(keyCombo) {
             return true
         }
         return false

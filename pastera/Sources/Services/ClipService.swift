@@ -22,7 +22,7 @@ final class ClipService {
     // MARK: - Properties
     fileprivate var cachedChangeCount = BehaviorRelay<Int>(value: 0)
     fileprivate var storeTypes = [String: NSNumber]()
-    fileprivate let scheduler = SerialDispatchQueueScheduler(qos: .userInteractive)
+    fileprivate let scheduler = SerialDispatchQueueScheduler(qos: .utility)
     fileprivate let lock = NSRecursiveLock(name: "com.pastera-app.Pastera.ClipUpdatable")
     fileprivate var disposeBag = DisposeBag()
 

@@ -516,6 +516,7 @@ extension SnippetBrowserPanelTests {
 
             #expect(deleteButton.image != nil)
             #expect(deleteButton.frame.minX > titleLabel.frame.maxX)
+            #expect(deleteButton.toolTip?.contains("⌘D") == true)
 
             withExtendedLifetime(managerAndRow.0) {
                 deleteButton.performClick(nil)

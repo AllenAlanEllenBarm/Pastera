@@ -70,7 +70,7 @@ struct SyncPreferenceTopSectionTests {
         let paneMinX = paneFrame.minX - 1
         let paneMaxX = paneFrame.maxX + 1
         let syncButtonTitles: Set<String> = ["i", "修改", "显示", "立即同步"]
-        let fileTypeLabels: Set<String> = ["图片", "PDF", "RTF", "RTFD"]
+        let fileTypeLabels: Set<String> = ["图片", "常用文本文件类型"]
         let syncSwitchLabels: Set<String> = [
             "上传历史",
             "同步历史",
@@ -91,7 +91,6 @@ struct SyncPreferenceTopSectionTests {
             "Pastera 不连接 Microsoft 账号，也不保存云端副本。" +
             "自动上传会写入本机最新历史和完整片段；自动同步只导入其他设备数据。"
         let expectedTexts = Set<String>([
-            "连接状态",
             "同步位置",
             "手动同步",
             "文件类型",
@@ -127,13 +126,13 @@ struct SyncPreferenceTopSectionTests {
         let oneDriveStatusTexts: Set<String> = ["OneDrive 可用", "OneDrive 不可用", "未检测到 OneDrive"]
         let oneDriveStatusField = try #require(textFields.first { oneDriveStatusTexts.contains($0.text) })
         let oneDriveStatusFrame = oneDriveStatusField.frame
-        let oneDriveLabelFrame = try #require(textFields.first { $0.text == "连接状态" }?.frame)
         let oneDriveBadgeFrame = try #require(preferenceViewFrame(
             in: contentView,
             identifier: "oneDriveStatusBadge"
         ))
         let folderLabelFrame = try #require(textFields.first { $0.text == "同步位置" }?.frame)
         let manualSyncFrame = try #require(textFields.first { $0.text == "手动同步" }?.frame)
+        let fileTypeLabelFrame = try #require(textFields.first { $0.text == "文件类型" }?.frame)
         let changeFrame = try #require(preferenceButtons(in: contentView).first { $0.title == "修改" }.map {
             contentView.convert($0.frame, from: $0.superview)
         })
@@ -151,6 +150,7 @@ struct SyncPreferenceTopSectionTests {
         })
 
         #expect(expectedTexts.isSubset(of: visibleTexts))
+        #expect(!visibleTexts.contains("连接状态"))
         #expect(!visibleTexts.contains("云同步"))
         #expect(!visibleTexts.contains("OneDrive 状态"))
         #expect(!visibleTexts.contains("可用"))
@@ -162,12 +162,17 @@ struct SyncPreferenceTopSectionTests {
         #expect(!visibleTexts.contains(where: { $0.contains(" > Pastera > sync") }))
         #expect(!visibleTexts.contains("上传文件"))
         #expect(!visibleTexts.contains("同步文件"))
+        #expect(!preferenceButtons(in: contentView).contains {
+            ["PDF", "RTF", "RTFD"].contains($0.accessibilityLabel() ?? "")
+        })
         #expect(removedStatusTexts.isDisjoint(with: visibleTexts))
         #expect(!preferenceButtons(in: contentView).contains { $0.title == "不上传文件" })
         #expect(!preferenceButtons(in: contentView).contains { $0.accessibilityLabel() == "文件类型" })
         #expect(!preferenceButtons(in: contentView).contains { $0.accessibilityLabel() == "Finder 文件" })
         #expect(infoButton?.toolTip?.contains("OneDrive 文件夹") == true)
         #expect(redetectButton?.toolTip?.contains("重新检测") == true)
+        #expect(redetectButton?.title == "检测")
+        #expect(redetectFrame.width >= 48)
         #expect(syncButtonFrames.count == syncButtonTitles.count)
         #expect(fileTypeFrames.count == fileTypeLabels.count)
         #expect(syncSwitchFrames.count == syncSwitchLabels.count)
@@ -179,25 +184,30 @@ struct SyncPreferenceTopSectionTests {
         #expect(!visibleTexts.contains("位置操作"))
         #expect(oneDriveStatusFrame.maxY >= paneFrame.maxY - 42)
         #expect(oneDriveStatusFrame.width >= oneDriveStatusField.intrinsicWidth)
-        #expect(oneDriveBadgeFrame.width <= 132)
-        #expect(abs(oneDriveLabelFrame.midY - oneDriveBadgeFrame.midY) <= 1)
+        #expect(oneDriveBadgeFrame.width >= 174)
+        #expect(oneDriveBadgeFrame.contains(redetectFrame))
         #expect(abs(redetectFrame.midY - oneDriveBadgeFrame.midY) <= 1)
         #expect(abs(infoFrame.midY - oneDriveBadgeFrame.midY) <= 1)
-        #expect(abs(oneDriveLabelFrame.midY - manualSyncFrame.midY) <= 1)
+        #expect(abs(oneDriveStatusFrame.midY - folderLabelFrame.midY) <= 1)
+        #expect(abs(manualSyncFrame.midY - fileTypeLabelFrame.midY) <= 1)
         #expect(abs(manualSyncFrame.midY - syncNowFrame.midY) <= 1)
         #expect(abs(folderLabelFrame.midY - changeFrame.midY) <= 1)
         #expect(abs(changeFrame.midY - showFrame.midY) <= 1)
-        #expect(redetectFrame.minX >= oneDriveBadgeFrame.maxX + 4)
-        #expect(redetectFrame.minX <= oneDriveBadgeFrame.maxX + 10)
-        #expect(infoFrame.minX >= redetectFrame.maxX + 4)
-        #expect(infoFrame.minX <= redetectFrame.maxX + 10)
-        #expect(manualSyncFrame.minX >= oneDriveBadgeFrame.maxX + 24)
-        #expect(manualSyncFrame.minY > folderLabelFrame.minY)
-        #expect(abs(changeFrame.minX - oneDriveBadgeFrame.minX) <= 20)
+        #expect(folderLabelFrame.minX >= oneDriveBadgeFrame.maxX + 28)
+        #expect(manualSyncFrame.maxX <= fileTypeLabelFrame.minX - 24)
+        #expect(redetectFrame.minX >= oneDriveStatusFrame.maxX + 6)
+        #expect(redetectFrame.maxX <= oneDriveBadgeFrame.maxX - 6)
+        #expect(infoFrame.minX >= oneDriveBadgeFrame.maxX + 4)
+        #expect(infoFrame.minX <= oneDriveBadgeFrame.maxX + 10)
+        #expect(manualSyncFrame.minY < oneDriveStatusFrame.minY)
+        #expect(folderLabelFrame.minY > manualSyncFrame.minY)
+        #expect(changeFrame.minX >= folderLabelFrame.maxX + 6)
         #expect(changeFrame.maxX <= showFrame.minX - 6)
-        #expect(showFrame.maxX <= manualSyncFrame.minX - 16)
+        #expect(showFrame.maxX <= paneMaxX)
         #expect(showFrame.width <= 60)
         #expect(syncNowFrame.width <= 100)
+        #expect(controller.selectedPaneDocumentHeightForTesting >= 240)
+        #expect(controller.selectedPaneDocumentHeightForTesting <= 266)
         for frame in syncButtonFrames + syncSwitchFrames + fileTypeFrames + [redetectFrame] {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)

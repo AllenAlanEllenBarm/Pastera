@@ -74,6 +74,29 @@ struct HistoryDisplayContentTests {
     }
 
     @Test
+    func fileURLHistoryPresentationUsesFileNameAndTextPreviewWhenAvailable() throws {
+        try withRegisteredDefaultEnvironment { _ in
+            let presentation = MenuManager().makeHistoryItemPresentation(
+                PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("file-url-text"),
+                        title: "notes.unknown\nHello from copied file",
+                        pasteboardTypes: [.fileURL],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                ),
+                listNumber: 1,
+                usesLeadingNumber: false
+            )
+
+            #expect(presentation.title == "notes.unknown")
+            #expect(presentation.previewText == "Hello from copied file")
+        }
+    }
+
+    @Test
     func imageHistoryRowShowsThumbnailWhenRetiredImagePreferenceWasDisabled() throws {
         try withRegisteredDefaultEnvironment { defaults in
             defaults.set(false, forKey: Constants.UserDefaults.showImageInTheMenu)

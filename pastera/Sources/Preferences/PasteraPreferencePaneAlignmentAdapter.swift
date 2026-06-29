@@ -10,7 +10,6 @@ import KeyHolder
 enum PasteraPreferencePaneAlignmentKind {
     case exclude
     case shortcuts
-    case beta
 }
 
 enum PasteraPreferencePaneAlignmentAdapter {
@@ -21,8 +20,6 @@ enum PasteraPreferencePaneAlignmentAdapter {
             layoutExcludePane(view, availableWidth: availableWidth)
         case .shortcuts:
             layoutShortcutsPane(view, availableWidth: availableWidth)
-        case .beta:
-            layoutBetaPane(view, availableWidth: availableWidth)
         }
         view.layoutSubtreeIfNeeded()
     }
@@ -80,174 +77,7 @@ enum PasteraPreferencePaneAlignmentAdapter {
     }
 
     private static func layoutShortcutsPane(_ view: NSView, availableWidth: CGFloat) {
-        let labelWidth = min(122, max(96, availableWidth * 0.28))
-        let controlX = labelWidth + 16
-        let controlWidth = max(180, availableWidth - controlX)
-        let recordContainers = view.subviews.filter {
-            !($0 is RecordView) && recordViews(in: $0).isEmpty == false
-        }
-        let sortedRecordContainers = recordContainers.sorted {
-            frame(of: $0, in: view).maxY > frame(of: $1, in: view).maxY
-        }
-
-        sortedRecordContainers.forEach { container in
-            let currentFrame = frame(of: container, in: view)
-            setFrame(of: container, in: view, to: NSRect(
-                x: 0,
-                y: currentFrame.minY,
-                width: availableWidth,
-                height: currentFrame.height
-            ))
-            textFields(in: container).filter { !$0.stringValue.isEmpty }.forEach { textField in
-                if isShortcutSectionTitle(textField.stringValue) {
-                    textField.isHidden = true
-                    return
-                }
-                textField.font = .systemFont(ofSize: 12.5, weight: .medium)
-                textField.alignment = .left
-                textField.frame = NSRect(
-                    x: 0,
-                    y: textField.frame.minY,
-                    width: labelWidth,
-                    height: textField.frame.height
-                )
-            }
-            recordViews(in: container).forEach { recordView in
-                recordView.frame = NSRect(
-                    x: controlX,
-                    y: recordView.frame.minY,
-                    width: controlWidth,
-                    height: recordView.frame.height
-                )
-            }
-        }
-
-        let sectionTitles = view.subviews.compactMap { $0 as? NSTextField }
-            .filter { !$0.stringValue.isEmpty && isShortcutSectionTitle($0.stringValue) }
-        sectionTitles.forEach { textField in
-            let currentFrame = frame(of: textField, in: view)
-            textField.isHidden = false
-            textField.font = .systemFont(ofSize: 13, weight: .semibold)
-            textField.alignment = .left
-            setFrame(of: textField, in: view, to: NSRect(
-                x: 0,
-                y: currentFrame.minY,
-                width: availableWidth,
-                height: currentFrame.height
-            ))
-        }
-
-        compactShortcutItems(sortedRecordContainers + sectionTitles, in: view)
-
-        textFields(in: view).filter { !$0.stringValue.isEmpty }.forEach { textField in
-            let currentFrame = frame(of: textField, in: view)
-            if isShortcutSectionTitle(textField.stringValue) {
-                textField.isHidden = false
-                textField.font = .systemFont(ofSize: 13, weight: .semibold)
-                textField.alignment = .left
-                setFrame(of: textField, in: view, to: NSRect(
-                    x: 0,
-                    y: currentFrame.minY,
-                    width: availableWidth,
-                    height: currentFrame.height
-                ))
-            } else if isShortcutRowLabel(textField.stringValue) {
-                textField.isHidden = false
-                textField.font = .systemFont(ofSize: 12.5, weight: .medium)
-                textField.alignment = .left
-                setFrame(of: textField, in: view, to: NSRect(
-                    x: 0,
-                    y: currentFrame.minY,
-                    width: labelWidth,
-                    height: currentFrame.height
-                ))
-            }
-        }
-
-        recordViews(in: view).forEach { recordView in
-            let currentFrame = frame(of: recordView, in: view)
-            setFrame(of: recordView, in: view, to: NSRect(
-                x: controlX,
-                y: currentFrame.minY,
-                width: controlWidth,
-                height: currentFrame.height
-            ))
-        }
-    }
-
-    private static func compactShortcutItems(_ items: [NSView], in root: NSView) {
-        let rowSpacing: CGFloat = 10
-        let sectionSpacing: CGFloat = 18
-        let sectionTitleSpacing: CGFloat = 8
-        let sortedItems = items.sorted {
-            frame(of: $0, in: root).maxY > frame(of: $1, in: root).maxY
-        }
-        var nextMaxY = root.bounds.maxY
-
-        sortedItems.enumerated().forEach { index, item in
-            let currentFrame = frame(of: item, in: root)
-            let isSectionTitle = (item as? NSTextField).map { isShortcutSectionTitle($0.stringValue) } ?? false
-            if isSectionTitle, index > 0 {
-                nextMaxY -= sectionSpacing
-            }
-            setFrame(of: item, in: root, to: NSRect(
-                x: currentFrame.minX,
-                y: nextMaxY - currentFrame.height,
-                width: currentFrame.width,
-                height: currentFrame.height
-            ))
-            nextMaxY -= currentFrame.height + (isSectionTitle ? sectionTitleSpacing : rowSpacing)
-        }
-    }
-
-    private static func layoutBetaPane(_ view: NSView, availableWidth: CGFloat) {
-        let popupWidth: CGFloat = 118
-        let popupX = max(0, availableWidth - popupWidth)
-
-        textFields(in: view).filter { !$0.stringValue.isEmpty }.forEach { textField in
-            let currentFrame = frame(of: textField, in: view)
-            if isBetaIntro(textField.stringValue) || currentFrame.width >= availableWidth * 0.55 {
-                textField.font = .systemFont(ofSize: 12.5, weight: .medium)
-                textField.alignment = .center
-                setFrame(of: textField, in: view, to: NSRect(
-                    x: 0,
-                    y: currentFrame.minY,
-                    width: availableWidth,
-                    height: currentFrame.height
-                ))
-            } else if isBetaSectionTitle(textField.stringValue) {
-                textField.font = .systemFont(ofSize: 13, weight: .semibold)
-                textField.alignment = .left
-                setFrame(of: textField, in: view, to: NSRect(
-                    x: 0,
-                    y: currentFrame.minY,
-                    width: availableWidth,
-                    height: currentFrame.height
-                ))
-            }
-        }
-
-        controls(in: view).compactMap { $0 as? NSButton }
-            .filter { !$0.title.isEmpty }
-            .forEach { button in
-                let currentFrame = frame(of: button, in: view)
-                setFrame(of: button, in: view, to: NSRect(
-                    x: 0,
-                    y: currentFrame.minY,
-                    width: max(1, popupX - 12),
-                    height: currentFrame.height
-                ))
-            }
-
-        controls(in: view).compactMap { $0 as? NSPopUpButton }.forEach { popup in
-            let currentFrame = frame(of: popup, in: view)
-            setFrame(of: popup, in: view, to: NSRect(
-                x: popupX,
-                y: currentFrame.minY,
-                width: popupWidth,
-                height: currentFrame.height
-            ))
-        }
+        PasteraShortcutPreferencePaneLayout.apply(to: view, availableWidth: availableWidth)
     }
 
     private static func nearestLabel(above target: NSView, labels: [NSTextField], root: NSView) -> NSTextField? {
@@ -299,6 +129,173 @@ enum PasteraPreferencePaneAlignmentAdapter {
         ["Exclude these applications:", "排除这些程序："].contains(text)
     }
 
+}
+
+private enum PasteraShortcutPreferencePaneLayout {
+    static func apply(to view: NSView, availableWidth: CGFloat) {
+        let metrics = Metrics(availableWidth: availableWidth, topY: view.bounds.maxY)
+        let recordContainers = sortedRecordContainers(in: view)
+        let sectionTitles = shortcutSectionTitles(in: view)
+
+        layoutSectionTitles(sectionTitles, in: view, metrics: metrics)
+        layoutRows(recordContainers, in: view, metrics: metrics)
+        normalizeFrames(in: view, metrics: metrics)
+    }
+
+    private struct Metrics {
+        let columnWidth: CGFloat
+        let labelWidth: CGFloat
+        let controlX: CGFloat
+        let controlWidth: CGFloat
+        let rowHeight: CGFloat = 28
+        let rowSpacing: CGFloat = 8
+        let sectionHeight: CGFloat = 18
+        let recordHeight: CGFloat = 26
+        let columnXs: [CGFloat]
+        let sectionTitleY: CGFloat
+        let rowStartY: CGFloat
+
+        init(availableWidth: CGFloat, topY: CGFloat) {
+            let columnGap: CGFloat = 14
+            columnWidth = floor(max(1, (availableWidth - columnGap) / 2))
+            labelWidth = min(66, max(52, columnWidth * 0.34))
+            controlX = labelWidth + 8
+            controlWidth = max(132, columnWidth - controlX)
+            columnXs = [0, columnWidth + columnGap]
+            sectionTitleY = topY - sectionHeight
+            rowStartY = sectionTitleY - 8 - rowHeight
+        }
+    }
+
+    private static func sortedRecordContainers(in view: NSView) -> [NSView] {
+        view.subviews.filter {
+            !($0 is RecordView) && recordViews(in: $0).isEmpty == false
+        }.sorted {
+            let lhsOrder = shortcutRowOrder(in: $0)
+            let rhsOrder = shortcutRowOrder(in: $1)
+            if let lhsOrder, let rhsOrder, lhsOrder != rhsOrder {
+                return lhsOrder < rhsOrder
+            }
+            if lhsOrder != nil {
+                return true
+            }
+            if rhsOrder != nil {
+                return false
+            }
+            return frame(of: $0, in: view).maxY > frame(of: $1, in: view).maxY
+        }
+    }
+
+    private static func shortcutSectionTitles(in view: NSView) -> [NSTextField] {
+        view.subviews.compactMap { $0 as? NSTextField }
+            .filter { !$0.stringValue.isEmpty && isShortcutSectionTitle($0.stringValue) }
+            .sorted { frame(of: $0, in: view).maxY > frame(of: $1, in: view).maxY }
+    }
+
+    private static func layoutSectionTitles(
+        _ sectionTitles: [NSTextField],
+        in view: NSView,
+        metrics: Metrics
+    ) {
+        sectionTitles.enumerated().forEach { index, textField in
+            let columnX = metrics.columnXs[min(index, metrics.columnXs.count - 1)]
+            textField.isHidden = false
+            textField.font = .systemFont(ofSize: 13, weight: .semibold)
+            textField.alignment = .left
+            setFrame(of: textField, in: view, to: NSRect(
+                x: columnX,
+                y: metrics.sectionTitleY,
+                width: metrics.columnWidth,
+                height: metrics.sectionHeight
+            ))
+        }
+    }
+
+    private static func layoutRows(
+        _ recordContainers: [NSView],
+        in view: NSView,
+        metrics: Metrics
+    ) {
+        recordContainers.enumerated().forEach { index, container in
+            let columnIndex = min(index / 3, metrics.columnXs.count - 1)
+            let rowIndex = index % 3
+            let rowY = metrics.rowStartY - CGFloat(rowIndex) * (metrics.rowHeight + metrics.rowSpacing)
+            setFrame(of: container, in: view, to: NSRect(
+                x: metrics.columnXs[columnIndex],
+                y: rowY,
+                width: metrics.columnWidth,
+                height: metrics.rowHeight
+            ))
+            layoutRowChildren(in: container, metrics: metrics)
+        }
+    }
+
+    private static func layoutRowChildren(in container: NSView, metrics: Metrics) {
+        textFields(in: container).filter { !$0.stringValue.isEmpty }.forEach { textField in
+            if isShortcutSectionTitle(textField.stringValue) {
+                textField.isHidden = true
+                return
+            }
+            textField.font = .systemFont(ofSize: 12.5, weight: .medium)
+            textField.alignment = .left
+            textField.frame = NSRect(
+                x: 0,
+                y: (metrics.rowHeight - textField.frame.height) / 2,
+                width: metrics.labelWidth,
+                height: textField.frame.height
+            )
+        }
+
+        recordViews(in: container).forEach { recordView in
+            recordView.frame = NSRect(
+                x: metrics.controlX,
+                y: (metrics.rowHeight - metrics.recordHeight) / 2,
+                width: metrics.controlWidth,
+                height: metrics.recordHeight
+            )
+        }
+    }
+
+    private static func normalizeFrames(in view: NSView, metrics: Metrics) {
+        textFields(in: view).filter { !$0.stringValue.isEmpty }.forEach { textField in
+            let currentFrame = frame(of: textField, in: view)
+            if isShortcutSectionTitle(textField.stringValue) {
+                normalizeTextField(textField, in: view, frame: currentFrame, width: metrics.columnWidth)
+            } else if isShortcutRowLabel(textField.stringValue) {
+                normalizeTextField(textField, in: view, frame: currentFrame, width: metrics.labelWidth)
+            }
+        }
+
+        recordViews(in: view).forEach { recordView in
+            let currentFrame = frame(of: recordView, in: view)
+            setFrame(of: recordView, in: view, to: NSRect(
+                x: currentFrame.minX,
+                y: currentFrame.minY,
+                width: metrics.controlWidth,
+                height: currentFrame.height
+            ))
+        }
+    }
+
+    private static func normalizeTextField(
+        _ textField: NSTextField,
+        in view: NSView,
+        frame currentFrame: NSRect,
+        width: CGFloat
+    ) {
+        textField.isHidden = false
+        textField.font = isShortcutSectionTitle(textField.stringValue)
+            ? .systemFont(ofSize: 13, weight: .semibold)
+            : .systemFont(ofSize: 12.5, weight: .medium)
+        textField.alignment = .left
+        setFrame(of: textField, in: view, to: NSRect(
+            x: currentFrame.minX,
+            y: currentFrame.minY,
+            width: width,
+            height: currentFrame.height
+        ))
+    }
+
     private static func isShortcutSectionTitle(_ text: String) -> Bool {
         [
             "Menu",
@@ -329,14 +326,45 @@ enum PasteraPreferencePaneAlignmentAdapter {
         ].contains(text)
     }
 
-    private static func isBetaIntro(_ text: String) -> Bool {
-        [
-            "Beta settings might be moved to a different pane in future versions.",
-            "Beta 测试设置将来可能会被移到其它面板。"
-        ].contains(text)
+    private static func shortcutRowOrder(in view: NSView) -> Int? {
+        textFields(in: view)
+            .compactMap { shortcutRowOrder(for: $0.stringValue) }
+            .min()
     }
 
-    private static func isBetaSectionTitle(_ text: String) -> Bool {
-        ["Action", "操作"].contains(text)
+    private static func shortcutRowOrder(for text: String) -> Int? {
+        switch text {
+        case "Main:", "主体：": 0
+        case "History:", "历史：": 1
+        case "Snippets:", "片段：": 2
+        case "Search:", "搜索：": 3
+        case "Previous Page:", "上一页：": 4
+        case "Next Page:", "下一页：": 5
+        default: nil
+        }
+    }
+
+    private static func textFields(in view: NSView) -> [NSTextField] {
+        var values = view.subviews.compactMap { $0 as? NSTextField }
+        view.subviews.forEach { values.append(contentsOf: textFields(in: $0)) }
+        return values
+    }
+
+    private static func recordViews(in view: NSView) -> [RecordView] {
+        var values = view.subviews.compactMap { $0 as? RecordView }
+        view.subviews.forEach { values.append(contentsOf: recordViews(in: $0)) }
+        return values
+    }
+
+    private static func frame(of view: NSView, in root: NSView) -> NSRect {
+        view.superview?.convert(view.frame, to: root) ?? view.frame
+    }
+
+    private static func setFrame(of view: NSView, in root: NSView, to frame: NSRect) {
+        guard let superview = view.superview else {
+            view.frame = frame
+            return
+        }
+        view.frame = superview.convert(frame, from: root)
     }
 }

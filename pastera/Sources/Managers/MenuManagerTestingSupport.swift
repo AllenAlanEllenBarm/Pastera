@@ -30,6 +30,7 @@ extension MenuManager {
     var statusItemImageForTesting: NSImage? { statusItem?.button?.image }
     var statusItemActionForTesting: Selector? { statusItem?.button?.action }
     var statusItemTintColorForTesting: NSColor? { statusItem?.button?.contentTintColor }
+    var shouldUseLegacyMenuFallbackForTesting: Bool { shouldUseLegacyMenuFallback }
     var mainMenuPanelBackgroundAlphaForTesting: CGFloat? { mainMenuPanelController?.contentBackgroundAlphaForTesting }
     var historyPanelBackgroundAlphaForTesting: CGFloat? { historyPanelController?.contentBackgroundAlphaForTesting }
     var snippetPanelBackgroundAlphaForTesting: CGFloat? { snippetPanelController?.contentBackgroundAlphaForTesting }

@@ -12,6 +12,20 @@ import Testing
 @Suite(.serialized)
 struct GeneralPreferenceHelpButtonLayoutTests {
     @Test
+    func remoteControlHotkeyPausePreferenceIsVisible() throws {
+        let controller = CPYGeneralPreferenceViewController(
+            nibName: "CPYGeneralPreferenceViewController",
+            bundle: nil
+        )
+        let paneView = controller.view
+        let buttons = paneView.subviews.compactMap { $0 as? NSButton }
+
+        #expect(buttons.contains {
+            ["Pause shortcuts during remote control", "远程控制时暂停本机快捷键"].contains($0.accessibilityLabel() ?? $0.title)
+        })
+    }
+
+    @Test
     func automaticPasteHelpButtonStaysCloseToLabel() throws {
         let controller = CPYGeneralPreferenceViewController(
             nibName: "CPYGeneralPreferenceViewController",

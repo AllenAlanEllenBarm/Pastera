@@ -108,15 +108,16 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let width: CGFloat = 450
         static let topInset: CGFloat = 4
         static let bottomInset: CGFloat = 28
-        static let sectionInset: CGFloat = 12
-        static let rowHeight: CGFloat = 32
-        static let rowSpacing: CGFloat = 6
+        static let sectionHorizontalInset: CGFloat = 12
+        static let sectionVerticalInset: CGFloat = 12
+        static let rowHeight: CGFloat = 36
+        static let rowSpacing: CGFloat = 8
         static let accountRowCount = 2
-        static let accountLabelWidth: CGFloat = 74
-        static let accountColumnGap: CGFloat = 20
+        static let accountLabelWidth: CGFloat = 68
+        static let accountColumnGap: CGFloat = 12
         static let buttonWidth: CGFloat = 96
-        static let secondaryButtonWidth: CGFloat = 58
-        static let buttonGap: CGFloat = 8
+        static let secondaryButtonWidth: CGFloat = 54
+        static let buttonGap: CGFloat = 6
         static let infoButtonSize: CGFloat = 16
         static let infoButtonGap: CGFloat = 6
         static let fieldHeight: CGFloat = 24
@@ -124,11 +125,11 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let switchHeight: CGFloat = 24
         static let switchStateWidth: CGFloat = 24
         static let switchStateGap: CGFloat = 6
-        static let switchColumnGap: CGFloat = 20
+        static let switchColumnGap: CGFloat = 16
         static let sectionGap: CGFloat = 12
 
         static func sectionHeight(rowCount: Int) -> CGFloat {
-            sectionInset * 2
+            sectionVerticalInset * 2
                 + CGFloat(rowCount) * rowHeight
                 + CGFloat(max(0, rowCount - 1)) * rowSpacing
         }
@@ -151,21 +152,19 @@ final class CPYSyncPreferenceViewController: NSViewController {
         static let syncInfo = "i"
         static let syncInfoLabel = "同步说明"
         static let syncInfoText = "Pastera 使用你电脑上的 OneDrive 文件夹同步，不连接 Microsoft 账号。选择同步位置时会检查它是否在 OneDrive 文件夹内，并确认 Pastera 可以写入检测文件；云端是否上传完成，请看 OneDrive 客户端状态。"
-        static let redetectOneDrive = "重新检测 OneDrive"
-        static let redetectOneDriveTooltip = "重新检测本地 OneDrive 文件夹和写入权限。"
         static let switchOn = "开"
         static let switchOff = "关"
         static let changeFolder = "修改"
         static let showInFinder = "显示"
         static let syncNow = "立即同步"
-        static let oneDriveStatus = "连接状态"
         static let oneDriveFolder = "同步位置"
         static let manualSync = "手动同步"
         static let notDetected = "未检测到 OneDrive"
     }
 
     private struct FileTypeOption {
-        let type: PasteboardAvailableType
+        let identifier: String
+        let types: Set<PasteboardAvailableType>
         let title: String
         let accessibilityLabel: String
         let symbolName: String
@@ -181,12 +180,12 @@ final class CPYSyncPreferenceViewController: NSViewController {
     private weak var switchesSection: PasteraSettingsSectionView?
     private weak var oneDriveStatusRow: PasteraSettingsRowView?
     private weak var folderRow: PasteraSettingsRowView?
+    private weak var fileTypeRow: PasteraSettingsRowView?
     private weak var folderLabel: NSTextField?
     private weak var fileTypeLabel: NSTextField?
     private weak var syncNowRow: PasteraSettingsRowView?
 
     private let syncInfoButton = NSButton(title: Text.syncInfo, target: nil, action: nil)
-    private let redetectOneDriveButton = NSButton(title: "", target: nil, action: nil)
     private let historyUploadSwitch = PasteraSyncSwitch()
     private let historyImportSwitch = PasteraSyncSwitch()
     private let snippetUploadSwitch = PasteraSyncSwitch()
@@ -202,10 +201,20 @@ final class CPYSyncPreferenceViewController: NSViewController {
     private let chooseSyncRoot: (NSWindow?, URL?) -> URL?
     private var infoPopover: NSPopover?
     private let fileTypeOptions: [FileTypeOption] = [
-        FileTypeOption(type: .tiff, title: "", accessibilityLabel: "图片", symbolName: "photo"),
-        FileTypeOption(type: .pdf, title: "", accessibilityLabel: "PDF", symbolName: "doc.richtext"),
-        FileTypeOption(type: .rtf, title: "", accessibilityLabel: "RTF", symbolName: "text.alignleft"),
-        FileTypeOption(type: .rtfd, title: "", accessibilityLabel: "RTFD", symbolName: "doc.text.image")
+        FileTypeOption(
+            identifier: PasteraFilePreviewKind.image.rawValue,
+            types: [.tiff],
+            title: "",
+            accessibilityLabel: "图片",
+            symbolName: "photo"
+        ),
+        FileTypeOption(
+            identifier: PasteraFilePreviewKind.commonText.rawValue,
+            types: [.pdf, .rtf, .rtfd],
+            title: "",
+            accessibilityLabel: "常用文本文件类型",
+            symbolName: "doc.text"
+        )
     ]
 
     init(
@@ -285,23 +294,14 @@ final class CPYSyncPreferenceViewController: NSViewController {
         syncInfoButton.font = .systemFont(ofSize: 11, weight: .semibold)
         syncInfoButton.setAccessibilityLabel(Text.syncInfoLabel)
         syncInfoButton.toolTip = Text.syncInfoText
-        redetectOneDriveButton.bezelStyle = .circular
-        redetectOneDriveButton.image = NSImage(
-            systemSymbolName: "arrow.clockwise",
-            accessibilityDescription: Text.redetectOneDrive
-        )
-        redetectOneDriveButton.imagePosition = .imageOnly
-        redetectOneDriveButton.setAccessibilityLabel(Text.redetectOneDrive)
-        redetectOneDriveButton.toolTip = Text.redetectOneDriveTooltip
         let accountSection = makeSection(rowCount: Layout.accountRowCount)
         self.accountSection = accountSection
         oneDriveStatusRow = makeRow(in: accountSection, index: 0)
-        oneDriveStatusRow?.addSubview(makeLabel(Text.oneDriveStatus))
         oneDriveStatusRow?.addSubview(oneDriveStatusBadge)
-        oneDriveStatusRow?.addSubview(redetectOneDriveButton)
         oneDriveStatusRow?.addSubview(syncInfoButton)
         addFolderRow(to: accountSection, index: 0)
         addSyncNowRow(to: accountSection, index: 1)
+        addFileTypeRow(to: accountSection, index: 1)
         host.addSubview(accountSection)
 
         let switchesSection = makeSection(rowCount: 2)
@@ -328,13 +328,13 @@ final class CPYSyncPreferenceViewController: NSViewController {
 
     private func makeRow(in section: NSView, index: Int) -> PasteraSettingsRowView {
         let rowY = section.bounds.height
-            - Layout.sectionInset
+            - Layout.sectionVerticalInset
             - Layout.rowHeight
             - CGFloat(index) * (Layout.rowHeight + Layout.rowSpacing)
         let row = PasteraSettingsRowView(frame: NSRect(
-            x: Layout.sectionInset,
+            x: Layout.sectionHorizontalInset,
             y: rowY,
-            width: section.bounds.width - Layout.sectionInset * 2,
+            width: section.bounds.width - Layout.sectionHorizontalInset * 2,
             height: Layout.rowHeight
         ))
         section.addSubview(row)
@@ -346,11 +346,16 @@ final class CPYSyncPreferenceViewController: NSViewController {
         folderRow = row
         let label = makeLabel(Text.oneDriveFolder)
         folderLabel = label
-        let fileTypeLabel = makeLabel(Text.fileTypes)
-        self.fileTypeLabel = fileTypeLabel
         row.addSubview(label)
         row.addSubview(changeFolderButton)
         row.addSubview(showFolderButton)
+    }
+
+    private func addFileTypeRow(to section: NSView, index: Int) {
+        let row = makeRow(in: section, index: index)
+        fileTypeRow = row
+        let fileTypeLabel = makeLabel(Text.fileTypes)
+        self.fileTypeLabel = fileTypeLabel
         row.addSubview(fileTypeLabel)
         fileTypeButtons = fileTypeOptions.map(makeFileTypeCheckbox)
         fileTypeButtons.forEach { row.addSubview($0) }
@@ -388,7 +393,7 @@ final class CPYSyncPreferenceViewController: NSViewController {
 
     private func makeFileTypeCheckbox(_ option: FileTypeOption) -> NSButton {
         let button = NSButton(checkboxWithTitle: option.title, target: self, action: #selector(toggleFileTypeCheckbox(_:)))
-        button.identifier = NSUserInterfaceItemIdentifier(option.type.rawValue)
+        button.identifier = NSUserInterfaceItemIdentifier(option.identifier)
         button.setAccessibilityLabel(option.accessibilityLabel)
         button.toolTip = option.accessibilityLabel
         button.image = NSImage(systemSymbolName: option.symbolName, accessibilityDescription: option.accessibilityLabel)
@@ -425,8 +430,7 @@ private extension CPYSyncPreferenceViewController {
         snippetImportSwitch.action = #selector(toggleSnippetImport(_:))
         syncInfoButton.target = self
         syncInfoButton.action = #selector(showSyncInfo(_:))
-        redetectOneDriveButton.target = self
-        redetectOneDriveButton.action = #selector(redetectOneDrive)
+        oneDriveStatusBadge.setRedetectTarget(self, action: #selector(redetectOneDrive))
         changeFolderButton.target = self
         changeFolderButton.action = #selector(changeFolder)
         showFolderButton.target = self
@@ -460,7 +464,11 @@ private extension CPYSyncPreferenceViewController {
     }
 
     @objc func redetectOneDrive() {
+        oneDriveStatusBadge.setRedetecting(true)
         refreshDefaultFolderAvailability()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.oneDriveStatusBadge.setRedetecting(false)
+        }
     }
 
     @objc func showFolderInFinder() {
@@ -533,11 +541,13 @@ private extension CPYSyncPreferenceViewController {
             updateControls()
             return
         }
-        guard let rawValue = sender.identifier?.rawValue,
-              let type = PasteboardAvailableType(rawValue: rawValue) else {
+        guard let identifier = sender.identifier?.rawValue,
+              let option = fileTypeOptions.first(where: { $0.identifier == identifier }) else {
             return
         }
-        settingsStore.setFileTypeEnabled(type, enabled: sender.state == .on)
+        option.types.forEach {
+            settingsStore.setFileTypeEnabled($0, enabled: sender.state == .on)
+        }
         updateControls()
     }
 
@@ -567,11 +577,11 @@ private extension CPYSyncPreferenceViewController {
 
     func updateFileTypeCheckboxes(settings: SyncSettings) {
         for button in fileTypeButtons {
-            guard let rawValue = button.identifier?.rawValue,
-                  let type = PasteboardAvailableType(rawValue: rawValue) else {
+            guard let identifier = button.identifier?.rawValue,
+                  let option = fileTypeOptions.first(where: { $0.identifier == identifier }) else {
                 continue
             }
-            button.state = settings.fileAssetTypes.contains(type) ? .on : .off
+            button.state = !settings.fileAssetTypes.isDisjoint(with: option.types) ? .on : .off
         }
     }
 
@@ -747,6 +757,7 @@ private extension CPYSyncPreferenceViewController {
         layoutOneDriveStatusRow()
         layoutFolderRow()
         layoutSyncNowRow()
+        layoutFileTypeRow()
 
         sectionTopY -= Layout.sectionGap
         sectionTopY = layoutSection(switchesSection, rowCount: 2, topY: sectionTopY, contentWidth: contentWidth)
@@ -768,13 +779,13 @@ private extension CPYSyncPreferenceViewController {
         guard let section else { return }
         rows.enumerated().forEach { index, row in
             let rowY = section.bounds.height
-                - Layout.sectionInset
+                - Layout.sectionVerticalInset
                 - Layout.rowHeight
                 - CGFloat(index) * (Layout.rowHeight + Layout.rowSpacing)
             row?.frame = NSRect(
-                x: Layout.sectionInset,
+                x: Layout.sectionHorizontalInset,
                 y: rowY,
-                width: section.bounds.width - Layout.sectionInset * 2,
+                width: section.bounds.width - Layout.sectionHorizontalInset * 2,
                 height: Layout.rowHeight
             )
         }
@@ -782,41 +793,49 @@ private extension CPYSyncPreferenceViewController {
 
     func layoutAccountRows() {
         guard let section = accountSection else { return }
-        let availableWidth = max(1, section.bounds.width - Layout.sectionInset * 2)
-        let columnWidth = floor(max(1, (availableWidth - Layout.accountColumnGap) / 2))
-        let topRowY = section.bounds.height - Layout.sectionInset - Layout.rowHeight
+        let availableWidth = max(1, section.bounds.width - Layout.sectionHorizontalInset * 2)
+        let rightColumnWidth = min(
+            max(1, availableWidth - Layout.accountColumnGap - 190),
+            Layout.accountLabelWidth + Layout.buttonGap + Layout.secondaryButtonWidth * 2 + Layout.buttonGap
+        )
+        let leftColumnWidth = floor(max(1, availableWidth - Layout.accountColumnGap - rightColumnWidth))
+        let rightColumnX = Layout.sectionHorizontalInset + leftColumnWidth + Layout.accountColumnGap
+        let topRowY = section.bounds.height - Layout.sectionVerticalInset - Layout.rowHeight
         let bottomRowY = topRowY - Layout.rowHeight - Layout.rowSpacing
         oneDriveStatusRow?.frame = NSRect(
-            x: Layout.sectionInset,
+            x: Layout.sectionHorizontalInset,
             y: topRowY,
-            width: columnWidth,
-            height: Layout.rowHeight
-        )
-        syncNowRow?.frame = NSRect(
-            x: Layout.sectionInset + columnWidth + Layout.accountColumnGap,
-            y: topRowY,
-            width: columnWidth,
+            width: leftColumnWidth,
             height: Layout.rowHeight
         )
         folderRow?.frame = NSRect(
-            x: Layout.sectionInset,
+            x: rightColumnX,
+            y: topRowY,
+            width: rightColumnWidth,
+            height: Layout.rowHeight
+        )
+        syncNowRow?.frame = NSRect(
+            x: Layout.sectionHorizontalInset,
             y: bottomRowY,
-            width: availableWidth,
+            width: leftColumnWidth,
+            height: Layout.rowHeight
+        )
+        fileTypeRow?.frame = NSRect(
+            x: rightColumnX,
+            y: bottomRowY,
+            width: rightColumnWidth,
             height: Layout.rowHeight
         )
     }
 
     func layoutFolderRow() {
         guard let row = folderRow else { return }
-        let availableWidth = max(1, row.bounds.width)
-        let columnWidth = floor(max(1, (availableWidth - Layout.accountColumnGap) / 2))
-        let fileColumnX = columnWidth + Layout.accountColumnGap
-        let showWidth = min(Layout.secondaryButtonWidth, columnWidth)
-        let changeWidth = min(Layout.secondaryButtonWidth, columnWidth)
+        let showWidth = min(Layout.secondaryButtonWidth, row.bounds.width)
+        let changeWidth = min(Layout.secondaryButtonWidth, row.bounds.width)
         let actionGroupWidth = showWidth + changeWidth + Layout.buttonGap
         let actionMinX = min(
             Layout.accountLabelWidth,
-            max(0, columnWidth - actionGroupWidth)
+            max(0, row.bounds.width - actionGroupWidth)
         )
         folderLabel?.frame = NSRect(
             x: 0,
@@ -836,8 +855,12 @@ private extension CPYSyncPreferenceViewController {
             width: showWidth,
             height: Layout.fieldHeight
         )
+    }
+
+    func layoutFileTypeRow() {
+        guard let row = fileTypeRow else { return }
         fileTypeLabel?.frame = NSRect(
-            x: fileColumnX,
+            x: 0,
             y: centeredY(height: 18, in: row),
             width: Layout.accountLabelWidth,
             height: 18
@@ -845,7 +868,7 @@ private extension CPYSyncPreferenceViewController {
         let checkboxSize = min(22, Layout.fieldHeight)
         let checkboxGap: CGFloat = 4
         let checkboxY = centeredY(height: checkboxSize, in: row)
-        let checkboxStartX = fileColumnX + Layout.accountLabelWidth
+        let checkboxStartX = Layout.accountLabelWidth + Layout.buttonGap
         for (index, button) in fileTypeButtons.enumerated() {
             button.frame = NSRect(
                 x: checkboxStartX + CGFloat(index) * (checkboxSize + checkboxGap),
@@ -858,32 +881,17 @@ private extension CPYSyncPreferenceViewController {
 
     func layoutOneDriveStatusRow() {
         guard let row = oneDriveStatusRow else { return }
-        let label = row.subviews.compactMap { $0 as? NSTextField }.first
         let badgeSize = oneDriveStatusBadge.intrinsicContentSize
-        let iconGroupWidth = Layout.infoButtonSize * 2 + Layout.infoButtonGap * 2
-        let preferredBadgeX = min(Layout.accountLabelWidth, row.bounds.width)
-        let minimumBadgeX = min(preferredBadgeX, max(0, Layout.accountLabelWidth - 20))
-        let badgeX = min(
-            preferredBadgeX,
-            max(minimumBadgeX, row.bounds.width - badgeSize.width - iconGroupWidth)
-        )
-        let maxBadgeWidth = max(1, row.bounds.width - badgeX - iconGroupWidth)
+        let maxBadgeWidth = max(1, row.bounds.width - Layout.infoButtonSize - Layout.infoButtonGap)
         let badgeWidth = min(maxBadgeWidth, badgeSize.width)
-        label?.frame = NSRect(x: 0, y: centeredY(height: 18, in: row), width: badgeX, height: 18)
         oneDriveStatusBadge.frame = NSRect(
-            x: badgeX,
+            x: 0,
             y: centeredY(height: badgeSize.height, in: row),
             width: badgeWidth,
             height: badgeSize.height
         )
-        redetectOneDriveButton.frame = NSRect(
-            x: oneDriveStatusBadge.frame.maxX + Layout.infoButtonGap,
-            y: centeredY(height: Layout.infoButtonSize, in: row),
-            width: Layout.infoButtonSize,
-            height: Layout.infoButtonSize
-        )
         syncInfoButton.frame = NSRect(
-            x: redetectOneDriveButton.frame.maxX + Layout.infoButtonGap,
+            x: oneDriveStatusBadge.frame.maxX + Layout.infoButtonGap,
             y: centeredY(height: Layout.infoButtonSize, in: row),
             width: Layout.infoButtonSize,
             height: Layout.infoButtonSize
@@ -911,15 +919,15 @@ private extension CPYSyncPreferenceViewController {
     func layoutSwitchRows(in section: NSView?) {
         guard let section else { return }
         let rows = switchRows.filter { $0.row.superview === section }
-        let availableWidth = max(1, section.bounds.width - Layout.sectionInset * 2)
+        let availableWidth = max(1, section.bounds.width - Layout.sectionHorizontalInset * 2)
         let columnWidth = floor(max(1, (availableWidth - Layout.switchColumnGap) / 2))
         for (index, switchRow) in rows.enumerated() {
             let columnIndex = index % 2
             let rowIndex = index / 2
-            let rowX = Layout.sectionInset
+            let rowX = Layout.sectionHorizontalInset
                 + CGFloat(columnIndex) * (columnWidth + Layout.switchColumnGap)
             let rowY = section.bounds.height
-                - Layout.sectionInset
+                - Layout.sectionVerticalInset
                 - Layout.rowHeight
                 - CGFloat(rowIndex) * (Layout.rowHeight + Layout.rowSpacing)
             let row = switchRow.row

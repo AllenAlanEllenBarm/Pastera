@@ -9,7 +9,7 @@ import Cocoa
 
 final class HistoryMenuImagePreviewController {
     private enum Metrics {
-        static let size = NSSize(width: 260, height: 180)
+        static let size = NSSize(width: 420, height: 290)
         static let contentInset: CGFloat = 8
         static let horizontalOffset: CGFloat = 12
     }

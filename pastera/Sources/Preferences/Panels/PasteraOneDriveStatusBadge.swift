@@ -54,10 +54,14 @@ final class PasteraOneDriveStatusBadge: NSView {
 
     private enum Metrics {
         static let height: CGFloat = 22
-        static let minWidth: CGFloat = 118
+        static let minWidth: CGFloat = 174
         static let horizontalPadding: CGFloat = 9
+        static let trailingPadding: CGFloat = 6
         static let dotSize: CGFloat = 6
         static let dotTextGap: CGFloat = 6
+        static let labelButtonGap: CGFloat = 8
+        static let redetectButtonWidth: CGFloat = 54
+        static let redetectButtonHeight: CGFloat = 18
     }
 
     var state: State = .notDetected {
@@ -72,6 +76,8 @@ final class PasteraOneDriveStatusBadge: NSView {
 
     private let dotView = NSView()
     private let label = NSTextField(labelWithString: "")
+    private let redetectButton = NSButton(title: "", target: nil, action: nil)
+    private var isRedetecting = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -92,6 +98,9 @@ final class PasteraOneDriveStatusBadge: NSView {
                     + Metrics.dotSize
                     + Metrics.dotTextGap
                     + labelWidth
+                    + Metrics.labelButtonGap
+                    + Metrics.redetectButtonWidth
+                    + Metrics.trailingPadding
             ),
             height: Metrics.height
         )
@@ -107,17 +116,34 @@ final class PasteraOneDriveStatusBadge: NSView {
         )
         dotView.layer?.cornerRadius = Metrics.dotSize / 2
         let labelX = dotView.frame.maxX + Metrics.dotTextGap
+        let buttonX = bounds.width - Metrics.trailingPadding - Metrics.redetectButtonWidth
+        redetectButton.frame = NSRect(
+            x: buttonX,
+            y: floor((bounds.height - Metrics.redetectButtonHeight) / 2),
+            width: Metrics.redetectButtonWidth,
+            height: Metrics.redetectButtonHeight
+        )
         let labelHeight: CGFloat = 16
         label.frame = NSRect(
             x: labelX,
             y: floor((bounds.height - labelHeight) / 2),
-            width: max(1, bounds.width - labelX - Metrics.horizontalPadding),
+            width: max(1, buttonX - Metrics.labelButtonGap - labelX),
             height: labelHeight
         )
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    func setRedetectTarget(_ target: AnyObject?, action: Selector?) {
+        redetectButton.target = target
+        redetectButton.action = action
+    }
+
+    func setRedetecting(_ isRedetecting: Bool) {
+        self.isRedetecting = isRedetecting
         updateAppearance()
     }
 
@@ -134,12 +160,28 @@ final class PasteraOneDriveStatusBadge: NSView {
         label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
+
+        redetectButton.title = "检测"
+        redetectButton.isBordered = false
+        redetectButton.bezelStyle = .regularSquare
+        redetectButton.font = .systemFont(ofSize: 10, weight: .semibold)
+        redetectButton.image = NSImage(
+            systemSymbolName: "arrow.clockwise",
+            accessibilityDescription: "重新检测 OneDrive"
+        )
+        redetectButton.imagePosition = .imageLeading
+        redetectButton.setAccessibilityLabel("重新检测 OneDrive")
+        redetectButton.toolTip = "重新检测本地 OneDrive 文件夹和写入权限。"
+        addSubview(redetectButton)
         updateAppearance()
     }
 
     private func updateAppearance() {
         label.stringValue = state.displayText
         label.textColor = .labelColor
+        redetectButton.title = isRedetecting ? "检测中" : "检测"
+        redetectButton.isEnabled = !isRedetecting
+        redetectButton.contentTintColor = .labelColor
         toolTip = state.tooltip
         setAccessibilityLabel(state.displayText)
         setAccessibilityValue(state.displayText)

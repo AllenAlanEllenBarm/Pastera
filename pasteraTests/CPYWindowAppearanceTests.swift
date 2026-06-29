@@ -45,6 +45,48 @@ struct CPYWindowAppearanceTests {
         #expect(options.suppressionTitle == "Don't ask again")
     }
 
+    @Test @MainActor
+    func confirmationPanelCentersInsideSourceWindowScreen() {
+        let panelSize = NSSize(width: 360, height: 176)
+        let sourceFrame = NSRect(x: 2_020, y: 160, width: 620, height: 420)
+        let sourceVisibleFrame = NSRect(x: 1_920, y: 0, width: 1_440, height: 900)
+
+        let origin = PasteraConfirmationController.panelOriginForTesting(
+            panelSize: panelSize,
+            sourceWindowFrame: sourceFrame,
+            visibleFrame: sourceVisibleFrame
+        )
+
+        #expect(origin.x >= sourceVisibleFrame.minX)
+        #expect(origin.y >= sourceVisibleFrame.minY)
+        #expect(origin.x + panelSize.width <= sourceVisibleFrame.maxX)
+        #expect(origin.y + panelSize.height <= sourceVisibleFrame.maxY)
+        #expect(abs((origin.x + panelSize.width / 2) - sourceFrame.midX) <= 1)
+        #expect(abs((origin.y + panelSize.height / 2) - sourceFrame.midY) <= 1)
+    }
+
+    @Test @MainActor
+    func destructiveConfirmationPanelUsesCompactHorizontalActions() throws {
+        let controller = PasteraConfirmationController(options: PasteraConfirmationOptions(
+            title: "删除",
+            message: "确定要删除此项？",
+            confirmTitle: "删除",
+            cancelTitle: "取消",
+            isDestructive: true
+        ))
+        defer { controller.close() }
+
+        let layout = try #require(controller.confirmationLayoutForTesting)
+
+        #expect(layout.iconFrame.minX < layout.titleFrame.minX)
+        #expect(layout.messageFrame.minX == layout.titleFrame.minX)
+        #expect(abs(layout.cancelButtonFrame.midY - layout.confirmButtonFrame.midY) <= 1)
+        #expect(layout.cancelButtonFrame.maxX < layout.confirmButtonFrame.minX)
+        #expect(layout.confirmButtonUsesDestructiveStyle)
+        #expect(layout.panelFrame.width >= 360)
+        #expect(layout.panelFrame.height <= 190)
+    }
+
     @Test
     func normalizedOpacityClampsToSupportedRange() {
         #expect(CPYWindowAppearance.defaultOpacity == 0.94)

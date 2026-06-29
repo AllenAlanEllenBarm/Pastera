@@ -141,6 +141,19 @@ struct SyncSuppression: Equatable {
     let suppressedAt: Int
 }
 
+@Table
+struct SnippetSyncDeletion: Equatable {
+    @Column(primaryKey: true)
+    let syncIdentity: String
+    let kind: SyncEntityKind
+    let recordID: String
+    let folderID: String?
+    let folderTitle: String
+    let content: String
+    let deletedAt: Int
+    let deviceID: String?
+}
+
 extension NSPasteboard.PasteboardType: @retroactive SQLiteType {}
 extension NSPasteboard.PasteboardType: @retroactive QueryBindable {}
 extension NSPasteboard.PasteboardType: @retroactive Codable {}
