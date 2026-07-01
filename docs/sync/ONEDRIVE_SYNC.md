@@ -29,11 +29,16 @@ that the user must install and log in to OneDrive. Pastera does not fall back to
 
 Sync is intentionally non-destructive:
 
-- Cloud imports may create or update local history and snippet records.
-- Cloud imports do not delete local history or snippets.
-- Local deletes stay local and are not emitted as cross-device tombstones.
-- When a user deletes a synced local item, Pastera records a local suppression
-  entry so the same cloud item is not imported back onto that device later.
+- Cloud imports may create or update local history records.
+- Cloud history imports do not delete local history.
+- Cloud snippet imports may apply explicit folder/snippet deletion tombstones
+  when the tombstone is newer than the matching local row.
+- Remote absence never deletes local history or snippets.
+- When a user deletes a synced local history item, Pastera records a local
+  suppression entry so the same cloud item is not imported back onto that device
+  later.
+- When a user deletes a synced local snippet folder or item, Pastera exports a
+  deletion tombstone so other devices can apply the newer snippet deletion.
 
 ## Directory Layout
 
@@ -155,9 +160,17 @@ snippets(id TEXT PRIMARY KEY, folderID TEXT NOT NULL, title TEXT NOT NULL,
          content TEXT NOT NULL, displayIndex INTEGER NOT NULL,
          isEnabled INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
          lastModifiedDeviceID TEXT)
+deletedFolders(id TEXT PRIMARY KEY, title TEXT NOT NULL, deletedAt INTEGER NOT NULL,
+               deviceID TEXT)
+deletedSnippets(id TEXT PRIMARY KEY, folderID TEXT NOT NULL, folderTitle TEXT NOT NULL,
+                content TEXT NOT NULL, deletedAt INTEGER NOT NULL,
+                deviceID TEXT)
 ```
 
-Snippet metadata includes `schemaVersion=2`, `deviceID`, and `generatedAt`.
+Snippet metadata includes `schemaVersion=3`, `deviceID`, and `generatedAt`.
+Pastera still reads `schemaVersion=2` snippet snapshots for development
+compatibility, but current writes use `schemaVersion=3` so explicit deletion
+tombstones can travel between devices.
 
 Snippet snapshots remain full snapshots and may keep all snippet text. They are
 independent from the text-only history protocol.
@@ -196,8 +209,11 @@ last-write-wins by business timestamp:
 
 - Remote history uses `histories.updatedAt`.
 - Remote snippet folders and snippets use their `updatedAt`.
+- Remote snippet deletions use `deletedAt`.
 - A remote row is imported only when the local row does not exist, or the
   remote timestamp is strictly greater than the local timestamp.
+- A remote snippet deletion is applied only when its `deletedAt` is greater than
+  or equal to the matched local snippet or folder `updatedAt`.
 - Equal or older remote rows are skipped.
 
 Imported history rows are written locally as plain text clipboard history. URL
@@ -205,8 +221,8 @@ history also imports as plain text so it works the same across macOS and future
 Windows clients.
 
 Remote absence never deletes local data. Import counts report actual local
-writes; corrupt snapshots, locally suppressed IDs, and older/equal records are
-not counted as imported.
+writes; corrupt snapshots, locally suppressed IDs, older/equal records, and
+older snippet tombstones are not counted as imported.
 
 Before opening a remote history SQLite file, Pastera compares its file size and
 modification time against the last successfully processed state for that app

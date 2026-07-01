@@ -24,6 +24,14 @@ pasteboard histories to SQLiteData". Until that work is merged into
 3. Add optional history/snippet sync through a user-selected OneDrive folder.
 4. Keep menu popup and clipboard monitoring lightweight.
 
+## Windows Porting
+
+For the Windows implementation handoff, use
+`docs/development/WINDOWS_PORTING_GUIDE.md` as the migration entrypoint. It
+summarizes the `v1.2.2-beta..develop` work, the cross-platform OneDrive sync
+contract, macOS-to-Windows replacement points, and the recommended implementation
+order for a Windows client.
+
 ## Storage Policy
 
 History storage and menu display must be separate concerns:
