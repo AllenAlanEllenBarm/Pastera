@@ -34,6 +34,10 @@
 
 "Number of characters in the menu:" = "メニューに表示する文字数:";
 "chars" = "文字";
+"Image/file limit:" = "画像/ファイル上限:";
+"Images" = "画像";
+"Files" = "ファイル";
+"items" = "項目";
 "Place already copied history at the top" = "重複した履歴をコピーする";
 "Move instead of copying (removes the older one from the list)" = "重複した履歴を上書きする";
 "Show color code preview" = "カラーコードのプレビューを表示";

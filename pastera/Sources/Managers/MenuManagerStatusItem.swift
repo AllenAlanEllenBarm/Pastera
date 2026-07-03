@@ -54,6 +54,13 @@ extension MenuManager {
         secureEventInputStatusTimer = timer
     }
 
+    func startOneDriveStatusMonitoring() {
+        guard oneDriveStatusObservation == nil else { return }
+        oneDriveStatusObservation = AppEnvironment.current.oneDriveProcessStatusService.startMonitoring { [weak self] in
+            self?.mainMenuPanelController?.reloadOneDriveStatusIfVisible()
+        }
+    }
+
     func refreshSecureEventInputStatus() {
         let isSecureEventInputEnabled = secureEventInputEnabledProvider()
         let toolTip = statusItemToolTip(isSecureEventInputEnabled: isSecureEventInputEnabled)

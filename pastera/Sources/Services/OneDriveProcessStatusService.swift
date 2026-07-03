@@ -1,0 +1,205 @@
+//
+//  OneDriveProcessStatusService.swift
+//
+//  Pastera
+//
+
+import Cocoa
+
+enum OneDriveProcessStatus {
+    case running(appURL: URL)
+    case notRunning(appURL: URL)
+    case notInstalled
+
+    var isRunning: Bool {
+        if case .running = self {
+            return true
+        }
+        return false
+    }
+
+    var appURL: URL? {
+        switch self {
+        case let .running(appURL), let .notRunning(appURL):
+            return appURL
+        case .notInstalled:
+            return nil
+        }
+    }
+}
+
+struct OneDriveRunningApplicationSnapshot: Equatable {
+    let bundleIdentifier: String?
+    let executableURL: URL?
+    let localizedName: String?
+
+    init(bundleIdentifier: String?, executableURL: URL?, localizedName: String?) {
+        self.bundleIdentifier = bundleIdentifier
+        self.executableURL = executableURL
+        self.localizedName = localizedName
+    }
+
+    init(application: NSRunningApplication) {
+        self.init(
+            bundleIdentifier: application.bundleIdentifier,
+            executableURL: application.executableURL,
+            localizedName: application.localizedName
+        )
+    }
+}
+
+final class OneDriveProcessStatusObservation {
+    private let cancellation: () -> Void
+    private var isCancelled = false
+
+    init(_ cancellation: @escaping () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    deinit {
+        cancel()
+    }
+
+    func cancel() {
+        guard !isCancelled else { return }
+        isCancelled = true
+        cancellation()
+    }
+}
+
+protocol OneDriveProcessStatusServicing: AnyObject {
+    func currentStatus() -> OneDriveProcessStatus
+    func openOneDrive() -> Bool
+    func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation
+}
+
+final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
+    private static let supportedBundleIdentifiers = [
+        "com.microsoft.OneDrive-mac",
+        "com.microsoft.OneDrive"
+    ]
+
+    private let applicationURLProvider: (String) -> URL?
+    private let fallbackApplicationURLs: [URL]
+    private let fileExists: (String) -> Bool
+    private let runningApplicationsProvider: () -> [OneDriveRunningApplicationSnapshot]
+    private let openApplication: (URL) -> Bool
+    private let notificationCenter: NotificationCenter
+
+    init(
+        applicationURLProvider: @escaping (String) -> URL? = {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+        },
+        fallbackApplicationURLs: [URL] = OneDriveProcessStatusService.defaultFallbackApplicationURLs(),
+        fileExists: @escaping (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        runningApplicationsProvider: @escaping () -> [OneDriveRunningApplicationSnapshot] = {
+            NSWorkspace.shared.runningApplications.map(OneDriveRunningApplicationSnapshot.init(application:))
+        },
+        openApplication: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
+        notificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
+    ) {
+        self.applicationURLProvider = applicationURLProvider
+        self.fallbackApplicationURLs = fallbackApplicationURLs
+        self.fileExists = fileExists
+        self.runningApplicationsProvider = runningApplicationsProvider
+        self.openApplication = openApplication
+        self.notificationCenter = notificationCenter
+    }
+
+    func currentStatus() -> OneDriveProcessStatus {
+        let runningApplications = runningApplicationsProvider()
+        let runningMainApplication = runningApplications.first(where: isMainOneDriveApplication)
+        guard let appURL = installedApplicationURL() ?? appURL(from: runningMainApplication) else {
+            return .notInstalled
+        }
+
+        if runningMainApplication != nil {
+            return .running(appURL: appURL)
+        }
+        return .notRunning(appURL: appURL)
+    }
+
+    func openOneDrive() -> Bool {
+        guard let appURL = currentStatus().appURL else { return false }
+        return openApplication(appURL)
+    }
+
+    func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {
+        let launchObserver = notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard self?.isOneDriveApplicationNotification(notification) == true else { return }
+            onChange()
+        }
+        let terminateObserver = notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard self?.isOneDriveApplicationNotification(notification) == true else { return }
+            onChange()
+        }
+
+        return OneDriveProcessStatusObservation { [weak notificationCenter] in
+            notificationCenter?.removeObserver(launchObserver)
+            notificationCenter?.removeObserver(terminateObserver)
+        }
+    }
+
+    private func installedApplicationURL() -> URL? {
+        for bundleIdentifier in Self.supportedBundleIdentifiers {
+            if let appURL = existingApplicationURL(applicationURLProvider(bundleIdentifier)) {
+                return appURL
+            }
+        }
+        return fallbackApplicationURLs
+            .compactMap(existingApplicationURL)
+            .first
+    }
+
+    private func existingApplicationURL(_ url: URL?) -> URL? {
+        guard let url = url?.standardizedFileURL,
+              fileExists(url.path) else {
+            return nil
+        }
+        return url
+    }
+
+    private func isMainOneDriveApplication(_ application: OneDriveRunningApplicationSnapshot) -> Bool {
+        if let bundleIdentifier = application.bundleIdentifier,
+           Self.supportedBundleIdentifiers.contains(bundleIdentifier) {
+            return true
+        }
+
+        guard let executableURL = application.executableURL?.standardizedFileURL else { return false }
+        return executableURL.path.hasSuffix("/OneDrive.app/Contents/MacOS/OneDrive")
+    }
+
+    private func appURL(from application: OneDriveRunningApplicationSnapshot?) -> URL? {
+        guard let executableURL = application?.executableURL?.standardizedFileURL,
+              executableURL.path.hasSuffix("/Contents/MacOS/OneDrive") else {
+            return nil
+        }
+        return executableURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func isOneDriveApplicationNotification(_ notification: Notification) -> Bool {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return false
+        }
+        return isMainOneDriveApplication(OneDriveRunningApplicationSnapshot(application: application))
+    }
+
+    private static func defaultFallbackApplicationURLs() -> [URL] {
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            URL(fileURLWithPath: "/Applications/OneDrive.app", isDirectory: true),
+            homeURL.appendingPathComponent("Applications/OneDrive.app", isDirectory: true)
+        ]
+    }
+}

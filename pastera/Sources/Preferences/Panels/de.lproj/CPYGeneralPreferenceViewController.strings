@@ -34,6 +34,10 @@
 
 "Number of characters in the menu:" = "Anzahl der Zeichen im Menü:";
 "chars" = "Zeichen";
+"Image/file limit:" = "Bild-/Datei-Limit:";
+"Images" = "Bilder";
+"Files" = "Dateien";
+"items" = "Einträge";
 "Place already copied history at the top" = "Kopierten Verlauf oben anfügen";
 "Move instead of copying (removes the older one from the list)" = "Verschieben anstatt kopieren (Entfernt älteren Eintrag von der Liste)";
 "Show color code preview" = "Farbcode-Vorschau anzeigen";

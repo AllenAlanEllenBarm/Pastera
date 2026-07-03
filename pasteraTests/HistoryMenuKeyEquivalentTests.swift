@@ -21,7 +21,7 @@ import Testing
 @Suite(.serialized)
 struct HistoryMenuKeyEquivalentTests {
     @Test
-    func pinnedMainMenuPanelBehaviorKeepsPanelVisibleAndMovable() {
+    func persistentMainMenuPanelBehaviorKeepsPanelVisibleAndMovable() {
         let behavior = MainMenuPanelBehavior()
 
         #expect(!behavior.hidesOnDeactivate)
@@ -31,67 +31,17 @@ struct HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func mainMenuHistoryRowShowsPinControl() throws {
-        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false)
+    func mainMenuHistoryRowDoesNotExposePinControl() {
+        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil)
 
-        let pinButton = try #require(menuItemView.subviews.compactMap { $0 as? NSButton }
-            .first { $0.identifier?.rawValue == "mainMenuPinButton" })
+        let pinButtons = menuItemView.subviews.compactMap { $0 as? NSButton }
+            .filter { $0.identifier?.rawValue == "mainMenuPinButton" }
 
-        #expect(!pinButton.isHidden)
-        #expect(pinButton.isEnabled)
-        #expect(pinButton.image != nil)
+        #expect(pinButtons.isEmpty)
     }
 
     @Test
-    func mainMenuPinButtonTogglesMainMenuPinnedState() throws {
-        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false)
-        var pinnedValues = [Bool]()
-        menuItemView.onPinnedChange = { pinned, _ in pinnedValues.append(pinned) }
-
-        let pinButton = try #require(menuItemView.subviews.compactMap { $0 as? NSButton }
-            .first { $0.identifier?.rawValue == "mainMenuPinButton" })
-        pinButton.performClick(nil)
-
-        #expect(pinnedValues == [true])
-    }
-
-    @Test
-    func mainMenuPinButtonDoesNotOpenHistory() throws {
-        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false)
-        var didOpenHistory = false
-        menuItemView.onOpen = { didOpenHistory = true }
-
-        let pinButton = try #require(menuItemView.subviews.compactMap { $0 as? NSButton }
-            .first { $0.identifier?.rawValue == "mainMenuPinButton" })
-        pinButton.performClick(nil)
-
-        #expect(!didOpenHistory)
-    }
-
-    @Test
-    func mainMenuPinButtonSendsCurrentMenuFrame() throws {
-        let window = TestKeyWindow(
-            contentRect: NSRect(x: 240, y: 360, width: 168, height: 220),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false)
-        window.contentView = menuItemView
-        defer { window.close() }
-
-        var capturedFrame: NSRect?
-        menuItemView.onPinnedChange = { _, frame in capturedFrame = frame }
-        let pinButton = try #require(menuItemView.subviews.compactMap { $0 as? NSButton }
-            .first { $0.identifier?.rawValue == "mainMenuPinButton" })
-
-        pinButton.performClick(nil)
-
-        #expect(capturedFrame == window.frame)
-    }
-
-    @Test
-    func pinnedMainMenuPanelUsesComfortableMenuMetrics() {
+    func mainMenuPanelUsesComfortableMenuMetrics() {
         #expect(MainMenuPanelLayout.rowHeight == 26)
         #expect(MainMenuPanelLayout.separatorVerticalInset == 5)
         #expect(MainMenuPanelLayout.topInset == 6)
@@ -99,13 +49,13 @@ struct HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func pinnedMainMenuPanelUsesMenuLikeSeparatorMetrics() {
+    func mainMenuPanelUsesMenuLikeSeparatorMetrics() {
         #expect(MainMenuPanelLayout.separatorHorizontalInset == MainMenuHeaderItemView.Metrics.horizontalInset)
         #expect(MainMenuPanelLayout.separatorAlpha <= 0.25)
     }
 
     @Test
-    func pinnedMainMenuPanelCanAnchorToOriginalMenuFrame() throws {
+    func mainMenuPanelCanAnchorToOriginalMenuFrame() throws {
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
@@ -113,8 +63,7 @@ struct HistoryMenuKeyEquivalentTests {
             snippetImage: nil,
             itemsProvider: { [] },
             onOpenHistory: {},
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
         let menuFrame = NSRect(x: 240, y: 360, width: 168, height: 220)
 
@@ -127,7 +76,7 @@ struct HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func pinnedMainMenuPanelKeepsOriginalMenuTopLeftPosition() throws {
+    func mainMenuPanelKeepsOriginalMenuTopLeftPosition() throws {
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
@@ -143,8 +92,7 @@ struct HistoryMenuKeyEquivalentTests {
                 ]
             },
             onOpenHistory: {},
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
         let menuFrame = NSRect(x: 96, y: 420, width: 168, height: 332)
 
@@ -157,7 +105,7 @@ struct HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func openingHistoryFromPinnedMenuKeepsPinnedMenuVisible() {
+    func openingHistoryFromMainMenuKeepsMainMenuVisible() {
         var didOpenHistory = false
         let controller = MainMenuPanelController(
             historyTitle: "History",
@@ -166,21 +114,20 @@ struct HistoryMenuKeyEquivalentTests {
             snippetImage: nil,
             itemsProvider: { [] },
             onOpenHistory: { didOpenHistory = true },
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
         controller.show(at: NSPoint(x: 100, y: 100))
         defer { controller.close() }
         #expect(controller.isVisibleForTesting)
 
-        controller.openHistoryFromPinnedMenu()
+        controller.openHistoryFromMainMenu()
 
         #expect(controller.isVisibleForTesting)
         #expect(didOpenHistory)
     }
 
     @Test
-    func showingHistoryBrowserPanelFromPinnedMenuKeepsMainMenuVisibleAndAttachesToSide() throws {
+    func showingHistoryBrowserPanelFromMainMenuKeepsMainMenuVisibleAndAttachesToSide() throws {
         let manager = MenuManager()
 
         let result = withDependencies {
@@ -217,7 +164,7 @@ struct HistoryMenuKeyEquivalentTests {
         let pinButtons = headerView.subviews.compactMap { $0 as? NSButton }
             .filter { $0.identifier?.rawValue == "historyPinButton" }
 
-        #expect(pinButtons.allSatisfy { $0.isHidden || !$0.isEnabled })
+        #expect(pinButtons.isEmpty)
     }
 
     @Test
@@ -732,7 +679,7 @@ extension HistoryMenuKeyEquivalentTests {
 
 extension HistoryMenuKeyEquivalentTests {
     @Test
-    func pinnedMainMenuPanelUsesPremiumMenuWidth() {
+    func mainMenuPanelUsesPremiumMenuWidth() {
         #expect(MainMenuPanelLayout.width == 168)
         #expect(MainMenuHeaderItemView.Metrics.width == MainMenuPanelLayout.width)
     }
@@ -749,7 +696,7 @@ extension HistoryMenuKeyEquivalentTests {
 
     @Test
     func mainMenuExpandableHeaderRequiresStableHoverBeforeOpening() async throws {
-        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false)
+        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil)
         var hoverOpenCount = 0
         menuItemView.onHoverOpen = { hoverOpenCount += 1 }
 
@@ -775,7 +722,7 @@ extension HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func openingSnippetsFromPinnedMenuKeepsPinnedMenuVisible() {
+    func openingSnippetsFromMainMenuKeepsMainMenuVisible() {
         var didOpenSnippets = false
         let controller = MainMenuPanelController(
             historyTitle: "History",
@@ -784,21 +731,20 @@ extension HistoryMenuKeyEquivalentTests {
             snippetImage: nil,
             itemsProvider: { [] },
             onOpenHistory: {},
-            onOpenSnippets: { didOpenSnippets = true },
-            onPinnedChange: { _ in }
+            onOpenSnippets: { didOpenSnippets = true }
         )
         controller.show(at: NSPoint(x: 100, y: 100))
         defer { controller.close() }
         #expect(controller.isVisibleForTesting)
 
-        controller.openSnippetsFromPinnedMenu()
+        controller.openSnippetsFromMainMenu()
 
         #expect(controller.isVisibleForTesting)
         #expect(didOpenSnippets)
     }
 
     @Test
-    func unpinnedMainMenuPopupUsesUnifiedPanelController() {
+    func mainMenuPopupUsesUnifiedPanelController() {
         withDependencies {
             $0.snippetRepository = EmptySnippetRepository()
         } operation: {
@@ -840,7 +786,7 @@ extension HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func mainMenuPanelKeepsSameSizeWhenPinnedFromTransientState() throws {
+    func mainMenuPanelKeepsSameSizeWhenReanchoredFromTransientState() throws {
         let items: [MainMenuPanelItem] = [
             .action(title: "Clear History", image: nil) {},
             .action(title: "Edit Snippets", image: nil) {},
@@ -855,20 +801,19 @@ extension HistoryMenuKeyEquivalentTests {
             snippetImage: nil,
             itemsProvider: { items },
             onOpenHistory: {},
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
         let transientFrame = try #require(controller.visibleFrame)
 
-        controller.show(anchoredTo: transientFrame, pinned: true)
+        controller.show(anchoredTo: transientFrame, pinned: false)
         defer { controller.close() }
 
-        let pinnedFrame = try #require(controller.visibleFrame)
-        #expect(pinnedFrame.size == transientFrame.size)
-        #expect(pinnedFrame.minX == transientFrame.minX)
-        #expect(pinnedFrame.maxY == transientFrame.maxY)
+        let reanchoredFrame = try #require(controller.visibleFrame)
+        #expect(reanchoredFrame.size == transientFrame.size)
+        #expect(reanchoredFrame.minX == transientFrame.minX)
+        #expect(reanchoredFrame.maxY == transientFrame.maxY)
     }
 }
 

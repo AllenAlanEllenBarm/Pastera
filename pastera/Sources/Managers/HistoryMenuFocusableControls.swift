@@ -46,10 +46,6 @@ extension NSButton {
     }
 }
 
-final class HistoryMenuPinButton: NSButton {
-    override var acceptsFirstResponder: Bool { false }
-}
-
 final class HistoryMenuFocusableSegmentedControl: NSSegmentedControl {
     private var focusedSegmentIndex: Int?
 

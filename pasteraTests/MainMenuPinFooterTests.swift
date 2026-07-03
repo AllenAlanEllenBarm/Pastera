@@ -12,9 +12,12 @@ import Testing
 
 @MainActor
 @Suite(.serialized)
-struct MainMenuPinFooterTests {
+struct MainMenuOneDriveFooterTests {
     @Test
-    func mainMenuPanelAlignsPinControlWithQuitRow() throws {
+    func mainMenuPanelPlacesQuitAndOneDriveStatusInDedicatedFooter() throws {
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notRunning(
+            appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
+        ))
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
@@ -24,30 +27,38 @@ struct MainMenuPinFooterTests {
                 [
                     .snippetFolder(title: "AI Prompt", image: nil, shortcutText: "⌃⌥⌘1") { _ in },
                     .separator,
-                    .action(title: "Quit Pastera", image: nil) {}
+                    .action(title: "Preferences", image: nil) {}
                 ]
             },
             onOpenHistory: {},
             onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            oneDriveStatusService: oneDriveService
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
         defer { controller.close() }
 
-        let pinFrames = controller.mainMenuPinButtonFramesForTesting
-        #expect(pinFrames.count == 1)
-        let pinFrame = try #require(pinFrames.first)
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuPinButton"))
+        #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
+        let statusFrames = controller.mainMenuOneDriveStatusButtonFramesForTesting
+        let quitFrames = controller.mainMenuQuitButtonFramesForTesting
+        #expect(statusFrames.count == 1)
+        #expect(quitFrames.count == 1)
+        let statusFrame = try #require(statusFrames.first)
+        let quitFrame = try #require(quitFrames.first)
         let folderRowFrame = try #require(controller.mainMenuSnippetRowFrameForTesting(title: "AI Prompt"))
         let folderTitleFrame = try #require(controller.mainMenuSnippetTitleFrameForTesting(title: "AI Prompt"))
-        let quitRowFrame = try #require(controller.mainMenuActionRowFrameForTesting(title: "Quit Pastera"))
+        let preferencesRowFrame = try #require(controller.mainMenuActionRowFrameForTesting(title: "Preferences"))
 
-        #expect(pinFrame.maxX <= MainMenuPanelLayout.width - MainMenuPanelLayout.pinTrailingInset)
-        #expect(abs(pinFrame.midY - quitRowFrame.midY) <= 1)
+        #expect(statusFrame.maxX <= MainMenuPanelLayout.width - MainMenuPanelLayout.oneDriveStatusTrailingInset)
+        #expect(abs(statusFrame.midY - (MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.rowHeight / 2)) <= 1)
+        #expect(quitFrame.minX >= MainMenuPanelLayout.quitButtonLeadingInset)
+        #expect(abs(quitFrame.midY - statusFrame.midY) <= 1)
+        #expect(preferencesRowFrame.minY >= MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.rowHeight)
         #expect(MainMenuPanelLayout.headerHeight == 32)
         #expect(MainMenuPanelLayout.snippetFolderRowHeight == 26)
         #expect(folderRowFrame.height == MainMenuPanelLayout.snippetFolderRowHeight)
-        #expect(quitRowFrame.height == MainMenuPanelLayout.rowHeight)
+        #expect(preferencesRowFrame.height == MainMenuPanelLayout.rowHeight)
         #expect(abs(folderTitleFrame.midY - MainMenuPanelLayout.snippetFolderRowHeight / 2) <= 1)
         #expect(controller.visibleFrame?.height == expectedMainMenuHeight(
             snippetFolderCount: 1,
@@ -69,12 +80,11 @@ struct MainMenuPinFooterTests {
                 [
                     .snippetFolder(title: "AI Prompt", image: folderImage, shortcutText: "⌃⌥⌘1") { _ in },
                     .separator,
-                    .action(title: "Quit Pastera", image: nil) {}
+                    .action(title: "Preferences", image: nil) {}
                 ]
             },
             onOpenHistory: {},
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
@@ -83,18 +93,18 @@ struct MainMenuPinFooterTests {
         let titleAvailableWidth = try #require(
             controller.mainMenuSnippetTitleAvailableWidthForTesting(title: "AI Prompt")
         )
-        let quitTitleAvailableWidth = try #require(
-            controller.mainMenuActionTitleAvailableWidthForTesting(title: "Quit Pastera")
+        let preferencesTitleAvailableWidth = try #require(
+            controller.mainMenuActionTitleAvailableWidthForTesting(title: "Preferences")
         )
 
         #expect(MainMenuPanelLayout.width == 168)
         #expect(titleAvailableWidth >= menuTitleWidth("AI Prompt"))
-        #expect(quitTitleAvailableWidth >= menuTitleWidth("Quit Pastera"))
+        #expect(preferencesTitleAvailableWidth >= menuTitleWidth("Preferences"))
     }
 
     @Test
     func visibleMainMenuPanelBackgroundFollowsOpacityChange() throws {
-        let suiteName = "MainMenuPinFooterTests.opacity.\(UUID().uuidString)"
+        let suiteName = "MainMenuOneDriveFooterTests.opacity.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(0.94, forKey: Constants.UserDefaults.windowBackgroundOpacity)
@@ -124,7 +134,7 @@ struct MainMenuPinFooterTests {
 
     @Test
     func mainMenuDoesNotShowClearHistoryAction() throws {
-        let suiteName = "MainMenuPinFooterTests.clearHistory.\(UUID().uuidString)"
+        let suiteName = "MainMenuOneDriveFooterTests.clearHistory.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(true, forKey: Constants.UserDefaults.addClearHistoryMenuItem)
@@ -138,32 +148,41 @@ struct MainMenuPinFooterTests {
         }
 
         #expect(!titles.contains(String(localized: "Clear History")))
+        #expect(!titles.contains(String(localized: "Quit Pastera")))
         #expect(titles.contains(String(localized: "Edit Snippets")))
         #expect(titles.contains(String(localized: "Preferences")))
     }
 
     @Test
-    func mainMenuFooterPinTogglesWithoutOpeningHistory() {
-        var didOpenHistory = false
-        var pinnedValues = [Bool]()
+    func mainMenuOneDriveStatusButtonReflectsOfflineAndRunningStates() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notRunning(
+            appURL: appURL
+        ))
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
             snippetTitle: "Snippet",
             snippetImage: nil,
-            itemsProvider: { [] },
-            onOpenHistory: { didOpenHistory = true },
+            itemsProvider: {
+                [.action(title: "Preferences", image: nil) {}]
+            },
+            onOpenHistory: {},
             onOpenSnippets: {},
-            onPinnedChange: { pinnedValues.append($0) }
+            oneDriveStatusService: oneDriveService
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
         defer { controller.close() }
 
-        controller.performMainMenuPinClickForTesting()
+        #expect(controller.mainMenuOneDriveStatusToolTipForTesting?.contains("未运行") == true)
+        #expect(controller.mainMenuOneDriveStatusTintColorForTesting?.isEqual(NSColor.secondaryLabelColor) == true)
 
-        #expect(pinnedValues == [true])
-        #expect(!didOpenHistory)
+        oneDriveService.status = .running(appURL: appURL)
+        controller.reloadOneDriveStatusIfVisible()
+
+        #expect(controller.mainMenuOneDriveStatusToolTipForTesting?.contains("正在运行") == true)
+        #expect(controller.mainMenuOneDriveStatusTintColorForTesting?.isEqual(NSColor.labelColor) == true)
     }
 
     @Test
@@ -185,8 +204,7 @@ struct MainMenuPinFooterTests {
                 ]
             },
             onOpenHistory: { openHistoryCount += 1 },
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: true)
@@ -219,8 +237,7 @@ struct MainMenuPinFooterTests {
                 ]
             },
             onOpenHistory: { openHistoryCount += 1 },
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: true)
@@ -253,8 +270,7 @@ struct MainMenuPinFooterTests {
                 ]
             },
             onOpenHistory: { openHistoryCount += 1 },
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: true)
@@ -287,8 +303,7 @@ struct MainMenuPinFooterTests {
                 ]
             },
             onOpenHistory: { openHistoryCount += 1 },
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: true)
@@ -324,8 +339,7 @@ struct MainMenuPinFooterTests {
                 ]
             },
             onOpenHistory: { didOpenHistory = true },
-            onOpenSnippets: {},
-            onPinnedChange: { _ in }
+            onOpenSnippets: {}
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: true)
@@ -354,6 +368,7 @@ struct MainMenuPinFooterTests {
                 MainMenuPanelLayout.separatorHeight
                     + MainMenuPanelLayout.separatorVerticalInset * 2
             )
+            + MainMenuPanelLayout.rowHeight
             + MainMenuPanelLayout.bottomInset
     }
 
@@ -400,6 +415,320 @@ struct MainMenuPinFooterTests {
             isARepeat: false,
             keyCode: keyCode
         ))
+    }
+
+}
+
+@MainActor
+@Suite(.serialized)
+struct MainMenuOneDriveInstallationFooterTests {
+    @Test
+    func mainMenuHidesOneDriveStatusButtonWhenOneDriveIsNotInstalled() {
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notInstalled)
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: {
+                [.action(title: "Preferences", image: nil) {}]
+            },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            oneDriveStatusService: oneDriveService
+        )
+
+        controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
+        defer { controller.close() }
+
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuOneDriveStatusButton"))
+        #expect(controller.mainMenuOneDriveStatusButtonFramesForTesting.isEmpty)
+        #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
+        #expect(controller.mainMenuQuitButtonFramesForTesting.count == 1)
+    }
+}
+
+@Suite(.serialized)
+struct MainMenuOneDriveStatusAssetTests {
+    @Test
+    func oneDriveStatusTemplateAssetKeepsSuppliedLogoMaskWithoutBlueBackground() throws {
+        let assetURL = mainMenuProjectRoot()
+            .appendingPathComponent(
+                "pastera/Resources/Assets.xcassets/StatusIcon/" +
+                    "onedrive_status_template.imageset/onedrive_status_template@2x.png"
+            )
+        let data = try Data(contentsOf: assetURL)
+        let image = try #require(NSBitmapImageRep(data: data))
+
+        #expect(image.pixelsWide == 36)
+        #expect(image.pixelsHigh == 36)
+        #expect(image.hasAlpha)
+
+        var visiblePixels = 0
+        var interiorTransparentPixels = 0
+        var blueBackgroundPixels = 0
+        var minColumn = image.pixelsWide
+        var maxColumn = 0
+        var minRow = image.pixelsHigh
+        var maxRow = 0
+
+        for row in 0..<image.pixelsHigh {
+            for column in 0..<image.pixelsWide {
+                guard let color = image.colorAt(x: column, y: row)?.usingColorSpace(.sRGB) else { continue }
+                if color.alphaComponent > 0.08 {
+                    visiblePixels += 1
+                    minColumn = min(minColumn, column)
+                    maxColumn = max(maxColumn, column)
+                    minRow = min(minRow, row)
+                    maxRow = max(maxRow, row)
+                    if color.blueComponent > color.redComponent + 0.1,
+                       color.blueComponent > color.greenComponent + 0.1 {
+                        blueBackgroundPixels += 1
+                    }
+                }
+            }
+        }
+
+        for row in minRow...maxRow {
+            for column in minColumn...maxColumn {
+                guard let color = image.colorAt(x: column, y: row)?.usingColorSpace(.sRGB) else { continue }
+                if color.alphaComponent < 0.04 {
+                    interiorTransparentPixels += 1
+                }
+            }
+        }
+
+        #expect(visiblePixels > 250)
+        #expect(maxColumn - minColumn + 1 >= 30)
+        #expect(maxRow - minRow + 1 >= 21)
+        #expect(blueBackgroundPixels == 0)
+        #expect(interiorTransparentPixels > 40)
+    }
+
+    private func mainMenuProjectRoot() -> URL {
+        var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent("pastera.xcodeproj").path) {
+                return directory
+            }
+            directory.deleteLastPathComponent()
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    }
+}
+
+@MainActor
+@Suite(.serialized)
+struct MainMenuFooterButtonActionTests {
+    @Test
+    func mainMenuFooterOneDriveStatusOpensOneDriveWithoutOpeningHistory() {
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notRunning(
+            appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
+        ))
+        var didOpenHistory = false
+        var didQuit = false
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: { didOpenHistory = true },
+            onOpenSnippets: {},
+            oneDriveStatusService: oneDriveService,
+            onQuit: { didQuit = true }
+        )
+
+        controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
+        defer { controller.close() }
+
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        #expect(oneDriveService.openCallCount == 1)
+        #expect(!didOpenHistory)
+        #expect(!didQuit)
+    }
+
+    @Test
+    func mainMenuFooterQuitButtonQuitsWithoutOpeningOneDriveOrHistory() {
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notInstalled)
+        var didOpenHistory = false
+        var didQuit = false
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: { didOpenHistory = true },
+            onOpenSnippets: {},
+            oneDriveStatusService: oneDriveService,
+            onQuit: { didQuit = true }
+        )
+
+        controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
+        defer { controller.close() }
+
+        controller.performMainMenuQuitClickForTesting()
+
+        #expect(didQuit)
+        #expect(oneDriveService.openCallCount == 0)
+        #expect(!didOpenHistory)
+    }
+}
+
+@MainActor
+@Suite(.serialized)
+struct OneDriveProcessStatusServiceTests {
+    @Test
+    func reportsRunningWhenMainOneDriveProcessIsPresent() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let service = makeService(
+            applicationURL: appURL,
+            runningApplications: [
+                OneDriveRunningApplicationSnapshot(
+                    bundleIdentifier: "com.microsoft.OneDrive-mac",
+                    executableURL: appURL.appendingPathComponent("Contents/MacOS/OneDrive"),
+                    localizedName: "OneDrive"
+                )
+            ]
+        )
+
+        guard case let .running(statusAppURL) = service.currentStatus() else {
+            Issue.record("Expected OneDrive to be running")
+            return
+        }
+        #expect(statusAppURL == appURL)
+    }
+
+    @Test
+    func fileProviderProcessAloneDoesNotCountAsRunning() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let service = makeService(
+            applicationURL: appURL,
+            runningApplications: [
+                OneDriveRunningApplicationSnapshot(
+                    bundleIdentifier: "com.microsoft.OneDrive-mac.FileProvider",
+                    executableURL: appURL.appendingPathComponent(
+                        "Contents/PlugIns/OneDrive File Provider.appex/Contents/MacOS/OneDrive File Provider"
+                    ),
+                    localizedName: "OneDrive File Provider"
+                )
+            ]
+        )
+
+        guard case let .notRunning(statusAppURL) = service.currentStatus() else {
+            Issue.record("Expected OneDrive main app to be offline")
+            return
+        }
+        #expect(statusAppURL == appURL)
+    }
+
+    @Test
+    func installedOneDriveWithoutProcessIsNotRunningAndKeepsAppURL() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let service = makeService(applicationURL: appURL, runningApplications: [])
+
+        guard case let .notRunning(statusAppURL) = service.currentStatus() else {
+            Issue.record("Expected installed OneDrive to be offline")
+            return
+        }
+        #expect(statusAppURL == appURL)
+    }
+
+    @Test
+    func staleBundleIdentifierApplicationURLIsTreatedAsNotInstalled() {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let service = OneDriveProcessStatusService(
+            applicationURLProvider: { bundleIdentifier in
+                bundleIdentifier == "com.microsoft.OneDrive-mac" ? appURL : nil
+            },
+            fallbackApplicationURLs: [],
+            fileExists: { _ in false },
+            runningApplicationsProvider: { [] },
+            openApplication: { _ in true },
+            notificationCenter: NotificationCenter()
+        )
+
+        guard case .notInstalled = service.currentStatus() else {
+            Issue.record("Expected stale OneDrive application URL to be ignored")
+            return
+        }
+        #expect(!service.openOneDrive())
+    }
+
+    @Test
+    func missingOneDriveIsNotInstalledAndCannotOpen() {
+        let service = makeService(applicationURL: nil, runningApplications: [])
+
+        guard case .notInstalled = service.currentStatus() else {
+            Issue.record("Expected missing OneDrive to be not installed")
+            return
+        }
+        #expect(!service.openOneDrive())
+    }
+
+    @Test
+    func supportsLegacyOneDriveBundleIdentifierLookup() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let service = OneDriveProcessStatusService(
+            applicationURLProvider: { bundleIdentifier in
+                bundleIdentifier == "com.microsoft.OneDrive" ? appURL : nil
+            },
+            fallbackApplicationURLs: [],
+            fileExists: { path in
+                URL(fileURLWithPath: path).standardizedFileURL.path == appURL.standardizedFileURL.path
+            },
+            runningApplicationsProvider: { [] },
+            openApplication: { _ in true },
+            notificationCenter: NotificationCenter()
+        )
+
+        guard case let .notRunning(statusAppURL) = service.currentStatus() else {
+            Issue.record("Expected legacy bundle id lookup to find installed OneDrive")
+            return
+        }
+        #expect(statusAppURL == appURL)
+    }
+
+    private func makeService(
+        applicationURL: URL?,
+        runningApplications: [OneDriveRunningApplicationSnapshot]
+    ) -> OneDriveProcessStatusService {
+        OneDriveProcessStatusService(
+            applicationURLProvider: { bundleIdentifier in
+                bundleIdentifier == "com.microsoft.OneDrive-mac" ? applicationURL : nil
+            },
+            fallbackApplicationURLs: [],
+            fileExists: { path in
+                applicationURL?.standardizedFileURL.path == URL(fileURLWithPath: path).standardizedFileURL.path
+            },
+            runningApplicationsProvider: { runningApplications },
+            openApplication: { _ in true },
+            notificationCenter: NotificationCenter()
+        )
+    }
+}
+
+private final class MainMenuFakeOneDriveProcessStatusService: OneDriveProcessStatusServicing {
+    var status: OneDriveProcessStatus
+    var openCallCount = 0
+
+    init(status: OneDriveProcessStatus) {
+        self.status = status
+    }
+
+    func currentStatus() -> OneDriveProcessStatus {
+        status
+    }
+
+    func openOneDrive() -> Bool {
+        openCallCount += 1
+        return true
+    }
+
+    func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {
+        OneDriveProcessStatusObservation {}
     }
 }
 

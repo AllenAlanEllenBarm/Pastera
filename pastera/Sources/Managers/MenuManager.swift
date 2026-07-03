@@ -57,10 +57,10 @@ final class MenuManager: NSObject {
     var historyPanelController: HistoryBrowserPanelController?
     var snippetPanelController: SnippetBrowserPanelController?
     var mainMenuPanelController: MainMenuPanelController?
-    var isMainMenuPinned = false
     var panelDismissLocalMonitor: Any?
     var panelDismissGlobalMonitor: Any?
     var secureEventInputStatusTimer: Timer?
+    var oneDriveStatusObservation: OneDriveProcessStatusObservation?
     var secureEventInputEnabledProvider: () -> Bool = {
         IsSecureEventInputEnabled()
     }
@@ -102,6 +102,7 @@ final class MenuManager: NSObject {
 
     deinit {
         secureEventInputStatusTimer?.invalidate()
+        oneDriveStatusObservation?.cancel()
         removePanelDismissMonitors()
         removeStatusItem()
     }
@@ -110,6 +111,7 @@ final class MenuManager: NSObject {
         createClipMenu()
         configureStatusItemFromDefaults()
         startSecureEventInputStatusMonitoring()
+        startOneDriveStatusMonitoring()
         bind()
     }
 
@@ -286,9 +288,17 @@ extension MenuManager {
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Edit Snippets"), action: #selector(AppDelegate.showSnippetEditorWindow)))
         clipMenu?.addItem(NSMenuItem(title: String(localized: "Preferences"), action: #selector(AppDelegate.showPreferenceWindow)))
         clipMenu?.addItem(NSMenuItem.separator())
-        clipMenu?.addItem(NSMenuItem(title: String(localized: "Quit Pastera"), action: #selector(AppDelegate.terminate)))
+        clipMenu?.addItem(makeIconOnlyQuitMenuItem())
 
         statusItem?.menu = nil
+    }
+
+    private func makeIconOnlyQuitMenuItem() -> NSMenuItem {
+        let accessibilityTitle = String(localized: "Quit Pastera")
+        let item = NSMenuItem(title: "", action: #selector(AppDelegate.terminate), keyEquivalent: "")
+        item.image = menuPanelSymbol("power", accessibilityDescription: accessibilityTitle)
+        item.toolTip = accessibilityTitle
+        return item
     }
 
     func menuItemTitle(_ title: String, listNumber: NSInteger, isMarkWithNumber: Bool) -> String {
@@ -344,23 +354,12 @@ extension MenuManager {
         let itemView = MainMenuHeaderItemView(
             title: String(localized: "History"),
             image: folderIcon,
-            isPinned: isMainMenuPinned,
             shortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.historyKeyCombo)
         )
         itemView.onOpen = { [weak self, weak historyItem] in
             historyItem?.menu?.cancelTracking()
             DispatchQueue.main.async { [weak self] in
                 self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation)
-            }
-        }
-        itemView.onPinnedChange = { [weak self, weak historyItem, weak itemView] pinned, menuFrame in
-            historyItem?.menu?.cancelTracking()
-            self?.setMainMenuPinned(pinned)
-            itemView?.setPinned(pinned)
-            DispatchQueue.main.async { [weak self] in
-                if pinned {
-                    self?.showMainMenuPanel(anchoredTo: menuFrame, fallbackPoint: NSEvent.mouseLocation)
-                }
             }
         }
         historyItem.view = itemView
@@ -378,8 +377,6 @@ extension MenuManager {
         let itemView = MainMenuHeaderItemView(
             title: String(localized: "Snippet"),
             image: snippetIcon,
-            isPinned: false,
-            showsPin: false,
             shortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.snippetKeyCombo)
         )
         itemView.onOpen = { [weak self, weak snippetItem] in
@@ -419,37 +416,15 @@ extension MenuManager {
     func showMainMenuPanel(at screenPoint: NSPoint, pasteTargetContext: PasteTargetContext? = nil) {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController
-        panelController.show(at: screenPoint, pinned: isMainMenuPinned, pasteTargetContext: pasteTargetContext)
-        installPanelDismissMonitorsIfNeeded()
-    }
-
-    func showMainMenuPanel(anchoredTo menuFrame: NSRect?, fallbackPoint: NSPoint, pasteTargetContext: PasteTargetContext? = nil) {
-        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
-        mainMenuPanelController = panelController
-        if let menuFrame {
-            panelController.show(anchoredTo: menuFrame, pinned: true, pasteTargetContext: pasteTargetContext)
-        } else {
-            panelController.show(at: fallbackPoint, pinned: true, pasteTargetContext: pasteTargetContext)
-        }
+        panelController.show(at: screenPoint, pinned: false, pasteTargetContext: pasteTargetContext)
         installPanelDismissMonitorsIfNeeded()
     }
 
     func showMainMenuPanel(attachedToStatusItemFrame statusItemFrame: NSRect, pasteTargetContext: PasteTargetContext? = nil) {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController
-        panelController.show(attachedToStatusItemFrame: statusItemFrame, pinned: isMainMenuPinned, pasteTargetContext: pasteTargetContext)
+        panelController.show(attachedToStatusItemFrame: statusItemFrame, pinned: false, pasteTargetContext: pasteTargetContext)
         installPanelDismissMonitorsIfNeeded()
-    }
-
-    func setMainMenuPinned(_ pinned: Bool) {
-        isMainMenuPinned = pinned
-        if !pinned {
-            mainMenuPanelController?.close()
-            historyPanelController?.close()
-            snippetPanelController?.close()
-            removePanelDismissMonitors()
-        }
-        createClipMenu()
     }
 
     func makeHistoryPanelController() -> HistoryBrowserPanelController {
@@ -491,7 +466,7 @@ extension MenuManager {
             itemsProvider: { [weak self] in self?.makeMainMenuPanelItems() ?? [] },
             onOpenHistory: { [weak self] in self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation) },
             onOpenSnippets: { [weak self] in self?.showSnippetBrowserPanel() },
-            onPinnedChange: { [weak self] pinned in self?.setMainMenuPinned(pinned) },
+            oneDriveStatusService: AppEnvironment.current.oneDriveProcessStatusService,
             onCloseChildPanels: { [weak self] in
                 self?.historyPanelController?.close()
                 self?.snippetPanelController?.close()
@@ -537,11 +512,6 @@ extension MenuManager {
         let preferencesTitle = String(localized: "Preferences")
         items.append(.action(title: preferencesTitle, image: menuPanelSymbol("gearshape", accessibilityDescription: preferencesTitle)) {
             NSApp.sendAction(#selector(AppDelegate.showPreferenceWindow), to: nil, from: nil)
-        })
-        items.append(.separator)
-        let quitTitle = String(localized: "Quit Pastera")
-        items.append(.action(title: quitTitle, image: menuPanelSymbol("power", accessibilityDescription: quitTitle)) {
-            NSApp.sendAction(#selector(AppDelegate.terminate), to: nil, from: nil)
         })
 
         return items

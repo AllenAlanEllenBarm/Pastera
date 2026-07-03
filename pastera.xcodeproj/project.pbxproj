@@ -20,6 +20,7 @@
 		C5A906002FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */; };
 		C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */; };
 		C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */; };
+		C5D2A1002FEA100000B7C0DE /* MainMenuFooterButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */; };
 		C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */; };
 		C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */; };
 		C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */; };
@@ -51,6 +52,7 @@
 		C5D100002FE010000B7C0DE /* PasteraSetupGuideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100012FE010000B7C0DE /* PasteraSetupGuideTests.swift */; };
 		C5D100022FE010000B7C0DE /* PasteraSetupGuideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */; };
 		C5D100042FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */; };
+		C5D2A0002FEA000000B7C0DE /* OneDriveProcessStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A0012FEA000000B7C0DE /* OneDriveProcessStatusService.swift */; };
 		C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000012FD870000B7C0DE /* SyncCoordinator.swift */; };
 		C5C000022FD870000B7C0DE /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */; };
 		C5C000042FD870000B7C0DE /* CPYSyncPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */; };
@@ -223,6 +225,7 @@
 		C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuFocusableControls.swift; sourceTree = "<group>"; };
 		C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuHeaderItemView.swift; sourceTree = "<group>"; };
 		C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuPanelController.swift; sourceTree = "<group>"; };
+		C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuFooterButtons.swift; sourceTree = "<group>"; };
 		C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuRowView.swift; sourceTree = "<group>"; };
 		C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetBrowserPanelController.swift; sourceTree = "<group>"; };
 		C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuManagerPanelDismissal.swift; sourceTree = "<group>"; };
@@ -254,6 +257,7 @@
 		C5D100012FE010000B7C0DE /* PasteraSetupGuideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideTests.swift; sourceTree = "<group>"; };
 		C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideService.swift; sourceTree = "<group>"; };
 		C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideStepRowView.swift; sourceTree = "<group>"; };
+		C5D2A0012FEA000000B7C0DE /* OneDriveProcessStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneDriveProcessStatusService.swift; sourceTree = "<group>"; };
 		C5C000012FD870000B7C0DE /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
 		C5C000032FD870000B7C0DE /* SyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinatorTests.swift; sourceTree = "<group>"; };
 		C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSyncPreferenceViewController.swift; sourceTree = "<group>"; };
@@ -455,6 +459,7 @@
 				C5B100012FD750000B7C0DE /* InstallationLocationService.swift */,
 				C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */,
 				C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */,
+				C5D2A0012FEA000000B7C0DE /* OneDriveProcessStatusService.swift */,
 				C5C000012FD870000B7C0DE /* SyncCoordinator.swift */,
 			);
 			path = Services;
@@ -535,10 +540,11 @@
 				C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */,
 				C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */,
 				C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */,
-				C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */,
-				C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */,
-				C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */,
-				C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */,
+					C5A905012FD0C30000B7C0DE /* HistoryBrowserPanelController.swift */,
+					C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */,
+					C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */,
+					C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */,
+					C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */,
 				C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */,
 				C5A918012FD1B2000B7C0DE /* MenuManagerStatusItem.swift */,
 				C5A917012FD1B1000B7C0DE /* MenuManagerTestingSupport.swift */,
@@ -907,6 +913,7 @@
 				C5B100002FD750000B7C0DE /* InstallationLocationService.swift in Sources */,
 				C5D100022FE010000B7C0DE /* PasteraSetupGuideService.swift in Sources */,
 				C5D100042FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift in Sources */,
+				C5D2A0002FEA000000B7C0DE /* OneDriveProcessStatusService.swift in Sources */,
 					C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */,
 					FA1DB4D31DDCB479007F95C8 /* CPYClip.swift in Sources */,
 					C5C000062FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift in Sources */,
@@ -933,10 +940,11 @@
 				C5A903002FD0C10000B7C0DE /* HistoryMenuSearchField.swift in Sources */,
 				C5A904002FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift in Sources */,
 				C5A905002FD0C30000B7C0DE /* HistoryBrowserPanelController.swift in Sources */,
-				C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */,
-				C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */,
-				C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
-				C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */,
+					C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */,
+					C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */,
+					C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
+					C5D2A1002FEA100000B7C0DE /* MainMenuFooterButtons.swift in Sources */,
+					C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */,
 				C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */,
 				C5A918002FD1B2000B7C0DE /* MenuManagerStatusItem.swift in Sources */,
 				C5A917002FD1B1000B7C0DE /* MenuManagerTestingSupport.swift in Sources */,

@@ -13,6 +13,7 @@
 import AppKit
 import Combine
 import Dependencies
+import GRDB
 import SQLiteData
 
 // swiftlint:disable type_body_length file_length
@@ -25,11 +26,16 @@ struct HistoryRetentionSettings: Equatable {
     static let defaultStoredHistoryLimit = 2000
     static let defaultMaxSyncedHistoryTextBytes = 256 * 1024
     static let defaultMaxHistorySnapshotTextBudgetBytes = 8 * 1024 * 1024
+    static let defaultMediaHistoryLimit = 15
+    static let minimumMediaHistoryLimit = 1
+    static let maximumMediaHistoryLimit = 50
 
     let menuDisplayLimit: Int
     let storedHistoryLimit: Int
     let maxSyncedHistoryTextBytes: Int
     let maxHistorySnapshotTextBudgetBytes: Int
+    let maxImageHistorySize: Int
+    let maxFileHistorySize: Int
 
     static func current(defaults: UserDefaults = AppEnvironment.current.defaults) -> HistoryRetentionSettings {
         let menuDisplayLimit = defaults.integer(forKey: Constants.UserDefaults.maxHistorySize)
@@ -47,8 +53,27 @@ struct HistoryRetentionSettings: Equatable {
                 : defaultMaxSyncedHistoryTextBytes,
             maxHistorySnapshotTextBudgetBytes: maxHistorySnapshotTextBudgetBytes > 0
                 ? maxHistorySnapshotTextBudgetBytes
-                : defaultMaxHistorySnapshotTextBudgetBytes
+                : defaultMaxHistorySnapshotTextBudgetBytes,
+            maxImageHistorySize: mediaHistoryLimit(
+                forKey: Constants.UserDefaults.maxImageHistorySize,
+                defaults: defaults
+            ),
+            maxFileHistorySize: mediaHistoryLimit(
+                forKey: Constants.UserDefaults.maxFileHistorySize,
+                defaults: defaults
+            )
         )
+    }
+
+    static func mediaHistoryLimit(forKey key: String, defaults: UserDefaults = AppEnvironment.current.defaults) -> Int {
+        guard let value = defaults.object(forKey: key) as? NSNumber else {
+            return defaultMediaHistoryLimit
+        }
+        return clampedMediaHistoryLimit(value.intValue)
+    }
+
+    static func clampedMediaHistoryLimit(_ value: Int) -> Int {
+        min(max(value, minimumMediaHistoryLimit), maximumMediaHistoryLimit)
     }
 }
 
@@ -482,48 +507,107 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     func deleteAll() {
         withErrorReporting {
             try database.write { database in
-                let ids = try PasteboardHistory
-                    .select { $0.id }
-                    .fetchAll(database)
-                try ids.forEach { id in
-                    try SyncSuppression.upsert {
-                        SyncSuppression(
-                            syncIdentity: syncIdentity(kind: .history, id: id.rawValue),
-                            kind: .history,
-                            recordID: id.rawValue,
-                            suppressedAt: Int(Date().timeIntervalSince1970)
-                        )
-                    }
-                    .execute(database)
-                }
-                try PasteboardHistory.delete().execute(database)
+                try deleteAll(database: database)
             }
         }
     }
 
     func deleteOverflowingHistories(maxHistorySize: Int) {
-        guard maxHistorySize > 0 else {
-            deleteAll()
-            return
-        }
         withErrorReporting {
             try database.write { database in
-                let deletingIDs = try PasteboardHistory
-                    .order { $0.updateAt.desc() }
-                    .limit(-1, offset: maxHistorySize)
-                    .select { $0.id }
-                    .fetchAll(database)
-                guard !deletingIDs.isEmpty else { return }
-                try PasteboardHistory
-                    .delete()
-                    .where { $0.id.in(deletingIDs) }
-                    .execute(database)
+                try deleteOverflowingHistories(maxHistorySize: maxHistorySize, database: database)
             }
         }
     }
 
     func pruneHistories(settings: HistoryRetentionSettings) {
-        deleteOverflowingHistories(maxHistorySize: settings.storedHistoryLimit)
+        withErrorReporting {
+            try database.write { database in
+                try deleteOverflowingHistories(maxHistorySize: settings.storedHistoryLimit, database: database)
+                try deleteOverflowingMediaHistories(settings: settings, database: database)
+            }
+        }
+    }
+
+    private func deleteOverflowingHistories(maxHistorySize: Int, database: Database) throws {
+        guard maxHistorySize > 0 else {
+            try deleteAll(database: database)
+            return
+        }
+        let deletingIDs = try PasteboardHistory
+            .order { $0.updateAt.desc() }
+            .limit(-1, offset: maxHistorySize)
+            .select { $0.id }
+            .fetchAll(database)
+        guard !deletingIDs.isEmpty else { return }
+        try PasteboardHistory
+            .delete()
+            .where { $0.id.in(deletingIDs) }
+            .execute(database)
+    }
+
+    private func deleteOverflowingMediaHistories(settings: HistoryRetentionSettings, database: Database) throws {
+        let decoder = JSONDecoder()
+        let candidates = try Row.fetchCursor(
+            database,
+            sql: """
+            SELECT "id", "pasteboardTypes"
+            FROM "pasteboardHistories"
+            ORDER BY "updateAt" DESC
+            """
+        )
+        let imageTypes = NSPasteboard.PasteboardType.clipyImageTypes
+        var imageHistoryCount = 0
+        var fileHistoryCount = 0
+        var deletingIDs = [PasteboardHistory.ID]()
+
+        while let candidate = try candidates.next() {
+            let id: String = candidate["id"]
+            let pasteboardTypesJSON: String = candidate["pasteboardTypes"]
+            let pasteboardTypes = Set(try decoder.decode(
+                [NSPasteboard.PasteboardType].self,
+                from: Data(pasteboardTypesJSON.utf8)
+            ))
+            var shouldDelete = false
+
+            if !pasteboardTypes.isDisjoint(with: imageTypes) {
+                imageHistoryCount += 1
+                shouldDelete = imageHistoryCount > settings.maxImageHistorySize
+            }
+
+            if pasteboardTypes.contains(.fileURL) {
+                fileHistoryCount += 1
+                shouldDelete = shouldDelete || fileHistoryCount > settings.maxFileHistorySize
+            }
+
+            if shouldDelete {
+                deletingIDs.append(PasteboardHistory.ID(rawValue: id))
+            }
+        }
+
+        guard !deletingIDs.isEmpty else { return }
+        try PasteboardHistory
+            .delete()
+            .where { $0.id.in(Array(Set(deletingIDs))) }
+            .execute(database)
+    }
+
+    private func deleteAll(database: Database) throws {
+        let ids = try PasteboardHistory
+            .select { $0.id }
+            .fetchAll(database)
+        try ids.forEach { id in
+            try SyncSuppression.upsert {
+                SyncSuppression(
+                    syncIdentity: syncIdentity(kind: .history, id: id.rawValue),
+                    kind: .history,
+                    recordID: id.rawValue,
+                    suppressedAt: Int(Date().timeIntervalSince1970)
+                )
+            }
+            .execute(database)
+        }
+        try PasteboardHistory.delete().execute(database)
     }
 
     func compactOversizedThumbnailAssets(maxBytes: Int) -> Int {

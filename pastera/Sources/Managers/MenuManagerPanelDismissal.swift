@@ -66,9 +66,7 @@ extension MenuManager {
             return
         }
 
-        if !isMainMenuPinned {
-            mainMenuPanelController?.close()
-        }
+        mainMenuPanelController?.close()
         removePanelDismissMonitorsIfIdle()
     }
 

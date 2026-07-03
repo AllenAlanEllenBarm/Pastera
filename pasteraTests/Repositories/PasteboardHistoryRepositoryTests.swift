@@ -405,7 +405,9 @@ struct PasteboardHistoryRepositoryTests {
             menuDisplayLimit: 1,
             storedHistoryLimit: 2,
             maxSyncedHistoryTextBytes: 256 * 1024,
-            maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024
+            maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024,
+            maxImageHistorySize: 15,
+            maxFileHistorySize: 15
         )
         let first = PasteboardContent("First")
         let second = PasteboardContent("Second")
@@ -500,6 +502,130 @@ struct PasteboardHistoryRepositoryTests {
                 offset: 0
             )
         }
+    }
+}
+
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct PasteboardHistoryMediaRetentionTests {
+    let repository = PasteboardHistoryRepository()
+
+    @Test
+    func retentionSettingsClampMediaHistoryLimits() throws {
+        let suiteName = "PasteboardHistoryRepositoryTests.retentionMediaClamp.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var settings = HistoryRetentionSettings.current(defaults: defaults)
+
+        #expect(settings.maxImageHistorySize == 15)
+        #expect(settings.maxFileHistorySize == 15)
+
+        defaults.set(-3, forKey: Constants.UserDefaults.maxImageHistorySize)
+        defaults.set(99, forKey: Constants.UserDefaults.maxFileHistorySize)
+        settings = HistoryRetentionSettings.current(defaults: defaults)
+
+        #expect(settings.maxImageHistorySize == 1)
+        #expect(settings.maxFileHistorySize == 50)
+
+        defaults.set(1, forKey: Constants.UserDefaults.maxImageHistorySize)
+        defaults.set(50, forKey: Constants.UserDefaults.maxFileHistorySize)
+        settings = HistoryRetentionSettings.current(defaults: defaults)
+
+        #expect(settings.maxImageHistorySize == 1)
+        #expect(settings.maxFileHistorySize == 50)
+    }
+
+    @Test
+    func pruneHistoriesLimitsImagesAndFilesIndependentlyWithoutDeletingText() throws {
+        let imageOne = PasteboardContent(assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47, 1]))])
+        let imageTwo = PasteboardContent(assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47, 2]))])
+        let imageThree = PasteboardContent(assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47, 3]))])
+        let fileOneURL = try writeTemporaryFile(name: "one.txt", data: Data("one".utf8))
+        let fileTwoURL = try writeTemporaryFile(name: "two.txt", data: Data("two".utf8))
+        defer {
+            try? FileManager.default.removeItem(at: fileOneURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: fileTwoURL.deletingLastPathComponent())
+        }
+        let fileOne = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileOneURL.dataRepresentation)]
+        )
+        let fileTwo = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileTwoURL.dataRepresentation)]
+        )
+        let text = PasteboardContent("Text remains")
+        let pdf = PasteboardContent(assets: [PasteboardContent.Asset(type: .pdf, data: Data("%PDF-1.7".utf8))])
+        let settings = HistoryRetentionSettings(
+            menuDisplayLimit: 10,
+            storedHistoryLimit: 20,
+            maxSyncedHistoryTextBytes: 256 * 1024,
+            maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024,
+            maxImageHistorySize: 2,
+            maxFileHistorySize: 1
+        )
+
+        repository.save(id: PasteboardHistory.ID(rawValue: imageOne.hash), content: imageOne, updateAt: 1)
+        repository.save(id: PasteboardHistory.ID(rawValue: imageTwo.hash), content: imageTwo, updateAt: 2)
+        repository.save(id: PasteboardHistory.ID(rawValue: fileOne.hash), content: fileOne, updateAt: 3)
+        repository.save(id: PasteboardHistory.ID(rawValue: imageThree.hash), content: imageThree, updateAt: 4)
+        repository.save(id: PasteboardHistory.ID(rawValue: text.hash), content: text, updateAt: 5)
+        repository.save(id: PasteboardHistory.ID(rawValue: fileTwo.hash), content: fileTwo, updateAt: 6)
+        repository.save(id: PasteboardHistory.ID(rawValue: pdf.hash), content: pdf, updateAt: 7)
+
+        repository.pruneHistories(settings: settings)
+
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: imageOne.hash)) == nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: imageTwo.hash)) != nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: imageThree.hash)) != nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: fileOne.hash)) == nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: fileTwo.hash)) != nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: text.hash)) != nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: pdf.hash)) != nil)
+    }
+
+    @Test
+    func pruneHistoriesDeletesMixedImageAndFileHistoryOnceWhenBothLimitsOverflow() throws {
+        let newerImage = PasteboardContent(assets: [
+            PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47, 1]))
+        ])
+        let fileURL = try writeTemporaryFile(name: "newer.txt", data: Data("newer".utf8))
+        let mixedFileURL = try writeTemporaryFile(name: "mixed.txt", data: Data("mixed".utf8))
+        defer {
+            try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: mixedFileURL.deletingLastPathComponent())
+        }
+        let newerFile = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
+        )
+        let mixedImageAndFile = PasteboardContent(assets: [
+            PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47, 2])),
+            PasteboardContent.Asset(type: .fileURL, data: mixedFileURL.dataRepresentation)
+        ])
+        let text = PasteboardContent("Text remains")
+        let settings = HistoryRetentionSettings(
+            menuDisplayLimit: 10,
+            storedHistoryLimit: 20,
+            maxSyncedHistoryTextBytes: 256 * 1024,
+            maxHistorySnapshotTextBudgetBytes: 8 * 1024 * 1024,
+            maxImageHistorySize: 1,
+            maxFileHistorySize: 1
+        )
+
+        repository.save(id: PasteboardHistory.ID(rawValue: mixedImageAndFile.hash), content: mixedImageAndFile, updateAt: 1)
+        repository.save(id: PasteboardHistory.ID(rawValue: text.hash), content: text, updateAt: 2)
+        repository.save(id: PasteboardHistory.ID(rawValue: newerFile.hash), content: newerFile, updateAt: 3)
+        repository.save(id: PasteboardHistory.ID(rawValue: newerImage.hash), content: newerImage, updateAt: 4)
+
+        repository.pruneHistories(settings: settings)
+
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: mixedImageAndFile.hash)) == nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: newerFile.hash)) != nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: newerImage.hash)) != nil)
+        #expect(repository.fetchHistory(id: PasteboardHistory.ID(rawValue: text.hash)) != nil)
     }
 }
 

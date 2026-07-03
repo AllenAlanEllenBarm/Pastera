@@ -5,6 +5,8 @@
 //
 
 import AppKit
+import Combine
+import Dependencies
 import Testing
 @testable import Pastera
 
@@ -235,8 +237,6 @@ struct OpacityPreferenceTests {
         #expect(!visibleTexts.contains("最大剪贴板历史："))
         #expect(!visibleTexts.contains("Sort history order by:"))
         #expect(!visibleTexts.contains("历史排序按照："))
-        #expect(!visibleTexts.contains("items"))
-        #expect(!visibleTexts.contains("项"))
         #expect(!visibleTexts.contains("Behavior"))
         #expect(!visibleTexts.contains("行为"))
         #expect(!visibleTexts.contains("Clipboard History"))
@@ -248,6 +248,70 @@ struct OpacityPreferenceTests {
         #expect(!visibleButtons.contains("Send crash report and error log (reflected at the next launch)"))
         #expect(!visibleButtons.contains("发送崩溃报告和错误日志（下次启动时生效）"))
         #expect(!defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting))
+    }
+
+    @Test
+    func generalPreferenceShowsMediaHistoryLimitControls() throws {
+        let controller = CPYPreferencesWindowController()
+        defer { controller.close() }
+
+        controller.showWindow(nil)
+        controller.showPreferencePaneForTesting(title: "General")
+
+        let contentView = try #require(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+        let visibleTexts = Set(textFields(in: contentView).map(\.stringValue).filter { !$0.isEmpty })
+
+        #expect(visibleTexts.contains("Image/file limit:") || visibleTexts.contains("图片/文件上限："))
+        #expect(visibleTexts.contains("Images") || visibleTexts.contains("图片"))
+        #expect(visibleTexts.contains("Files") || visibleTexts.contains("文件"))
+        #expect(visibleTexts.contains("items") || visibleTexts.contains("项"))
+    }
+
+    @Test
+    func generalPreferenceSubmittingMediaHistoryLimitsUsesCurrentFieldValues() throws {
+        let suiteName = "OpacityPreferenceTests.mediaHistorySubmit.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let repository = PreferenceMediaHistoryRepository()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        AppEnvironment.push(defaults: defaults)
+        defer { _ = AppEnvironment.popLast() }
+        defaults.set(15, forKey: Constants.UserDefaults.maxImageHistorySize)
+        defaults.set(15, forKey: Constants.UserDefaults.maxFileHistorySize)
+
+        try withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let controller = CPYGeneralPreferenceViewController(
+                nibName: "CPYGeneralPreferenceViewController",
+                bundle: nil
+            )
+
+            _ = controller.view
+            let mediaLimitFields = textFields(in: controller.view)
+                .filter { textField in
+                    guard let formatter = textField.formatter as? NumberFormatter else { return false }
+                    return formatter.minimum == NSNumber(value: HistoryRetentionSettings.minimumMediaHistoryLimit)
+                        && formatter.maximum == NSNumber(value: HistoryRetentionSettings.maximumMediaHistoryLimit)
+                }
+
+            #expect(mediaLimitFields.count == 2)
+            let imageField = try #require(mediaLimitFields.first)
+            let fileField = try #require(mediaLimitFields.dropFirst().first)
+            imageField.integerValue = 0
+            fileField.integerValue = 99
+
+            controller.controlTextDidEndEditing(
+                Notification(name: NSControl.textDidEndEditingNotification, object: imageField)
+            )
+
+            #expect(defaults.integer(forKey: Constants.UserDefaults.maxImageHistorySize) == 1)
+            #expect(defaults.integer(forKey: Constants.UserDefaults.maxFileHistorySize) == 50)
+            #expect(imageField.integerValue == 1)
+            #expect(fileField.integerValue == 50)
+            #expect(repository.pruneSettings.map(\.maxImageHistorySize) == [1])
+            #expect(repository.pruneSettings.map(\.maxFileHistorySize) == [50])
+        }
     }
 
     @Test
@@ -306,4 +370,43 @@ private func popUpButtons(in view: NSView) -> [NSPopUpButton] {
         values.append(contentsOf: popUpButtons(in: $0))
     }
     return values
+}
+
+private final class PreferenceMediaHistoryRepository: PasteboardHistoryRepositoryProtocol {
+    private(set) var pruneSettings = [HistoryRetentionSettings]()
+
+    func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func hasHistories() -> Bool { false }
+
+    func fetchHistoryDetails(
+        ascending: Bool,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) -> [PasteboardHistoryDetail] {
+        []
+    }
+
+    func searchHistoryDetails(
+        query: HistorySearchQuery,
+        includesThumbnailAsset: Bool,
+        limit: Int,
+        offset: Int
+    ) throws -> [PasteboardHistoryDetail] {
+        []
+    }
+
+    func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? { nil }
+    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
+    func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {}
+    func deleteHistory(id: PasteboardHistory.ID) {}
+    func deleteAll() {}
+    func deleteOverflowingHistories(maxHistorySize: Int) {}
+
+    func pruneHistories(settings: HistoryRetentionSettings) {
+        pruneSettings.append(settings)
+    }
 }

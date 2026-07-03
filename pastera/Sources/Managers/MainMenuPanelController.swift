@@ -24,8 +24,10 @@ enum MainMenuPanelLayout {
     static let separatorHorizontalInset: CGFloat = 10
     static let separatorVerticalInset: CGFloat = 5
     static let separatorAlpha: CGFloat = 0.16
-    static let pinButtonSize: CGFloat = 18
-    static let pinTrailingInset: CGFloat = 10
+    static let quitButtonSize: CGFloat = 18
+    static let quitButtonLeadingInset: CGFloat = 10
+    static let oneDriveStatusButtonSize: CGFloat = 18
+    static let oneDriveStatusTrailingInset: CGFloat = 10
     static let cornerRadius: CGFloat = PasteraDesignTokens.Metrics.panelCornerRadius
     static let screenPadding: CGFloat = 8
     static let folderHoverOpenDelay: TimeInterval = 0.45
@@ -92,7 +94,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     private let itemsProvider: () -> [MainMenuPanelItem]
     private let onOpenHistory: () -> Void
     private let onOpenSnippets: () -> Void
-    private let onPinnedChange: (Bool) -> Void
+    private let oneDriveStatusService: OneDriveProcessStatusServicing
+    private let onQuit: () -> Void
     private let onCloseChildPanels: () -> Void
 
     private let contentView = NSView()
@@ -102,6 +105,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     private var isPinned = true
     private var keepsVisibleWhileChildPanelOpen = false
     private var pasteTargetContext: PasteTargetContext?
+    private weak var oneDriveStatusButton: MainMenuOneDriveStatusButton?
 
     init(
         historyTitle: String,
@@ -112,7 +116,10 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         itemsProvider: @escaping () -> [MainMenuPanelItem],
         onOpenHistory: @escaping () -> Void,
         onOpenSnippets: @escaping () -> Void,
-        onPinnedChange: @escaping (Bool) -> Void,
+        oneDriveStatusService: OneDriveProcessStatusServicing = AppEnvironment.current.oneDriveProcessStatusService,
+        onQuit: @escaping () -> Void = {
+            NSApp.sendAction(#selector(AppDelegate.terminate), to: nil, from: nil)
+        },
         onCloseChildPanels: @escaping () -> Void = {}
     ) {
         self.historyTitle = historyTitle
@@ -123,12 +130,13 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         self.itemsProvider = itemsProvider
         self.onOpenHistory = onOpenHistory
         self.onOpenSnippets = onOpenSnippets
-        self.onPinnedChange = onPinnedChange
+        self.oneDriveStatusService = oneDriveStatusService
+        self.onQuit = onQuit
         self.onCloseChildPanels = onCloseChildPanels
         super.init()
     }
 
-    func show(at screenPoint: NSPoint, pinned: Bool = true, pasteTargetContext: PasteTargetContext? = nil) {
+    func show(at screenPoint: NSPoint, pinned: Bool = false, pasteTargetContext: PasteTargetContext? = nil) {
         isPinned = pinned
         self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
         let panel = makePanelIfNeeded()
@@ -199,11 +207,11 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
     }
 #endif
 
-    func openHistoryFromPinnedMenu() {
+    func openHistoryFromMainMenu() {
         onOpenHistory()
     }
 
-    func openSnippetsFromPinnedMenu() {
+    func openSnippetsFromMainMenu() {
         onOpenSnippets()
     }
 
@@ -236,7 +244,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
-        panel.onCancel = { [weak self] in self?.onPinnedChange(false) }
+        panel.onCancel = { [weak self] in self?.close() }
         panel.onKeyDown = { [weak self] event in self?.handleKeyboardNavigation(event) ?? false }
         panel.delegate = self
         panel.contentView = contentView
@@ -276,19 +284,17 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         let headerView = MainMenuHeaderItemView(
             title: historyTitle,
             image: historyImage,
-            isPinned: isPinned,
-            showsPin: false,
             shortcutText: historyShortcutText
         )
         headerView.allowsWindowDrag = isPinned
         headerView.frame = NSRect(x: 0, y: currentY, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.headerHeight)
-        headerView.onOpen = { [weak self] in self?.openHistoryFromPinnedMenu() }
-        headerView.onHoverOpen = { [weak self] in self?.openHistoryFromPinnedMenu() }
+        headerView.onOpen = { [weak self] in self?.openHistoryFromMainMenu() }
+        headerView.onHoverOpen = { [weak self] in self?.openHistoryFromMainMenu() }
         let historyEntryIndex = appendKeyboardEntry(
             title: historyTitle,
             view: headerView,
-            openChildPanel: { [weak self] in self?.openHistoryFromPinnedMenu() },
-            confirm: { [weak self] in self?.openHistoryFromPinnedMenu() }
+            openChildPanel: { [weak self] in self?.openHistoryFromMainMenu() },
+            confirm: { [weak self] in self?.openHistoryFromMainMenu() }
         )
         headerView.onHoverFocus = { [weak self] in
             self?.selectKeyboardEntry(at: historyEntryIndex, triggerChildPanel: false)
@@ -298,8 +304,6 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         currentY -= MainMenuPanelLayout.separatorVerticalInset + MainMenuPanelLayout.separatorHeight
         addSeparator(at: currentY)
         currentY -= MainMenuPanelLayout.separatorVerticalInset
-
-        var pinCenterY: CGFloat?
 
         for item in items {
             switch item {
@@ -369,11 +373,12 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
                     self?.selectKeyboardEntry(at: entryIndex, triggerChildPanel: false)
                 }
                 contentView.addSubview(rowView)
-                pinCenterY = rowView.frame.midY
             }
         }
 
-        addPinButton(centerY: pinCenterY ?? MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.pinButtonSize / 2)
+        let footerCenterY = MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.rowHeight / 2
+        addQuitButton(centerY: footerCenterY)
+        addOneDriveStatusButton(status: oneDriveStatusService.currentStatus(), centerY: footerCenterY)
     }
 
     private func preferredHeight(for items: [MainMenuPanelItem]) -> CGFloat {
@@ -394,33 +399,54 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
             + MainMenuPanelLayout.separatorHeight
             + MainMenuPanelLayout.separatorVerticalInset * 2
             + rowHeights
+            + MainMenuPanelLayout.rowHeight
             + MainMenuPanelLayout.bottomInset
     }
 
-    private func addPinButton(centerY: CGFloat) {
-        let pinButton = HistoryMenuPinButton(frame: NSRect(
-            x: MainMenuPanelLayout.width - MainMenuPanelLayout.pinTrailingInset - MainMenuPanelLayout.pinButtonSize,
-            y: centerY - MainMenuPanelLayout.pinButtonSize / 2,
-            width: MainMenuPanelLayout.pinButtonSize,
-            height: MainMenuPanelLayout.pinButtonSize
-        ))
-        pinButton.identifier = NSUserInterfaceItemIdentifier("mainMenuPinButton")
-        pinButton.setButtonType(.momentaryPushIn)
-        pinButton.bezelStyle = .inline
-        pinButton.isBordered = false
-        pinButton.imagePosition = .imageOnly
-        pinButton.target = self
-        pinButton.action = #selector(togglePinnedFromPinButton(_:))
-        updatePinButtonAppearance(pinButton)
-        contentView.addSubview(pinButton)
+    private func addOneDriveStatusButton(status: OneDriveProcessStatus, centerY: CGFloat) {
+        guard case .notInstalled = status else {
+            let button = MainMenuOneDriveStatusButton(frame: NSRect(
+                x: MainMenuPanelLayout.width
+                    - MainMenuPanelLayout.oneDriveStatusTrailingInset
+                    - MainMenuPanelLayout.oneDriveStatusButtonSize,
+                y: centerY - MainMenuPanelLayout.oneDriveStatusButtonSize / 2,
+                width: MainMenuPanelLayout.oneDriveStatusButtonSize,
+                height: MainMenuPanelLayout.oneDriveStatusButtonSize
+            ))
+            button.target = self
+            button.action = #selector(openOneDriveFromStatusButton(_:))
+            button.configure(status: status)
+            contentView.addSubview(button)
+            oneDriveStatusButton = button
+            return
+        }
+        oneDriveStatusButton = nil
     }
 
-    private func updatePinButtonAppearance(_ pinButton: HistoryMenuPinButton) {
-        let symbolName = isPinned ? "pin.fill" : "pin"
-        pinButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
-        pinButton.toolTip = isPinned ? "Unpin Menu" : "Pin Menu"
-        pinButton.setAccessibilityLabel(pinButton.toolTip)
+    private func updateOneDriveStatusButton(_ status: OneDriveProcessStatus) {
+        guard case .notInstalled = status else {
+            if let oneDriveStatusButton {
+                oneDriveStatusButton.configure(status: status)
+            } else {
+                let footerCenterY = MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.rowHeight / 2
+                addOneDriveStatusButton(status: status, centerY: footerCenterY)
+            }
+            return
+        }
+        oneDriveStatusButton?.removeFromSuperview()
+        oneDriveStatusButton = nil
+    }
+
+    private func addQuitButton(centerY: CGFloat) {
+        let button = MainMenuQuitButton(frame: NSRect(
+            x: MainMenuPanelLayout.quitButtonLeadingInset,
+            y: centerY - MainMenuPanelLayout.quitButtonSize / 2,
+            width: MainMenuPanelLayout.quitButtonSize,
+            height: MainMenuPanelLayout.quitButtonSize
+        ))
+        button.target = self
+        button.action = #selector(quitFromFooterButton(_:))
+        contentView.addSubview(button)
     }
 
     private func addSeparator(at verticalPosition: CGFloat) {
@@ -469,26 +495,18 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate {
         panel.setFrameTopLeftPoint(NSPoint(x: originX, y: topY))
     }
 
-    private func updatePinnedState(_ pinned: Bool) {
-        guard let panel else {
-            isPinned = pinned
-            onPinnedChange(pinned)
-            return
-        }
-
-        let topLeftPoint = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
-        isPinned = pinned
-        onPinnedChange(pinned)
-
-        guard pinned else { return }
-        reloadContent()
-        applyBehavior(to: panel)
-        panel.setFrameTopLeftPoint(topLeftPoint)
-        panel.makeKeyAndOrderFront(nil)
+    func reloadOneDriveStatusIfVisible() {
+        guard panel?.isVisible == true else { return }
+        updateOneDriveStatusButton(oneDriveStatusService.currentStatus())
     }
 
-    @objc private func togglePinnedFromPinButton(_ sender: HistoryMenuPinButton) {
-        updatePinnedState(!isPinned)
+    @objc private func openOneDriveFromStatusButton(_: MainMenuOneDriveStatusButton) {
+        _ = oneDriveStatusService.openOneDrive()
+        updateOneDriveStatusButton(oneDriveStatusService.currentStatus())
+    }
+
+    @objc private func quitFromFooterButton(_ sender: MainMenuQuitButton) {
+        onQuit()
     }
 }
 
@@ -817,11 +835,23 @@ private final class MainMenuPanelRowView: NSControl {
 
 #if DEBUG
 extension MainMenuPanelController {
-    var mainMenuPinButtonFramesForTesting: [NSRect] {
+    var mainMenuOneDriveStatusButtonFramesForTesting: [NSRect] {
         contentView.layoutSubtreeIfNeeded()
-        return mainMenuPinButtonsForTesting.map { button in
+        return mainMenuOneDriveStatusButtonsForTesting.map { button in
             button.superview?.convert(button.frame, to: contentView) ?? .zero
         }
+    }
+
+    var mainMenuQuitButtonFramesForTesting: [NSRect] {
+        contentView.layoutSubtreeIfNeeded()
+        return mainMenuQuitButtonsForTesting.map { button in
+            button.superview?.convert(button.frame, to: contentView) ?? .zero
+        }
+    }
+
+    var mainMenuButtonIdentifiersForTesting: [String] {
+        contentView.layoutSubtreeIfNeeded()
+        return collectButtons(in: contentView).compactMap { $0.identifier?.rawValue }
     }
 
     func mainMenuActionRowFrameForTesting(title: String) -> NSRect? {
@@ -866,8 +896,20 @@ extension MainMenuPanelController {
         return row.titleAvailableWidthForTesting
     }
 
-    func performMainMenuPinClickForTesting() {
-        mainMenuPinButtonsForTesting.first?.performClick(nil)
+    var mainMenuOneDriveStatusTintColorForTesting: NSColor? {
+        mainMenuOneDriveStatusButtonsForTesting.first?.contentTintColor
+    }
+
+    var mainMenuOneDriveStatusToolTipForTesting: String? {
+        mainMenuOneDriveStatusButtonsForTesting.first?.toolTip
+    }
+
+    func performMainMenuOneDriveStatusClickForTesting() {
+        mainMenuOneDriveStatusButtonsForTesting.first?.performClick(nil)
+    }
+
+    func performMainMenuQuitClickForTesting() {
+        mainMenuQuitButtonsForTesting.first?.performClick(nil)
     }
 
     var selectedMainMenuTitleForTesting: String? {
@@ -894,17 +936,25 @@ extension MainMenuPanelController {
         return contentView.subviews.compactMap { $0 as? MainMenuPanelRowView }
     }
 
-    private var mainMenuPinButtonsForTesting: [NSButton] {
-        func collectButtons(in view: NSView) -> [NSButton] {
-            var buttons = view.subviews
-                .compactMap { $0 as? NSButton }
-                .filter { $0.identifier?.rawValue == "mainMenuPinButton" && !$0.isHidden }
-            for subview in view.subviews {
-                buttons.append(contentsOf: collectButtons(in: subview))
-            }
-            return buttons
+    private var mainMenuOneDriveStatusButtonsForTesting: [NSButton] {
+        collectButtons(identifier: "mainMenuOneDriveStatusButton")
+    }
+
+    private var mainMenuQuitButtonsForTesting: [NSButton] {
+        collectButtons(identifier: "mainMenuQuitButton")
+    }
+
+    private func collectButtons(identifier: String) -> [NSButton] {
+        collectButtons(in: contentView)
+            .filter { $0.identifier?.rawValue == identifier && !$0.isHidden }
+    }
+
+    private func collectButtons(in view: NSView) -> [NSButton] {
+        var buttons = view.subviews.compactMap { $0 as? NSButton }
+        for subview in view.subviews {
+            buttons.append(contentsOf: collectButtons(in: subview))
         }
-        return collectButtons(in: contentView)
+        return buttons
     }
 }
 

@@ -301,11 +301,20 @@ struct GeneralPreferenceMergedMenuTests {
             of: ["Number of characters in the menu:", "菜单中字符的个数："],
             in: textFields
         )
+        let mediaHistoryLimitFrame = try textFrame(
+            of: ["Image/file limit:", "图片/文件上限："],
+            in: textFields
+        )
+        let mediaImageLimitFrame = try textFrame(of: ["Images", "图片"], in: textFields)
+        let mediaFileLimitFrame = try textFrame(of: ["Files", "文件"], in: textFields)
         let visibleControlsFrame = [
             launchFrame,
             clearHistoryFrame,
             opacityFrame,
             menuTitleLengthFrame,
+            mediaHistoryLimitFrame,
+            mediaImageLimitFrame,
+            mediaFileLimitFrame,
             reorderFrame,
             moveFrame,
             colorPreviewFrame,
@@ -313,7 +322,6 @@ struct GeneralPreferenceMergedMenuTests {
             automaticPasteInfoFrame,
             remoteFrame
         ].reduce(NSRect.null) { $0.union($1) }
-
         #expect(!sidebarButtonTitles.contains { ["Menu", "菜单"].contains($0) })
         #expect(buttonFrames.allSatisfy { !removedButtonTitles.contains($0.title) })
         #expect(textFields.allSatisfy { !removedTextTitles.contains($0.text) })
@@ -324,6 +332,9 @@ struct GeneralPreferenceMergedMenuTests {
             clearHistoryFrame,
             opacityFrame,
             menuTitleLengthFrame,
+            mediaHistoryLimitFrame,
+            mediaImageLimitFrame,
+            mediaFileLimitFrame,
             reorderFrame,
             moveFrame,
             colorPreviewFrame,
@@ -334,6 +345,8 @@ struct GeneralPreferenceMergedMenuTests {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
         }
+        #expect(abs(mediaImageLimitFrame.midY - mediaFileLimitFrame.midY) <= 2)
+        #expect(mediaImageLimitFrame.maxX < mediaFileLimitFrame.minX)
         #expect(automaticPasteInfoFrame.minX > automaticPasteFrame.minX)
         #expect(abs(automaticPasteInfoFrame.midY - automaticPasteFrame.midY) <= 2)
     }

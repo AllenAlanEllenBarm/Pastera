@@ -89,7 +89,7 @@ struct PasteboardContentTests {
     }
 
     @Test
-    func thumbnailImageIsCreatedFromStoredTiffData() {
+    func thumbnailImageIsCreatedFromStoredTiffData() throws {
         let defaults = UserDefaults.standard
         let previousWidth = defaults.object(forKey: Constants.UserDefaults.thumbnailWidth)
         let previousHeight = defaults.object(forKey: Constants.UserDefaults.thumbnailHeight)
@@ -109,9 +109,11 @@ struct PasteboardContentTests {
         defaults.set(6, forKey: Constants.UserDefaults.thumbnailHeight)
 
         let image = NSImage.create(with: .blue, size: NSSize(width: 20, height: 10))
+        let sourceBitmap = try #require(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
         let content = PasteboardContent(image: image)
+        let expectedSize = NSSize(width: sourceBitmap.pixelsWide, height: sourceBitmap.pixelsHigh)
 
-        #expect(content?.thumbnailImage?.size == NSSize(width: 20, height: 10))
+        #expect(content?.thumbnailImage?.size == expectedSize)
     }
 
     @Test
@@ -137,13 +139,15 @@ struct PasteboardContentTests {
         let image = NSImage.create(with: .blue, size: NSSize(width: 20, height: 10))
         let tiffData = try #require(image.tiffRepresentation)
         let pngData = try #require(NSBitmapImageRep(data: tiffData)?.representation(using: .png, properties: [:]))
+        let sourceBitmap = try #require(NSBitmapImageRep(data: pngData))
         let content = PasteboardContent(
             assets: [
                 PasteboardContent.Asset(type: .png, data: pngData)
             ]
         )
+        let expectedSize = NSSize(width: sourceBitmap.pixelsWide, height: sourceBitmap.pixelsHigh)
 
-        #expect(content.thumbnailImage?.size == NSSize(width: 20, height: 10))
+        #expect(content.thumbnailImage?.size == expectedSize)
     }
 
     @Test

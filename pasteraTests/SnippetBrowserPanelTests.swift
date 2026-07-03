@@ -134,7 +134,7 @@ struct SnippetBrowserPanelTests {
 
     @Test
     func mainMenuHeaderDisplaysRightAlignedShortcutText() throws {
-        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, isPinned: false, shortcutText: "⌃⌘V")
+        let menuItemView = MainMenuHeaderItemView(title: "History", image: nil, shortcutText: "⌃⌘V")
 
         let shortcutBadge = try #require(menuItemView.subviews.compactMap { $0 as? PasteraShortcutBadgeView }
             .first { $0.shortcutTextForTesting == "⌃⌘V" })

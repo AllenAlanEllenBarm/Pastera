@@ -20,6 +20,7 @@ struct Environment {
     let pasteService: PasteService
     let excludeAppService: ExcludeAppService
     let accessibilityService: AccessibilityService
+    let oneDriveProcessStatusService: OneDriveProcessStatusServicing
     let menuManager: MenuManager
 
     let defaults: UserDefaults
@@ -30,6 +31,7 @@ struct Environment {
          pasteService: PasteService = PasteService(),
          excludeAppService: ExcludeAppService = ExcludeAppService(applications: []),
          accessibilityService: AccessibilityService = AccessibilityService(),
+         oneDriveProcessStatusService: OneDriveProcessStatusServicing = OneDriveProcessStatusService(),
          menuManager: MenuManager = MenuManager(),
          defaults: UserDefaults = .standard) {
 
@@ -38,6 +40,7 @@ struct Environment {
         self.pasteService = pasteService
         self.excludeAppService = excludeAppService
         self.accessibilityService = accessibilityService
+        self.oneDriveProcessStatusService = oneDriveProcessStatusService
         self.menuManager = menuManager
         self.defaults = defaults
     }

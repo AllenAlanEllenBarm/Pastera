@@ -64,6 +64,8 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: false), forKey: Constants.UserDefaults.suppressAlertForLoginItem)
         defaultValues.updateValue(NSNumber(value: 30), forKey: Constants.UserDefaults.maxHistorySize)
         defaultValues.updateValue(NSNumber(value: 2000), forKey: Constants.UserDefaults.storedHistoryLimit)
+        defaultValues.updateValue(NSNumber(value: 15), forKey: Constants.UserDefaults.maxImageHistorySize)
+        defaultValues.updateValue(NSNumber(value: 15), forKey: Constants.UserDefaults.maxFileHistorySize)
         defaultValues.updateValue(NSNumber(value: 256 * 1024), forKey: Constants.UserDefaults.maxSyncedHistoryTextBytes)
         defaultValues.updateValue(
             NSNumber(value: 8 * 1024 * 1024),

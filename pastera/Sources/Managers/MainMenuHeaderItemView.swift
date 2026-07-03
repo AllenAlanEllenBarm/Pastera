@@ -18,32 +18,25 @@ final class MainMenuHeaderItemView: NSControl {
         static let height: CGFloat = MainMenuPanelLayout.headerHeight
         static let horizontalInset: CGFloat = 10
         static let iconSize: CGFloat = 18
-        static let pinSize: CGFloat = 22
         static let hoverOpenDelay: TimeInterval = 0.55
     }
 
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let shortcutBadge = PasteraShortcutBadgeView()
-    private let pinButton = HistoryMenuPinButton()
     private var trackingArea: NSTrackingArea?
     private var isMouseInside = false
     private var didTriggerHoverOpen = false
     private var pendingHoverOpen: DispatchWorkItem?
     private var didDragWindow = false
     private var isKeyboardSelected = false
-    private var isPinned: Bool
-    private let showsPin: Bool
 
     var allowsWindowDrag = false
     var onOpen: (() -> Void)?
     var onHoverOpen: (() -> Void)?
     var onHoverFocus: (() -> Void)?
-    var onPinnedChange: ((Bool, NSRect?) -> Void)?
 
-    init(title: String, image: NSImage?, isPinned: Bool, showsPin: Bool = true, shortcutText: String? = nil) {
-        self.isPinned = isPinned
-        self.showsPin = showsPin
+    init(title: String, image: NSImage?, shortcutText: String? = nil) {
         super.init(frame: NSRect(x: 0, y: 0, width: Metrics.width, height: Metrics.height))
         setup(title: title, image: image, shortcutText: shortcutText)
     }
@@ -86,7 +79,6 @@ final class MainMenuHeaderItemView: NSControl {
             didDragWindow = false
             return
         }
-        guard !pinButtonContains(event) else { return }
         onOpen?()
     }
 
@@ -97,11 +89,6 @@ final class MainMenuHeaderItemView: NSControl {
         }
         didDragWindow = true
         window?.performDrag(with: event)
-    }
-
-    func setPinned(_ pinned: Bool) {
-        isPinned = pinned
-        updatePinAppearance()
     }
 
     func setKeyboardSelected(_ selected: Bool) {
@@ -127,21 +114,12 @@ final class MainMenuHeaderItemView: NSControl {
 
         shortcutBadge.shortcutText = shortcutText
 
-        pinButton.identifier = NSUserInterfaceItemIdentifier("mainMenuPinButton")
-        pinButton.setButtonType(.momentaryPushIn)
-        pinButton.bezelStyle = .inline
-        pinButton.isBordered = false
-        pinButton.imagePosition = .imageOnly
-        pinButton.isHidden = !showsPin
-        pinButton.target = self
-        pinButton.action = #selector(togglePinned(_:))
-
-        [imageView, titleLabel, shortcutBadge, pinButton].forEach {
+        [imageView, titleLabel, shortcutBadge].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
 
-        var constraints = [
+        NSLayoutConstraint.activate([
             imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalInset),
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
@@ -150,28 +128,12 @@ final class MainMenuHeaderItemView: NSControl {
             titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 7),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
+            shortcutBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
             shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ]
-
-        if showsPin {
-            constraints += [
-                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
-                shortcutBadge.trailingAnchor.constraint(equalTo: pinButton.leadingAnchor, constant: -6),
-                pinButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
-                pinButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-                pinButton.widthAnchor.constraint(equalToConstant: Metrics.pinSize),
-                pinButton.heightAnchor.constraint(equalToConstant: Metrics.pinSize)
-            ]
-        } else {
-            constraints += [
-                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
-                shortcutBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset)
-            ]
-        }
-        NSLayoutConstraint.activate(constraints)
+        ])
 
         updateAppearance()
-        updatePinAppearance()
     }
 
     private func updateAppearance() {
@@ -199,24 +161,5 @@ final class MainMenuHeaderItemView: NSControl {
     private func cancelPendingHoverOpen() {
         pendingHoverOpen?.cancel()
         pendingHoverOpen = nil
-    }
-
-    private func updatePinAppearance() {
-        guard showsPin else { return }
-        let symbolName = isPinned ? "pin.fill" : "pin"
-        pinButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
-        pinButton.toolTip = isPinned ? "Unpin Menu" : "Pin Menu"
-        pinButton.setAccessibilityLabel(pinButton.toolTip)
-    }
-
-    private func pinButtonContains(_ event: NSEvent) -> Bool {
-        guard showsPin else { return false }
-        let location = pinButton.convert(event.locationInWindow, from: nil)
-        return pinButton.bounds.contains(location)
-    }
-
-    @objc private func togglePinned(_ sender: NSButton) {
-        onPinnedChange?(!isPinned, window?.frame)
     }
 }

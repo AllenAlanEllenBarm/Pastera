@@ -41,6 +41,7 @@ struct AppEnvironment {
                      pasteService: PasteService = current.pasteService,
                      excludeAppService: ExcludeAppService = current.excludeAppService,
                      accessibilityService: AccessibilityService = current.accessibilityService,
+                     oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                      menuManager: MenuManager = current.menuManager,
                      defaults: UserDefaults = current.defaults) {
         push(environment: Environment(clipService: clipService,
@@ -48,6 +49,7 @@ struct AppEnvironment {
                                       pasteService: pasteService,
                                       excludeAppService: excludeAppService,
                                       accessibilityService: accessibilityService,
+                                      oneDriveProcessStatusService: oneDriveProcessStatusService,
                                       menuManager: menuManager,
                                       defaults: defaults))
     }
@@ -57,6 +59,7 @@ struct AppEnvironment {
                                pasteService: PasteService = current.pasteService,
                                excludeAppService: ExcludeAppService = current.excludeAppService,
                                accessibilityService: AccessibilityService = current.accessibilityService,
+                               oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                                menuManager: MenuManager = current.menuManager,
                                defaults: UserDefaults = current.defaults) {
         replaceCurrent(environment: Environment(clipService: clipService,
@@ -64,6 +67,7 @@ struct AppEnvironment {
                                                 pasteService: pasteService,
                                                 excludeAppService: excludeAppService,
                                                 accessibilityService: accessibilityService,
+                                                oneDriveProcessStatusService: oneDriveProcessStatusService,
                                                 menuManager: menuManager,
                                                 defaults: defaults))
     }

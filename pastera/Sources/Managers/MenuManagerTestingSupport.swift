@@ -84,12 +84,10 @@ extension MenuManager {
     }
 
     func showMainMenuPanelForTesting(at screenPoint: NSPoint) {
-        isMainMenuPinned = true
         showMainMenuPanel(at: screenPoint)
     }
 
     func showMainMenuPanelForTesting(at screenPoint: NSPoint, pasteTargetContext: PasteTargetContext) {
-        isMainMenuPinned = true
         showMainMenuPanel(at: screenPoint, pasteTargetContext: pasteTargetContext)
     }
 

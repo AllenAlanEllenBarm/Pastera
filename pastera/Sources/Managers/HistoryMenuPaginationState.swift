@@ -252,14 +252,12 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         static let filterTopSpacing: CGFloat = 5
         static let filterHeight: CGFloat = 22
         static let buttonSize: CGFloat = 24
-        static let pinButtonSize: CGFloat = 24
         static let pageWidth: CGFloat = 28
     }
 
     private let searchField = HistoryMenuSearchField()
     private let previousButton = HistoryMenuFocusableButton()
     private let nextButton = HistoryMenuFocusableButton()
-    private let pinButton = HistoryMenuPinButton()
     private let pageLabel = NSTextField(labelWithString: "")
     private let regexOptionControl = HistoryMenuFocusableSegmentedControl(
         labels: [".*"],
@@ -289,13 +287,6 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     var onPanelShortcutKeyDown: ((NSEvent) -> Bool)? {
         didSet { searchField.onPanelShortcutKeyDown = onPanelShortcutKeyDown }
     }
-    var onPinnedChange: ((Bool) -> Void)? {
-        didSet {
-            let supportsPinning = onPinnedChange != nil
-            pinButton.isHidden = !supportsPinning
-            pinButton.isEnabled = supportsPinning
-        }
-    }
 
     var firstHeaderFocusableView: NSView { searchField }
     var lastHeaderFocusableView: NSView { headerFocusableViews.last ?? searchField }
@@ -305,7 +296,6 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     private weak var lastKeyboardFocusOwner: NSView?
     private var trackingArea: NSTrackingArea?
     private var queryChangeTimer: Timer?
-    private var isPinned = false
     var markedTextStateProvider: (() -> Bool)?
     var queryDebounceInterval: TimeInterval = 0.12
     var usesMenuTrackingKeyMonitor = true {
@@ -350,7 +340,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         removeKeyDownMonitor()
     }
 
-    func configure(state: HistoryMenuPaginationState, hasNextPage: Bool, isPinned: Bool = false) {
+    func configure(state: HistoryMenuPaginationState, hasNextPage: Bool) {
         if searchField.stringValue != state.query {
             searchField.stringValue = state.query
         }
@@ -363,7 +353,6 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         pageLabel.stringValue = "\(state.displayPage)"
         previousButton.updateHistoryShortcutToolTip("Previous Page", shortcut: .previousPage)
         nextButton.updateHistoryShortcutToolTip("Next Page", shortcut: .nextPage)
-        updatePinnedState(isPinned)
         configureKeyViewLoop()
     }
 
@@ -407,10 +396,6 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
 
         configureButton(previousButton, symbolName: "chevron.left", accessibilityLabel: "Previous Page", action: #selector(previousPage(_:)))
         configureButton(nextButton, symbolName: "chevron.right", accessibilityLabel: "Next Page", action: #selector(nextPage(_:)))
-        configureButton(pinButton, symbolName: "pin", accessibilityLabel: "Pin History", action: #selector(pinOptionChanged(_:)))
-        pinButton.identifier = NSUserInterfaceItemIdentifier("historyPinButton")
-        pinButton.isHidden = true
-        pinButton.isEnabled = false
         previousButton.isEnabled = false
         nextButton.isEnabled = false
 
@@ -447,7 +432,6 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
             previousButton,
             pageLabel,
             nextButton,
-            pinButton,
             regexOptionControl,
             caseSensitiveOptionControl,
             typeSegmentedControl
@@ -474,12 +458,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
             nextButton.centerYAnchor.constraint(equalTo: previousButton.centerYAnchor),
             nextButton.widthAnchor.constraint(equalToConstant: Metrics.buttonSize),
             nextButton.heightAnchor.constraint(equalToConstant: Metrics.buttonSize),
-
-            pinButton.leadingAnchor.constraint(equalTo: nextButton.trailingAnchor, constant: 3),
-            pinButton.centerYAnchor.constraint(equalTo: nextButton.centerYAnchor),
-            pinButton.widthAnchor.constraint(equalToConstant: Metrics.pinButtonSize),
-            pinButton.heightAnchor.constraint(equalToConstant: Metrics.pinButtonSize),
-            pinButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.inset),
+            nextButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.inset),
 
             regexOptionControl.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
             regexOptionControl.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.filterTopSpacing),
@@ -490,7 +469,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
             caseSensitiveOptionControl.heightAnchor.constraint(equalToConstant: Metrics.filterHeight),
 
             typeSegmentedControl.leadingAnchor.constraint(greaterThanOrEqualTo: caseSensitiveOptionControl.trailingAnchor, constant: 10),
-            typeSegmentedControl.trailingAnchor.constraint(equalTo: pinButton.trailingAnchor),
+            typeSegmentedControl.trailingAnchor.constraint(equalTo: nextButton.trailingAnchor),
             typeSegmentedControl.centerYAnchor.constraint(equalTo: regexOptionControl.centerYAnchor),
             typeSegmentedControl.heightAnchor.constraint(equalToConstant: Metrics.filterHeight)
         ])
@@ -739,19 +718,6 @@ extension HistoryMenuHeaderView {
 }
 
 extension HistoryMenuHeaderView {
-    func updatePinnedState(_ pinned: Bool) {
-        isPinned = pinned
-        let symbolName = pinned ? "pin.fill" : "pin"
-        pinButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        pinButton.contentTintColor = pinned ? .controlAccentColor : .secondaryLabelColor
-        pinButton.toolTip = pinned ? "Unpin History" : "Pin History"
-        pinButton.setAccessibilityLabel(pinButton.toolTip)
-    }
-
-    @objc func pinOptionChanged(_ sender: NSButton) {
-        onPinnedChange?(!isPinned)
-    }
-
     @discardableResult
     func handleHistoryKeyboardEvent(_ event: NSEvent) -> Bool {
         if let direction = historySelectionDirection(for: event) {

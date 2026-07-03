@@ -48,6 +48,8 @@ struct Constants {
         static let menuIconSize = "kCPYPrefMenuIconSizeKey"
         static let maxHistorySize = "kCPYPrefMaxHistorySizeKey"
         static let storedHistoryLimit = "kCPYPrefStoredHistoryLimitKey"
+        static let maxImageHistorySize = "kPasteraMaxImageHistorySizeKey"
+        static let maxFileHistorySize = "kPasteraMaxFileHistorySizeKey"
         static let maxSyncedHistoryTextBytes = "kCPYPrefMaxSyncedHistoryTextBytesKey"
         static let maxHistorySnapshotTextBudgetBytes = "kCPYPrefMaxHistorySnapshotTextBudgetBytesKey"
         static let maxSyncedFileBytes = "kCPYPrefMaxSyncedFileBytesKey"
