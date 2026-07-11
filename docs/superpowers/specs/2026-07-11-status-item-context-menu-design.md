@@ -2,14 +2,15 @@
 
 ## 目标
 
-为 Pastera 的 macOS 状态栏图标增加原生右击快捷菜单，同时保留现有左击打开主面板的交互。菜单只暴露当前已经存在、能够复用的产品能力，不为参考产品中特有的功能创建空入口。
+为 Pastera 的 macOS 状态栏图标增加原生右击快捷菜单，同时保留现有左击打开主界面的交互。历史、片段和密码库统一使用主界面的内嵌模式，不再打开独立历史或片段面板。菜单只暴露当前已经存在、能够复用的产品能力，不为参考产品中特有的功能创建空入口。
 
 ## 交互约定
 
-- 左击状态栏图标：保持现有行为，打开附着于状态栏图标的 Pastera 主面板。
+- 左击状态栏图标：打开附着于状态栏图标的 Pastera 主界面。
 - 右击状态栏图标：弹出独立的原生 `NSMenu` 快捷菜单。
 - 菜单使用标准菜单跟踪、键盘导航和辅助功能行为。
 - 菜单每次打开前刷新动态启用状态，避免展示过期状态。
+- 主快捷键打开主界面当前模式；历史、片段和密码库入口打开同一个主界面并切换到对应模式。
 
 ## 菜单结构
 
@@ -36,9 +37,9 @@
 | 菜单项 | 复用入口 | 行为 |
 | --- | --- | --- |
 | 打开 Pastera | `MenuManager.showMainMenuPanel(attachedToStatusItemFrame:)` | 打开现有主面板 |
-| 历史记录 | `MenuManager.popUpMenu(.history)` 对应面板入口 | 打开历史记录面板 |
-| 片段 | `MenuManager.popUpMenu(.snippet)` 对应面板入口 | 打开片段面板 |
-| 密码库 | `MenuManager.popUpMenu(.passwordVault)` 对应面板入口 | 打开主面板内的密码库模式 |
+| 历史记录 | `MainMenuPanelController.openHistoryFromMainMenu()` | 打开主界面并切换到历史模式 |
+| 片段 | `MainMenuPanelController.openSnippetsFromMainMenu()` | 打开主界面并切换到片段模式 |
+| 密码库 | `MainMenuPanelController.openPasswordVaultFromMainMenu()` | 打开主界面并切换到密码库模式 |
 | 管理片段 | `AppDelegate.showSnippetEditorWindow` | 打开现有片段编辑器 |
 | 清空历史记录 | `AppDelegate.clearAllHistory` | 显示现有破坏性确认框后清空历史 |
 | 设置 | `AppDelegate.showPreferenceWindow` | 打开设置中心 |
@@ -54,9 +55,11 @@
 
 ## 架构
 
-在 `MenuManager` 的状态栏边界内维护一个独立的右击菜单。`statusItemButtonClicked(_:)` 读取当前 `NSApp.currentEvent` 的鼠标事件类型：右键事件打开快捷菜单，其他事件继续执行现有左击路径。
+在 `MenuManager` 的状态栏边界内维护一个独立的右击菜单。`statusItemButtonClicked(_:)` 读取当前 `NSApp.currentEvent` 的鼠标事件类型：右键事件打开快捷菜单，其他事件继续执行左击主界面路径。
 
-菜单构建和事件分流放在状态栏相关扩展中，业务动作继续由现有 `MenuManager`、`AppDelegate`、设置窗口和 Sparkle updater 所有。右击菜单只做路由，不复制历史、片段、密码库、设置或更新逻辑。
+菜单构建和事件分流放在状态栏相关扩展中，业务动作继续由现有 `MenuManager`、`MainMenuPanelController`、`AppDelegate`、设置窗口和 Sparkle updater 所有。右击菜单只做路由，不复制历史、片段、密码库、设置或更新逻辑。
+
+`MenuManager.popUpMenu(_:)` 不再根据 `.history` 或 `.snippet` 创建独立浏览面板，而是取得或创建 `MainMenuPanelController`、切换对应模式并显示主界面。历史/片段独立面板的产品入口和安全输入回退全部移除；类文件可在入口迁移和测试完成后删除。
 
 “关于 Pastera”需要一个窄的设置页路由入口，使菜单能够打开设置窗口并选中已有的关于页；不创建第二个关于窗口。
 
@@ -68,6 +71,16 @@
 - 独立 OCR 菜单：OCR 当前是历史索引和搜索能力，不是可单独执行的动作。
 - 独立 OneDrive 菜单：OneDrive 当前属于设置中心的同步配置，不作为首版高频快捷入口。
 - 自定义悬浮菜单面板或参考截图的像素级视觉复刻。
+
+## 安全键盘输入边界
+
+macOS 安全键盘输入会在 Pastera 收到事件之前阻止其他进程观察全局键盘事件。Pastera 无法通过 Carbon、AppKit 事件监听、辅助功能权限或窗口激活策略合法绕过这一系统安全边界。
+
+- 删除安全输入开启时的旧版 `NSMenu` 历史/片段回退。
+- 安全输入期间，全局快捷键不可用是明确的系统限制，不伪装为应用可恢复的事件。
+- 状态栏图标继续以橙色显示受限状态，并提示用户点击图标打开 Pastera。
+- 状态栏左击不依赖全局键盘事件，始终打开统一主界面。
+- 安全输入结束后，现有全局快捷键注册自动恢复正常响应，无需用户重新配置。
 
 ## 错误与生命周期处理
 
@@ -84,6 +97,10 @@
 - 左击调用现有主面板路径。
 - 右击只弹出快捷菜单，不打开主面板。
 - 菜单项顺序、标题、分隔线和动作映射符合本规格。
+- 主快捷键、历史快捷键和片段快捷键都使用主界面，历史/片段入口分别选中对应模式。
+- 正常状态与安全输入状态都不调用旧版菜单回退。
+- 安全输入状态提示明确说明全局快捷键由 macOS 暂停，并提供状态栏点击入口。
+- 历史和片段独立面板不再有可达的产品入口。
 - 无历史时禁用“清空历史记录”，有历史时启用。
 - Sparkle 不可检查更新时禁用“检查更新…”，可检查时启用并正确路由。
 - “关于 Pastera”打开设置中心的关于页。
