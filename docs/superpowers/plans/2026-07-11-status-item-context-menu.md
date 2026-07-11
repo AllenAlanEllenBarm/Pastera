@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a native right-click menu to the Pastera menu bar icon while preserving the existing left-click main panel.
+**Goal:** Add a native right-click menu and route every history, snippet, and password-vault entry through the unified Pastera main interface.
 
-**Architecture:** `MenuManagerStatusItem.swift` owns mouse-event routing, native menu construction, dynamic validation, and narrow action adapters. Existing `MenuManager`, `AppDelegate`, preferences, repositories, and Sparkle updater remain the business owners; the context menu only routes to them.
+**Architecture:** `MenuManagerStatusItem.swift` owns mouse-event routing, native menu construction, dynamic validation, and narrow action adapters. `MenuManager.popUpMenu(_:)` becomes the single mode-routing boundary: it creates the main controller, selects the requested embedded mode, and shows the same main interface for hotkeys and context-menu actions. Existing `AppDelegate`, preferences, repositories, and Sparkle updater remain the business owners.
 
 **Tech Stack:** Swift 6, AppKit `NSStatusItem`/`NSMenu`, Sparkle, Swift Testing, Xcode.
 
@@ -16,6 +16,10 @@
 - Clear History is disabled when the history repository is empty.
 - Check for Updates… is disabled when Sparkle is unavailable or cannot check.
 - About Pastera opens the existing About preference pane; do not create a second window.
+- Main, History, Snippet, and Password Vault hotkeys all open the same `MainMenuPanelController`; mode-specific hotkeys select their matching embedded mode.
+- Remove the secure-input legacy `NSMenu` fallback and all normal product routes to standalone history and snippet browser panels.
+- Secure Keyboard Entry can block global hotkeys before Pastera receives them; the orange status icon and tooltip must direct users to click the status item instead of promising a keyboard bypass.
+- After Secure Keyboard Entry ends, registered hotkeys resume without reconfiguration.
 - Use SF Symbols without making icons the only accessible labels.
 - Do not add Quick Reply, Clipboard Stack, Pause Monitoring, standalone OCR, standalone OneDrive, or a custom floating-menu UI.
 - Preserve all unrelated dirty and untracked workspace changes.
@@ -122,7 +126,7 @@ git commit -m "feat(menu): define status item context menu"
 - Test: `pasteraTests/MenuManagerStatusItemTests.swift`
 
 **Interfaces:**
-- Consumes: Task 1 `makeStatusItemContextMenu()`, existing panel methods, `NSMenu.popUp(positioning:at:in:)`.
+- Consumes: Task 1 `makeStatusItemContextMenu()`, unified `popUpMenu(_:)` routing from Task 3, `NSMenu.popUp(positioning:at:in:)`.
 - Produces: `func handleStatusItemClick(eventType: NSEvent.EventType, button: NSStatusBarButton)`, action adapters `openMainPanelFromContextMenu`, `openHistoryFromContextMenu`, `openSnippetFromContextMenu`, `openPasswordVaultFromContextMenu`, and a test-injectable menu popup closure.
 
 - [ ] **Step 1: Write failing event-routing and selector tests**
@@ -175,7 +179,7 @@ func handleStatusItemClick(eventType: NSEvent.EventType, button: NSStatusBarButt
 }
 ```
 
-Implement the four `@objc` adapters by using the status-item frame for the main panel and the existing `.history`, `.snippet`, and `.passwordVault` paths for the other entries. Ensure context-menu tracking has ended before opening a panel by dispatching the panel action to the next main-queue turn.
+Implement the four `@objc` adapters by using the status-item frame for the main interface and the `.history`, `.snippet`, and `.passwordVault` unified routes from Task 3 for the other entries. Ensure context-menu tracking has ended before opening the main interface by dispatching the action to the next main-queue turn.
 
 Add DEBUG hooks that replace only the popup and main-panel calls, so tests verify real branching without displaying UI.
 
@@ -192,7 +196,99 @@ git add -p pastera/Sources/Managers/MenuManagerStatusItem.swift \
 git commit -m "feat(menu): route status item right clicks"
 ```
 
-### Task 3: About-pane and Sparkle update routes
+### Task 3: Unify hotkeys and feature entries in the main interface
+
+**Files:**
+- Modify: `pastera/Sources/Managers/MenuManager.swift`
+- Modify: `pastera/Sources/Managers/MenuManagerTestingSupport.swift`
+- Test: `pasteraTests/MenuManagerStatusItemTests.swift`
+- Test: `pasteraTests/MainMenuEmbeddedContentTests.swift`
+- Test: `pasteraTests/SnippetHotkeyPanelEntrypointTests.swift`
+
+**Interfaces:**
+- Consumes: `MainMenuPanelController.openHistoryFromMainMenu()`, `openSnippetsFromMainMenu()`, `openPasswordVaultFromMainMenu()`, and `show(at:pinned:)`.
+- Produces: one `MenuManager.popUpMenu(_:)` path that displays `MainMenuPanelController` for `.main`, `.history`, `.snippet`, and `.passwordVault`; DEBUG `mainMenuSelectedModeForTesting` evidence.
+
+- [ ] **Step 1: Write failing unified-entry tests**
+
+Replace the secure-input fallback expectations with assertions that both secure and normal states choose the main interface. Add entry tests that call `popUpMenu(.history)`, `popUpMenu(.snippet)`, and `popUpMenu(.passwordVault)` and assert the main controller mode is respectively `history`, `snippets`, and `passwordVault`, while `historyBrowserPanelFrameForTesting` and `snippetBrowserPanelFrameForTesting` remain nil.
+
+```swift
+manager.secureEventInputEnabledProvider = { true }
+manager.popUpMenu(.history)
+#expect(manager.mainMenuSelectedModeForTesting == "history")
+#expect(manager.historyBrowserPanelFrameForTesting == nil)
+
+manager.popUpMenu(.snippet)
+#expect(manager.mainMenuSelectedModeForTesting == "snippets")
+#expect(manager.snippetBrowserPanelFrameForTesting == nil)
+```
+
+- [ ] **Step 2: Run targeted suites and verify RED**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation test \
+  -only-testing:pasteraTests/MenuManagerStatusItemTests \
+  -only-testing:pasteraTests/MainMenuEmbeddedContentTests \
+  -only-testing:pasteraTests/SnippetHotkeyPanelEntrypointTests
+```
+
+Expected: FAIL because history/snippet still create standalone panels and secure input still routes to legacy menus.
+
+- [ ] **Step 3: Implement the unified mode router**
+
+Remove `shouldUseLegacyMenuFallback` and `popUpLegacyMenu(_:)`. In `popUpMenu(_:)`, always obtain `mainMenuPanelController ?? makeMainMenuPanelController()`, store it, select a mode when needed, then show it once:
+
+```swift
+func popUpMenu(_ type: MenuType, triggerKeyCombo: KeyCombo? = nil) {
+    let controller = mainMenuPanelController ?? makeMainMenuPanelController()
+    mainMenuPanelController = controller
+    switch type {
+    case .main:
+        break
+    case .history:
+        controller.openHistoryFromMainMenu()
+    case .snippet:
+        controller.openSnippetsFromMainMenu()
+    case .passwordVault:
+        controller.openPasswordVaultFromMainMenu()
+    }
+    controller.show(at: NSEvent.mouseLocation, pinned: false)
+    installPanelDismissMonitorsIfNeeded()
+}
+```
+
+Keep `triggerKeyCombo` temporarily source-compatible until all call sites are migrated, but do not use it to create a standalone panel. Remove legacy-mode testing support and replace it with selected-main-mode evidence.
+
+- [ ] **Step 4: Update the secure-input notice**
+
+Change the notice copy to state that macOS has paused global shortcuts and that clicking the Pastera menu bar icon opens the app. Keep the orange status item tint and matching tooltip; do not suggest that Pastera can bypass Secure Keyboard Entry.
+
+- [ ] **Step 5: Run targeted suites and verify GREEN**
+
+Run the Task 3 command again. Expected: PASS with zero failures.
+
+- [ ] **Step 6: Remove unreachable standalone panel product routes**
+
+Delete normal calls from `makeMainMenuPanelController`, context menu actions, and hotkeys to `showHistoryBrowserPanel`/`showSnippetBrowserPanel`. Keep standalone controller source files only if still required by focused legacy tests; otherwise remove the source files and their project references after confirming `rg` finds no production callers.
+
+- [ ] **Step 7: Commit Task 3**
+
+```bash
+git add -p pastera/Sources/Managers/MenuManager.swift \
+  pastera/Sources/Managers/MenuManagerTestingSupport.swift \
+  pastera/Resources/Localizable.xcstrings \
+  pasteraTests/MenuManagerStatusItemTests.swift \
+  pasteraTests/MainMenuEmbeddedContentTests.swift \
+  pasteraTests/SnippetHotkeyPanelEntrypointTests.swift
+git commit -m "refactor(menu): unify feature entries in main interface"
+```
+
+### Task 4: About-pane and Sparkle update routes
 
 **Files:**
 - Modify: `pastera/Sources/AppDelegate.swift`
@@ -267,7 +363,7 @@ Wire the two context-menu items to these selectors.
 
 - [ ] **Step 4: Run both suites and verify GREEN**
 
-Run the Task 3 command again. Expected: PASS with zero failures.
+Run the Task 4 command again. Expected: PASS with zero failures.
 
 - [ ] **Step 5: Commit Task 3**
 
@@ -280,14 +376,14 @@ git add -p pastera/Sources/AppDelegate.swift \
 git commit -m "feat(menu): connect app management actions"
 ```
 
-### Task 4: Localization, regression verification, and live UI acceptance
+### Task 5: Localization, regression verification, and live UI acceptance
 
 **Files:**
 - Modify: `pastera/Resources/Localizable.xcstrings`
 - Test: `pasteraTests/MenuManagerStatusItemTests.swift`
 
 **Interfaces:**
-- Consumes: all Task 1-3 interfaces.
+- Consumes: all Task 1-4 interfaces.
 - Produces: localized English, German, Italian, Japanese, and Simplified Chinese titles for newly introduced strings.
 
 - [ ] **Step 1: Add failing localization assertions**
@@ -304,7 +400,7 @@ Add translations for every new key introduced by Tasks 1-3. Reuse existing catal
 
 - [ ] **Step 4: Run targeted suites**
 
-Run the Task 3 command. Expected: PASS with zero failures.
+Run the Task 4 command. Expected: PASS with zero failures.
 
 - [ ] **Step 5: Run the full build**
 
@@ -325,9 +421,12 @@ Use the repository's existing build/install workflow. Launch the freshly built P
 1. Left-click the Pastera menu bar icon and confirm the existing main panel opens attached to the icon.
 2. Close it, right-click the icon, and confirm the native menu opens without the main panel.
 3. Confirm all titles, icons, separators, and enabled states match the specification.
-4. Activate History, Snippet, Password Vault, Manage Snippets, Preferences, Check for Updates…, About Pastera, and Clear History (cancel the destructive confirmation) one at a time.
-5. Confirm About Pastera selects the existing About preference pane.
-6. Do not activate Quit until all other checks have completed; then confirm it terminates the app.
+4. Activate History, Snippet, and Password Vault one at a time; confirm each opens the same main interface in its matching mode and no standalone panel appears.
+5. Activate Manage Snippets, Preferences, Check for Updates…, About Pastera, and Clear History (cancel the destructive confirmation) one at a time.
+6. Confirm About Pastera selects the existing About preference pane.
+7. Enable Secure Keyboard Entry in a password field, confirm the status icon becomes orange, confirm hotkeys are system-blocked, and confirm clicking the icon still opens the unified main interface.
+8. End Secure Keyboard Entry and confirm the registered hotkeys resume without reconfiguration.
+9. Do not activate Quit until all other checks have completed; then confirm it terminates the app.
 
 - [ ] **Step 7: Review the scoped diff and commit**
 
