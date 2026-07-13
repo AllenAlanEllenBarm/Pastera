@@ -81,6 +81,7 @@
 		C5F510000000000000000005 /* ScriptTemplateCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F510000000000000000006 /* ScriptTemplateCatalog.swift */; };
 		C5F520000000000000000001 /* ScriptPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F520000000000000000002 /* ScriptPreferenceTests.swift */; };
 		C5F520000000000000000003 /* ScriptTemplateMarketViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */; };
+		C5F530000000000000000001 /* ScriptTestViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F530000000000000000002 /* ScriptTestViewController.swift */; };
 		FEE500000000000000000003 /* AboutPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEE500000000000000000004 /* AboutPreferenceTests.swift */; };
 		C5D100022FE010000B7C0DE /* PasteraSetupGuideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */; };
 		C5D100042FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */; };
@@ -303,6 +304,7 @@
 		C5F510000000000000000006 /* ScriptTemplateCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptTemplateCatalog.swift; sourceTree = "<group>"; };
 		C5F520000000000000000002 /* ScriptPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptPreferenceTests.swift; sourceTree = "<group>"; };
 		C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptTemplateMarketViewController.swift; sourceTree = "<group>"; };
+		C5F530000000000000000002 /* ScriptTestViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptTestViewController.swift; sourceTree = "<group>"; };
 		FEE500000000000000000004 /* AboutPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutPreferenceTests.swift; sourceTree = "<group>"; };
 		C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideService.swift; sourceTree = "<group>"; };
 		C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideStepRowView.swift; sourceTree = "<group>"; };
@@ -699,6 +701,7 @@
 					C5F500000000000000000002 /* CPYScriptsPreferenceViewController.swift */,
 					C5F500000000000000000004 /* ScriptEditorViewController.swift */,
 					C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */,
+					C5F530000000000000000002 /* ScriptTestViewController.swift */,
 			);
 			path = Panels;
 			sourceTree = "<group>";
@@ -994,6 +997,7 @@
 				C5F500000000000000000001 /* CPYScriptsPreferenceViewController.swift in Sources */,
 				C5F500000000000000000003 /* ScriptEditorViewController.swift in Sources */,
 				C5F520000000000000000003 /* ScriptTemplateMarketViewController.swift in Sources */,
+				C5F530000000000000000001 /* ScriptTestViewController.swift in Sources */,
 				FA1DB4A21DDCB433007F95C8 /* AppDelegate.swift in Sources */,
 				C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */,
 				C5E207002FF2000000B7C0DE /* CPYHistoryPreferenceViewController.swift in Sources */,

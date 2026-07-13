@@ -1,9 +1,27 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Pastera
 
 @MainActor
 struct ScriptPreferenceTests {
+    @Test
+    func scriptsPreferencePageSeparatesManagementShortcutAndTesting() {
+        let page = CPYScriptsPreferenceViewController(
+            repository: ScriptPreferenceRepository(scripts: []),
+            executor: ScriptExecutionService(),
+            hotKeyService: HotKeyService()
+        )
+        _ = page.view
+
+        #expect(page.emptyStateMinimumHeightForTesting >= 120)
+        #expect(page.emptyStateMinimumHeightForTesting <= 150)
+        #expect(!page.hasEmbeddedTestControlsForTesting)
+        #expect(page.hasSeparateShortcutCardForTesting)
+        #expect(!page.isTestActionEnabledForTesting)
+        #expect(page.view.fittingSize.height > 200)
+    }
+
     @Test
     func editorRequiresSuccessfulValidationBeforeSave() async {
         let editor = ScriptEditorViewController(
@@ -94,11 +112,39 @@ struct ScriptPreferenceTests {
     }
 
     @Test
-    func scriptsPreferencePageRunsSelectedScriptTest() async {
+    func scriptTestSheetRunsSelectedScriptWithoutChangingClipboard() async {
         let script = ScriptTransform(
             id: UUID(),
             name: "Uppercase",
             code: "function transform(clip) { return clip.text.toUpperCase(); }",
+            isEnabled: true,
+            runOnCopy: false,
+            runOnPaste: false,
+            runManually: true,
+            sortIndex: 0,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let originalPasteboard = NSPasteboard.general.string(forType: .string)
+        let sheet = ScriptTestViewController(
+            scripts: [script],
+            executor: ScriptExecutionService()
+        )
+        _ = sheet.view
+
+        #expect(sheet.usesSingleColumnLayoutForTesting)
+        await sheet.runSelectedScriptForTesting(input: "Hello World")
+        #expect(sheet.testOutputForTesting == "HELLO WORLD")
+        #expect(sheet.testErrorForTesting == nil)
+        #expect(NSPasteboard.general.string(forType: .string) == originalPasteboard)
+    }
+
+    @Test
+    func scriptsPreferenceEnablesTestActionWhenScriptExists() {
+        let script = ScriptTransform(
+            id: UUID(),
+            name: "Identity",
+            code: "function transform(clip) { return clip.text; }",
             isEnabled: true,
             runOnCopy: false,
             runOnPaste: false,
@@ -114,10 +160,7 @@ struct ScriptPreferenceTests {
         )
         _ = page.view
 
-        #expect(page.hasTestCardForTesting)
-        await page.runSelectedScriptTestForTesting(input: "Hello World")
-        #expect(page.testOutputForTesting == "HELLO WORLD")
-        #expect(page.testErrorForTesting == nil)
+        #expect(page.isTestActionEnabledForTesting)
     }
 }
 
