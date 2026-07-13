@@ -46,6 +46,100 @@ struct HistoryRepositoryBootstrapTests {
 @Suite
 struct ClipServiceCaptureTests {
     @Test
+    func textWithoutCopyScriptsKeepsSynchronousCapturePath() {
+        let repository = RecordingPasteboardHistoryRepository()
+        let coordinator = RecordingClipboardScriptCoordinator(hasCopyScripts: false, outcome: .transformed("unused"))
+        let pasteboard = makeTextPasteboard("Original")
+        defer { pasteboard.clearContents() }
+
+        withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let service = ClipService(clipboardScriptCoordinatorProvider: { coordinator })
+            service.setStoreTypesForTesting(["String": NSNumber(value: true)])
+
+            #expect(service.createForTesting(from: pasteboard))
+            #expect(repository.savedContents.map(\.stringValue) == ["Original"])
+            #expect(coordinator.receivedTexts.isEmpty)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func successfulCopyTransformWritesAndSavesOnlyFinalText() async throws {
+        let repository = RecordingPasteboardHistoryRepository()
+        let coordinator = RecordingClipboardScriptCoordinator(hasCopyScripts: true, outcome: .transformed("FINAL"))
+        let pasteboard = makeTextPasteboard("Original")
+        defer { pasteboard.clearContents() }
+
+        try await withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let service = ClipService(clipboardScriptCoordinatorProvider: { coordinator })
+            service.setStoreTypesForTesting(["String": NSNumber(value: true)])
+
+            #expect(service.createForTesting(from: pasteboard))
+            #expect(repository.savedContents.isEmpty)
+            try await waitUntil { repository.savedContents.count == 1 }
+
+            #expect(repository.savedContents.map(\.stringValue) == ["FINAL"])
+            #expect(pasteboard.string(forType: .string) == "FINAL")
+            #expect(coordinator.receivedTexts == ["Original"])
+            #expect(service.createForTesting(from: pasteboard))
+            #expect(repository.savedContents.count == 1)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func failedCopyTransformSavesOriginalWithoutWritingPasteboard() async throws {
+        let repository = RecordingPasteboardHistoryRepository()
+        let scriptID = UUID()
+        let coordinator = RecordingClipboardScriptCoordinator(
+            hasCopyScripts: true,
+            outcome: .failed(.javaScriptException(scriptID: scriptID))
+        )
+        let pasteboard = makeTextPasteboard("Original")
+        let originalChangeCount = pasteboard.changeCount
+        defer { pasteboard.clearContents() }
+
+        try await withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let service = ClipService(clipboardScriptCoordinatorProvider: { coordinator })
+            service.setStoreTypesForTesting(["String": NSNumber(value: true)])
+
+            #expect(service.createForTesting(from: pasteboard))
+            try await waitUntil { repository.savedContents.count == 1 }
+
+            #expect(repository.savedContents.map(\.stringValue) == ["Original"])
+            #expect(pasteboard.changeCount == originalChangeCount)
+        }
+    }
+
+    @Test
+    func nonTextCaptureDoesNotConsultScripts() throws {
+        let repository = RecordingPasteboardHistoryRepository()
+        let coordinator = RecordingClipboardScriptCoordinator(hasCopyScripts: true, outcome: .transformed("unused"))
+        let pasteboard = NSPasteboard(name: .init("ClipServiceCaptureTests.image.\(UUID().uuidString)"))
+        let image = NSImage.create(with: .blue, size: NSSize(width: 8, height: 8))
+        let data = try #require(image.tiffRepresentation)
+        pasteboard.clearContents()
+        pasteboard.setData(data, forType: .tiff)
+        defer { pasteboard.clearContents() }
+
+        withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let service = ClipService(clipboardScriptCoordinatorProvider: { coordinator })
+            service.setStoreTypesForTesting(["TIFF": NSNumber(value: true)])
+
+            #expect(service.createForTesting(from: pasteboard))
+        }
+
+        #expect(coordinator.receivedTexts.isEmpty)
+        #expect(repository.savedContents.count == 1)
+    }
+
+    @Test
     func emptyPasteboardChangeRetriesUntilTypesAreAvailable() {
         let repository = RecordingPasteboardHistoryRepository()
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("ClipServiceCaptureTests.retry.\(UUID().uuidString)"))
@@ -69,6 +163,60 @@ struct ClipServiceCaptureTests {
 
         #expect(repository.savedContents.map(\.stringValue) == ["Ready after clear"])
     }
+
+    @Test
+    func savingImageContentEnqueuesOCRIndexing() {
+        let repository = RecordingPasteboardHistoryRepository()
+        let ocrIndexer = RecordingOCRIndexer()
+        let image = NSImage.create(with: .orange, size: NSSize(width: 24, height: 16))
+
+        withDependencies {
+            $0.pasteboardHistoryRepository = repository
+            $0.pasteboardHistoryOCRIndexer = ocrIndexer
+        } operation: {
+            let service = ClipService()
+
+            service.create(with: image)
+        }
+
+        #expect(repository.savedContents.count == 1)
+        #expect(ocrIndexer.enqueuedHistoryIDs == repository.savedIDs)
+        #expect(ocrIndexer.enqueuedContents == repository.savedContents)
+    }
+}
+
+private func makeTextPasteboard(_ text: String) -> NSPasteboard {
+    let pasteboard = NSPasteboard(name: .init("ClipServiceCaptureTests.text.\(UUID().uuidString)"))
+    pasteboard.clearContents()
+    pasteboard.setString(text, forType: .string)
+    return pasteboard
+}
+
+private final class RecordingClipboardScriptCoordinator: ClipboardScriptCoordinating {
+    let hasCopyScripts: Bool
+    let outcome: ScriptTransformOutcome
+    private(set) var receivedTexts = [String]()
+
+    init(hasCopyScripts: Bool, outcome: ScriptTransformOutcome) {
+        self.hasCopyScripts = hasCopyScripts
+        self.outcome = outcome
+    }
+
+    func hasEnabledScripts(for trigger: ScriptTrigger) -> Bool {
+        trigger == .copy && hasCopyScripts
+    }
+
+    func transform(
+        text: String,
+        sourceAppBundleIdentifier: String?,
+        trigger: ScriptTrigger
+    ) async -> ScriptTransformOutcome {
+        receivedTexts.append(text)
+        return outcome
+    }
+
+    func runManualTransform() async {}
+    func consumeSuppression(changeCount: Int) -> Bool { false }
 }
 
 @MainActor
@@ -135,6 +283,46 @@ struct PasteboardHistoryRepositoryTests {
                 PasteboardHistoryDetail(history: history, thumbnailAsset: nil)
             ]
         )
+    }
+
+    @Test
+    func updateTextHistoryReplacesStoredPlainTextContent() throws {
+        let content = PasteboardContent("#ff0000")
+        let id = PasteboardHistory.ID(rawValue: content.hash)
+        repository.save(id: id, content: content, updateAt: 1)
+        #expect(repository.fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1).first?.thumbnailAsset?.kind == .colorCode)
+
+        #expect(repository.updateTextHistory(id: id, text: "Updated text", updateAt: 20))
+
+        #expect(repository.fetchHistory(id: id) == PasteboardHistory(
+            id: id,
+            title: "Updated text",
+            pasteboardTypes: [.string],
+            updateAt: 20,
+            deviceID: CPYUtilities.deviceID
+        ))
+        #expect(repository.fetchContent(id: id) == PasteboardContent("Updated text"))
+        #expect(repository.fetchHistoryDetails(ascending: false, includesThumbnailAsset: true, limit: 1).first?.thumbnailAsset == nil)
+    }
+
+    @Test
+    func updateTextHistoryRejectsUnsupportedOrEmptyContent() throws {
+        let text = PasteboardContent("Original")
+        let textID = PasteboardHistory.ID(rawValue: text.hash)
+        repository.save(id: textID, content: text, updateAt: 1)
+
+        let image = PasteboardContent(assets: [PasteboardContent.Asset(type: .png, data: Data([0x89, 0x50, 0x4E, 0x47]))])
+        let imageID = PasteboardHistory.ID(rawValue: image.hash)
+        repository.save(id: imageID, content: image, updateAt: 2)
+
+        #expect(!repository.updateTextHistory(id: textID, text: "   \n", updateAt: 20))
+        #expect(!repository.updateTextHistory(id: imageID, text: "Changed", updateAt: 20))
+        #expect(!repository.updateTextHistory(id: PasteboardHistory.ID(rawValue: "missing"), text: "Changed", updateAt: 20))
+
+        #expect(repository.fetchHistory(id: textID)?.title == "Original")
+        #expect(repository.fetchContent(id: textID) == text)
+        #expect(repository.fetchHistory(id: imageID)?.pasteboardTypes == [.png])
+        #expect(repository.fetchContent(id: imageID) == image)
     }
 
     @Test
@@ -502,6 +690,356 @@ struct PasteboardHistoryRepositoryTests {
                 offset: 0
             )
         }
+    }
+
+}
+
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct PasteboardHistoryOCRSearchTests {
+    let repository = PasteboardHistoryRepository()
+
+    @Test
+    func imageOCRTextParticipatesInPlainSearchAndImageTypeFiltering() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .blue, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        let textContent = PasteboardContent("普通文本")
+        let textID = PasteboardHistory.ID(rawValue: textContent.hash)
+
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+        repository.save(id: textID, content: textContent, updateAt: 2)
+        #expect(repository.upsertOCRText(
+            historyID: imageID,
+            sourceHash: "image-source",
+            recognizedText: "个测试通过",
+            updatedAt: 3
+        ))
+
+        let allMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "通过", mode: .plain, caseSensitive: false, sortOrder: .oldestFirst),
+            includesThumbnailAsset: true,
+            limit: 10,
+            offset: 0
+        )
+        let imageMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(
+                text: "通过",
+                mode: .plain,
+                caseSensitive: false,
+                types: NSPasteboard.PasteboardType.clipyImageTypes,
+                sortOrder: .oldestFirst
+            ),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        let missingMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "失败", mode: .plain, caseSensitive: false, sortOrder: .oldestFirst),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+
+        #expect(allMatches.map(\.history.id) == [imageID])
+        #expect(allMatches.first?.thumbnailAsset?.kind == .image)
+        #expect(imageMatches.map(\.history.id) == [imageID])
+        #expect(!allMatches.map(\.history.id).contains(textID))
+        #expect(missingMatches.isEmpty)
+    }
+
+    @Test
+    func imageOCRTextSearchSupportsRegexAndCaseSensitivity() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .green, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+        #expect(repository.upsertOCRText(
+            historyID: imageID,
+            sourceHash: "image-source",
+            recognizedText: "Build Passed\nToken ABC",
+            updatedAt: 2
+        ))
+
+        let caseSensitiveMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "Build Passed", mode: .plain, caseSensitive: true),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        let caseSensitiveMisses = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "build passed", mode: .plain, caseSensitive: true),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        let regexMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: #"Token\s+[A-Z]{3}"#, mode: .regex, caseSensitive: true),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+
+        #expect(caseSensitiveMatches.map(\.history.id) == [imageID])
+        #expect(caseSensitiveMisses.isEmpty)
+        #expect(regexMatches.map(\.history.id) == [imageID])
+    }
+
+    @Test
+    func deletingHistoryDeletesOCRText() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .purple, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+        #expect(repository.upsertOCRText(
+            historyID: imageID,
+            sourceHash: "image-source",
+            recognizedText: "deleted text",
+            updatedAt: 2
+        ))
+
+        repository.deleteHistory(id: imageID)
+
+        #expect(repository.fetchOCRText(historyID: imageID) == nil)
+    }
+
+    @Test
+    func ocrIndexerIndexesSavedImageContentWithFakeRecognizer() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .red, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        let recognizer = FakeImageTextRecognizer(result: "个测试通过")
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: recognizer,
+            scheduler: { $0() },
+            now: { 100 }
+        )
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+
+        indexer.enqueueIndexing(historyID: imageID, content: imageContent)
+
+        let matches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "通过", mode: .plain),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        let ocrText = try #require(repository.fetchOCRText(historyID: imageID))
+        #expect(matches.map(\.history.id) == [imageID])
+        #expect(ocrText.recognizedText == "个测试通过")
+        #expect(ocrText.updatedAt == 100)
+        #expect(recognizer.recognizedImageDataCount == 1)
+    }
+
+    @Test
+    func ocrIndexerReusesExistingSourceHashWithoutRecognizingAgain() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .red, size: NSSize(width: 24, height: 16)))
+        )
+        let firstID = PasteboardHistory.ID(rawValue: "ocr-source-reuse-first")
+        let secondID = PasteboardHistory.ID(rawValue: "ocr-source-reuse-second")
+        let recognizer = FakeImageTextRecognizer(result: "reused recognized text")
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: recognizer,
+            scheduler: { $0() },
+            now: { 150 }
+        )
+        repository.save(id: firstID, content: imageContent, updateAt: 1)
+        repository.save(id: secondID, content: imageContent, updateAt: 2)
+
+        indexer.enqueueIndexing(historyID: firstID, content: imageContent)
+        indexer.enqueueIndexing(historyID: secondID, content: imageContent)
+
+        #expect(repository.fetchOCRText(historyID: firstID)?.recognizedText == "reused recognized text")
+        #expect(repository.fetchOCRText(historyID: secondID)?.recognizedText == "reused recognized text")
+        #expect(recognizer.recognizedImageDataCount == 1)
+    }
+
+    @Test
+    func ocrIndexerTrimsAndCapsRecognizedTextBeforeSaving() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .orange, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        let longResult = "  "
+            + String(repeating: "通", count: PasteboardHistoryOCRTextLimits.maxRecognizedTextLength + 40)
+            + "\n"
+        let recognizer = FakeImageTextRecognizer(result: longResult)
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: recognizer,
+            scheduler: { $0() },
+            now: { 175 }
+        )
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+
+        indexer.enqueueIndexing(historyID: imageID, content: imageContent)
+
+        let ocrText = try #require(repository.fetchOCRText(historyID: imageID))
+        #expect(ocrText.recognizedText.utf16.count == PasteboardHistoryOCRTextLimits.maxRecognizedTextLength)
+        #expect(!ocrText.recognizedText.hasPrefix(" "))
+        #expect(!ocrText.recognizedText.hasSuffix("\n"))
+    }
+
+    @Test
+    func ocrIndexerBackfillsExistingImageHistories() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .cyan, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        let recognizer = FakeImageTextRecognizer(result: "backfill 通过")
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: recognizer,
+            scheduler: { $0() },
+            now: { 200 }
+        )
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+
+        indexer.backfillMissingImageOCR(limit: 10)
+
+        let matches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(text: "backfill", mode: .plain),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        #expect(matches.map(\.history.id) == [imageID])
+    }
+
+    @Test
+    func ocrIndexerDeletesOCRTextForNonImageContentAndIgnoresRecognizerFailure() throws {
+        let textContent = PasteboardContent("not image")
+        let textID = PasteboardHistory.ID(rawValue: textContent.hash)
+        repository.save(id: textID, content: textContent, updateAt: 1)
+        #expect(repository.upsertOCRText(
+            historyID: textID,
+            sourceHash: "old",
+            recognizedText: "stale",
+            updatedAt: 1
+        ))
+        let failingImageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .yellow, size: NSSize(width: 24, height: 16)))
+        )
+        let failingImageID = PasteboardHistory.ID(rawValue: failingImageContent.hash)
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: FakeImageTextRecognizer(error: FakeImageTextRecognizer.Failure.failed),
+            scheduler: { $0() },
+            now: { 300 }
+        )
+        repository.save(id: failingImageID, content: failingImageContent, updateAt: 2)
+
+        indexer.enqueueIndexing(historyID: textID, content: textContent)
+        indexer.enqueueIndexing(historyID: failingImageID, content: failingImageContent)
+
+        #expect(repository.fetchOCRText(historyID: textID) == nil)
+        #expect(repository.fetchOCRText(historyID: failingImageID) == nil)
+    }
+
+    @Test
+    func oversizedImageSourceIsSkippedBeforeOCRRecognition() throws {
+        let image = NSImage.create(with: .magenta, size: NSSize(width: 24, height: 16))
+        var oversizedPNGData = try #require(PasteraImageEncoding.pngData(from: image))
+        oversizedPNGData.append(Data(
+            repeating: 0,
+            count: PasteboardHistoryOCRIndexer.maxSourceImageBytes - oversizedPNGData.count + 1
+        ))
+        let imageContent = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .png, data: oversizedPNGData)]
+        )
+        let imageID = PasteboardHistory.ID(rawValue: imageContent.hash)
+        let recognizer = FakeImageTextRecognizer(result: "should not run")
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: recognizer,
+            scheduler: { $0() },
+            now: { 325 }
+        )
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+
+        indexer.enqueueIndexing(historyID: imageID, content: imageContent)
+
+        #expect(repository.fetchOCRText(historyID: imageID) == nil)
+        #expect(recognizer.recognizedImageDataCount == 0)
+    }
+}
+
+@MainActor
+@Suite(
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
+struct PasteboardHistoryRepositoryFileCategorySearchTests {
+    let repository = PasteboardHistoryRepository()
+
+    @Test
+    func searchFiltersFinderFilesByCategoryWithoutMatchingTextHistory() throws {
+        let documentURL = try writeTemporaryFile(name: "report.docx", data: Data("document".utf8))
+        let archiveURL = try writeTemporaryFile(name: "backup.zip", data: Data([0x50, 0x4B, 0x03, 0x04]))
+        let codeURL = try writeTemporaryFile(name: "main.swift", data: Data("let value = 1".utf8))
+        let otherURL = try writeTemporaryFile(name: "payload.unknown", data: Data("payload".utf8))
+        defer {
+            [documentURL, archiveURL, codeURL, otherURL].forEach {
+                try? FileManager.default.removeItem(at: $0.deletingLastPathComponent())
+            }
+        }
+
+        let document = PasteboardContent(assets: [.init(type: .fileURL, data: documentURL.dataRepresentation)])
+        let archive = PasteboardContent(assets: [.init(type: .fileURL, data: archiveURL.dataRepresentation)])
+        let code = PasteboardContent(assets: [.init(type: .fileURL, data: codeURL.dataRepresentation)])
+        let other = PasteboardContent(assets: [.init(type: .fileURL, data: otherURL.dataRepresentation)])
+        let text = PasteboardContent("payload.unknown")
+
+        let documentID = PasteboardHistory.ID(rawValue: document.hash)
+        let archiveID = PasteboardHistory.ID(rawValue: archive.hash)
+        let codeID = PasteboardHistory.ID(rawValue: code.hash)
+        let otherID = PasteboardHistory.ID(rawValue: other.hash)
+        let textID = PasteboardHistory.ID(rawValue: text.hash)
+
+        repository.save(id: documentID, content: document, updateAt: 1)
+        repository.save(id: archiveID, content: archive, updateAt: 2)
+        repository.save(id: codeID, content: code, updateAt: 3)
+        repository.save(id: otherID, content: other, updateAt: 4)
+        repository.save(id: textID, content: text, updateAt: 5)
+
+        let codeMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(
+                text: "",
+                types: [.fileURL],
+                fileCategories: [.code],
+                sortOrder: .oldestFirst
+            ),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+        let otherMatches = try repository.searchHistoryDetails(
+            query: HistorySearchQuery(
+                text: "",
+                types: [.fileURL],
+                fileCategories: [.other],
+                sortOrder: .oldestFirst
+            ),
+            includesThumbnailAsset: false,
+            limit: 10,
+            offset: 0
+        )
+
+        #expect(codeMatches.map(\.history.id) == [codeID])
+        #expect(otherMatches.map(\.history.id) == [otherID])
+        #expect(repository.fetchHistory(id: textID) != nil)
     }
 }
 
@@ -1087,8 +1625,8 @@ struct PasteboardHistoryFilePreviewTests {
     }
 
     @Test
-    func fileURLHistoryStoresTextFileTitleAndKeepsOriginalFileURLAsset() throws {
-        let fileURL = try writeTemporaryFile(name: "notes.unknown", data: Data("Hello searchable file".utf8))
+    func fileURLHistoryStoresDocumentPreviewTitleAndKeepsOriginalFileURLAsset() throws {
+        let fileURL = try writeTemporaryFile(name: "notes.md", data: Data("Hello searchable file".utf8))
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
         let content = PasteboardContent(
             assets: [PasteboardContent.Asset(type: .fileURL, data: fileURL.dataRepresentation)]
@@ -1098,7 +1636,7 @@ struct PasteboardHistoryFilePreviewTests {
         repository.save(id: id, content: content, updateAt: 2)
 
         let history = try #require(repository.fetchHistory(id: id))
-        #expect(history.title == "notes.unknown\nHello searchable file")
+        #expect(history.title == "notes.md\nHello searchable file")
         #expect(repository.fetchContent(id: id)?.assets == content.assets)
 
         let searchResults = try repository.searchHistoryDetails(
@@ -1108,6 +1646,32 @@ struct PasteboardHistoryFilePreviewTests {
             offset: 0
         )
         #expect(searchResults.map(\.history.id).contains(id))
+    }
+
+    @Test
+    func fileURLHistoryStoresFileNameForFinderFileCategories() throws {
+        let cases: [(name: String, data: Data)] = [
+            ("backup.zip", Data([0x50, 0x4B, 0x03, 0x04])),
+            ("main.swift", Data("let value = 1".utf8)),
+            ("report.docx", Data([0x50, 0x4B, 0x03, 0x04])),
+            ("payload.unknown", Data([0x01, 0x02, 0x03, 0x04]))
+        ]
+        let urls = try cases.map { try writeTemporaryFile(name: $0.name, data: $0.data) }
+        defer {
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+
+        for (index, url) in urls.enumerated() {
+            let content = PasteboardContent(
+                assets: [PasteboardContent.Asset(type: .fileURL, data: url.dataRepresentation)]
+            )
+            let id = PasteboardHistory.ID(rawValue: "\(content.hash)-\(index)")
+
+            repository.save(id: id, content: content, updateAt: index + 10)
+
+            let history = try #require(repository.fetchHistory(id: id))
+            #expect(history.title.components(separatedBy: .newlines).first == cases[index].name)
+        }
     }
 
     @Test
@@ -1138,6 +1702,7 @@ struct PasteboardHistoryFilePreviewTests {
 
 private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     private(set) var savedContents = [PasteboardContent]()
+    private(set) var savedIDs = [PasteboardHistory.ID]()
 
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
         Just([]).eraseToAnyPublisher()
@@ -1167,6 +1732,7 @@ private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepos
     func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
 
     func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {
+        savedIDs.append(id)
         savedContents.append(content)
     }
 
@@ -1174,6 +1740,44 @@ private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepos
     func deleteAll() {}
     func deleteOverflowingHistories(maxHistorySize: Int) {}
     func pruneHistories(settings: HistoryRetentionSettings) {}
+}
+
+private final class RecordingOCRIndexer: PasteboardHistoryOCRIndexing {
+    private(set) var enqueuedHistoryIDs = [PasteboardHistory.ID]()
+    private(set) var enqueuedContents = [PasteboardContent]()
+    private(set) var backfillLimits = [Int]()
+
+    func enqueueIndexing(historyID: PasteboardHistory.ID, content: PasteboardContent) {
+        enqueuedHistoryIDs.append(historyID)
+        enqueuedContents.append(content)
+    }
+
+    func backfillMissingImageOCR(limit: Int) {
+        backfillLimits.append(limit)
+    }
+}
+
+private final class FakeImageTextRecognizer: PasteboardImageTextRecognizing {
+    enum Failure: Error {
+        case failed
+    }
+
+    private let result: String
+    private let error: Error?
+    private(set) var recognizedImageDataCount = 0
+
+    init(result: String = "", error: Error? = nil) {
+        self.result = result
+        self.error = error
+    }
+
+    func recognizeText(in imageData: Data) throws -> String {
+        recognizedImageDataCount += 1
+        if let error {
+            throw error
+        }
+        return result
+    }
 }
 
 private extension PasteboardContent {
@@ -1416,6 +2020,14 @@ struct HistoryMenuPaginationStateTests {
         state.updateTypeFilter(.images)
         #expect(state.typeFilter == .images)
         #expect(state.selectedTypes == NSPasteboard.PasteboardType.clipyImageTypes)
+        #expect(state.selectedFileCategories.isEmpty)
+        #expect(state.pageIndex == 0)
+
+        state.goToNextPage(if: true)
+        state.updateTypeFilter(.code)
+        #expect(state.typeFilter == .code)
+        #expect(state.selectedTypes == [.fileURL])
+        #expect(state.selectedFileCategories == [.code])
         #expect(state.pageIndex == 0)
     }
 
@@ -1424,7 +2036,14 @@ struct HistoryMenuPaginationStateTests {
         #expect(HistoryMenuTypeFilter.all.pasteboardTypes.isEmpty)
         #expect(HistoryMenuTypeFilter.text.pasteboardTypes == [.string, .deprecatedString])
         #expect(HistoryMenuTypeFilter.images.pasteboardTypes == NSPasteboard.PasteboardType.clipyImageTypes)
-        #expect(HistoryMenuTypeFilter.files.pasteboardTypes == [.fileURL])
+        #expect(HistoryMenuTypeFilter.documents.pasteboardTypes == [.fileURL])
+        #expect(HistoryMenuTypeFilter.archives.pasteboardTypes == [.fileURL])
+        #expect(HistoryMenuTypeFilter.code.pasteboardTypes == [.fileURL])
+        #expect(HistoryMenuTypeFilter.otherFiles.pasteboardTypes == [.fileURL])
+        #expect(HistoryMenuTypeFilter.documents.fileCategories == [.document])
+        #expect(HistoryMenuTypeFilter.archives.fileCategories == [.archive])
+        #expect(HistoryMenuTypeFilter.code.fileCategories == [.code])
+        #expect(HistoryMenuTypeFilter.otherFiles.fileCategories == [.other])
         #expect(HistoryMenuTypeFilter.pdf.pasteboardTypes == [.pdf, .deprecatedPDF])
     }
 }
@@ -1445,6 +2064,22 @@ struct HistoryMenuHeaderViewTests {
         #expect(controls.count >= 5)
         #expect(searchField.nextKeyView != nil)
         #expect(tabChainControls.allSatisfy { $0.nextKeyView != nil })
+    }
+
+    @Test @MainActor
+    func headerShowsFinderFileCategoryFiltersInsteadOfSingleFileFilter() throws {
+        let headerView = HistoryMenuHeaderView()
+        let typeControl = try #require(
+            headerView.subviews.compactMap { $0 as? NSSegmentedControl }
+                .first { $0.segmentCount == HistoryMenuTypeFilter.allCases.count }
+        )
+        let labels = (0..<typeControl.segmentCount).map { typeControl.label(forSegment: $0) ?? "" }
+
+        #expect(labels.contains("Doc"))
+        #expect(labels.contains("Zip"))
+        #expect(labels.contains("Code"))
+        #expect(labels.contains("Other"))
+        #expect(!labels.contains("File"))
     }
 
     @Test @MainActor
@@ -1837,7 +2472,7 @@ struct HistoryMenuHeaderViewTests {
     }
 
     @Test @MainActor
-    func historyRowUsesCompactImagePreview() throws {
+    func historyRowUsesUnifiedImagePreviewSlot() throws {
         let image = NSImage(size: NSSize(width: 320, height: 180))
         let row = HistoryMenuRowView(title: "1. Screenshot", image: image) {}
 
@@ -1845,16 +2480,16 @@ struct HistoryMenuHeaderViewTests {
 
         let imageView = try #require(row.subviews.compactMap { $0 as? NSImageView }.first)
         #expect(imageView.imageScaling == .scaleProportionallyDown)
-        #expect(row.frame.height == 42)
-        #expect(imageView.frame.width == 52)
-        #expect(imageView.frame.height == 32)
+        #expect(row.frame.height == 52)
+        #expect(imageView.frame.width == 56)
+        #expect(imageView.frame.height == 36)
     }
 
     @Test @MainActor
-    func historyRowWithoutImageKeepsCompactHeight() {
+    func historyRowWithoutImageUsesReadableHeight() {
         let row = HistoryMenuRowView(title: "1. Text", image: nil) {}
 
-        #expect(row.frame.height == 28)
+        #expect(row.frame.height == 36)
     }
 
     @Test @MainActor
@@ -1867,15 +2502,31 @@ struct HistoryMenuHeaderViewTests {
         let panel = try #require(controller.panel)
         #expect(panel.styleMask.contains(.nonactivatingPanel))
         #expect(panel.level == .popUpMenu)
-        #expect(panel.contentView?.frame.size == NSSize(width: 420, height: 290))
+        #expect(panel.contentView?.frame.size == NSSize(width: 370, height: 248))
         controller.hide()
     }
+
 }
 
 @Suite(.serialized)
 struct HistoryMenuTextPreviewTests {
     @Test @MainActor
-    func historyRowShowsTextPreviewAfterStableHoverDelay() async throws {
+    func textPreviewPanelUsesCompactReadableSize() throws {
+        let controller = HistoryMenuTextPreviewController()
+
+        controller.show(
+            text: "A compact preview should feel attached to the hovered row.",
+            relativeTo: NSRect(x: 40, y: 40, width: 120, height: 25),
+            in: nil
+        )
+
+        let panel = try #require(controller.panel)
+        #expect(panel.contentView?.frame.size == NSSize(width: 298, height: 112))
+        controller.hide()
+    }
+
+    @Test @MainActor
+    func historyRowRequestsTextPreviewAfterStableHoverDelay() throws {
         let previewText = "A longer clipboard history entry that has been shortened in the row but should be readable on hover."
         let row = HistoryMenuRowView(
             title: "A longer clipboard history...",
@@ -1887,13 +2538,23 @@ struct HistoryMenuTextPreviewTests {
         window.orderFront(nil)
         defer { closeHistoryMenuTestWindow(window) }
 
+        var observedPreview = false
+        HistoryMenuRowView.scheduleTextPreviewWorkItemsForTesting { workItem in
+            workItem.perform()
+        }
+        HistoryMenuRowView.observeTextPreviewRequestsForTesting { text in
+            if text == previewText {
+                observedPreview = true
+            }
+        }
+        defer {
+            HistoryMenuRowView.scheduleTextPreviewWorkItemsForTesting(nil)
+            HistoryMenuRowView.observeTextPreviewRequestsForTesting(nil)
+        }
+
         row.mouseEntered(with: try makeMouseEnteredEvent())
-        #expect(!HistoryMenuRowView.isTextPreviewVisibleForTesting)
 
-        try await Task.sleep(for: .seconds(0.55))
-
-        #expect(HistoryMenuRowView.isTextPreviewVisibleForTesting)
-        #expect(HistoryMenuRowView.textPreviewValueForTesting == previewText)
+        #expect(observedPreview)
 
         row.mouseExited(with: try makeMouseEnteredEvent())
 
@@ -1919,6 +2580,7 @@ struct HistoryMenuTextPreviewTests {
 
         #expect(!HistoryMenuRowView.isTextPreviewVisibleForTesting)
     }
+
 }
 
 private extension PasteboardHistory {
@@ -1934,14 +2596,12 @@ private extension PasteboardHistory {
 }
 
 private func waitUntil(condition: @escaping @MainActor () async -> Bool) async throws {
-    try await confirmation { confirmation in
-        while true {
-            if await condition() {
-                confirmation()
-                return
-            } else {
-                try await Task.sleep(for: .seconds(0.01))
-            }
+    let deadline = Date().addingTimeInterval(2)
+    while Date() < deadline {
+        if await condition() {
+            return
         }
+        try await Task.sleep(for: .seconds(0.01))
     }
+    Issue.record("Timed out waiting for condition.")
 }

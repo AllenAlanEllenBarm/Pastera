@@ -4,61 +4,30 @@ import Magnet
 import Testing
 @testable import Pastera
 
+@MainActor
 @Suite(.serialized)
 // swiftlint:disable:next type_body_length
 final class HotKeyServiceTests {
+    private let suiteName: String
+    private let defaults: UserDefaults
+
     init() {
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: Constants.UserDefaults.hotKeys)
-        defaults.removeObject(forKey: Constants.HotKey.migrateNewKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.mainKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.snippetKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.clearHistoryKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelOptionCommand)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaults)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults)
-        defaults.removeObject(forKey: Constants.HotKey.historySearchKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyNextPageKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyPreviousPageKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
-        defaults.removeObject(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
-        defaults.removeObject(forKey: Constants.HotKey.folderKeyCombos)
-        defaults.synchronize()
+        suiteName = "HotKeyServiceTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     deinit {
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: Constants.UserDefaults.hotKeys)
-        defaults.removeObject(forKey: Constants.HotKey.migrateNewKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.mainKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.snippetKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.clearHistoryKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelOptionCommand)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaults)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2)
-        defaults.removeObject(forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults)
-        defaults.removeObject(forKey: Constants.HotKey.historySearchKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyNextPageKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.historyPreviousPageKeyCombo)
-        defaults.removeObject(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
-        defaults.removeObject(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
-        defaults.removeObject(forKey: Constants.HotKey.folderKeyCombos)
-        defaults.synchronize()
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     @Test
     func migrateDefaultSettings() throws {
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         #expect(service.mainKeyCombo == nil)
         #expect(service.historyKeyCombo == nil)
         #expect(service.snippetKeyCombo == nil)
 
-        let defaults = UserDefaults.standard
         #expect(defaults.bool(forKey: Constants.HotKey.migrateNewKeyCombo) == false)
         service.setupDefaultHotKeys()
         #expect(defaults.bool(forKey: Constants.HotKey.migrateNewKeyCombo) == true)
@@ -104,7 +73,7 @@ final class HotKeyServiceTests {
 
     @Test
     func historyPanelShortcutDefaultsAreLocalKeyCombos() throws {
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
 
         service.setupDefaultHotKeys()
 
@@ -127,13 +96,12 @@ final class HotKeyServiceTests {
 
     @Test
     func historyPanelDefaultsAreRestoredWhenMigrationMarkerExistsButKeysAreMissing() throws {
-        let defaults = UserDefaults.standard
         defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
         defaults.removeObject(forKey: Constants.HotKey.historySearchKeyCombo)
         defaults.removeObject(forKey: Constants.HotKey.historyPreviousPageKeyCombo)
         defaults.removeObject(forKey: Constants.HotKey.historyNextPageKeyCombo)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         #expect(service.historyPanelKeyCombo(for: .search) == HistoryPanelShortcut.search.defaultKeyCombo)
@@ -143,7 +111,6 @@ final class HotKeyServiceTests {
 
     @Test
     func preservesCommandHistoryPanelShortcutsAsDefaults() throws {
-        let defaults = UserDefaults.standard
         let legacySearch = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey))
         let legacyPreviousPage = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey))
         let legacyNextPage = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey))
@@ -153,7 +120,7 @@ final class HotKeyServiceTests {
         defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
         defaults.set(false, forKey: Constants.HotKey.migrateHistoryPanelOptionCommand)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         #expect(service.historyPanelKeyCombo(for: .search) == HistoryPanelShortcut.search.defaultKeyCombo)
@@ -163,7 +130,6 @@ final class HotKeyServiceTests {
 
     @Test
     func preservesCustomizedHistoryPanelShortcutsDuringDefaultMigration() throws {
-        let defaults = UserDefaults.standard
         let customSearch = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | shiftKey))
         let customPreviousPage = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | controlKey))
         let customNextPage = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey | shiftKey))
@@ -173,7 +139,7 @@ final class HotKeyServiceTests {
         defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
         defaults.set(false, forKey: Constants.HotKey.migrateHistoryPanelOptionCommand)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         #expect(service.historyPanelKeyCombo(for: .search) == customSearch)
@@ -183,7 +149,6 @@ final class HotKeyServiceTests {
 
     @Test
     func migratesKnownIncorrectLegacyHistoryPanelShortcutsToCommandDefaults() throws {
-        let defaults = UserDefaults.standard
         let incorrectSearch = try #require(KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | optionKey))
         let incorrectPreviousPage = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | optionKey))
         let incorrectNextPage = try #require(KeyCombo(QWERTYKeyCode: 0, carbonModifiers: cmdKey))
@@ -196,7 +161,7 @@ final class HotKeyServiceTests {
         defaults.set(true, forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2)
         defaults.set(false, forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         #expect(service.historyPanelKeyCombo(for: .search) == HistoryPanelShortcut.search.defaultKeyCombo)
@@ -206,8 +171,7 @@ final class HotKeyServiceTests {
 
     @Test
     func changingHistoryPanelShortcutPersistsWithoutGlobalRegistration() throws {
-        let defaults = UserDefaults.standard
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         let customSearchKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | optionKey))
 
         service.changeHistoryPanelKeyCombo(.search, keyCombo: customSearchKeyCombo)
@@ -223,6 +187,120 @@ final class HotKeyServiceTests {
     }
 
     @Test
+    func resetMenuShortcutsToDefaultsPreservesHistoryPanelAndUnrelatedState() throws {
+        let service = HotKeyService(defaults: defaults)
+        let customMain = try #require(KeyCombo(QWERTYKeyCode: 0, carbonModifiers: cmdKey | controlKey))
+        let customHistory = try #require(KeyCombo(QWERTYKeyCode: 1, carbonModifiers: cmdKey | shiftKey))
+        let customSnippet = try #require(KeyCombo(QWERTYKeyCode: 2, carbonModifiers: cmdKey | controlKey))
+        let customSearch = try #require(KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | shiftKey))
+        let customPrevious = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | controlKey))
+        let customNext = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey | shiftKey))
+        let clearHistory = try #require(KeyCombo(QWERTYKeyCode: 10, carbonModifiers: cmdKey | controlKey))
+        let folderCombo = try #require(KeyCombo(QWERTYKeyCode: 12, carbonModifiers: cmdKey | optionKey))
+        let folderIdentifier = "menu-reset-folder"
+        let nextFolderIdentifier = "menu-reset-next-folder"
+        defer {
+            service.unregisterSnippetHotKey(with: folderIdentifier)
+            service.unregisterSnippetHotKey(with: nextFolderIdentifier)
+        }
+
+        service.change(with: .main, keyCombo: customMain)
+        service.change(with: .history, keyCombo: customHistory)
+        service.change(with: .snippet, keyCombo: customSnippet)
+        service.changeHistoryPanelKeyCombo(.search, keyCombo: customSearch)
+        service.changeHistoryPanelKeyCombo(.previousPage, keyCombo: customPrevious)
+        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: customNext)
+        service.changeClearHistoryKeyCombo(clearHistory)
+        service.registerSnippetHotKey(with: folderIdentifier, keyCombo: folderCombo)
+        let savedFolderKeyCombos = try #require(defaults.object(forKey: Constants.HotKey.folderKeyCombos) as? Data)
+        setMigrationFlagSentinels(in: defaults)
+
+        service.resetMenuShortcutsToDefaults()
+
+        let defaultMain = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
+        let defaultHistory = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
+        let defaultSnippet = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        let defaultPasswordVault = try #require(KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey))
+        #expect(service.mainKeyCombo == defaultMain)
+        #expect(service.historyKeyCombo == defaultHistory)
+        #expect(service.snippetKeyCombo == defaultSnippet)
+        #expect(service.passwordVaultKeyCombo == defaultPasswordVault)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.mainKeyCombo) == defaultMain)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyKeyCombo) == defaultHistory)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.snippetKeyCombo) == defaultSnippet)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.passwordVaultKeyCombo) == defaultPasswordVault)
+        #expect(service.historyPanelKeyCombo(for: .search) == customSearch)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == customPrevious)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == customNext)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historySearchKeyCombo) == customSearch)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == customPrevious)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == customNext)
+        #expect(service.clearHistoryKeyCombo == clearHistory)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.clearHistoryKeyCombo) == clearHistory)
+        #expect(service.snippetKeyCombo(forIdentifier: folderIdentifier) == folderCombo)
+        #expect(defaults.object(forKey: Constants.HotKey.folderKeyCombos) as? Data == savedFolderKeyCombos)
+        expectMigrationFlagSentinels(in: defaults)
+
+        let nextFolderCombo = try #require(service.registerDefaultSnippetHotKeyIfAvailable(forIdentifier: nextFolderIdentifier))
+        #expect(nextFolderCombo.QWERTYKeyCode == 13)
+        #expect(nextFolderCombo.modifiers == cmdKey | optionKey)
+    }
+
+    @Test
+    func resetHistoryPanelShortcutsToDefaultsPreservesMenuAndUnrelatedState() throws {
+        let service = HotKeyService(defaults: defaults)
+        let customMain = try #require(KeyCombo(QWERTYKeyCode: 0, carbonModifiers: cmdKey | controlKey))
+        let customHistory = try #require(KeyCombo(QWERTYKeyCode: 1, carbonModifiers: cmdKey | shiftKey))
+        let customSnippet = try #require(KeyCombo(QWERTYKeyCode: 2, carbonModifiers: cmdKey | controlKey))
+        let customSearch = try #require(KeyCombo(QWERTYKeyCode: 17, carbonModifiers: cmdKey | shiftKey))
+        let customPrevious = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | controlKey))
+        let customNext = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey | shiftKey))
+        let clearHistory = try #require(KeyCombo(QWERTYKeyCode: 10, carbonModifiers: cmdKey | controlKey))
+        let folderCombo = try #require(KeyCombo(QWERTYKeyCode: 12, carbonModifiers: cmdKey | optionKey))
+        let folderIdentifier = "history-reset-folder"
+        let nextFolderIdentifier = "history-reset-next-folder"
+        defer {
+            service.unregisterSnippetHotKey(with: folderIdentifier)
+            service.unregisterSnippetHotKey(with: nextFolderIdentifier)
+        }
+
+        service.change(with: .main, keyCombo: customMain)
+        service.change(with: .history, keyCombo: customHistory)
+        service.change(with: .snippet, keyCombo: customSnippet)
+        service.changeHistoryPanelKeyCombo(.search, keyCombo: customSearch)
+        service.changeHistoryPanelKeyCombo(.previousPage, keyCombo: customPrevious)
+        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: customNext)
+        service.changeClearHistoryKeyCombo(clearHistory)
+        service.registerSnippetHotKey(with: folderIdentifier, keyCombo: folderCombo)
+        let savedFolderKeyCombos = try #require(defaults.object(forKey: Constants.HotKey.folderKeyCombos) as? Data)
+        setMigrationFlagSentinels(in: defaults)
+
+        service.resetHistoryPanelShortcutsToDefaults()
+
+        #expect(service.historyPanelKeyCombo(for: .search) == HistoryPanelShortcut.search.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historySearchKeyCombo) == HistoryPanelShortcut.search.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
+        #expect(service.mainKeyCombo == customMain)
+        #expect(service.historyKeyCombo == customHistory)
+        #expect(service.snippetKeyCombo == customSnippet)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.mainKeyCombo) == customMain)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyKeyCombo) == customHistory)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.snippetKeyCombo) == customSnippet)
+        #expect(service.clearHistoryKeyCombo == clearHistory)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.clearHistoryKeyCombo) == clearHistory)
+        #expect(service.snippetKeyCombo(forIdentifier: folderIdentifier) == folderCombo)
+        #expect(defaults.object(forKey: Constants.HotKey.folderKeyCombos) as? Data == savedFolderKeyCombos)
+        expectMigrationFlagSentinels(in: defaults)
+
+        let nextFolderCombo = try #require(service.registerDefaultSnippetHotKeyIfAvailable(forIdentifier: nextFolderIdentifier))
+        #expect(nextFolderCombo.QWERTYKeyCode == 13)
+        #expect(nextFolderCombo.modifiers == cmdKey | optionKey)
+    }
+
+    @Test
     func shortcutFormatterUsesNumericShortcutText() {
         #expect(PasteraShortcutFormatter.numericString(forRowIndex: 0, startsAtZero: false) == "1")
         #expect(PasteraShortcutFormatter.numericString(forRowIndex: 8, startsAtZero: false) == "9")
@@ -233,12 +311,11 @@ final class HotKeyServiceTests {
 
     @Test
     func migrateCustomizeSettings() throws {
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         #expect(service.mainKeyCombo == nil)
         #expect(service.historyKeyCombo == nil)
         #expect(service.snippetKeyCombo == nil)
 
-        let defaults = UserDefaults.standard
         let defaultKeyCombos: [String: Any] = [Constants.Menu.clip: ["keyCode": 0, "modifiers": 4352],
                                                Constants.Menu.history: ["keyCode": 9, "modifiers": 768],
                                                Constants.Menu.snippet: ["keyCode": 11, "modifiers": 4352]]
@@ -270,10 +347,9 @@ final class HotKeyServiceTests {
 
     @Test
     func saveKeyCombos() throws {
-        let defaults = UserDefaults.standard
         defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         #expect(service.mainKeyCombo == nil)
         #expect(service.historyKeyCombo == nil)
         #expect(service.snippetKeyCombo == nil)
@@ -321,7 +397,6 @@ final class HotKeyServiceTests {
 
     @Test
     func unarchiveSavedKeyCombos() throws {
-        let defaults = UserDefaults.standard
         defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
 
         let mainKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: 768))
@@ -332,7 +407,7 @@ final class HotKeyServiceTests {
         defaults.setArchiveData(historyKeyCombo, forKey: Constants.HotKey.historyKeyCombo)
         defaults.setArchiveData(snippetKeyCombo, forKey: Constants.HotKey.snippetKeyCombo)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         #expect(service.mainKeyCombo == nil)
         #expect(service.historyKeyCombo == nil)
         #expect(service.snippetKeyCombo == nil)
@@ -377,7 +452,6 @@ final class HotKeyServiceTests {
 
     @Test
     func migratesLegacyDefaultHistoryAndSnippetHotkeysToOptionCommandDefaults() throws {
-        let defaults = UserDefaults.standard
         defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
         defaults.set(false, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
         let legacyHistory = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey))
@@ -385,7 +459,7 @@ final class HotKeyServiceTests {
         defaults.setArchiveData(legacyHistory, forKey: Constants.HotKey.historyKeyCombo)
         defaults.setArchiveData(legacySnippet, forKey: Constants.HotKey.snippetKeyCombo)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         let historyKeyCombo = try #require(service.historyKeyCombo)
@@ -403,14 +477,13 @@ final class HotKeyServiceTests {
 
     @Test
     func migratesOldOptionCommandSnippetDefaultToF() throws {
-        let defaults = UserDefaults.standard
         defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
         defaults.set(true, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
         defaults.set(false, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
         let oldDefaultSnippet = try #require(KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey))
         defaults.setArchiveData(oldDefaultSnippet, forKey: Constants.HotKey.snippetKeyCombo)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
@@ -422,7 +495,6 @@ final class HotKeyServiceTests {
 
     @Test
     func preservesCustomizedHistoryAndSnippetHotkeysDuringOptionCommandDefaultMigration() throws {
-        let defaults = UserDefaults.standard
         defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
         defaults.set(false, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
         let customHistory = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
@@ -430,7 +502,7 @@ final class HotKeyServiceTests {
         defaults.setArchiveData(customHistory, forKey: Constants.HotKey.historyKeyCombo)
         defaults.setArchiveData(customSnippet, forKey: Constants.HotKey.snippetKeyCombo)
 
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         service.setupDefaultHotKeys()
 
         #expect(service.historyKeyCombo == customHistory)
@@ -441,18 +513,17 @@ final class HotKeyServiceTests {
 
     @Test
     func defaultSnippetFolderHotkeysUsePreferredOptionCommandOrder() throws {
-        let service = HotKeyService()
-        let identifiers = (0..<7).map { "default-folder-\($0)" }
+        let service = HotKeyService(defaults: defaults)
+        let identifiers = (0..<6).map { "default-folder-\($0)" }
         defer { identifiers.forEach(service.unregisterSnippetHotKey) }
 
         let expectedKeys: [(keyCode: Int, key: String)] = [
             (12, "Q"),
             (13, "W"),
             (14, "E"),
-            (15, "R"),
-            (0, "A"),
-            (1, "S"),
-            (2, "D")
+            (17, "T"),
+            (16, "Y"),
+            (32, "U")
         ]
 
         for (identifier, expectedKey) in zip(identifiers, expectedKeys) {
@@ -467,7 +538,7 @@ final class HotKeyServiceTests {
 
     @Test
     func defaultSnippetFolderHotkeysSkipUsedCombosAndStopWhenSequenceIsExhausted() throws {
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
         let identifiers = (0..<8).map { "reserved-folder-\($0)" }
         defer { identifiers.forEach(service.unregisterSnippetHotKey) }
 
@@ -487,26 +558,48 @@ final class HotKeyServiceTests {
 
     @Test
     func remoteSessionPolicyDoesNotSuspendByDefault() {
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: Constants.HotKey.suspendDuringRemoteSession)
-
-        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"))
+        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(
+            frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing",
+            isEnabled: false
+        ))
     }
 
     @Test
     func remoteSessionPolicySuspendsWhenPreferenceIsEnabled() {
-        let defaults = UserDefaults.standard
-        defaults.set(true, forKey: Constants.HotKey.suspendDuringRemoteSession)
-        defer { defaults.removeObject(forKey: Constants.HotKey.suspendDuringRemoteSession) }
+        #expect(RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(
+            frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing",
+            isEnabled: true
+        ))
+        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(
+            frontmostApplicationBundleIdentifier: "com.apple.finder",
+            isEnabled: true
+        ))
+        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(
+            frontmostApplicationBundleIdentifier: nil,
+            isEnabled: true
+        ))
+    }
 
-        #expect(RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"))
-        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: "com.apple.finder"))
-        #expect(!RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier: nil))
+    @Test
+    func remoteSessionStateRefreshUsesTheServicesBoundDefaultsImmediately() {
+        let service = HotKeyService(defaults: defaults)
+        defaults.set(true, forKey: Constants.HotKey.suspendDuringRemoteSession)
+
+        service.updateRemoteSessionHotKeyState(
+            frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"
+        )
+        #expect(service.isSuspendedForRemoteSession)
+
+        defaults.set(false, forKey: Constants.HotKey.suspendDuringRemoteSession)
+        service.updateRemoteSessionHotKeyState(
+            frontmostApplicationBundleIdentifier: "com.apple.ScreenSharing"
+        )
+        #expect(!service.isSuspendedForRemoteSession)
     }
 
     @Test
     func addAndRemoveClearHistoryHotkey() throws {
-        let service = HotKeyService()
+        let service = HotKeyService(defaults: defaults)
 
         #expect(service.clearHistoryKeyCombo == nil)
 
@@ -516,12 +609,50 @@ final class HotKeyServiceTests {
         #expect(service.clearHistoryKeyCombo != nil)
         #expect(service.clearHistoryKeyCombo == keyCombo)
 
-        let defaults = UserDefaults.standard
         let savedData = try #require(defaults.object(forKey: Constants.HotKey.clearHistoryKeyCombo) as? Data)
         let savedKeyCombo = try #require(NSKeyedUnarchiver.unarchiveObject(with: savedData) as? KeyCombo)
         #expect(savedKeyCombo == keyCombo)
 
         service.changeClearHistoryKeyCombo(nil)
         #expect(service.clearHistoryKeyCombo == nil)
+    }
+
+    @Test
+    func scriptTransformShortcutPersistsAndCanBeRemoved() throws {
+        let service = HotKeyService(defaults: defaults)
+        let keyCombo = try #require(KeyCombo(QWERTYKeyCode: 1, carbonModifiers: cmdKey | optionKey))
+
+        service.changeScriptTransformKeyCombo(keyCombo)
+
+        #expect(service.scriptTransformKeyCombo == keyCombo)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.scriptTransformKeyCombo) == keyCombo)
+
+        service.changeScriptTransformKeyCombo(nil)
+        #expect(service.scriptTransformKeyCombo == nil)
+        #expect(defaults.object(forKey: Constants.HotKey.scriptTransformKeyCombo) == nil)
+    }
+
+    private func setMigrationFlagSentinels(in defaults: UserDefaults) {
+        migrationFlagSentinels.forEach { defaults.set($0.value, forKey: $0.key) }
+        defaults.synchronize()
+    }
+
+    private func expectMigrationFlagSentinels(in defaults: UserDefaults) {
+        migrationFlagSentinels.forEach { flag in
+            #expect(defaults.object(forKey: flag.key) as? Bool == flag.value)
+        }
+    }
+
+    private var migrationFlagSentinels: [(key: String, value: Bool)] {
+        [
+            (Constants.HotKey.migrateNewKeyCombo, false),
+            (Constants.HotKey.migrateOptionCommandDefaultKeyCombos, true),
+            (Constants.HotKey.migrateSnippetDefaultKeyComboToF, false),
+            (Constants.HotKey.historyPanelShortcutDefaultsMigrated, false),
+            (Constants.HotKey.migrateHistoryPanelOptionCommand, true),
+            (Constants.HotKey.migrateHistoryPanelCanonicalDefaults, false),
+            (Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2, true),
+            (Constants.HotKey.migrateHistoryPanelCommandDefaults, false)
+        ]
     }
 }

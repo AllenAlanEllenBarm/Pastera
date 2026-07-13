@@ -70,6 +70,7 @@ struct MenuPanelSelectionDismissalTests {
         )
 
         try withDependencies {
+            $0.pasteboardHistoryRepository = StaticHistoryRepository(details: [])
             $0.snippetRepository = StaticSelectionSnippetRepository(details: [detail])
         } operation: {
             let manager = MenuManager()
@@ -228,6 +229,7 @@ struct MenuPanelSelectionDismissalTests {
         )
 
         try withDependencies {
+            $0.pasteboardHistoryRepository = StaticHistoryRepository(details: [])
             $0.snippetRepository = StaticSelectionSnippetRepository(details: [detail])
         } operation: {
             let manager = MenuManager()
@@ -258,6 +260,7 @@ struct MenuPanelSelectionDismissalTests {
         )
 
         try withDependencies {
+            $0.pasteboardHistoryRepository = StaticHistoryRepository(details: [])
             $0.snippetRepository = StaticSelectionSnippetRepository(details: [detail])
         } operation: {
             let manager = MenuManager()
@@ -451,6 +454,30 @@ struct PasteServiceTargetRestoreTests {
         #expect(probe.events == ["activate", "focus", "schedule", "paste"])
     }
 
+    @Test
+    func pasteTextAppliesPasteScriptsBeforeSecureTextInput() async {
+        let context = makeTargetContext(processIdentifier: 9_797)
+        let probe = PasteRestoreProbe()
+        let coordinator = PasteTransformCoordinatorMock(outcome: .transformed("TRANSFORMED"))
+        let service = makePasteService(
+            context: context,
+            isTargetFrontmost: { true },
+            probe: probe,
+            isSecureEventInputEnabled: { true },
+            scriptCoordinator: coordinator
+        )
+
+        service.pasteText("original", restoring: context)
+        for _ in 0..<20 where probe.scheduledWork.isEmpty {
+            await Task.yield()
+        }
+        #expect(coordinator.requests == ["original|com.example.editor|paste"])
+        probe.scheduledWork.removeFirst()()
+
+        #expect(probe.events == ["activate", "focus", "schedule", "type:TRANSFORMED"])
+        #expect(NSPasteboard.general.string(forType: .string) == "TRANSFORMED")
+    }
+
     private func makeTargetContext(processIdentifier: pid_t) -> PasteTargetContext {
         PasteTargetContext(
             processIdentifier: processIdentifier,
@@ -464,7 +491,8 @@ struct PasteServiceTargetRestoreTests {
         context: PasteTargetContext,
         isTargetFrontmost: @escaping () -> Bool,
         probe: PasteRestoreProbe,
-        isSecureEventInputEnabled: @escaping () -> Bool = { false }
+        isSecureEventInputEnabled: @escaping () -> Bool = { false },
+        scriptCoordinator: ClipboardScriptCoordinating? = nil
     ) -> PasteService {
         PasteService(
             inputPasteCommandEnabledProvider: { true },
@@ -478,6 +506,7 @@ struct PasteServiceTargetRestoreTests {
             pasteCommandSender: { probe.events.append("paste") },
             secureEventInputEnabledProvider: isSecureEventInputEnabled,
             textInputSender: { text in probe.events.append("type:\(text)") },
+            clipboardScriptCoordinatorProvider: { scriptCoordinator },
             scheduleAfter: { delay, work in
                 #expect(delay == 0.02 || delay == 0.04)
                 probe.delays.append(delay)
@@ -486,6 +515,25 @@ struct PasteServiceTargetRestoreTests {
             }
         )
     }
+}
+
+private final class PasteTransformCoordinatorMock: ClipboardScriptCoordinating {
+    let outcome: ScriptTransformOutcome
+    var requests = [String]()
+
+    init(outcome: ScriptTransformOutcome) {
+        self.outcome = outcome
+    }
+
+    func hasEnabledScripts(for trigger: ScriptTrigger) -> Bool { trigger == .paste }
+
+    func transform(text: String, sourceAppBundleIdentifier: String?, trigger: ScriptTrigger) async -> ScriptTransformOutcome {
+        requests.append("\(text)|\(sourceAppBundleIdentifier ?? "nil")|paste")
+        return outcome
+    }
+
+    func runManualTransform() async {}
+    func consumeSuppression(changeCount: Int) -> Bool { false }
 }
 
 private final class PasteRestoreProbe {

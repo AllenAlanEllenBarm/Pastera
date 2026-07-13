@@ -244,11 +244,11 @@ struct PasteboardContentTests {
     @Test
     func filePreviewClassifierReadsBoundedTextPreviewAndRejectsBinaryFiles() throws {
         let textURL = try writeTemporaryFile(
-            name: "notes.unknown",
+            name: "notes.md",
             data: Data(("First line\n" + String(repeating: "Second line\n", count: 200)).utf8)
         )
         let binaryURL = try writeTemporaryFile(
-            name: "archive.unknown",
+            name: "archive.zip",
             data: Data([0x00, 0x01, 0x02, 0x03, 0x04])
         )
         defer {
@@ -259,14 +259,39 @@ struct PasteboardContentTests {
         let preview = try #require(PasteraFileTypeClassifier.textPreview(from: textURL, maxBytes: 16))
 
         #expect(preview == "First line\nSecon")
-        #expect(PasteraFileTypeClassifier.kind(for: textURL) == .commonText)
-        #expect(PasteraFileTypeClassifier.kind(for: binaryURL) == nil)
+        #expect(PasteraFileTypeClassifier.kind(for: textURL) == .document)
+        #expect(PasteraFileTypeClassifier.kind(for: binaryURL) == .archive)
         #expect(PasteraFileTypeClassifier.textPreview(from: binaryURL) == nil)
     }
 
     @Test
-    func fileURLContentKeepsOriginalAssetAndCreatesDisplayTitleForCommonTextFiles() throws {
-        let textURL = try writeTemporaryFile(name: "notes.unknown", data: Data("Hello from file".utf8))
+    func finderFileCategoryClassifiesDocumentArchiveCodeOtherAndRejectsDirectories() throws {
+        let documentURL = try writeTemporaryFile(name: "report.docx", data: Data("doc".utf8))
+        let archiveURL = try writeTemporaryFile(name: "backup.zip", data: Data([0x50, 0x4B]))
+        let codeURL = try writeTemporaryFile(name: "main.swift", data: Data("let value = 1".utf8))
+        let unknownURL = try writeTemporaryFile(name: "payload.unknown", data: Data("payload".utf8))
+        let extensionlessURL = try writeTemporaryFile(name: "README", data: Data("readme".utf8))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        defer {
+            [documentURL, archiveURL, codeURL, unknownURL, extensionlessURL].forEach {
+                try? FileManager.default.removeItem(at: $0.deletingLastPathComponent())
+            }
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        #expect(PasteraFinderFileCategory.category(for: documentURL) == .document)
+        #expect(PasteraFinderFileCategory.category(for: archiveURL) == .archive)
+        #expect(PasteraFinderFileCategory.category(for: codeURL) == .code)
+        #expect(PasteraFinderFileCategory.category(for: unknownURL) == .other)
+        #expect(PasteraFinderFileCategory.category(for: extensionlessURL) == .other)
+        #expect(PasteraFinderFileCategory.category(for: directoryURL) == nil)
+    }
+
+    @Test
+    func fileURLContentKeepsOriginalAssetAndCreatesDisplayTitleForDocumentFiles() throws {
+        let textURL = try writeTemporaryFile(name: "notes.md", data: Data("Hello from file".utf8))
         defer { try? FileManager.default.removeItem(at: textURL.deletingLastPathComponent()) }
         let content = PasteboardContent(
             assets: [
@@ -275,7 +300,29 @@ struct PasteboardContentTests {
         )
 
         #expect(content.assets == [PasteboardContent.Asset(type: .fileURL, data: textURL.dataRepresentation)])
-        #expect(content.historyTitle == "notes.unknown\nHello from file")
+        #expect(content.historyTitle == "notes.md\nHello from file")
+    }
+
+    @Test
+    func fileURLContentKeepsFileNameForArchiveCodeDocumentAndOtherFiles() throws {
+        let cases: [(name: String, data: Data)] = [
+            ("backup.zip", Data([0x50, 0x4B, 0x03, 0x04])),
+            ("main.swift", Data("let value = 1".utf8)),
+            ("report.docx", Data([0x50, 0x4B, 0x03, 0x04])),
+            ("payload.unknown", Data([0x01, 0x02, 0x03, 0x04]))
+        ]
+        let urls = try cases.map { try writeTemporaryFile(name: $0.name, data: $0.data) }
+        defer {
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+
+        for (index, url) in urls.enumerated() {
+            let content = PasteboardContent(
+                assets: [PasteboardContent.Asset(type: .fileURL, data: url.dataRepresentation)]
+            )
+
+            #expect(content.historyTitle.components(separatedBy: .newlines).first == cases[index].name)
+        }
     }
 
     @Test

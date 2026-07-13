@@ -69,14 +69,13 @@ struct SparkleUpdateFeedTests {
     func manualUpdateCheckUsesSparkleWithoutGitHubDownloadFallback() throws {
         let source = try String(
             contentsOf: projectRoot()
-                .appendingPathComponent("pastera/Sources/Preferences/Panels/CPYUpdatesPreferenceViewController.swift"),
+                .appendingPathComponent("pastera/Sources/Preferences/Panels/CPYAboutPreferenceViewController.swift"),
             encoding: .utf8
         )
 
-        #expect(source.contains("updaterController?.checkForUpdates(sender)"))
+        #expect(source.contains("updater?.checkForUpdates()"))
         #expect(!source.contains("PasteraGitHubReleaseUpdateChecker"))
         #expect(!source.contains("api.github.com/repos/pastera-app/Pastera/releases"))
-        #expect(!source.contains("NSWorkspace.shared.open"))
         #expect(!source.contains("Open the GitHub release page to download this version."))
     }
 

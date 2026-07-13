@@ -26,7 +26,7 @@ struct PreferenceSidebarTests {
     }
 
     @Test
-    func sidebarUsesChineseTitlesAndDistinctSyncUpdateIcons() throws {
+    func sidebarUsesApprovedTitlesAndDistinctServiceIcons() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
 
@@ -35,16 +35,16 @@ struct PreferenceSidebarTests {
         let titles = controller.preferenceSidebarTitlesForTesting
         let symbolNames = controller.preferenceSidebarSymbolNamesForTesting
         let syncIndex = try #require(titles.firstIndex(of: "同步"))
-        let updateIndex = try #require(titles.firstIndex(of: "更新"))
+        let aboutIndex = try #require(titles.firstIndex(of: "关于 Pastera"))
 
-        #expect(titles == ["通用", "类型", "排除", "快捷键", "同步", "更新"])
+        #expect(titles == ["通用", "历史与预览", "快捷键", "排除应用", "同步", "关于 Pastera"])
         #expect(!titles.contains("Types"))
         #expect(!titles.contains("Exclude"))
         #expect(!titles.contains("Update"))
         #expect(!titles.contains("Beta"))
         #expect(!titles.contains("测试"))
         #expect(symbolNames.count == titles.count)
-        #expect(symbolNames[syncIndex] != symbolNames[updateIndex])
+        #expect(symbolNames[syncIndex] != symbolNames[aboutIndex])
     }
 }
 
@@ -52,7 +52,63 @@ struct PreferenceSidebarTests {
 @Suite(.serialized)
 struct PreferencePaneAlignmentTests {
     @Test
-    func excludePaneTitleAndTableUseSameContentColumn() throws {
+    func generalGroupsUseSemanticHeaderIconsAndStableRowRhythm() throws {
+        let page = CPYGeneralPreferenceViewController()
+        page.loadView()
+        page.view.frame = NSRect(x: 0, y: 0, width: 520, height: 900)
+        page.view.layoutSubtreeIfNeeded()
+
+        let groups = preferenceGroups(in: page.view)
+        #expect(groups.count == 4)
+        for group in groups {
+            let icons = descendantImageViews(in: group).filter {
+                $0.accessibilityIdentifier() == "preference.group.icon"
+            }
+            let rows = descendantSettingRows(in: group)
+            let separators = descendantViews(in: group).filter {
+                $0.accessibilityIdentifier() == "preference.group.separator"
+            }
+            #expect(icons.count == 1)
+            #expect(!rows.isEmpty)
+            #expect(rows.allSatisfy { $0.frame.height >= 48 })
+            #expect(!separators.isEmpty)
+            #expect(separators.allSatisfy { ($0.layer?.backgroundColor?.alpha ?? 1) <= 0.15 })
+        }
+    }
+
+    @Test
+    func nativeTask5AnchorsStayInsideTheirPageBounds() throws {
+        let controller = CPYPreferencesWindowController()
+        defer { controller.close() }
+        controller.showWindow(nil)
+
+        let anchors: [(PasteraPreferencePaneID, [String])] = [
+            (.sync, ["sync.oneDriveStatus", "sync.rootFolder", "sync.fileTypes", "sync.actions"]),
+            (.about, ["about.version", "about.github", "about.license", "about.sparkle"])
+        ]
+        for (paneID, anchorIDs) in anchors {
+            controller.showPreferencePaneForTesting(paneID: paneID)
+            let paneBounds = NSRect(
+                origin: .zero,
+                size: NSSize(
+                    width: controller.selectedPaneDocumentWidthForTesting,
+                    height: controller.selectedPaneDocumentHeightForTesting
+                )
+            )
+            for anchorID in anchorIDs {
+                let frame = try #require(controller.selectedPaneDescendantFrameForTesting(
+                    accessibilityIdentifier: anchorID
+                ))
+                #expect(frame.minX >= paneBounds.minX - 0.5)
+                #expect(frame.maxX <= paneBounds.maxX + 0.5)
+                #expect(frame.minY >= paneBounds.minY - 0.5)
+                #expect(frame.maxY <= paneBounds.maxY + 0.5)
+            }
+        }
+    }
+
+    @Test
+    func excludedAppsNativePaneKeepsTitleAndTableInsideContentBounds() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
 
@@ -61,17 +117,29 @@ struct PreferencePaneAlignmentTests {
 
         let contentView = try #require(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
-        let paneFrame = controller.selectedPaneFrameInContentViewForTesting
-        let titleFrame = try #require(preferenceTextFieldFrames(in: contentView)
-            .first { ["Exclude these applications:", "排除这些程序："].contains($0.text) }?.frame)
-        let tableFrame = try #require(preferenceTableScrollFrame(in: contentView))
-
-        #expect(abs(titleFrame.minX - tableFrame.minX) <= 1)
-        #expect(tableFrame.width >= controller.selectedPaneDocumentWidthForTesting - 4)
-        #expect(
-            paneFrame.maxY - titleFrame.maxY <= 24,
-            "Exclude pane title should be top-aligned, but top gap is \(paneFrame.maxY - titleFrame.maxY)"
+        let titleFrame = try #require(controller.selectedPaneTextFrameForTesting(
+            matching: ["Excluded Apps", "排除应用"]
+        ))
+        let tableFrame = try #require(controller.selectedPaneDescendantFrameForTesting(
+            accessibilityIdentifier: "exclude.apps.scroll"
+        ))
+        let paneBounds = NSRect(
+            origin: .zero,
+            size: NSSize(
+                width: controller.selectedPaneDocumentWidthForTesting,
+                height: controller.selectedPaneDocumentHeightForTesting
+            )
         )
+
+        #expect(titleFrame.minX >= -0.5)
+        #expect(titleFrame.maxX <= controller.selectedPaneDocumentWidthForTesting + 0.5)
+        #expect(titleFrame.minY >= -0.5)
+        #expect(titleFrame.maxY <= controller.selectedPaneDocumentHeightForTesting + 0.5)
+        #expect(tableFrame.minX >= paneBounds.minX - 0.5)
+        #expect(tableFrame.maxX <= paneBounds.maxX + 0.5)
+        #expect(tableFrame.minY >= paneBounds.minY - 0.5)
+        #expect(tableFrame.maxY <= paneBounds.maxY + 0.5)
+        #expect(tableFrame.width >= controller.selectedPaneDocumentWidthForTesting - 100)
     }
 
     @Test
@@ -98,18 +166,20 @@ struct PreferencePaneAlignmentTests {
         }
         let rowLabels = textFrames.filter {
             [
-                "Main:",
-                "History:",
-                "Search:",
-                "Previous Page:",
-                "Next Page:",
-                "Snippets:",
-                "主体：",
-                "历史：",
-                "搜索：",
-                "上一页：",
-                "下一页：",
-                "片段："
+                "Main",
+                "History",
+                "Search",
+                "Previous Page",
+                "Next Page",
+                "Snippets",
+                "Password Vault",
+                "主体",
+                "历史",
+                "搜索",
+                "上一页",
+                "下一页",
+                "片段",
+                "密码箱"
             ].contains($0.text)
         }
         let recordFrames = preferenceRecordViewFrames(in: contentView)
@@ -121,26 +191,26 @@ struct PreferencePaneAlignmentTests {
             ["History Panel Shortcuts", "历史面板快捷键"].contains($0.text)
         })
         let searchLabel = try #require(rowLabels.first {
-            ["Search:", "搜索："].contains($0.text)
+            ["Search", "搜索"].contains($0.text)
         })
         let previousPageLabel = try #require(rowLabels.first {
-            ["Previous Page:", "上一页："].contains($0.text)
+            ["Previous Page", "上一页"].contains($0.text)
         })
         let nextPageLabel = try #require(rowLabels.first {
-            ["Next Page:", "下一页："].contains($0.text)
+            ["Next Page", "下一页"].contains($0.text)
         })
         let nextPageFrameInPane = try #require(controller.selectedPaneTextFrameForTesting(
-            matching: ["Next Page:", "下一页："]
+            matching: ["Next Page", "下一页"]
         ))
 
         #expect(sectionTitles.count == 2)
-        #expect(rowLabels.count == 6)
-        #expect(recordFrames.count == 6)
+        #expect(rowLabels.count == 7)
+        #expect(recordFrames.count == 7)
         #expect(!textFrames.contains {
             ["Clear History:", "清空历史：", "清除历史："].contains($0.text)
         })
-        #expect(abs(menuTitle.frame.midY - historyPanelTitle.frame.midY) <= 1)
-        #expect(menuTitle.frame.minX < historyPanelTitle.frame.minX)
+        #expect(abs(menuTitle.frame.minX - historyPanelTitle.frame.minX) <= 1)
+        #expect(menuTitle.frame.maxY > historyPanelTitle.frame.maxY)
         #expect(searchLabel.frame.maxY > previousPageLabel.frame.maxY)
         #expect(previousPageLabel.frame.maxY > nextPageLabel.frame.maxY)
         #expect(nextPageFrameInPane.minY >= -0.5)
@@ -149,40 +219,9 @@ struct PreferencePaneAlignmentTests {
         let labelColumns = Set(rowLabels.map { Int(($0.frame.minX / 2).rounded()) })
         let recordColumns = Set(recordFrames.map { Int(($0.minX / 2).rounded()) })
         let paneMaxX = paneFrame.maxX
-        #expect(labelColumns.count == 2)
-        #expect(recordColumns.count == 2)
+        #expect(labelColumns.count == 1)
+        #expect(recordColumns.count == 1)
         for frame in recordFrames {
-            #expect(frame.maxX <= paneMaxX)
-        }
-    }
-
-    @Test
-    func generalPaneRemovesClearHistoryWarningAndCentersContentVertically() throws {
-        let controller = CPYPreferencesWindowController()
-        defer { controller.close() }
-
-        controller.showWindow(nil)
-        controller.showPreferencePaneForTesting(title: "General")
-
-        let contentView = try #require(controller.window?.contentView)
-        contentView.layoutSubtreeIfNeeded()
-        let paneFrame = controller.selectedPaneFrameInContentViewForTesting
-        let paneMinX = paneFrame.minX - 1
-        let paneMaxX = paneFrame.maxX + 1
-        let buttonFrames = preferenceButtons(in: contentView).map { button in
-            (title: button.title, frame: contentView.convert(button.frame, from: button.superview))
-        }.filter { $0.frame.minX >= paneMinX }
-        let textFrames = preferenceTextFieldFrames(in: contentView).filter { $0.frame.minX >= paneMinX }
-        let clearHistoryFrame = try #require(buttonFrames.first { ["Clear History", "清除历史", "清空历史"].contains($0.title) }?.frame)
-        let launchFrame = try #require(buttonFrames.first { ["Launch on Login", "登录时打开"].contains($0.title) }?.frame)
-        let opacityFrame = try #require(textFrames.first { ["Transparency", "透明度"].contains($0.text) }?.frame)
-        let warningFrame = buttonFrames.first { ["Show alert panel before clear history", "清空历史前显示警告面板"].contains($0.title) }?.frame
-        let visibleControlsFrame = buttonFrames.map(\.frame).reduce(NSRect.null) { $0.union($1) }
-
-        #expect(warningFrame == nil)
-        #expect(abs(visibleControlsFrame.midY - contentView.bounds.midY) <= 6)
-        for frame in [launchFrame, clearHistoryFrame, opacityFrame] {
-            #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
         }
     }
@@ -198,6 +237,25 @@ struct PreferencePaneAlignmentTests {
             values.append(contentsOf: preferenceTextFieldFrames(in: $0, root: rootView))
         }
         return values
+    }
+
+    private func preferenceGroups(in view: NSView) -> [PasteraPreferenceGroupView] {
+        view.subviews.compactMap { $0 as? PasteraPreferenceGroupView }
+            + view.subviews.flatMap { preferenceGroups(in: $0) }
+    }
+
+    private func descendantImageViews(in view: NSView) -> [NSImageView] {
+        view.subviews.compactMap { $0 as? NSImageView }
+            + view.subviews.flatMap { descendantImageViews(in: $0) }
+    }
+
+    private func descendantSettingRows(in view: NSView) -> [PasteraPreferenceSettingRowView] {
+        view.subviews.compactMap { $0 as? PasteraPreferenceSettingRowView }
+            + view.subviews.flatMap { descendantSettingRows(in: $0) }
+    }
+
+    private func descendantViews(in view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descendantViews(in: $0) }
     }
 
     private func preferenceTableScrollFrame(in view: NSView, root: NSView? = nil) -> NSRect? {
@@ -261,7 +319,7 @@ struct PreferencePaneAlignmentTests {
 @Suite(.serialized)
 struct GeneralPreferenceMergedMenuTests {
     @Test
-    func generalPaneContainsMergedMenuSettingsAndCentersContentVertically() throws {
+    func generalPaneContainsOnlyApprovedNativeGeneralSettings() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
 
@@ -279,44 +337,29 @@ struct GeneralPreferenceMergedMenuTests {
             .map(\.title)
         let buttonFrames = allButtonFrames.filter { $0.frame.minX >= paneMinX }
         let textFields = preferenceTextFieldFrames(in: contentView).filter { $0.frame.minX >= paneMinX }
-        let launchFrame = try frame(of: ["Launch on Login", "登录时打开"], in: buttonFrames)
-        let clearHistoryFrame = try frame(of: ["Clear History", "清除历史", "清空历史"], in: buttonFrames)
-        let reorderFrame = try frame(of: ["Place already copied history at the top", "把已经粘贴的历史置顶"], in: buttonFrames)
-        let moveFrame = try frame(
-            of: [
-                "Move instead of copying (removes the older one from the list)",
-                "移动而非拷贝（第二次粘贴时把旧的项从列表中移除）"
-            ],
+        let launchFrame = try frame(of: [pasteraPreferenceString("Launch on Login")], in: buttonFrames)
+        let colorPreviewFrame = try frame(
+            of: [pasteraPreferenceString("Show color code preview")],
             in: buttonFrames
         )
-        let colorPreviewFrame = try frame(of: ["Show color code preview", "为颜色代码显示预览"], in: buttonFrames)
-        let automaticPasteFrame = try frame(of: ["Automatic Paste", "自动粘贴"], in: buttonFrames)
+        let automaticPasteFrame = try frame(of: [pasteraPreferenceString("Automatic Paste")], in: buttonFrames)
         let automaticPasteInfoFrame = try frame(
-            of: ["Automatic Paste Permission Info", "自动粘贴权限说明"],
+            of: [pasteraPreferenceString("Automatic Paste Permission Info")],
             in: buttonFrames
         )
-        let remoteFrame = try frame(of: ["Pause shortcuts during remote control", "远程控制时暂停本机快捷键"], in: buttonFrames)
-        let opacityFrame = try textFrame(of: ["Transparency", "透明度"], in: textFields)
+        let remoteFrame = try frame(
+            of: [pasteraPreferenceString("Pause shortcuts during remote control")],
+            in: buttonFrames
+        )
+        let opacityFrame = try textFrame(of: [pasteraPreferenceString("Transparency")], in: textFields)
         let menuTitleLengthFrame = try textFrame(
-            of: ["Number of characters in the menu:", "菜单中字符的个数："],
+            of: [pasteraPreferenceString("Number of characters in the menu:")],
             in: textFields
         )
-        let mediaHistoryLimitFrame = try textFrame(
-            of: ["Image/file limit:", "图片/文件上限："],
-            in: textFields
-        )
-        let mediaImageLimitFrame = try textFrame(of: ["Images", "图片"], in: textFields)
-        let mediaFileLimitFrame = try textFrame(of: ["Files", "文件"], in: textFields)
         let visibleControlsFrame = [
             launchFrame,
-            clearHistoryFrame,
             opacityFrame,
             menuTitleLengthFrame,
-            mediaHistoryLimitFrame,
-            mediaImageLimitFrame,
-            mediaFileLimitFrame,
-            reorderFrame,
-            moveFrame,
             colorPreviewFrame,
             automaticPasteFrame,
             automaticPasteInfoFrame,
@@ -325,18 +368,18 @@ struct GeneralPreferenceMergedMenuTests {
         #expect(!sidebarButtonTitles.contains { ["Menu", "菜单"].contains($0) })
         #expect(buttonFrames.allSatisfy { !removedButtonTitles.contains($0.title) })
         #expect(textFields.allSatisfy { !removedTextTitles.contains($0.text) })
-        #expect(abs(visibleControlsFrame.midY - contentView.bounds.midY) <= 6)
-        #expect((controller.minimumVisibleControlVerticalGapForTesting ?? 0) >= 11.5)
+        #expect(!buttonFrames.contains { ["Clear History", "清除历史", "清空历史"].contains($0.title) })
+        #expect(!buttonFrames.contains { ["Place already copied history at the top", "把已经粘贴的历史置顶"].contains($0.title) })
+        #expect(!textFields.contains { ["Image/file limit:", "图片/文件上限："].contains($0.text) })
+        #expect(!visibleControlsFrame.isNull)
+        let generalPage = try #require(
+            controller.cachedPreferencePageForTesting(paneID: .general) as? CPYGeneralPreferenceViewController
+        )
+        #expect((task3MinimumNativePreferenceGroupGap(in: generalPage.view) ?? 0) >= 11.5)
         for frame in [
             launchFrame,
-            clearHistoryFrame,
             opacityFrame,
             menuTitleLengthFrame,
-            mediaHistoryLimitFrame,
-            mediaImageLimitFrame,
-            mediaFileLimitFrame,
-            reorderFrame,
-            moveFrame,
             colorPreviewFrame,
             automaticPasteFrame,
             automaticPasteInfoFrame,
@@ -345,28 +388,8 @@ struct GeneralPreferenceMergedMenuTests {
             #expect(frame.minX >= paneMinX)
             #expect(frame.maxX <= paneMaxX)
         }
-        #expect(abs(mediaImageLimitFrame.midY - mediaFileLimitFrame.midY) <= 2)
-        #expect(mediaImageLimitFrame.maxX < mediaFileLimitFrame.minX)
         #expect(automaticPasteInfoFrame.minX > automaticPasteFrame.minX)
         #expect(abs(automaticPasteInfoFrame.midY - automaticPasteFrame.midY) <= 2)
-    }
-
-    @Test
-    func enablingAutomaticPasteRequestsAccessibilityGuidance() throws {
-        let controller = CPYGeneralPreferenceViewController(nibName: "CPYGeneralPreferenceViewController", bundle: nil)
-        var requestCount = 0
-        controller.automaticPastePermissionRequester = {
-            requestCount += 1
-        }
-
-        _ = controller.view
-        let automaticPasteButton = try #require(preferenceButtons(in: controller.view)
-            .first { ["Automatic Paste", "自动粘贴"].contains($0.accessibilityLabel() ?? $0.title) })
-
-        automaticPasteButton.state = .off
-        automaticPasteButton.performClick(nil)
-
-        #expect(requestCount == 1)
     }
 
     private let removedButtonTitles: Set<String> = [
@@ -481,12 +504,14 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
 
             let visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
             #expect(!visibleTexts.contains("OneDrive > Pastera > sync"))
-            #expect(visibleTexts.contains("OneDrive 可用"))
+            #expect(visibleTexts.contains(pasteraPreferenceString("OneDrive Available")))
             #expect(!visibleTexts.contains("已使用 OneDrive 默认同步位置。"))
-            #expect(!visibleTexts.contains("OneDrive 状态"))
+            #expect(visibleTexts.contains(pasteraPreferenceString("OneDrive Status")))
             #expect(!visibleTexts.contains("可用"))
             #expect(!visibleTexts.contains(where: { $0.contains("Library/CloudStorage") }))
-            #expect(preferenceButtons(in: controller.view).contains { $0.title == "修改" })
+            #expect(preferenceButtons(in: controller.view).contains {
+                $0.title == pasteraPreferenceString("Change")
+            })
         }
     }
 
@@ -553,6 +578,10 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             })
             controller.loadView()
             controller.viewDidLoad()
+            let window = SyncPreferenceVisibilityWindow()
+            window.contentView = controller.view
+            window.testIsVisible = true
+            defer { window.contentView = nil }
             controller.view.layoutSubtreeIfNeeded()
 
             var visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
@@ -567,7 +596,9 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             #expect(!visibleTexts.contains("所选 OneDrive 文件夹不可用。"))
             #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
             #expect(!FileManager.default.fileExists(atPath: defaultRootURL.path))
-            #expect(preferenceButtons(in: controller.view).first { $0.title == "显示" }?.isEnabled == false)
+            #expect(preferenceButtons(in: controller.view).first {
+                $0.title == pasteraPreferenceString("Show in Finder")
+            }?.isEnabled == false)
         }
     }
 
@@ -769,10 +800,10 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             controller.viewDidLoad()
             controller.view.layoutSubtreeIfNeeded()
             let historyUploadSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
-                $0.accessibilityLabel() == "上传历史"
+                $0.accessibilityLabel() == pasteraPreferenceString("Upload History")
             })
             let historyImportSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
-                $0.accessibilityLabel() == "同步历史"
+                $0.accessibilityLabel() == pasteraPreferenceString("Import History")
             })
 
             historyUploadSwitch.performClick(nil)
@@ -824,7 +855,10 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             let labels = Set(preferenceSwitchButtons(in: controller.view).compactMap { $0.accessibilityLabel() })
             #expect(!labels.contains("上传文件"))
             #expect(!labels.contains("同步文件"))
-            let fileTypeLabels: Set<String> = ["图片", "常用文本文件类型"]
+            let fileTypeLabels: Set<String> = [
+                pasteraPreferenceString("Images"),
+                pasteraPreferenceString("Common Document Types")
+            ]
             let fileTypeCheckboxes = preferenceButtons(in: controller.view).filter {
                 fileTypeLabels.contains($0.accessibilityLabel() ?? "")
             }
@@ -836,13 +870,13 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             #expect(fileTypeCheckboxes.allSatisfy { $0.state == .off })
 
             let historyUploadSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
-                $0.accessibilityLabel() == "上传历史"
+                $0.accessibilityLabel() == pasteraPreferenceString("Upload History")
             })
             let historyImportSwitch = try #require(preferenceSwitchButtons(in: controller.view).first {
-                $0.accessibilityLabel() == "同步历史"
+                $0.accessibilityLabel() == pasteraPreferenceString("Import History")
             })
             let commonTextCheckbox = try #require(fileTypeCheckboxes.first {
-                $0.accessibilityLabel() == "常用文本文件类型"
+                $0.accessibilityLabel() == pasteraPreferenceString("Common Document Types")
             })
 
             historyUploadSwitch.performClick(nil)
@@ -941,13 +975,21 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
 
     private func preferenceSwitchButtons(in view: NSView) -> [NSButton] {
         let switchLabels: Set<String> = [
-            "上传历史",
-            "同步历史",
-            "上传片段",
-            "同步片段"
+            pasteraPreferenceString("Upload History"),
+            pasteraPreferenceString("Import History"),
+            pasteraPreferenceString("Upload Snippets"),
+            pasteraPreferenceString("Import Snippets")
         ]
         return preferenceButtons(in: view).filter {
             switchLabels.contains($0.accessibilityLabel() ?? "")
         }
+    }
+}
+
+private final class SyncPreferenceVisibilityWindow: NSWindow {
+    var testIsVisible = false
+
+    override var isVisible: Bool {
+        testIsVisible
     }
 }

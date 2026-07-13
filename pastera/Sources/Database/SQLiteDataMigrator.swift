@@ -17,6 +17,8 @@ extension DatabaseMigrator {
         registerMigrationV1()
         registerMigrationV2()
         registerMigrationV3()
+        registerMigrationV4()
+        registerMigrationV5()
     }
 
     // swiftlint:disable:next function_body_length
@@ -237,6 +239,63 @@ extension DatabaseMigrator {
                 """
                 CREATE INDEX "index_snippetSyncDeletions_on_kind_recordID"
                 ON "snippetSyncDeletions" ("kind", "recordID")
+                """
+            )
+            .execute(database)
+        }
+    }
+
+    mutating func registerMigrationV4() {
+        registerMigration("Add pasteboard history OCR text index") { database in
+            try #sql(
+                """
+                CREATE TABLE "pasteboardHistoryOCRTexts" (
+                  "pasteboardHistoryID" TEXT PRIMARY KEY NOT NULL,
+                  "sourceHash" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "recognizedText" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "updatedAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0,
+                  FOREIGN KEY ("pasteboardHistoryID")
+                    REFERENCES "pasteboardHistories" ("id")
+                    ON DELETE CASCADE
+                ) STRICT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                CREATE INDEX "index_pasteboardHistoryOCRTexts_on_sourceHash"
+                ON "pasteboardHistoryOCRTexts" ("sourceHash")
+                """
+            )
+            .execute(database)
+        }
+    }
+
+    mutating func registerMigrationV5() {
+        registerMigration("Add local script transforms") { database in
+            try #sql(
+                """
+                CREATE TABLE "scriptTransforms" (
+                  "id" TEXT PRIMARY KEY NOT NULL,
+                  "name" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "code" TEXT NOT NULL ON CONFLICT REPLACE DEFAULT '',
+                  "isEnabled" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 1,
+                  "runOnCopy" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0,
+                  "runOnPaste" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0,
+                  "runManually" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 1,
+                  "sortIndex" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0,
+                  "createdAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0,
+                  "updatedAt" INTEGER NOT NULL ON CONFLICT REPLACE DEFAULT 0
+                ) STRICT
+                """
+            )
+            .execute(database)
+
+            try #sql(
+                """
+                CREATE INDEX "index_scriptTransforms_on_sortIndex_createdAt"
+                ON "scriptTransforms" ("sortIndex", "createdAt")
                 """
             )
             .execute(database)

@@ -112,6 +112,9 @@ struct MenuManagerStatusItemTests {
             manager.secureEventInputEnabledProvider = { true }
 
             #expect(manager.mainMenuNoticeTitlesForTesting == [String(localized: "Shortcuts are paused")])
+            #expect(manager.mainMenuNoticeMessagesForTesting == [String(localized:
+                "macOS paused global shortcuts while Secure Keyboard Entry is active. Click the Pastera menu bar icon to open Pastera."
+            )])
         }
     }
 
@@ -126,12 +129,16 @@ struct MenuManagerStatusItemTests {
     }
 
     @Test
-    func secureKeyboardEntryUsesLegacyMenuFallbackForHotkeyPopups() throws {
+    func secureKeyboardEntryUsesUnifiedMainInterfaceForHotkeyPopups() throws {
         try withRegisteredDefaultEnvironment { _, _ in
             let manager = MenuManager()
             manager.secureEventInputEnabledProvider = { true }
 
-            #expect(manager.shouldUseLegacyMenuFallbackForTesting)
+            manager.popUpMenu(.history)
+            defer { manager.closeMainMenuPanelForTesting() }
+
+            #expect(manager.mainMenuSelectedModeForTesting == "history")
+            #expect(manager.historyBrowserPanelFrameForTesting == nil)
         }
     }
 
@@ -141,7 +148,29 @@ struct MenuManagerStatusItemTests {
             let manager = MenuManager()
             manager.secureEventInputEnabledProvider = { false }
 
-            #expect(!manager.shouldUseLegacyMenuFallbackForTesting)
+            manager.popUpMenu(.history)
+            defer { manager.closeMainMenuPanelForTesting() }
+
+            #expect(manager.mainMenuSelectedModeForTesting == "history")
+            #expect(manager.historyBrowserPanelFrameForTesting == nil)
+        }
+    }
+
+    @Test
+    func featureHotkeysSelectModesInUnifiedMainInterface() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+
+            manager.popUpMenu(.history)
+            #expect(manager.mainMenuSelectedModeForTesting == "history")
+            #expect(manager.historyBrowserPanelFrameForTesting == nil)
+
+            manager.popUpMenu(.snippet)
+            #expect(manager.mainMenuSelectedModeForTesting == "snippets")
+            #expect(manager.snippetBrowserPanelFrameForTesting == nil)
+
+            manager.popUpMenu(.passwordVault)
+            #expect(manager.mainMenuSelectedModeForTesting == "passwordVault")
         }
     }
 
@@ -189,6 +218,99 @@ struct MenuManagerStatusItemTests {
 
             #expect(menuManager.makeSubmenuItem("AI Prompt").image != nil)
             #expect(menuManager.makeSnippetMenuItemForTesting(snippet, listNumber: 1, rowIndex: 0).image != nil)
+        }
+    }
+
+    @Test
+    func contextMenuContainsOnlyExistingPasteraCapabilitiesInOrder() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+
+            #expect(manager.statusItemContextMenuTitlesForTesting == [
+                String(localized: "History"),
+                String(localized: "Snippet"),
+                String(localized: "Password Vault"),
+                String(localized: "Manage Snippets"),
+                String(localized: "Clear History"),
+                String(localized: "Preferences"),
+                String(localized: "Check for Updates…"),
+                String(localized: "About Pastera"),
+                String(localized: "Quit Pastera")
+            ])
+        }
+    }
+
+    @Test
+    func contextMenuUsesIconsForEveryAction() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+
+            #expect(manager.statusItemContextMenuItemsForTesting.allSatisfy { $0.image != nil })
+        }
+    }
+
+    @Test
+    func contextMenuDisablesUnavailableDestructiveAndUpdateActions() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+            let clearHistory = try #require(manager.statusItemContextMenuItemForTesting(
+                title: String(localized: "Clear History")
+            ))
+            let checkForUpdates = try #require(manager.statusItemContextMenuItemForTesting(
+                title: String(localized: "Check for Updates…")
+            ))
+
+            #expect(clearHistory.isEnabled == false)
+            #expect(checkForUpdates.isEnabled == false)
+        }
+    }
+
+    @Test
+    func statusItemRoutesOnlyRightMouseUpToContextMenu() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+
+            #expect(manager.statusItemClickActionForTesting(eventType: .leftMouseUp) == "mainPanel")
+            #expect(manager.statusItemClickActionForTesting(eventType: .rightMouseUp) == "contextMenu")
+            #expect(manager.statusItemClickActionForTesting(eventType: nil) == "mainPanel")
+        }
+    }
+
+    @Test
+    func contextMenuRoutesExistingFeatureAndManagementActions() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Open Pastera")
+            ) == nil)
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "History")
+            ) == #selector(MenuManager.openHistoryFromContextMenu))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Snippet")
+            ) == #selector(MenuManager.openSnippetFromContextMenu))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Password Vault")
+            ) == #selector(MenuManager.openPasswordVaultFromContextMenu))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Manage Snippets")
+            ) == #selector(AppDelegate.showSnippetEditorWindow))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Clear History")
+            ) == #selector(AppDelegate.clearAllHistory))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Preferences")
+            ) == #selector(AppDelegate.showPreferenceWindow))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Check for Updates…")
+            ) == #selector(AppDelegate.checkForUpdatesFromMenu))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "About Pastera")
+            ) == #selector(AppDelegate.showAboutPreferencePane))
+            #expect(manager.statusItemContextMenuActionForTesting(
+                title: String(localized: "Quit Pastera")
+            ) == #selector(AppDelegate.terminate))
         }
     }
 

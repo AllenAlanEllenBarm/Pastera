@@ -22,8 +22,11 @@ struct RemoteSessionHotKeyPolicy {
         "com.apple.RemoteDesktop"
     ]
 
-    static func shouldSuspendLocalHotKeys(frontmostApplicationBundleIdentifier bundleIdentifier: String?) -> Bool {
-        guard AppEnvironment.current.defaults.bool(forKey: Constants.HotKey.suspendDuringRemoteSession) else {
+    static func shouldSuspendLocalHotKeys(
+        frontmostApplicationBundleIdentifier bundleIdentifier: String?,
+        isEnabled: Bool = AppEnvironment.current.defaults.bool(forKey: Constants.HotKey.suspendDuringRemoteSession)
+    ) -> Bool {
+        guard isEnabled else {
             return false
         }
         guard let bundleIdentifier else { return false }
@@ -149,21 +152,30 @@ final class HotKeyService: NSObject {
     private static let defaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey)!
     private static let oldOptionCommandSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey)!
     private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
+    private static let defaultPasswordVaultKeyCombo = KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey)!
     private static let legacyDefaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey)!
     private static let legacyDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultSnippetFolderHotKeyModifiers = cmdKey | optionKey
-    private static let defaultSnippetFolderHotKeyCodes = [12, 13, 14, 15, 0, 1, 2]
+    private static let defaultSnippetFolderHotKeyCodes = [12, 13, 14, 17, 16, 32]
 
     fileprivate(set) var mainKeyCombo: KeyCombo?
     fileprivate(set) var historyKeyCombo: KeyCombo?
     fileprivate(set) var snippetKeyCombo: KeyCombo?
+    fileprivate(set) var passwordVaultKeyCombo: KeyCombo?
     fileprivate(set) var clearHistoryKeyCombo: KeyCombo?
+    fileprivate(set) var scriptTransformKeyCombo: KeyCombo?
     private var historyPanelKeyCombos = [HistoryPanelShortcut: KeyCombo]()
     fileprivate(set) var isSuspendedForRemoteSession = false
     private var remoteSessionObserver: NSObjectProtocol?
+    private let defaults: UserDefaults
 
     @Dependency(\.snippetRepository)
     private var snippetRepository
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        super.init()
+    }
 
     deinit {
         if let remoteSessionObserver {
@@ -223,9 +235,19 @@ extension HotKeyService {
         AppEnvironment.current.menuManager.popUpMenu(.snippet, triggerKeyCombo: triggerKeyCombo)
     }
 
+    @objc func popupPasswordVaultMenu() {
+        AppEnvironment.current.menuManager.popUpMenu(.passwordVault)
+    }
+
     @objc func popUpClearHistoryAlert() {
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
         appDelegate.clearAllHistory()
+    }
+
+    @objc func runClipboardScriptTransform() {
+        Task {
+            await AppEnvironment.current.clipboardScriptCoordinator.runManualTransform()
+        }
     }
 }
 
@@ -233,13 +255,14 @@ extension HotKeyService {
 extension HotKeyService {
     func setupDefaultHotKeys() {
         // Migration new framework
-        if !AppEnvironment.current.defaults.bool(forKey: Constants.HotKey.migrateNewKeyCombo) {
+        if !defaults.bool(forKey: Constants.HotKey.migrateNewKeyCombo) {
             migrationKeyCombos()
-            AppEnvironment.current.defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
-            AppEnvironment.current.defaults.synchronize()
+            defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
+            defaults.synchronize()
         }
         migrateOptionCommandDefaultKeyCombosIfNeeded()
         migrateSnippetDefaultKeyComboToFIfNeeded()
+        migratePasswordVaultDefaultKeyComboIfNeeded()
         migrateHistoryPanelShortcutDefaultsIfNeeded()
         migrateHistoryPanelDefaultsV2IfNeeded()
         migrateHistoryPanelCanonicalDefaultsIfNeeded()
@@ -254,8 +277,10 @@ extension HotKeyService {
         change(with: .history, keyCombo: savedKeyCombo(forKey: Constants.HotKey.historyKeyCombo))
         // Snippet menu
         change(with: .snippet, keyCombo: savedKeyCombo(forKey: Constants.HotKey.snippetKeyCombo))
+        change(with: .passwordVault, keyCombo: savedKeyCombo(forKey: Constants.HotKey.passwordVaultKeyCombo))
         // Clear History
         changeClearHistoryKeyCombo(savedKeyCombo(forKey: Constants.HotKey.clearHistoryKeyCombo))
+        changeScriptTransformKeyCombo(savedKeyCombo(forKey: Constants.HotKey.scriptTransformKeyCombo))
         setupHistoryPanelKeyCombos()
         startMonitoringRemoteSessionApplications()
         updateRemoteSessionHotKeyState(
@@ -271,20 +296,44 @@ extension HotKeyService {
             historyKeyCombo = keyCombo
         case .snippet:
             snippetKeyCombo = keyCombo
+        case .passwordVault:
+            passwordVaultKeyCombo = keyCombo
         }
         register(with: type, keyCombo: keyCombo)
     }
 
+    func resetMenuShortcutsToDefaults() {
+        change(with: .main, keyCombo: Self.defaultMainKeyCombo)
+        change(with: .history, keyCombo: Self.defaultHistoryKeyCombo)
+        change(with: .snippet, keyCombo: Self.defaultSnippetKeyCombo)
+        change(with: .passwordVault, keyCombo: Self.defaultPasswordVaultKeyCombo)
+    }
+
     func changeClearHistoryKeyCombo(_ keyCombo: KeyCombo?) {
         clearHistoryKeyCombo = keyCombo
-        AppEnvironment.current.defaults.set(keyCombo?.archive(), forKey: Constants.HotKey.clearHistoryKeyCombo)
-        AppEnvironment.current.defaults.synchronize()
+        defaults.set(keyCombo?.archive(), forKey: Constants.HotKey.clearHistoryKeyCombo)
+        defaults.synchronize()
         // Reset hotkey
         HotKeyCenter.shared.unregisterHotKey(with: "ClearHistory")
         // Register new hotkey
         guard !isSuspendedForRemoteSession, let keyCombo else { return }
         let hotkey = HotKey(identifier: "ClearHistory", keyCombo: keyCombo, target: self, action: #selector(HotKeyService.popUpClearHistoryAlert))
         hotkey.register()
+    }
+
+    func changeScriptTransformKeyCombo(_ keyCombo: KeyCombo?) {
+        scriptTransformKeyCombo = keyCombo
+        defaults.set(keyCombo?.archive(), forKey: Constants.HotKey.scriptTransformKeyCombo)
+        defaults.synchronize()
+        HotKeyCenter.shared.unregisterHotKey(with: "ScriptTransform")
+        guard !isSuspendedForRemoteSession, let keyCombo else { return }
+        let hotKey = HotKey(
+            identifier: "ScriptTransform",
+            keyCombo: keyCombo,
+            target: self,
+            action: #selector(HotKeyService.runClipboardScriptTransform)
+        )
+        hotKey.register()
     }
 
     func historyPanelKeyCombo(for shortcut: HistoryPanelShortcut) -> KeyCombo? {
@@ -294,17 +343,30 @@ extension HotKeyService {
     func changeHistoryPanelKeyCombo(_ shortcut: HistoryPanelShortcut, keyCombo: KeyCombo?) {
         if let keyCombo {
             historyPanelKeyCombos[shortcut] = keyCombo
-            AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
+            defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
         } else {
             historyPanelKeyCombos.removeValue(forKey: shortcut)
-            AppEnvironment.current.defaults.removeObject(forKey: shortcut.userDefaultsKey)
+            defaults.removeObject(forKey: shortcut.userDefaultsKey)
         }
-        AppEnvironment.current.defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
-        AppEnvironment.current.defaults.synchronize()
+        defaults.set(true, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
+        defaults.synchronize()
+    }
+
+    func resetHistoryPanelShortcutsToDefaults() {
+        let migrationFlag = defaults.object(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
+        HistoryPanelShortcut.allCases.forEach { shortcut in
+            changeHistoryPanelKeyCombo(shortcut, keyCombo: shortcut.defaultKeyCombo)
+        }
+        if let migrationFlag {
+            defaults.set(migrationFlag, forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
+        } else {
+            defaults.removeObject(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
+        }
+        defaults.synchronize()
     }
 
     private func savedKeyCombo(forKey key: String) -> KeyCombo? {
-        guard let data = AppEnvironment.current.defaults.object(forKey: key) as? Data else { return nil }
+        guard let data = defaults.object(forKey: key) as? Data else { return nil }
         guard let keyCombo = NSKeyedUnarchiver.unarchiveObject(with: data) as? KeyCombo else { return nil }
         return keyCombo
     }
@@ -317,15 +379,14 @@ extension HotKeyService {
             } else {
                 let keyCombo = shortcut.defaultKeyCombo
                 keyCombos[shortcut] = keyCombo
-                AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
+                defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
             }
         }
         historyPanelKeyCombos = keyCombos
-        AppEnvironment.current.defaults.synchronize()
+        defaults.synchronize()
     }
 
     private func migrateOptionCommandDefaultKeyCombosIfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos) else { return }
 
         migrateDefaultKeyComboIfNeeded(
@@ -344,11 +405,10 @@ extension HotKeyService {
 
     private func migrateDefaultKeyComboIfNeeded(forKey key: String, legacyDefault: KeyCombo, newDefault: KeyCombo) {
         guard savedKeyCombo(forKey: key) == legacyDefault else { return }
-        AppEnvironment.current.defaults.set(newDefault.archive(), forKey: key)
+        defaults.set(newDefault.archive(), forKey: key)
     }
 
     private func migrateSnippetDefaultKeyComboToFIfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF) else { return }
         migrateDefaultKeyComboIfNeeded(
             forKey: Constants.HotKey.snippetKeyCombo,
@@ -359,8 +419,16 @@ extension HotKeyService {
         defaults.synchronize()
     }
 
+    private func migratePasswordVaultDefaultKeyComboIfNeeded() {
+        guard !defaults.bool(forKey: Constants.HotKey.migratePasswordVaultDefaultKeyCombo) else { return }
+        if savedKeyCombo(forKey: Constants.HotKey.passwordVaultKeyCombo) == nil {
+            defaults.set(Self.defaultPasswordVaultKeyCombo.archive(), forKey: Constants.HotKey.passwordVaultKeyCombo)
+        }
+        defaults.set(true, forKey: Constants.HotKey.migratePasswordVaultDefaultKeyCombo)
+        defaults.synchronize()
+    }
+
     private func migrateHistoryPanelShortcutDefaultsIfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated) else { return }
         HistoryPanelShortcut.allCases.forEach { shortcut in
             guard savedKeyCombo(forKey: shortcut.userDefaultsKey) == nil else { return }
@@ -371,7 +439,6 @@ extension HotKeyService {
     }
 
     private func migrateHistoryPanelDefaultsV2IfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelOptionCommand) else { return }
         HistoryPanelShortcut.allCases.forEach { shortcut in
             guard savedKeyCombo(forKey: shortcut.userDefaultsKey) == shortcut.commandDefaultKeyCombo else { return }
@@ -382,7 +449,6 @@ extension HotKeyService {
     }
 
     private func migrateHistoryPanelCanonicalDefaultsIfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaults) else { return }
         HistoryPanelShortcut.allCases.forEach { shortcut in
             guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else {
@@ -397,7 +463,6 @@ extension HotKeyService {
     }
 
     private func migrateHistoryPanelCanonicalDefaultsV2IfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2) else { return }
         HistoryPanelShortcut.allCases.forEach { shortcut in
             guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else { return }
@@ -409,7 +474,6 @@ extension HotKeyService {
     }
 
     private func migrateHistoryPanelCommandDefaultsIfNeeded() {
-        let defaults = AppEnvironment.current.defaults
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults) else { return }
         HistoryPanelShortcut.allCases.forEach { shortcut in
             guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else { return }
@@ -434,13 +498,19 @@ private extension HotKeyService {
     }
 
     func save(with type: MenuType, keyCombo: KeyCombo?) {
-        AppEnvironment.current.defaults.set(keyCombo?.archive(), forKey: type.userDefaultsKey)
-        AppEnvironment.current.defaults.synchronize()
+        defaults.set(keyCombo?.archive(), forKey: type.userDefaultsKey)
+        defaults.synchronize()
     }
 }
 
 // MARK: - Remote Sessions
 extension HotKeyService {
+    func refreshRemoteSessionHotKeyState() {
+        updateRemoteSessionHotKeyState(
+            frontmostApplicationBundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        )
+    }
+
     func startMonitoringRemoteSessionApplications() {
         guard remoteSessionObserver == nil else { return }
         remoteSessionObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -457,7 +527,8 @@ extension HotKeyService {
 
     func updateRemoteSessionHotKeyState(frontmostApplicationBundleIdentifier bundleIdentifier: String?) {
         let shouldSuspend = RemoteSessionHotKeyPolicy.shouldSuspendLocalHotKeys(
-            frontmostApplicationBundleIdentifier: bundleIdentifier
+            frontmostApplicationBundleIdentifier: bundleIdentifier,
+            isEnabled: defaults.bool(forKey: Constants.HotKey.suspendDuringRemoteSession)
         )
         guard shouldSuspend != isSuspendedForRemoteSession else { return }
         isSuspendedForRemoteSession = shouldSuspend
@@ -470,7 +541,7 @@ extension HotKeyService {
     }
 
     private func unregisterAllRegisteredHotKeys() {
-        [MenuType.main.rawValue, MenuType.history.rawValue, MenuType.snippet.rawValue, "ClearHistory"].forEach {
+        [MenuType.main.rawValue, MenuType.history.rawValue, MenuType.snippet.rawValue, MenuType.passwordVault.rawValue, "ClearHistory", "ScriptTransform"].forEach {
             HotKeyCenter.shared.unregisterHotKey(with: $0)
         }
         folderKeyCombos?.keys.forEach {
@@ -482,7 +553,9 @@ extension HotKeyService {
         register(with: .main, keyCombo: mainKeyCombo)
         register(with: .history, keyCombo: historyKeyCombo)
         register(with: .snippet, keyCombo: snippetKeyCombo)
+        register(with: .passwordVault, keyCombo: passwordVaultKeyCombo)
         changeClearHistoryKeyCombo(clearHistoryKeyCombo)
+        changeScriptTransformKeyCombo(scriptTransformKeyCombo)
         setupSnippetHotKeys()
     }
 }
@@ -494,24 +567,24 @@ private extension HotKeyService {
      *  Changed framework, PTHotKey to Magnet
      */
     func migrationKeyCombos() {
-        guard let keyCombos = AppEnvironment.current.defaults.object(forKey: Constants.UserDefaults.hotKeys) as? [String: Any] else { return }
+        guard let keyCombos = defaults.object(forKey: Constants.UserDefaults.hotKeys) as? [String: Any] else { return }
 
         // Main menu
         if let (keyCode, modifiers) = parse(with: keyCombos, forKey: Constants.Menu.clip) {
             if let keyCombo = KeyCombo(QWERTYKeyCode: keyCode, carbonModifiers: modifiers) {
-                AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: Constants.HotKey.mainKeyCombo)
+                defaults.set(keyCombo.archive(), forKey: Constants.HotKey.mainKeyCombo)
             }
         }
         // History menu
         if let (keyCode, modifiers) = parse(with: keyCombos, forKey: Constants.Menu.history) {
             if let keyCombo = KeyCombo(QWERTYKeyCode: keyCode, carbonModifiers: modifiers) {
-                AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: Constants.HotKey.historyKeyCombo)
+                defaults.set(keyCombo.archive(), forKey: Constants.HotKey.historyKeyCombo)
             }
         }
         // Snippet menu
         if let (keyCode, modifiers) = parse(with: keyCombos, forKey: Constants.Menu.snippet) {
             if let keyCombo = KeyCombo(QWERTYKeyCode: keyCode, carbonModifiers: modifiers) {
-                AppEnvironment.current.defaults.set(keyCombo.archive(), forKey: Constants.HotKey.snippetKeyCombo)
+                defaults.set(keyCombo.archive(), forKey: Constants.HotKey.snippetKeyCombo)
             }
         }
     }
@@ -527,16 +600,16 @@ private extension HotKeyService {
 extension HotKeyService {
     private var folderKeyCombos: [String: KeyCombo]? {
         get {
-            guard let data = AppEnvironment.current.defaults.object(forKey: Constants.HotKey.folderKeyCombos) as? Data else { return nil }
+            guard let data = defaults.object(forKey: Constants.HotKey.folderKeyCombos) as? Data else { return nil }
             return NSKeyedUnarchiver.unarchiveObject(with: data) as? [String: KeyCombo]
         }
         set {
             if let value = newValue {
-                AppEnvironment.current.defaults.set(NSKeyedArchiver.archivedData(withRootObject: value), forKey: Constants.HotKey.folderKeyCombos)
+                defaults.set(NSKeyedArchiver.archivedData(withRootObject: value), forKey: Constants.HotKey.folderKeyCombos)
             } else {
-                AppEnvironment.current.defaults.removeObject(forKey: Constants.HotKey.folderKeyCombos)
+                defaults.removeObject(forKey: Constants.HotKey.folderKeyCombos)
             }
-            AppEnvironment.current.defaults.synchronize()
+            defaults.synchronize()
         }
     }
 

@@ -1,301 +1,275 @@
 //
 //  CPYGeneralPreferenceViewController.swift
 //
-//  Clipy
+//  Pastera
 //
 
-import Cocoa
-import Dependencies
+import AppKit
 
-final class CPYGeneralPreferenceViewController: NSViewController, NSTextFieldDelegate {
-    private let clearHistoryButton = NSButton(title: String(localized: "Clear History"), target: nil, action: #selector(AppDelegate.clearAllHistory))
-    private let opacityLabel = NSTextField(labelWithString: String(localized: "Transparency"))
-    private let opacitySlider = NSSlider()
-    private let opacityValueLabel = NSTextField(labelWithString: "")
-    private let menuTitleLengthLabel = NSTextField(labelWithString: localizedPreferenceString("Number of characters in the menu:"))
-    private let menuTitleLengthField = NSTextField()
-    private let menuTitleLengthUnitLabel = NSTextField(labelWithString: localizedPreferenceString("chars"))
-    private let mediaHistoryLimitLabel = NSTextField(labelWithString: localizedPreferenceString("Image/file limit:"))
-    private let mediaImageLimitLabel = NSTextField(labelWithString: localizedPreferenceString("Images"))
-    private let mediaImageLimitField = NSTextField()
-    private let mediaImageLimitUnitLabel = NSTextField(labelWithString: localizedPreferenceString("items"))
-    private let mediaFileLimitLabel = NSTextField(labelWithString: localizedPreferenceString("Files"))
-    private let mediaFileLimitField = NSTextField()
-    private let mediaFileLimitUnitLabel = NSTextField(labelWithString: localizedPreferenceString("items"))
-    private let copySameHistoryButton = NSButton(
-        checkboxWithTitle: localizedPreferenceString("Place already copied history at the top"),
+final class CPYGeneralPreferenceViewController: PasteraPreferencePageViewController, NSTextFieldDelegate {
+    private let defaults: UserDefaults
+    private let remoteSessionHotKeyRefresher: () -> Void
+    private var launchOnLoginButton = NSButton(
+        checkboxWithTitle: "",
         target: nil,
         action: nil
     )
-    private let overwriteSameHistoryButton = NSButton(
-        checkboxWithTitle: localizedPreferenceString("Move instead of copying (removes the older one from the list)"),
+    private var opacityLabel = NSTextField(labelWithString: String(localized: "Transparency"))
+    private var opacitySlider = NSSlider()
+    private var opacityValueLabel = NSTextField(labelWithString: "")
+    private var menuTitleLengthField = NSTextField()
+    private var menuTitleLengthErrorLabel = CPYGeneralPreferenceViewController.makeErrorLabel()
+    private var showColorPreviewButton = NSButton(
+        checkboxWithTitle: "",
         target: nil,
         action: nil
     )
-    private let showColorPreviewButton = NSButton(
-        checkboxWithTitle: localizedPreferenceString("Show color code preview"),
+    private var automaticPasteButton = NSButton(
+        checkboxWithTitle: "",
         target: nil,
         action: nil
     )
-    private let automaticPasteButton = NSButton(
-        checkboxWithTitle: localizedPreferenceString("Automatic Paste"),
+    private var automaticPasteInfoButton = NSButton(title: "", target: nil, action: nil)
+    private var openSystemSettingsButton = NSButton(
+        title: localizedGeneralPreferenceString("Open System Settings", value: "Open System Settings"),
         target: nil,
         action: nil
     )
-    private let automaticPasteInfoButton = NSButton(title: "", target: nil, action: nil)
-    private let suspendRemoteHotKeysButton = NSButton(
-        checkboxWithTitle: localizedPreferenceString(
-            "Pause shortcuts during remote control",
-            value: "Pause shortcuts during remote control"
-        ),
+    private var permissionGuidanceStack = NSStackView()
+    private var suspendRemoteHotKeysButton = NSButton(
+        checkboxWithTitle: "",
         target: nil,
         action: nil
     )
-    private var didInstallAdditionalControls = false
-    private weak var launchOnLoginButton: NSButton?
-    @Dependency(\.pasteboardHistoryRepository)
-    private var pasteboardHistoryRepository
+
+    var automaticPastePermissionChecker: () -> Bool = {
+        AppEnvironment.current.accessibilityService.isAccessibilityEnabled(isPrompt: false)
+    }
     var automaticPastePermissionRequester: () -> Void = {
         let accessibilityService = AppEnvironment.current.accessibilityService
         guard !accessibilityService.isAccessibilityEnabled(isPrompt: false) else { return }
-
         _ = accessibilityService.isAccessibilityEnabled(isPrompt: true)
         _ = accessibilityService.openAccessibilitySettingWindow()
     }
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        installAdditionalControls()
-        updateOpacityControls()
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        layoutAdditionalControls()
-    }
-
-    @objc private func opacitySliderChanged(_ sender: NSSlider) {
-        CPYWindowAppearance.setOpacity(sender.doubleValue)
-        updateOpacityControls()
-    }
-
-    @objc private func automaticPasteButtonChanged(_ sender: NSButton) {
-        guard sender.state == .on else { return }
-        automaticPastePermissionRequester()
-    }
-
-    @objc private func showAutomaticPasteInfo(_ sender: NSButton) {
-        let alert = NSAlert()
-        alert.messageText = localizedPreferenceString(
-            "Why Accessibility is required",
-            value: "Why Accessibility is required"
-        )
-        alert.informativeText = automaticPastePermissionDescription()
-        alert.addButton(withTitle: localizedPreferenceString("OK", value: "OK"))
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
-    }
-
-    private func installAdditionalControls() {
-        guard !didInstallAdditionalControls else { return }
-        didInstallAdditionalControls = true
-        launchOnLoginButton = view.subviews.compactMap { $0 as? NSButton }.first
-
-        view.subviews.forEach { subview in
-            CPYWindowAppearance.apply(to: subview)
+    init(
+        defaults: UserDefaults = AppEnvironment.current.defaults,
+        remoteSessionHotKeyRefresher: @escaping () -> Void = {
+            AppEnvironment.current.hotKeyService.refreshRemoteSessionHotKeyState()
         }
-        CPYWindowAppearance.apply(to: view)
+    ) {
+        self.defaults = defaults
+        self.remoteSessionHotKeyRefresher = remoteSessionHotKeyRefresher
+        super.init(paneID: .general, title: pasteraPreferenceString("General"))
+    }
 
-        clearHistoryButton.bezelStyle = .rounded
-        clearHistoryButton.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
-        clearHistoryButton.setButtonType(.momentaryPushIn)
+    required init?(coder: NSCoder) {
+        nil
+    }
 
-        opacityLabel.textColor = .labelColor
-        opacityLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
+    override func loadView() {
+        resetViewState()
+        super.loadView()
+        configureControls()
+        buildStartupGroup()
+        buildAppearanceGroup()
+        buildAutomaticPasteGroup()
+        buildRemoteControlGroup()
+    }
+
+    private func configureControls() {
+        configureDefaultsButton(
+            launchOnLoginButton,
+            key: Constants.UserDefaults.loginItem,
+            accessibilityLabel: localizedGeneralPreferenceString("Launch on Login")
+        )
+        configureDefaultsButton(
+            showColorPreviewButton,
+            key: Constants.UserDefaults.showColorPreviewInTheMenu,
+            accessibilityLabel: localizedGeneralPreferenceString("Show color code preview")
+        )
+        configureDefaultsButton(
+            suspendRemoteHotKeysButton,
+            key: Constants.HotKey.suspendDuringRemoteSession,
+            accessibilityLabel: localizedGeneralPreferenceString(
+                "Pause shortcuts during remote control",
+                value: "Pause shortcuts during remote control"
+            )
+        )
 
         opacitySlider.minValue = CPYWindowAppearance.minimumOpacity
         opacitySlider.maxValue = CPYWindowAppearance.maximumOpacity
         opacitySlider.target = self
         opacitySlider.action = #selector(opacitySliderChanged(_:))
         opacitySlider.isContinuous = true
-
+        opacitySlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
         opacityValueLabel.alignment = .right
-        opacityValueLabel.textColor = .secondaryLabelColor
         opacityValueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        opacityValueLabel.textColor = .secondaryLabelColor
+        updateOpacityControls()
 
-        configureNumberField(menuTitleLengthField, minimum: 1)
-        configureNumberField(
-            mediaImageLimitField,
-            minimum: HistoryRetentionSettings.minimumMediaHistoryLimit,
-            maximum: HistoryRetentionSettings.maximumMediaHistoryLimit
-        )
-        configureNumberField(
-            mediaFileLimitField,
-            minimum: HistoryRetentionSettings.minimumMediaHistoryLimit,
-            maximum: HistoryRetentionSettings.maximumMediaHistoryLimit
-        )
-        mediaImageLimitField.delegate = self
-        mediaFileLimitField.delegate = self
+        menuTitleLengthField.alignment = .right
+        menuTitleLengthField.delegate = self
+        menuTitleLengthField.target = self
+        menuTitleLengthField.action = #selector(menuTitleLengthCommitted(_:))
+        menuTitleLengthField.stringValue = String(currentMenuTitleLength())
+        menuTitleLengthField.setAccessibilityLabel(pasteraPreferenceString("Menu Title Length"))
+        menuTitleLengthField.widthAnchor.constraint(equalToConstant: 58).isActive = true
 
-        [menuTitleLengthLabel, mediaHistoryLimitLabel, mediaImageLimitLabel, mediaFileLimitLabel].forEach {
-            $0.textColor = .labelColor
-            $0.font = .systemFont(ofSize: NSFont.systemFontSize)
-        }
-
-        [menuTitleLengthUnitLabel, mediaImageLimitUnitLabel, mediaFileLimitUnitLabel].forEach {
-            $0.textColor = .secondaryLabelColor
-            $0.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        }
-
-        copySameHistoryButton.bindValue(to: Constants.UserDefaults.copySameHistory)
-        overwriteSameHistoryButton.bindValue(to: Constants.UserDefaults.overwriteSameHistory)
-        overwriteSameHistoryButton.bindEnabled(to: Constants.UserDefaults.copySameHistory)
-        menuTitleLengthField.bindValue(to: Constants.UserDefaults.maxMenuItemTitleLength)
-        mediaImageLimitField.bindValue(to: Constants.UserDefaults.maxImageHistorySize)
-        mediaFileLimitField.bindValue(to: Constants.UserDefaults.maxFileHistorySize)
-        showColorPreviewButton.bindValue(to: Constants.UserDefaults.showColorPreviewInTheMenu)
-        automaticPasteButton.bindValue(to: Constants.UserDefaults.inputPasteCommand)
         automaticPasteButton.target = self
         automaticPasteButton.action = #selector(automaticPasteButtonChanged(_:))
-        automaticPasteButton.setAccessibilityLabel(localizedPreferenceString("Automatic Paste"))
-        suspendRemoteHotKeysButton.bindValue(to: Constants.HotKey.suspendDuringRemoteSession)
-        suspendRemoteHotKeysButton.setAccessibilityLabel(localizedPreferenceString(
-            "Pause shortcuts during remote control",
-            value: "Pause shortcuts during remote control"
-        ))
-
+        automaticPasteButton.setAccessibilityLabel(localizedGeneralPreferenceString("Automatic Paste"))
         automaticPasteInfoButton.bezelStyle = .helpButton
         automaticPasteInfoButton.target = self
         automaticPasteInfoButton.action = #selector(showAutomaticPasteInfo(_:))
         automaticPasteInfoButton.toolTip = automaticPastePermissionDescription()
-        automaticPasteInfoButton.setAccessibilityLabel(localizedPreferenceString("Automatic Paste Permission Info"))
-
-        [
-            clearHistoryButton,
-            opacityLabel,
-            opacitySlider,
-            opacityValueLabel,
-            menuTitleLengthLabel,
-            menuTitleLengthField,
-            menuTitleLengthUnitLabel,
-            mediaHistoryLimitLabel,
-            mediaImageLimitLabel,
-            mediaImageLimitField,
-            mediaImageLimitUnitLabel,
-            mediaFileLimitLabel,
-            mediaFileLimitField,
-            mediaFileLimitUnitLabel,
-            copySameHistoryButton,
-            overwriteSameHistoryButton,
-            showColorPreviewButton,
-            automaticPasteButton,
-            automaticPasteInfoButton,
-            suspendRemoteHotKeysButton
-        ].forEach {
-            $0.autoresizingMask = [.maxXMargin, .maxYMargin]
-            CPYWindowAppearance.apply(to: $0)
-            view.addSubview($0)
-        }
-        layoutAdditionalControls()
+        automaticPasteInfoButton.setAccessibilityLabel(
+            localizedGeneralPreferenceString("Automatic Paste Permission Info")
+        )
+        openSystemSettingsButton.target = self
+        openSystemSettingsButton.action = #selector(openAutomaticPasteSystemSettings(_:))
+        openSystemSettingsButton.bezelStyle = .rounded
+        configurePermissionGuidance()
+        refreshAutomaticPasteState()
     }
 
-    private func configureNumberField(_ textField: NSTextField, minimum: Int, maximum: Int? = nil) {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .none
-        formatter.usesGroupingSeparator = false
-        formatter.minimum = NSNumber(value: minimum)
-        if let maximum {
-            formatter.maximum = NSNumber(value: maximum)
-        }
-        textField.formatter = formatter
-        textField.alignment = .right
-        textField.isEditable = true
-        textField.isSelectable = true
+    private func configureDefaultsButton(_ button: NSButton, key: String, accessibilityLabel: String) {
+        button.identifier = NSUserInterfaceItemIdentifier(key)
+        button.state = defaults.bool(forKey: key) ? .on : .off
+        button.target = self
+        button.action = #selector(defaultsButtonChanged(_:))
+        button.setAccessibilityLabel(accessibilityLabel)
     }
 
-    private func layoutAdditionalControls() {
-        let contentLeftX: CGFloat = 59
-        let topY: CGFloat = 308
-        let controlMaxX = min(view.bounds.width - 18, 438)
-        let checkboxHeight: CGFloat = 18
-        let checkboxWidth = max(180, controlMaxX - contentLeftX)
-        let automaticPasteWidth = max(1, ceil(automaticPasteButton.intrinsicContentSize.width))
-        let helpButtonSize = NSSize(width: 18, height: 18)
-        let clearHistoryButtonSize = NSSize(width: 118, height: 24)
-        let numberFieldSize = NSSize(width: 58, height: 22)
-        let unitLabelSize = NSSize(width: 58, height: 14)
-        let inputX = min(controlMaxX - unitLabelSize.width - numberFieldSize.width - 8, contentLeftX + 273)
-        let inputLabelWidth = max(160, inputX - contentLeftX - 8)
-        let mediaNumberFieldSize = NSSize(width: 44, height: 22)
-        let mediaKindLabelWidth: CGFloat = 42
-        let mediaUnitLabelWidth: CGFloat = 32
-        let mediaElementGap: CGFloat = 4
-        let mediaGroupGap: CGFloat = 10
-        let mediaGroupWidth = mediaKindLabelWidth + mediaElementGap
-            + mediaNumberFieldSize.width + mediaElementGap
-            + mediaUnitLabelWidth
-        let mediaFirstKindX = max(contentLeftX + 110, controlMaxX - mediaGroupWidth * 2 - mediaGroupGap)
-        let mediaLabelWidth = mediaFirstKindX - contentLeftX - 8
-        let mediaFirstFieldX = mediaFirstKindX + mediaKindLabelWidth + mediaElementGap
-        let mediaFirstUnitX = mediaFirstFieldX + mediaNumberFieldSize.width + mediaElementGap
-        let mediaSecondKindX = mediaFirstKindX + mediaGroupWidth + mediaGroupGap
-        let mediaSecondFieldX = mediaSecondKindX + mediaKindLabelWidth + mediaElementGap
-        let mediaSecondUnitX = mediaSecondFieldX + mediaNumberFieldSize.width + mediaElementGap
-
-        launchOnLoginButton?.frame = NSRect(
-            x: contentLeftX,
-            y: topY,
-            width: checkboxWidth,
-            height: checkboxHeight
+    private func configurePermissionGuidance() {
+        let status = PasteraPreferenceStatusView(
+            text: automaticPastePermissionDescription(),
+            style: .warning
         )
+        permissionGuidanceStack.orientation = .vertical
+        permissionGuidanceStack.alignment = .trailing
+        permissionGuidanceStack.spacing = 8
+        permissionGuidanceStack.addArrangedSubview(status)
+        permissionGuidanceStack.addArrangedSubview(openSystemSettingsButton)
+        permissionGuidanceStack.isHidden = true
+    }
 
-        clearHistoryButton.frame = NSRect(
-            x: contentLeftX,
-            y: topY - 36,
-            width: clearHistoryButtonSize.width,
-            height: clearHistoryButtonSize.height
+    private func buildStartupGroup() {
+        let group = PasteraPreferenceGroupView(
+            title: pasteraPreferenceString("Startup"),
+            symbolName: "power",
+            accentColor: .systemGreen
         )
-
-        let opacityY = topY - 68
-        opacityLabel.frame = NSRect(x: contentLeftX, y: opacityY, width: 80, height: checkboxHeight)
-        opacitySlider.frame = NSRect(x: contentLeftX + 98, y: opacityY - 4, width: 176, height: 24)
-        opacityValueLabel.frame = NSRect(x: contentLeftX + 292, y: opacityY, width: 42, height: checkboxHeight)
-
-        let menuTitleLengthY = topY - 106
-        menuTitleLengthLabel.frame = NSRect(x: contentLeftX, y: menuTitleLengthY + 2, width: inputLabelWidth, height: checkboxHeight)
-        menuTitleLengthField.frame = NSRect(x: inputX, y: menuTitleLengthY, width: numberFieldSize.width, height: numberFieldSize.height)
-        menuTitleLengthUnitLabel.frame = NSRect(
-            x: inputX + numberFieldSize.width + 8,
-            y: menuTitleLengthY + 4,
-            width: unitLabelSize.width,
-            height: unitLabelSize.height
+        let row = PasteraPreferenceSettingRowView(
+            title: localizedGeneralPreferenceString("Launch on Login"),
+            control: launchOnLoginButton
         )
+        group.addRow(row)
+        addGroup(group)
+        registerAnchor("general.launchAtLogin", view: row)
+    }
 
-        let mediaHistoryLimitY = topY - 140
-        mediaHistoryLimitLabel.frame = NSRect(x: contentLeftX, y: mediaHistoryLimitY + 2, width: mediaLabelWidth, height: checkboxHeight)
-        mediaImageLimitLabel.frame = NSRect(x: mediaFirstKindX, y: mediaHistoryLimitY + 2, width: mediaKindLabelWidth, height: checkboxHeight)
-        mediaImageLimitField.frame = NSRect(x: mediaFirstFieldX, y: mediaHistoryLimitY, width: mediaNumberFieldSize.width, height: mediaNumberFieldSize.height)
-        mediaImageLimitUnitLabel.frame = NSRect(x: mediaFirstUnitX, y: mediaHistoryLimitY + 4, width: mediaUnitLabelWidth, height: unitLabelSize.height)
-        mediaFileLimitLabel.frame = NSRect(x: mediaSecondKindX, y: mediaHistoryLimitY + 2, width: mediaKindLabelWidth, height: checkboxHeight)
-        mediaFileLimitField.frame = NSRect(x: mediaSecondFieldX, y: mediaHistoryLimitY, width: mediaNumberFieldSize.width, height: mediaNumberFieldSize.height)
-        mediaFileLimitUnitLabel.frame = NSRect(x: mediaSecondUnitX, y: mediaHistoryLimitY + 4, width: mediaUnitLabelWidth, height: unitLabelSize.height)
+    private func buildAppearanceGroup() {
+        let group = PasteraPreferenceGroupView(
+            title: pasteraPreferenceString("Menu Appearance"),
+            symbolName: "slider.horizontal.3",
+            accentColor: .systemBlue
+        )
+        let opacityControl = NSStackView(views: [opacitySlider, opacityValueLabel])
+        opacityControl.orientation = .horizontal
+        opacityControl.alignment = .centerY
+        opacityControl.spacing = 10
+        let opacityRow = PasteraPreferenceSettingRowView(
+            title: opacityLabel.stringValue,
+            control: opacityControl
+        )
+        let titleLengthRow = PasteraPreferenceSettingRowView(
+            title: localizedGeneralPreferenceString("Number of characters in the menu:"),
+            control: makeTitleLengthControl()
+        )
+        let colorPreviewRow = PasteraPreferenceSettingRowView(
+            title: localizedGeneralPreferenceString("Show color code preview"),
+            control: showColorPreviewButton
+        )
+        group.addRow(opacityRow)
+        group.addRow(titleLengthRow)
+        group.addRow(colorPreviewRow)
+        addGroup(group)
+        registerAnchor("general.windowOpacity", view: opacityRow)
+        registerAnchor("general.titleLength", view: titleLengthRow)
+        registerAnchor("general.colorPreview", view: colorPreviewRow)
+    }
 
-        copySameHistoryButton.frame = NSRect(x: contentLeftX, y: topY - 170, width: checkboxWidth, height: checkboxHeight)
-        overwriteSameHistoryButton.frame = NSRect(x: contentLeftX + 15, y: topY - 200, width: checkboxWidth - 15, height: checkboxHeight)
-        showColorPreviewButton.frame = NSRect(x: contentLeftX, y: topY - 230, width: checkboxWidth, height: checkboxHeight)
-        automaticPasteButton.frame = NSRect(x: contentLeftX, y: topY - 260, width: automaticPasteWidth, height: checkboxHeight)
-        automaticPasteInfoButton.frame = NSRect(
-            x: contentLeftX + automaticPasteWidth + 4,
-            y: topY - 260,
-            width: helpButtonSize.width,
-            height: helpButtonSize.height
+    private func makeTitleLengthControl() -> NSView {
+        let unitLabel = NSTextField(labelWithString: localizedGeneralPreferenceString("chars"))
+        unitLabel.textColor = .secondaryLabelColor
+        let valueRow = NSStackView(views: [menuTitleLengthField, unitLabel])
+        valueRow.orientation = .horizontal
+        valueRow.alignment = .centerY
+        valueRow.spacing = 6
+        let stack = NSStackView(views: [valueRow, menuTitleLengthErrorLabel])
+        stack.orientation = .vertical
+        stack.alignment = .trailing
+        stack.spacing = 3
+        return stack
+    }
+
+    private func buildAutomaticPasteGroup() {
+        let group = PasteraPreferenceGroupView(
+            title: pasteraPreferenceString("Automatic Paste"),
+            symbolName: "clipboard",
+            accentColor: .systemTeal
         )
-        suspendRemoteHotKeysButton.frame = NSRect(
-            x: contentLeftX,
-            y: topY - 290,
-            width: checkboxWidth,
-            height: checkboxHeight
+        let buttonRow = NSStackView(views: [automaticPasteButton, automaticPasteInfoButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 6
+        let control = NSStackView(views: [buttonRow, permissionGuidanceStack])
+        control.orientation = .vertical
+        control.alignment = .trailing
+        control.spacing = 10
+        let row = PasteraPreferenceSettingRowView(
+            title: localizedGeneralPreferenceString("Automatic Paste"),
+            subtitle: localizedGeneralPreferenceString(
+                "Automatic Paste Permission Short Description",
+                value: "Paste automatically after selecting a history item."
+            ),
+            control: control
         )
+        group.addRow(row)
+        addGroup(group)
+        registerAnchor("general.autoPaste", view: row)
+    }
+
+    private func buildRemoteControlGroup() {
+        let group = PasteraPreferenceGroupView(
+            title: pasteraPreferenceString("Remote Control"),
+            symbolName: "command",
+            accentColor: .systemPurple
+        )
+        let row = PasteraPreferenceSettingRowView(
+            title: localizedGeneralPreferenceString(
+                "Pause shortcuts during remote control",
+                value: "Pause shortcuts during remote control"
+            ),
+            control: suspendRemoteHotKeysButton
+        )
+        group.addRow(row)
+        addGroup(group)
+        registerAnchor("general.pauseHotkeys", view: row)
+    }
+
+    @objc private func defaultsButtonChanged(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        defaults.set(sender.state == .on, forKey: key)
+        if key == Constants.HotKey.suspendDuringRemoteSession {
+            remoteSessionHotKeyRefresher()
+        }
+    }
+
+    @objc private func opacitySliderChanged(_ sender: NSSlider) {
+        CPYWindowAppearance.setOpacity(sender.doubleValue)
+        updateOpacityControls()
     }
 
     private func updateOpacityControls(opacity: Double = CPYWindowAppearance.opacity()) {
@@ -304,50 +278,144 @@ final class CPYGeneralPreferenceViewController: NSViewController, NSTextFieldDel
         opacityValueLabel.stringValue = "\(Int(round(normalizedOpacity * 100)))%"
     }
 
-    func controlTextDidEndEditing(_ notification: Notification) {
-        guard let textField = notification.object as? NSTextField,
-              textField === mediaImageLimitField || textField === mediaFileLimitField else {
-            return
-        }
-        let settings = normalizeMediaHistoryLimitFields()
-        pasteboardHistoryRepository.pruneHistories(settings: settings)
+    @objc private func menuTitleLengthCommitted(_ sender: NSTextField) {
+        commitMenuTitleLength(sender)
     }
 
-    private func normalizeMediaHistoryLimitFields() -> HistoryRetentionSettings {
-        let defaults = AppEnvironment.current.defaults
-        let imageLimit = HistoryRetentionSettings.clampedMediaHistoryLimit(
-            mediaImageLimitField.integerValue
+    private func commitMenuTitleLength(_ field: NSTextField) {
+        defer { invalidateContentSize() }
+        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(trimmed) else {
+            menuTitleLengthErrorLabel.isHidden = false
+            return
+        }
+        let normalizedValue = max(1, value)
+        defaults.set(normalizedValue, forKey: Constants.UserDefaults.maxMenuItemTitleLength)
+        field.stringValue = String(normalizedValue)
+        menuTitleLengthErrorLabel.isHidden = true
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField, field === menuTitleLengthField else { return }
+        commitMenuTitleLength(field)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard commandSelector == #selector(NSResponder.cancelOperation(_:)),
+              let field = control as? NSTextField,
+              field === menuTitleLengthField else { return false }
+        field.stringValue = String(currentMenuTitleLength())
+        menuTitleLengthErrorLabel.isHidden = true
+        invalidateContentSize()
+        return true
+    }
+
+    private func currentMenuTitleLength() -> Int {
+        max(1, defaults.integer(forKey: Constants.UserDefaults.maxMenuItemTitleLength))
+    }
+
+    @objc private func automaticPasteButtonChanged(_ sender: NSButton) {
+        defer { invalidateContentSize() }
+        guard sender.state == .on else {
+            defaults.set(false, forKey: Constants.UserDefaults.inputPasteCommand)
+            permissionGuidanceStack.isHidden = true
+            return
+        }
+        guard automaticPastePermissionChecker() else {
+            defaults.set(false, forKey: Constants.UserDefaults.inputPasteCommand)
+            sender.state = .off
+            permissionGuidanceStack.isHidden = false
+            automaticPastePermissionRequester()
+            return
+        }
+        defaults.set(true, forKey: Constants.UserDefaults.inputPasteCommand)
+        permissionGuidanceStack.isHidden = true
+    }
+
+    private func refreshAutomaticPasteState() {
+        defer { invalidateContentSize() }
+        let isEnabled = defaults.bool(forKey: Constants.UserDefaults.inputPasteCommand)
+        guard !isEnabled || automaticPastePermissionChecker() else {
+            defaults.set(false, forKey: Constants.UserDefaults.inputPasteCommand)
+            automaticPasteButton.state = .off
+            permissionGuidanceStack.isHidden = false
+            return
+        }
+        automaticPasteButton.state = isEnabled ? .on : .off
+    }
+
+    @objc private func openAutomaticPasteSystemSettings(_ sender: NSButton) {
+        automaticPastePermissionRequester()
+    }
+
+    @objc private func showAutomaticPasteInfo(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = localizedGeneralPreferenceString(
+            "Why Accessibility is required",
+            value: "Why Accessibility is required"
         )
-        let fileLimit = HistoryRetentionSettings.clampedMediaHistoryLimit(
-            mediaFileLimitField.integerValue
+        alert.informativeText = automaticPastePermissionDescription()
+        alert.addButton(withTitle: localizedGeneralPreferenceString("OK", value: "OK"))
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private static func makeErrorLabel() -> NSTextField {
+        let label = NSTextField(labelWithString: pasteraPreferenceString("Enter an integer."))
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .systemRed
+        label.isHidden = true
+        return label
+    }
+}
+
+private extension CPYGeneralPreferenceViewController {
+    func resetViewState() {
+        removeExistingContent()
+        launchOnLoginButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        opacityLabel = NSTextField(labelWithString: String(localized: "Transparency"))
+        opacitySlider = NSSlider()
+        opacityValueLabel = NSTextField(labelWithString: "")
+        menuTitleLengthField = NSTextField()
+        menuTitleLengthErrorLabel = Self.makeErrorLabel()
+        showColorPreviewButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        automaticPasteButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        automaticPasteInfoButton = NSButton(title: "", target: nil, action: nil)
+        openSystemSettingsButton = NSButton(
+            title: localizedGeneralPreferenceString("Open System Settings", value: "Open System Settings"),
+            target: nil,
+            action: nil
         )
-        defaults.set(imageLimit, forKey: Constants.UserDefaults.maxImageHistorySize)
-        defaults.set(fileLimit, forKey: Constants.UserDefaults.maxFileHistorySize)
-        mediaImageLimitField.integerValue = imageLimit
-        mediaFileLimitField.integerValue = fileLimit
-        return HistoryRetentionSettings.current(defaults: defaults)
+        permissionGuidanceStack = NSStackView()
+        suspendRemoteHotKeysButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    }
+
+    func removeExistingContent() {
+        contentStack.arrangedSubviews.forEach { arrangedSubview in
+            NSLayoutConstraint.deactivate(contentStack.constraints.filter {
+                $0.firstItem === arrangedSubview || $0.secondItem === arrangedSubview
+            })
+            contentStack.removeArrangedSubview(arrangedSubview)
+            arrangedSubview.removeFromSuperview()
+        }
+        if let container = contentStack.superview {
+            NSLayoutConstraint.deactivate(container.constraints.filter {
+                $0.firstItem === contentStack || $0.secondItem === contentStack
+            })
+        }
+        contentStack.removeFromSuperview()
     }
 }
 
 private func automaticPastePermissionDescription() -> String {
-    localizedPreferenceString(
+    localizedGeneralPreferenceString(
         "Automatic Paste Permission Description",
         value: "When Automatic Paste is enabled, Pastera restores the target app and sends Command+V after you choose a history item or snippet. macOS requires Accessibility permission for that action. When this is off, Pastera only copies to the clipboard and you paste manually."
     )
 }
 
-private func localizedPreferenceString(_ key: String, value: String? = nil) -> String {
-    Bundle.main.localizedString(forKey: key, value: value ?? key, table: "CPYGeneralPreferenceViewController")
-}
-
-private extension NSControl {
-    func bindValue(to defaultKey: String) {
-        bind(.value, to: NSUserDefaultsController.shared, withKeyPath: "values.\(defaultKey)", options: nil)
-    }
-
-    func bindEnabled(to defaultKey: String) {
-        bind(.enabled, to: NSUserDefaultsController.shared, withKeyPath: "values.\(defaultKey)", options: nil)
-    }
+private func localizedGeneralPreferenceString(_ key: String, value: String? = nil) -> String {
+    pasteraPreferenceString(key, defaultValue: value)
 }
 
 #if DEBUG

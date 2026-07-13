@@ -40,6 +40,8 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     var context
     @Dependency(\.pasteboardHistoryRepository)
     private var pasteboardHistoryRepository
+    @Dependency(\.pasteboardHistoryOCRIndexer)
+    private var pasteboardHistoryOCRIndexer
     @Dependency(\.snippetRepository)
     private var snippetRepository
 
@@ -52,6 +54,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
             try! values.bootstrapDatabase()
         }
         _ = snippetRepository.removeDuplicateFoldersAndSnippets()
+        pasteboardHistoryOCRIndexer.backfillMissingImageOCR(limit: 200)
     }
 
     // MARK: - NSMenuItem Validation
@@ -66,6 +69,18 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     @objc func showPreferenceWindow() {
         NSApp.activate(ignoringOtherApps: true)
         CPYPreferencesWindowController.sharedController.showWindow(self)
+    }
+
+    @objc func showAboutPreferencePane() {
+        NSApp.activate(ignoringOtherApps: true)
+        let controller = CPYPreferencesWindowController.sharedController
+        controller.showWindow(self)
+        controller.showPreferencePane(.about)
+    }
+
+    @objc func checkForUpdatesFromMenu() {
+        guard updaterController?.updater.canCheckForUpdates == true else { return }
+        updaterController?.updater.checkForUpdates()
     }
 
     @objc func showSnippetEditorWindow() {
@@ -183,7 +198,7 @@ private final class HistorySearchCellView: NSTableCellView {
         indexLabel.stringValue = "\(index)"
         titleLabel.stringValue = displayTitle(for: history)
         metadataLabel.stringValue = [
-            displayType(for: history.primaryType),
+            displayType(for: history),
             displayDate(for: history.updateAt)
         ].joined(separator: "  |  ")
 
@@ -193,7 +208,7 @@ private final class HistorySearchCellView: NSTableCellView {
             iconImageView.image = image
             iconImageView.imageScaling = .scaleProportionallyUpOrDown
         } else {
-            iconImageView.image = icon(for: history.primaryType)
+            iconImageView.image = icon(for: history)
             iconImageView.imageScaling = .scaleProportionallyDown
         }
     }
@@ -246,6 +261,9 @@ private final class HistorySearchCellView: NSTableCellView {
     }
 
     private func displayTitle(for history: PasteboardHistory) -> String {
+        if history.primaryType == .fileURL {
+            return fileURLPresentation(from: history.title)?.title ?? "其他文件"
+        }
         if !history.title.isEmpty {
             return history.title
         }
@@ -262,8 +280,8 @@ private final class HistorySearchCellView: NSTableCellView {
         }
     }
 
-    private func displayType(for type: NSPasteboard.PasteboardType?) -> String {
-        guard let type else { return "Clipboard" }
+    private func displayType(for history: PasteboardHistory) -> String {
+        guard let type = history.primaryType else { return "Clipboard" }
         if type.isClipyImageType {
             return "Image"
         }
@@ -277,7 +295,7 @@ private final class HistorySearchCellView: NSTableCellView {
         case .pdf, .deprecatedPDF:
             return "PDF"
         case .fileURL:
-            return "Files"
+            return fileCategory(for: history).title
         case .URL, .deprecatedURL:
             return "URL"
         default:
@@ -292,7 +310,8 @@ private final class HistorySearchCellView: NSTableCellView {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func icon(for type: NSPasteboard.PasteboardType?) -> NSImage? {
+    private func icon(for history: PasteboardHistory) -> NSImage? {
+        let type = history.primaryType
         if type?.isClipyImageType == true {
             return NSImage(systemSymbolName: "photo", accessibilityDescription: "Image")
         }
@@ -300,12 +319,30 @@ private final class HistorySearchCellView: NSTableCellView {
         case .pdf, .deprecatedPDF:
             return NSImage(systemSymbolName: "doc.richtext", accessibilityDescription: "PDF")
         case .fileURL:
-            return NSImage(systemSymbolName: "folder", accessibilityDescription: "Files")
+            return fileCategory(for: history).icon()
         case .URL, .deprecatedURL:
             return NSImage(systemSymbolName: "link", accessibilityDescription: "URL")
         default:
             return NSImage(systemSymbolName: "doc.text", accessibilityDescription: "Text")
         }
+    }
+
+    private func fileCategory(for history: PasteboardHistory) -> PasteraFinderFileCategory {
+        guard let fileTitle = fileURLPresentation(from: history.title)?.title else {
+            return .other
+        }
+        return PasteraFinderFileCategory.category(forFilename: fileTitle)
+    }
+
+    private func fileURLPresentation(from title: String) -> (title: String, previewText: String?)? {
+        var lines = title.components(separatedBy: .newlines)
+        guard let firstLine = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !firstLine.isEmpty else {
+            return nil
+        }
+        lines.removeFirst()
+        let previewText = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (firstLine, previewText.isEmpty ? nil : previewText)
     }
 }
 
@@ -437,7 +474,7 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
 
     private let searchField = NSSearchField()
     private let typeSegmentedControl = NSSegmentedControl(
-        labels: ["All", "Text", "Images", "Files", "PDF"],
+        labels: HistoryMenuTypeFilter.allCases.map(\.title),
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -534,11 +571,10 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
         typeSegmentedControl.segmentStyle = .rounded
         typeSegmentedControl.target = self
         typeSegmentedControl.action = #selector(typeChanged(_:))
-        typeSegmentedControl.setWidth(58, forSegment: 0)
-        typeSegmentedControl.setWidth(58, forSegment: 1)
-        typeSegmentedControl.setWidth(72, forSegment: 2)
-        typeSegmentedControl.setWidth(62, forSegment: 3)
-        typeSegmentedControl.setWidth(52, forSegment: 4)
+        for (index, filter) in HistoryMenuTypeFilter.allCases.enumerated() {
+            typeSegmentedControl.setLabel(filter.title, forSegment: index)
+            typeSegmentedControl.setWidth(historySearchSegmentWidth(for: filter), forSegment: index)
+        }
 
         regexButton.target = self
         regexButton.action = #selector(optionChanged(_:))
@@ -634,6 +670,7 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
             mode: regexButton.state == .on ? .regex : .plain,
             caseSensitive: caseButton.state == .on,
             types: selectedTypes,
+            fileCategories: selectedFileCategories,
             sortOrder: .newestFirst
         )
         statusLabel.stringValue = appending ? "Loading..." : "Searching..."
@@ -671,17 +708,35 @@ private final class HistorySearchWindowController: NSWindowController, NSSearchF
     }
 
     private var selectedTypes: Set<NSPasteboard.PasteboardType> {
-        switch typeSegmentedControl.selectedSegment {
-        case 1:
-            return [.string, .deprecatedString]
-        case 2:
-            return NSPasteboard.PasteboardType.clipyImageTypes
-        case 3:
-            return [.fileURL]
-        case 4:
-            return [.pdf, .deprecatedPDF]
-        default:
-            return []
+        selectedTypeFilter.pasteboardTypes
+    }
+
+    private var selectedFileCategories: Set<PasteraFinderFileCategory> {
+        selectedTypeFilter.fileCategories
+    }
+
+    private var selectedTypeFilter: HistoryMenuTypeFilter {
+        HistoryMenuTypeFilter(rawValue: typeSegmentedControl.selectedSegment) ?? .all
+    }
+
+    private func historySearchSegmentWidth(for filter: HistoryMenuTypeFilter) -> CGFloat {
+        switch filter {
+        case .all:
+            return 44
+        case .text:
+            return 48
+        case .images:
+            return 56
+        case .documents:
+            return 44
+        case .archives:
+            return 42
+        case .code:
+            return 48
+        case .otherFiles:
+            return 56
+        case .pdf:
+            return 42
         }
     }
 

@@ -24,10 +24,25 @@ final class ClipService {
     fileprivate var storeTypes = [String: NSNumber]()
     fileprivate let scheduler = SerialDispatchQueueScheduler(qos: .utility)
     fileprivate let lock = NSRecursiveLock(name: "com.pastera-app.Pastera.ClipUpdatable")
+    fileprivate var ignoredPasteboardChangeCounts = Set<Int>()
     fileprivate var disposeBag = DisposeBag()
+    private let clipboardScriptCoordinatorProvider: () -> ClipboardScriptCoordinating?
+    private let sourceAppBundleIdentifierProvider: () -> String?
 
     @Dependency(\.pasteboardHistoryRepository)
     private var pasteboardHistoryRepository
+    @Dependency(\.pasteboardHistoryOCRIndexer)
+    private var pasteboardHistoryOCRIndexer
+
+    init(
+        clipboardScriptCoordinatorProvider: @escaping () -> ClipboardScriptCoordinating? = { nil },
+        sourceAppBundleIdentifierProvider: @escaping () -> String? = {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+    ) {
+        self.clipboardScriptCoordinatorProvider = clipboardScriptCoordinatorProvider
+        self.sourceAppBundleIdentifierProvider = sourceAppBundleIdentifierProvider
+    }
 
     // MARK: - Clips
     func startMonitoring() {
@@ -68,6 +83,11 @@ final class ClipService {
         cachedChangeCount.accept(cachedChangeCount.value + 1)
     }
 
+    func ignorePasteboardChange(_ changeCount: Int) {
+        lock.lock(); defer { lock.unlock() }
+        ignoredPasteboardChangeCounts.insert(changeCount)
+    }
+
 }
 
 // MARK: - Create Clip
@@ -75,6 +95,10 @@ extension ClipService {
     @discardableResult
     fileprivate func create(from pasteboard: NSPasteboard = .general) -> Bool {
         lock.lock(); defer { lock.unlock() }
+
+        if ignoredPasteboardChangeCounts.remove(pasteboard.changeCount) != nil {
+            return true
+        }
 
         // Pasteboard types
         let pasteboardTypes = pasteboard.pasteboardItems?.flatMap { $0.types } ?? []
@@ -91,7 +115,49 @@ extension ClipService {
         guard !AppEnvironment.current.excludeAppService.copiedProcessIsExcludedApplications(pasteboard: pasteboard) else { return true }
 
         guard let content = PasteboardContent(pasteboard: pasteboard, types: types) else { return false }
+        if content.isOnlyStringType,
+           let coordinator = clipboardScriptCoordinatorProvider(),
+           coordinator.hasEnabledScripts(for: .copy) {
+            transformAndSave(
+                content,
+                pasteboard: pasteboard,
+                coordinator: coordinator,
+                sourceAppBundleIdentifier: sourceAppBundleIdentifierProvider()
+            )
+            return true
+        }
         return save(content)
+    }
+
+    private func transformAndSave(
+        _ originalContent: PasteboardContent,
+        pasteboard: NSPasteboard,
+        coordinator: ClipboardScriptCoordinating,
+        sourceAppBundleIdentifier: String?
+    ) {
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await coordinator.transform(
+                text: originalContent.stringValue,
+                sourceAppBundleIdentifier: sourceAppBundleIdentifier,
+                trigger: .copy
+            )
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            switch outcome {
+            case .unchanged, .failed:
+                self.save(originalContent)
+            case let .transformed(output):
+                pasteboard.clearContents()
+                pasteboard.setString(output, forType: .string)
+                self.ignoredPasteboardChangeCounts.insert(pasteboard.changeCount)
+                self.save(
+                    PasteboardContent(
+                        assets: [.init(type: .string, data: Data(output.utf8))]
+                    )
+                )
+            }
+        }
     }
 
     func create(with image: NSImage) {
@@ -123,8 +189,10 @@ extension ClipService {
         let savedHash = (isOverwriteHistory && !allowDuplicateContent) ? content.hash : UUID().uuidString
 
         let unixTime = Int(Date().timeIntervalSince1970)
-        pasteboardHistoryRepository.save(id: .init(rawValue: savedHash), content: content, updateAt: unixTime)
+        let savedID = PasteboardHistory.ID(rawValue: savedHash)
+        pasteboardHistoryRepository.save(id: savedID, content: content, updateAt: unixTime)
         pasteboardHistoryRepository.pruneHistories(settings: HistoryRetentionSettings.current())
+        pasteboardHistoryOCRIndexer.enqueueIndexing(historyID: savedID, content: content)
         return true
     }
 }
@@ -138,6 +206,11 @@ extension ClipService {
     @discardableResult
     func createForTesting(from pasteboard: NSPasteboard) -> Bool {
         create(from: pasteboard)
+    }
+
+    func consumeIgnoredPasteboardChangeForTesting(_ changeCount: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return ignoredPasteboardChangeCounts.remove(changeCount) != nil
     }
 }
 #endif

@@ -18,6 +18,8 @@ import Magnet
 import RxCocoa
 import RxSwift
 
+// swiftlint:disable file_length
+
 private final class HistoryBrowserMenu: NSMenu {
     weak var headerView: HistoryMenuHeaderView?
 
@@ -57,6 +59,13 @@ final class MenuManager: NSObject {
     var historyPanelController: HistoryBrowserPanelController?
     var snippetPanelController: SnippetBrowserPanelController?
     var mainMenuPanelController: MainMenuPanelController?
+    private lazy var passwordVaultUIController: PasswordVaultUIController = {
+        let controller = PasswordVaultUIController()
+        controller.onChange = { [weak self] in
+            self?.mainMenuPanelController?.reloadContentIfVisible()
+        }
+        return controller
+    }()
     var panelDismissLocalMonitor: Any?
     var panelDismissGlobalMonitor: Any?
     var secureEventInputStatusTimer: Timer?
@@ -120,64 +129,28 @@ final class MenuManager: NSObject {
 // MARK: - Popup Menu
 extension MenuManager {
     func popUpMenu(_ type: MenuType, triggerKeyCombo: KeyCombo? = nil) {
-        if shouldUseLegacyMenuFallback {
-            popUpLegacyMenu(type)
-            return
-        }
-
-        if type == .main {
-            showMainMenuPanel(at: NSEvent.mouseLocation)
-            return
-        }
-
-        if type == .history {
-            showHistoryBrowserPanel(
-                at: NSEvent.mouseLocation,
-                triggerKeyCombo: triggerKeyCombo ?? AppEnvironment.current.hotKeyService.historyKeyCombo
-            )
-            return
-        }
-
-        if type == .snippet {
-            showSnippetBrowserPanel(
-                at: NSEvent.mouseLocation,
-                triggerKeyCombo: triggerKeyCombo ?? AppEnvironment.current.hotKeyService.snippetKeyCombo
-            )
-            return
-        }
-    }
-
-    var shouldUseLegacyMenuFallback: Bool {
-        secureEventInputEnabledProvider()
-    }
-
-    private func popUpLegacyMenu(_ type: MenuType) {
-        let menu: NSMenu?
+        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
+        mainMenuPanelController = panelController
         switch type {
         case .main:
-            if clipMenu == nil {
-                createClipMenu()
-            }
-            menu = clipMenu
+            break
         case .history:
-            menu = makeHistoryBrowserMenu()
+            panelController.openHistoryFromMainMenu()
         case .snippet:
-            let snippetMenu = NSMenu(title: String(localized: "Snippet"))
-            addSnippetItems(snippetMenu, separateMenu: false)
-            menu = snippetMenu
+            panelController.openSnippetsFromMainMenu()
+        case .passwordVault:
+            panelController.openPasswordVaultFromMainMenu()
         }
-        menu?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        panelController.show(at: NSEvent.mouseLocation, pinned: false)
+        installPanelDismissMonitorsIfNeeded()
     }
 
     func popUpSnippetFolder(_ folderDetail: SnippetFolderDetail, triggerKeyCombo: KeyCombo? = nil) {
-        let fallbackKeyCombo = AppEnvironment.current.hotKeyService.snippetKeyCombo(
-            forIdentifier: folderDetail.folder.id.uuidString
-        )
-        showSnippetFolderPanel(
-            folderDetail.folder.id,
-            at: NSEvent.mouseLocation,
-            triggerKeyCombo: triggerKeyCombo ?? fallbackKeyCombo
-        )
+        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
+        mainMenuPanelController = panelController
+        panelController.openSnippetFolderFromMainMenu(folderDetail.folder.id)
+        panelController.show(at: NSEvent.mouseLocation, pinned: false)
+        installPanelDismissMonitorsIfNeeded()
     }
 }
 
@@ -257,7 +230,12 @@ extension MenuManager {
 }
 
 extension MenuManager {
+    var hasHistoriesForStatusItemMenu: Bool {
+        pasteboardHistoryRepository.hasHistories()
+    }
+
     func refreshHistorySurfacesIfVisible() {
+        mainMenuPanelController?.reloadContentIfVisible()
         historyPanelController?.reloadResultsIfVisible()
     }
 
@@ -459,18 +437,138 @@ extension MenuManager {
     func makeMainMenuPanelController() -> MainMenuPanelController {
         MainMenuPanelController(
             historyTitle: String(localized: "History"),
-            historyImage: folderIcon,
+            historyImage: MainMenuModeIcons.history(),
             historyShortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.historyKeyCombo),
             snippetTitle: String(localized: "Snippet"),
-            snippetImage: snippetIcon,
+            snippetImage: MainMenuModeIcons.snippets(),
             itemsProvider: { [weak self] in self?.makeMainMenuPanelItems() ?? [] },
-            onOpenHistory: { [weak self] in self?.showHistoryBrowserPanel(at: NSEvent.mouseLocation) },
-            onOpenSnippets: { [weak self] in self?.showSnippetBrowserPanel() },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { [weak self] in
+                    self?.historyMenuState ?? HistoryMenuPaginationState()
+                },
+                updateState: { [weak self] update in
+                    guard let self else { return }
+                    update(&self.historyMenuState)
+                },
+                fetchPage: { [weak self] in
+                    self?.fetchHistoryMenuPage() ?? HistoryMenuPage()
+                },
+                makeRowView: { [weak self] detail, index, onConfirm in
+                    self?.makeHistoryRowView(detail, index: index, layoutStyle: .compactMainMenu, onConfirm: onConfirm)
+                        ?? HistoryMenuRowView(title: detail.history.title, image: nil, layoutStyle: .compactMainMenu, onConfirm: onConfirm)
+                },
+                selectHistory: { [weak self] historyID, targetContext in
+                    self?.selectHistory(historyID, restoring: targetContext)
+                },
+                fetchEditableText: { [weak self] historyID in
+                    self?.editableTextHistoryContent(historyID)
+                },
+                updateTextHistory: { [weak self] historyID, text in
+                    self?.pasteboardHistoryRepository.updateTextHistory(
+                        id: historyID,
+                        text: text,
+                        updateAt: Int(Date().timeIntervalSince1970)
+                    ) ?? false
+                }
+            ),
+            snippetDataSource: MainMenuSnippetDataSource(
+                fetchFolderDetails: { [weak self] in
+                    self?.snippetRepository.fetchFolderDetails() ?? []
+                },
+                fetchFolderDetail: { [weak self] folderID in
+                    self?.snippetRepository.fetchFolderDetail(id: folderID)
+                },
+                selectSnippet: { [weak self] snippetID, targetContext in
+                    self?.selectSnippet(snippetID, restoring: targetContext)
+                },
+                createFolder: { [weak self] title in
+                    guard let self, let folder = self.snippetRepository.insertFolder() else { return nil }
+                    guard self.snippetRepository.updateFolderTitle(folder.id, title: title) else {
+                        self.snippetRepository.deleteFolder(folder.id)
+                        return nil
+                    }
+                    return self.snippetRepository.fetchFolderDetail(id: folder.id)?.folder
+                },
+                createSnippet: { [weak self] folderID, title, content in
+                    guard let self, let snippet = self.snippetRepository.insertSnippet(to: folderID) else { return nil }
+                    guard content.isEmpty || self.snippetRepository.updateSnippetContent(snippet.id, content: content) else {
+                        self.snippetRepository.deleteSnippet(snippet.id)
+                        return nil
+                    }
+                    self.snippetRepository.updateSnippetTitle(snippet.id, title: title)
+                    return self.snippetRepository.fetchFolderDetail(id: folderID)?.snippets.first { $0.id == snippet.id }
+                },
+                updateFolderTitle: { [weak self] folderID, title in
+                    self?.snippetRepository.updateFolderTitle(folderID, title: title) ?? false
+                },
+                updateSnippetTitle: { [weak self] snippetID, title in
+                    self?.snippetRepository.updateSnippetTitle(snippetID, title: title)
+                },
+                updateSnippetContent: { [weak self] snippetID, content in
+                    self?.snippetRepository.updateSnippetContent(snippetID, content: content) ?? false
+                },
+                deleteFolder: { [weak self] folderID in
+                    self?.snippetRepository.deleteFolder(folderID)
+                    AppEnvironment.current.hotKeyService.unregisterSnippetHotKey(with: folderID.uuidString)
+                },
+                deleteSnippet: { [weak self] snippetID in
+                    self?.snippetRepository.deleteSnippet(snippetID)
+                },
+                folderKeyCombo: { folderID in
+                    AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folderID.uuidString)
+                },
+                updateFolderKeyCombo: { folderID, keyCombo in
+                    AppEnvironment.current.hotKeyService.registerSnippetHotKey(
+                        with: folderID.uuidString,
+                        keyCombo: keyCombo
+                    )
+                },
+                clearFolderKeyCombo: { folderID in
+                    AppEnvironment.current.hotKeyService.unregisterSnippetHotKey(with: folderID.uuidString)
+                }
+            ),
+            passwordVaultDataSource: MainMenuPasswordVaultDataSource(
+                fetchFolders: { [weak self] in
+                    try self?.passwordVaultUIController.folders() ?? []
+                },
+                fetchEntries: { [weak self] in
+                    try self?.passwordVaultUIController.entries() ?? []
+                },
+                copyPassword: { [weak self] id, completion in
+                    self?.passwordVaultUIController.copyPassword(id: id, completion: completion)
+                },
+                loadDraft: { [weak self] id, completion in
+                    self?.passwordVaultUIController.loadDraft(id: id, completion: completion)
+                },
+                createEntry: { [weak self] draft, completion in
+                    self?.passwordVaultUIController.createEntry(draft, completion: completion)
+                },
+                updateEntry: { [weak self] id, draft, completion in
+                    self?.passwordVaultUIController.updateEntry(id: id, draft: draft, completion: completion)
+                },
+                deleteEntry: { [weak self] id, completion in
+                    self?.passwordVaultUIController.deleteEntry(id: id, completion: completion)
+                },
+                createFolder: { [weak self] name in
+                    guard let self else { throw PasswordVaultError.keychainUnavailable }
+                    return try self.passwordVaultUIController.createFolder(name: name)
+                },
+                renameFolder: { [weak self] id, name in
+                    guard let self else { throw PasswordVaultError.keychainUnavailable }
+                    return try self.passwordVaultUIController.renameFolder(id: id, name: name)
+                },
+                deleteFolder: { [weak self] id in
+                    guard let self else { throw PasswordVaultError.keychainUnavailable }
+                    try self.passwordVaultUIController.deleteFolder(id: id)
+                }
+            ),
             oneDriveStatusService: AppEnvironment.current.oneDriveProcessStatusService,
-            onCloseChildPanels: { [weak self] in
-                self?.historyPanelController?.close()
-                self?.snippetPanelController?.close()
-            }
+            onOpenPreferences: {
+                NSApp.sendAction(#selector(AppDelegate.showPreferenceWindow), to: nil, from: nil)
+            },
+            onCloseChildPanels: {}
         )
     }
 
@@ -480,7 +578,7 @@ extension MenuManager {
         if secureEventInputEnabledProvider() {
             items.append(.notice(
                 title: String(localized: "Shortcuts are paused"),
-                message: String(localized: "Secure Keyboard Entry is active in a password prompt. Finish or cancel it, then Pastera shortcuts will work again."),
+                message: String(localized: "macOS paused global shortcuts while Secure Keyboard Entry is active. Click the Pastera menu bar icon to open Pastera."),
                 image: menuPanelSymbol(
                     "exclamationmark.triangle.fill",
                     accessibilityDescription: String(localized: "Secure Keyboard Entry")
@@ -499,20 +597,13 @@ extension MenuManager {
                     for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folder.id.uuidString)
                 )
                 items.append(.snippetFolder(title: title, image: folderImage, shortcutText: shortcutText) { [weak self] anchorFrame in
-                    self?.showSnippetFolderPanel(folder.id, attachedTo: anchorFrame)
+                    guard let self,
+                          let detail = self.snippetRepository.fetchFolderDetail(id: folder.id) else { return }
+                    self.popUpSnippetFolder(detail)
                 })
             }
             items.append(.separator)
         }
-
-        let snippetsTitle = String(localized: "Edit Snippets")
-        items.append(.action(title: snippetsTitle, image: menuPanelSymbol("text.quote", accessibilityDescription: snippetsTitle)) {
-            NSApp.sendAction(#selector(AppDelegate.showSnippetEditorWindow), to: nil, from: nil)
-        })
-        let preferencesTitle = String(localized: "Preferences")
-        items.append(.action(title: preferencesTitle, image: menuPanelSymbol("gearshape", accessibilityDescription: preferencesTitle)) {
-            NSApp.sendAction(#selector(AppDelegate.showPreferenceWindow), to: nil, from: nil)
-        })
 
         return items
     }
@@ -686,6 +777,7 @@ extension MenuManager {
             mode: historyMenuState.mode,
             caseSensitive: historyMenuState.caseSensitive,
             types: historyMenuState.selectedTypes,
+            fileCategories: historyMenuState.selectedFileCategories,
             sortOrder: ascending ? .oldestFirst : .newestFirst
         )
         do {
@@ -746,19 +838,28 @@ extension MenuManager {
         return menuItem
     }
 
-    func makeHistoryRowView(_ historyDetail: PasteboardHistoryDetail, index: Int, onConfirm: @escaping () -> Void) -> HistoryMenuRowView {
+    func makeHistoryRowView(_ historyDetail: PasteboardHistoryDetail, index: Int, layoutStyle: HistoryMenuRowView.LayoutStyle = .regular, onConfirm: @escaping () -> Void) -> HistoryMenuRowView {
         let listNumber = (firstIndexOfMenuItems() + index) % kMaxKeyEquivalents
         let shortcutText = numericShortcutText(forRowIndex: index)
         let presentation = makeHistoryItemPresentation(
             historyDetail,
             listNumber: listNumber,
-            usesLeadingNumber: false
+            usesLeadingNumber: false,
+            usesCompactImageLabel: layoutStyle == .compactMainMenu
         )
+        let onEdit: (() -> Void)? = layoutStyle == .compactMainMenu &&
+            isEditablePlainTextHistoryTypes(historyDetail.history.pasteboardTypes)
+            ? { [weak self] in
+                self?.mainMenuPanelController?.beginEditingHistory(historyDetail.history.id)
+            }
+            : nil
         return HistoryMenuRowView(
             title: presentation.title,
             image: presentation.image,
             shortcutText: shortcutText,
             previewText: presentation.previewText,
+            layoutStyle: layoutStyle,
+            onEdit: onEdit,
             onDelete: { [weak self] in self?.deleteHistory(historyDetail.history.id) },
             onConfirm: onConfirm
         )
@@ -767,7 +868,8 @@ extension MenuManager {
     func makeHistoryItemPresentation(
         _ historyDetail: PasteboardHistoryDetail,
         listNumber: Int,
-        usesLeadingNumber: Bool? = nil
+        usesLeadingNumber: Bool? = nil,
+        usesCompactImageLabel: Bool = false
     ) -> HistoryItemPresentation {
         let history = historyDetail.history
         let isMarkWithNumber = usesLeadingNumber ?? false
@@ -781,6 +883,7 @@ extension MenuManager {
             displayedTitle: displayTitle,
             primaryPboardType: primaryPboardType
         )
+        var fallbackImage: NSImage?
         var title = menuItemTitle(
             displayTitle,
             listNumber: listNumber,
@@ -788,23 +891,22 @@ extension MenuManager {
         )
 
         if primaryPboardType?.isClipyImageType == true {
-            title = menuItemTitle("(Image)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
+            let imageTitle = usesCompactImageLabel ? String(localized: "Image") : "(Image)"
+            title = menuItemTitle(imageTitle, listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
             previewText = nil
         } else if primaryPboardType == .pdf || primaryPboardType == .deprecatedPDF {
             title = menuItemTitle("(PDF)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
             previewText = nil
         } else if primaryPboardType == .fileURL {
-            if let filePresentation = fileURLPresentation(from: clipString) {
-                title = menuItemTitle(
-                    trimTitle(filePresentation.title, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength),
-                    listNumber: listNumber,
-                    isMarkWithNumber: isMarkWithNumber
-                )
-                previewText = filePresentation.previewText
-            } else {
-                title = menuItemTitle("(Files)", listNumber: listNumber, isMarkWithNumber: isMarkWithNumber)
-                previewText = nil
-            }
+            let filePresentation = fileURLPresentation(from: clipString)
+            let fileTitle = filePresentation?.title ?? "其他文件"
+            title = menuItemTitle(
+                trimTitle(fileTitle, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength),
+                listNumber: listNumber,
+                isMarkWithNumber: isMarkWithNumber
+            )
+            previewText = filePresentation?.previewText
+            fallbackImage = PasteraFinderFileCategory.category(forFilename: fileTitle).icon()
         }
 
         let toolTip: String?
@@ -821,6 +923,8 @@ extension MenuManager {
            let thumbnailImage = NSImage(data: thumbnailAsset.data),
            thumbnailAsset.kind == .image || (thumbnailAsset.kind == .colorCode && isShowColorCode) {
             image = thumbnailImage
+        } else if let fallbackImage {
+            image = fallbackImage
         } else {
             image = nil
         }
@@ -874,6 +978,21 @@ extension MenuManager {
 
     func deleteHistory(_ historyID: PasteboardHistory.ID) {
         pasteboardHistoryRepository.deleteHistory(id: historyID)
+    }
+
+    func editableTextHistoryContent(_ historyID: PasteboardHistory.ID) -> String? {
+        guard let history = pasteboardHistoryRepository.fetchHistory(id: historyID),
+              isEditablePlainTextHistoryTypes(history.pasteboardTypes),
+              let content = pasteboardHistoryRepository.fetchContent(id: historyID) else {
+            return nil
+        }
+        return content.stringValue
+    }
+
+    private func isEditablePlainTextHistoryTypes(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard !types.isEmpty else { return false }
+        let plainTextTypes: Set<NSPasteboard.PasteboardType> = [.string, .deprecatedString]
+        return Set(types).isSubset(of: plainTextTypes)
     }
 }
 

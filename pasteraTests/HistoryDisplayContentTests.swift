@@ -74,13 +74,13 @@ struct HistoryDisplayContentTests {
     }
 
     @Test
-    func fileURLHistoryPresentationUsesFileNameAndTextPreviewWhenAvailable() throws {
+    func fileURLHistoryPresentationUsesFileNameIconAndTextPreviewWhenAvailable() throws {
         try withRegisteredDefaultEnvironment { _ in
             let presentation = MenuManager().makeHistoryItemPresentation(
                 PasteboardHistoryDetail(
                     history: PasteboardHistory(
                         id: PasteboardHistory.ID("file-url-text"),
-                        title: "notes.unknown\nHello from copied file",
+                        title: "script.swift\nprint(\"Hello\")",
                         pasteboardTypes: [.fileURL],
                         updateAt: 1,
                         deviceID: CPYUtilities.deviceID
@@ -91,8 +91,57 @@ struct HistoryDisplayContentTests {
                 usesLeadingNumber: false
             )
 
-            #expect(presentation.title == "notes.unknown")
-            #expect(presentation.previewText == "Hello from copied file")
+            #expect(presentation.title == "script.swift")
+            #expect(presentation.image != nil)
+            #expect(presentation.previewText == "print(\"Hello\")")
+        }
+    }
+
+    @Test
+    func fileURLHistoryPresentationUsesCategoryIconWithoutTextPreviewForArchives() throws {
+        try withRegisteredDefaultEnvironment { _ in
+            let presentation = MenuManager().makeHistoryItemPresentation(
+                PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("file-url-archive"),
+                        title: "backup.zip",
+                        pasteboardTypes: [.fileURL],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                ),
+                listNumber: 1,
+                usesLeadingNumber: false
+            )
+
+            #expect(presentation.title == "backup.zip")
+            #expect(presentation.image != nil)
+            #expect(presentation.previewText == nil)
+        }
+    }
+
+    @Test
+    func fileURLHistoryPresentationFallsBackToOtherFileForEmptyLegacyTitles() throws {
+        try withRegisteredDefaultEnvironment { _ in
+            let presentation = MenuManager().makeHistoryItemPresentation(
+                PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("file-url-empty"),
+                        title: "",
+                        pasteboardTypes: [.fileURL],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                ),
+                listNumber: 1,
+                usesLeadingNumber: false
+            )
+
+            #expect(presentation.title == "其他文件")
+            #expect(presentation.image != nil)
+            #expect(presentation.previewText == nil)
         }
     }
 
@@ -122,6 +171,40 @@ struct HistoryDisplayContentTests {
 
             #expect(row.frame.height > 28)
             #expect(row.textValuesForTesting.contains("(Image)"))
+        }
+    }
+
+    @Test
+    func compactMainMenuImageHistoryUsesLocalizedLabelWithoutParentheses() throws {
+        try withRegisteredDefaultEnvironment { defaults in
+            defaults.set(false, forKey: Constants.UserDefaults.showImageInTheMenu)
+            let historyID = PasteboardHistory.ID("compact-image")
+            let image = NSImage.create(with: .blue, size: NSSize(width: 24, height: 18))
+            let imageData = try #require(image.tiffRepresentation)
+            let detail = PasteboardHistoryDetail(
+                history: PasteboardHistory(
+                    id: historyID,
+                    title: "Screenshot",
+                    pasteboardTypes: [.tiff],
+                    updateAt: 1,
+                    deviceID: CPYUtilities.deviceID
+                ),
+                thumbnailAsset: PasteboardHistoryThumbnailAsset(
+                    pasteboardHistoryID: historyID,
+                    kind: .image,
+                    data: imageData
+                )
+            )
+
+            let row = MenuManager().makeHistoryRowView(
+                detail,
+                index: 0,
+                layoutStyle: .compactMainMenu
+            ) {}
+
+            #expect(row.frame.height == MainMenuPanelLayout.compactImageRowHeight)
+            #expect(!row.textValuesForTesting.contains("(Image)"))
+            #expect(row.textValuesForTesting.contains(String(localized: "Image")))
         }
     }
 

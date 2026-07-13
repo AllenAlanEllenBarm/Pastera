@@ -13,31 +13,74 @@
 import Cocoa
 
 final class HistoryMenuRowView: NSControl {
-    private enum Metrics {
-        static let width: CGFloat = HistoryBrowserLayout.width
-        static let textRowHeight: CGFloat = 28
-        static let imageRowHeight: CGFloat = 42
-        static let horizontalInset: CGFloat = 10
-        static let imageWidth: CGFloat = 52
-        static let imageHeight: CGFloat = 32
-        static let textSpacing: CGFloat = 10
-        static let shortcutSpacing: CGFloat = 8
-        static let deleteButtonSize: CGFloat = 24
-        static let textPreviewDelay: TimeInterval = 0.45
+    enum LayoutStyle {
+        case regular
+        case compactMainMenu
+    }
+
+    private struct Metrics {
+        let width: CGFloat
+        let textRowHeight: CGFloat
+        let imageRowHeight: CGFloat
+        let horizontalInset: CGFloat
+        let imageWidth: CGFloat
+        let imageHeight: CGFloat
+        let textSpacing: CGFloat
+        let shortcutSpacing: CGFloat
+        let deleteButtonSize: CGFloat
+        let titleFontSize: CGFloat
+
+        static let textPreviewDelay: TimeInterval = 0.32
         static let maxPreviewTextLength = 1200
+
+        static let regular = Metrics(
+            width: HistoryBrowserLayout.width,
+            textRowHeight: 36,
+            imageRowHeight: 52,
+            horizontalInset: 18,
+            imageWidth: 56,
+            imageHeight: 36,
+            textSpacing: 12,
+            shortcutSpacing: 8,
+            deleteButtonSize: 28,
+            titleFontSize: 15
+        )
+
+        static let compactMainMenu = Metrics(
+            width: MainMenuPanelLayout.width,
+            textRowHeight: MainMenuPanelLayout.rowHeight,
+            imageRowHeight: MainMenuPanelLayout.compactImageRowHeight,
+            horizontalInset: 9,
+            imageWidth: 34,
+            imageHeight: 20,
+            textSpacing: 7,
+            shortcutSpacing: 5,
+            deleteButtonSize: 20,
+            titleFontSize: 12
+        )
     }
 
     private static let imagePreviewController = HistoryMenuImagePreviewController()
     private static let textPreviewController = HistoryMenuTextPreviewController()
 
+    #if DEBUG
+    private static var textPreviewRequestObserverForTesting: ((String) -> Void)?
+    private static var textPreviewSchedulerForTesting: ((DispatchWorkItem) -> Void)?
+    #endif
+
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let shortcutBadge = PasteraShortcutBadgeView()
+    private let editButton = NSButton()
     private let deleteButton = NSButton()
     private let onConfirm: () -> Void
+    private let onEdit: (() -> Void)?
     private let onDelete: (() -> Void)?
     private let previewImage: NSImage?
     private let previewText: String?
+    private let fullTitle: String
+    private let layoutStyle: LayoutStyle
+    private let metrics: Metrics
     private var trackingArea: NSTrackingArea?
     private var textPreviewWorkItem: DispatchWorkItem?
     private var isMouseInside = false
@@ -50,15 +93,21 @@ final class HistoryMenuRowView: NSControl {
         image: NSImage?,
         shortcutText: String? = nil,
         previewText: String? = nil,
+        layoutStyle: LayoutStyle = .regular,
+        onEdit: (() -> Void)? = nil,
         onDelete: (() -> Void)? = nil,
         onConfirm: @escaping () -> Void
     ) {
         self.onConfirm = onConfirm
+        self.onEdit = onEdit
         self.onDelete = onDelete
         self.previewImage = image
         self.previewText = Self.boundedPreviewText(previewText)
-        let height = image == nil ? Metrics.textRowHeight : Metrics.imageRowHeight
-        super.init(frame: NSRect(x: 0, y: 0, width: Metrics.width, height: height))
+        self.fullTitle = title
+        self.layoutStyle = layoutStyle
+        self.metrics = layoutStyle == .compactMainMenu ? .compactMainMenu : .regular
+        let height = image == nil ? metrics.textRowHeight : metrics.imageRowHeight
+        super.init(frame: NSRect(x: 0, y: 0, width: metrics.width, height: height))
         setup(title: title, image: image, shortcutText: shortcutText)
     }
 
@@ -77,11 +126,13 @@ final class HistoryMenuRowView: NSControl {
         onLogicalFocusChange?()
         isFocused = true
         updateAppearance()
+        scheduleTextPreview()
         return true
     }
 
     override func resignFirstResponder() -> Bool {
         isFocused = false
+        isMouseInside ? scheduleTextPreview() : cancelTextPreview()
         updateAppearance()
         return true
     }
@@ -112,8 +163,28 @@ final class HistoryMenuRowView: NSControl {
     override func mouseUp(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         guard bounds.contains(location) else { return }
+        guard editButton.isHidden || !editButton.frame.contains(location) else { return }
         guard deleteButton.isHidden || !deleteButton.frame.contains(location) else { return }
         confirm()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard onEdit != nil || onDelete != nil else { return nil }
+        let menu = NSMenu()
+        if onEdit != nil {
+            let editItem = NSMenuItem(title: String(localized: "Edit"), action: #selector(editButtonClicked(_:)), keyEquivalent: "")
+            editItem.target = self
+            menu.addItem(editItem)
+        }
+        if onDelete != nil {
+            if !menu.items.isEmpty {
+                menu.addItem(.separator())
+            }
+            let deleteItem = NSMenuItem(title: String(localized: "Delete History"), action: #selector(deleteButtonClicked(_:)), keyEquivalent: "")
+            deleteItem.target = self
+            menu.addItem(deleteItem)
+        }
+        return menu
     }
 
     override func viewDidMoveToWindow() {
@@ -190,12 +261,24 @@ final class HistoryMenuRowView: NSControl {
         imageView.layer?.borderWidth = hasImage ? 0.5 : 0
 
         titleLabel.stringValue = title
-        titleLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        titleLabel.font = .systemFont(ofSize: metrics.titleFontSize, weight: .medium)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.textColor = .labelColor
 
-        shortcutBadge.style = .itemNumber
-        shortcutBadge.shortcutText = shortcutText
+        configureHistoryRowShortcut(self, badge: shortcutBadge, title: title, shortcut: shortcutText)
+
+        editButton.identifier = NSUserInterfaceItemIdentifier("historyRowEditButton")
+        editButton.setButtonType(.momentaryPushIn)
+        editButton.bezelStyle = .inline
+        editButton.isBordered = false
+        editButton.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        editButton.imagePosition = .imageOnly
+        editButton.contentTintColor = .tertiaryLabelColor
+        editButton.toolTip = String(localized: "Edit")
+        editButton.setAccessibilityLabel(String(localized: "Edit"))
+        editButton.target = self
+        editButton.action = #selector(editButtonClicked(_:))
+        editButton.isHidden = true
 
         deleteButton.identifier = NSUserInterfaceItemIdentifier("historyRowDeleteButton")
         deleteButton.setButtonType(.momentaryPushIn)
@@ -209,52 +292,92 @@ final class HistoryMenuRowView: NSControl {
         deleteButton.setAccessibilityLabel(deleteShortcutTitle)
         deleteButton.target = self
         deleteButton.action = #selector(deleteButtonClicked(_:))
-        deleteButton.isHidden = onDelete == nil
+        deleteButton.isHidden = true
 
-        [shortcutBadge, imageView, titleLabel, deleteButton].forEach {
+        [shortcutBadge, imageView, titleLabel, editButton, deleteButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
 
         let hasShortcut = shortcutText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let shortcutSpacing: CGFloat = hasShortcut ? Metrics.shortcutSpacing : 0
-        let deleteButtonWidth: CGFloat = onDelete == nil ? 0 : Metrics.deleteButtonSize
-        let deleteButtonSpacing: CGFloat = onDelete == nil ? 0 : -6
+        let shortcutSpacing: CGFloat = hasShortcut ? metrics.shortcutSpacing : 0
+        let editButtonWidth: CGFloat = onEdit == nil ? 0 : metrics.deleteButtonSize
+        let editButtonSpacing: CGFloat = onEdit == nil ? 0 : -4
+        let deleteButtonWidth: CGFloat = onDelete == nil ? 0 : metrics.deleteButtonSize
+        let deleteButtonSpacing: CGFloat = onDelete == nil ? 0 : -4
 
         NSLayoutConstraint.activate([
-            shortcutBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalInset),
+            shortcutBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: metrics.horizontalInset),
             shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             imageView.leadingAnchor.constraint(equalTo: shortcutBadge.trailingAnchor, constant: shortcutSpacing),
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            imageView.widthAnchor.constraint(equalToConstant: hasImage ? Metrics.imageWidth : 0),
-            imageView.heightAnchor.constraint(equalToConstant: hasImage ? Metrics.imageHeight : 0),
+            imageView.widthAnchor.constraint(equalToConstant: hasImage ? metrics.imageWidth : 0),
+            imageView.heightAnchor.constraint(equalToConstant: hasImage ? metrics.imageHeight : 0),
 
             titleLabel.leadingAnchor.constraint(
                 equalTo: hasImage ? imageView.trailingAnchor : shortcutBadge.trailingAnchor,
-                constant: hasImage ? Metrics.textSpacing : shortcutSpacing
+                constant: hasImage ? metrics.textSpacing : shortcutSpacing
             ),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: deleteButton.leadingAnchor, constant: deleteButtonSpacing),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editButton.leadingAnchor, constant: editButtonSpacing),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
+            editButton.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: deleteButtonSpacing),
+            editButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            editButton.widthAnchor.constraint(equalToConstant: editButtonWidth),
+            editButton.heightAnchor.constraint(equalToConstant: metrics.deleteButtonSize),
+
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -metrics.horizontalInset),
             deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             deleteButton.widthAnchor.constraint(equalToConstant: deleteButtonWidth),
-            deleteButton.heightAnchor.constraint(equalToConstant: Metrics.deleteButtonSize)
+            deleteButton.heightAnchor.constraint(equalToConstant: metrics.deleteButtonSize)
         ])
         updateAppearance()
     }
 
     private func updateAppearance() {
-        let tokens = PasteraDesignTokens.colors()
         let backgroundColor: NSColor = isFocused
-            ? tokens.selectedRow
-            : isMouseInside ? tokens.hoveredRow : .clear
+            ? selectedBackgroundColor
+            : isMouseInside ? hoveredBackgroundColor : .clear
         layer?.backgroundColor = backgroundColor.cgColor
         titleLabel.textColor = isFocused ? .selectedMenuItemTextColor : .labelColor
         shortcutBadge.setState(isEmphasized: isFocused || isMouseInside)
+        editButton.contentTintColor = isFocused || isMouseInside ? .secondaryLabelColor : .tertiaryLabelColor
+        editButton.isHidden = onEdit == nil || !showsEditButton
         deleteButton.contentTintColor = isFocused || isMouseInside ? .secondaryLabelColor : .tertiaryLabelColor
+        deleteButton.isHidden = onDelete == nil || !showsDeleteButton
         updatePreviewVisibility(isFocused: isFocused)
+    }
+
+    private var showsDeleteButton: Bool {
+        switch layoutStyle {
+        case .regular:
+            return isFocused || isMouseInside
+        case .compactMainMenu:
+            return isMouseInside
+        }
+    }
+
+    private var showsEditButton: Bool {
+        isFocused || isMouseInside
+    }
+
+    private var selectedBackgroundColor: NSColor {
+        switch layoutStyle {
+        case .regular:
+            return NSColor(calibratedRed: 0.04, green: 0.45, blue: 1.0, alpha: 0.90)
+        case .compactMainMenu:
+            return MainMenuVisualColors.selectedRow
+        }
+    }
+
+    private var hoveredBackgroundColor: NSColor {
+        switch layoutStyle {
+        case .regular:
+            return NSColor(calibratedWhite: 1.0, alpha: 0.085)
+        case .compactMainMenu:
+            return MainMenuVisualColors.hoveredRow
+        }
     }
 
     private func updatePreviewVisibility(isFocused: Bool) {
@@ -277,26 +400,30 @@ final class HistoryMenuRowView: NSControl {
 
     private func scheduleTextPreview() {
         cancelTextPreview()
-        guard previewImage == nil,
-              let previewText,
-              !previewText.isEmpty else {
-            return
-        }
+        guard previewImage == nil else { return }
         let workItem = DispatchWorkItem { [weak self] in
             self?.showTextPreviewIfNeeded()
         }
         textPreviewWorkItem = workItem
+        #if DEBUG
+        if let textPreviewSchedulerForTesting = Self.textPreviewSchedulerForTesting {
+            textPreviewSchedulerForTesting(workItem)
+            return
+        }
+        #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.textPreviewDelay, execute: workItem)
     }
 
     private func showTextPreviewIfNeeded() {
-        guard isMouseInside,
+        guard isMouseInside || isFocused,
               window?.isVisible == true,
-              let previewText,
-              !previewText.isEmpty else {
+              let previewText = textPreviewCandidate() else {
             Self.hideTextPreview()
             return
         }
+        #if DEBUG
+        Self.textPreviewRequestObserverForTesting?(previewText)
+        #endif
         Self.textPreviewController.show(text: previewText, relativeTo: bounds, in: self)
     }
 
@@ -316,6 +443,12 @@ final class HistoryMenuRowView: NSControl {
 
     @objc private func deleteButtonClicked(_ sender: NSButton) {
         delete()
+    }
+
+    @objc private func editButtonClicked(_ sender: Any) {
+        cancelTextPreview()
+        Self.hideImagePreview()
+        onEdit?()
     }
 
     private func delete() {
@@ -338,6 +471,31 @@ final class HistoryMenuRowView: NSControl {
     }
 }
 
+private extension HistoryMenuRowView {
+    func textPreviewCandidate() -> String? {
+        if let previewText, !previewText.isEmpty { return previewText }
+        guard isTitleVisuallyTruncated else {
+            return nil
+        }
+        return Self.boundedPreviewText(fullTitle)
+    }
+
+    var isTitleVisuallyTruncated: Bool {
+        layoutSubtreeIfNeeded()
+        let visibleWidth = min(
+            titleLabel.bounds.width,
+            max(0, bounds.maxX - titleLabel.frame.minX - metrics.horizontalInset)
+        )
+        guard visibleWidth > 0 else {
+            return false
+        }
+        let requiredWidth = (titleLabel.stringValue as NSString).size(
+            withAttributes: [.font: titleLabel.font as Any]
+        ).width
+        return ceil(requiredWidth) > floor(visibleWidth) + 1
+    }
+}
+
 #if DEBUG
 extension HistoryMenuRowView {
     static var isImagePreviewVisibleForTesting: Bool {
@@ -350,6 +508,18 @@ extension HistoryMenuRowView {
 
     static var textPreviewValueForTesting: String {
         textPreviewController.textValueForTesting
+    }
+
+    static func observeTextPreviewRequestsForTesting(_ observer: ((String) -> Void)?) {
+        textPreviewRequestObserverForTesting = observer
+    }
+
+    static func scheduleTextPreviewWorkItemsForTesting(_ scheduler: ((DispatchWorkItem) -> Void)?) {
+        textPreviewSchedulerForTesting = scheduler
+    }
+
+    var textPreviewCandidateForTesting: String? {
+        textPreviewCandidate()
     }
 
     var textValuesForTesting: [String] {

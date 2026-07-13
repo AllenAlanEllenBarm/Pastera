@@ -184,7 +184,7 @@ struct SnippetHotkeyPanelEntrypointTests {
     }
 
     @Test
-    func globalSnippetMenuHotkeyShowsStandaloneSnippetPanel() {
+    func globalSnippetMenuHotkeyShowsSnippetModeInUnifiedMainInterface() {
         let folderID = SnippetFolder.ID(rawValue: UUID())
         let detail = SnippetFolderDetail(
             folder: SnippetFolder(id: folderID, title: "AI Prompt", index: 0, isEnabled: true),
@@ -196,15 +196,16 @@ struct SnippetHotkeyPanelEntrypointTests {
         } operation: {
             let manager = MenuManager()
             manager.popUpMenu(.snippet)
-            defer { manager.closeSnippetBrowserPanelForTesting() }
+            defer { manager.closeMainMenuPanelForTesting() }
 
-            #expect(manager.snippetBrowserPanelFrameForTesting != nil)
-            #expect(manager.snippetBrowserRowTitlesForTesting == ["AI Prompt"])
+            #expect(manager.mainMenuPanelFrameForTesting != nil)
+            #expect(manager.mainMenuSelectedModeForTesting == "snippets")
+            #expect(manager.snippetBrowserPanelFrameForTesting == nil)
         }
     }
 
     @Test
-    func folderHotkeyShowsStandaloneSnippetPanel() throws {
+    func folderHotkeyShowsTargetFolderInUnifiedMainInterface() throws {
         try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
             let folderID = SnippetFolder.ID(rawValue: UUID())
             let detail = SnippetFolderDetail(
@@ -225,12 +226,13 @@ struct SnippetHotkeyPanelEntrypointTests {
                 $0.snippetRepository = HotkeyPanelStaticSnippetRepository(details: [detail])
             } operation: {
                 let manager = MenuManager()
-                manager.showSnippetFolderPanelForTesting(folderID, at: NSPoint(x: 120, y: 420))
-                defer { manager.closeSnippetBrowserPanelForTesting() }
+                manager.popUpSnippetFolder(detail)
+                defer { manager.closeMainMenuPanelForTesting() }
 
-                #expect(manager.snippetBrowserPanelFrameForTesting != nil)
-                #expect(manager.snippetBrowserRowTitlesForTesting == ["Ask GPT"])
-                #expect(manager.snippetBrowserShortcutTextsForTesting == ["1"])
+                #expect(manager.mainMenuPanelFrameForTesting != nil)
+                #expect(manager.mainMenuSelectedModeForTesting == "snippets")
+                #expect(manager.mainMenuExpandedSnippetFolderIDForTesting == folderID)
+                #expect(manager.snippetBrowserPanelFrameForTesting == nil)
             }
         }
     }

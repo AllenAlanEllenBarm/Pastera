@@ -21,22 +21,22 @@ final class PasteraOneDriveStatusBadge: NSView {
         var displayText: String {
             switch self {
             case .available:
-                return "OneDrive 可用"
+                return pasteraPreferenceString("OneDrive Available")
             case .unavailable:
-                return "OneDrive 不可用"
+                return pasteraPreferenceString("OneDrive Unavailable")
             case .notDetected:
-                return "未检测到 OneDrive"
+                return pasteraPreferenceString("OneDrive Not Detected")
             }
         }
 
         var tooltip: String {
             switch self {
             case .available:
-                return "当前同步位置在 OneDrive 文件夹内，Pastera 可以写入同步检测文件。"
+                return pasteraPreferenceString("OneDrive Available Description")
             case .unavailable:
-                return "当前同步位置不可用，请选择 OneDrive 中可写的文件夹。"
+                return pasteraPreferenceString("OneDrive Unavailable Description")
             case .notDetected:
-                return "没有检测到可用的 OneDrive 同步位置。"
+                return pasteraPreferenceString("OneDrive Not Detected Description")
             }
         }
 
@@ -161,17 +161,17 @@ final class PasteraOneDriveStatusBadge: NSView {
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
 
-        redetectButton.title = "检测"
+        redetectButton.title = pasteraPreferenceString("Detect")
         redetectButton.isBordered = false
         redetectButton.bezelStyle = .regularSquare
         redetectButton.font = .systemFont(ofSize: 10, weight: .semibold)
         redetectButton.image = NSImage(
             systemSymbolName: "arrow.clockwise",
-            accessibilityDescription: "重新检测 OneDrive"
+            accessibilityDescription: pasteraPreferenceString("Redetect OneDrive")
         )
         redetectButton.imagePosition = .imageLeading
-        redetectButton.setAccessibilityLabel("重新检测 OneDrive")
-        redetectButton.toolTip = "重新检测本地 OneDrive 文件夹和写入权限。"
+        redetectButton.setAccessibilityLabel(pasteraPreferenceString("Redetect OneDrive"))
+        redetectButton.toolTip = pasteraPreferenceString("Redetect OneDrive Description")
         addSubview(redetectButton)
         updateAppearance()
     }
@@ -179,7 +179,9 @@ final class PasteraOneDriveStatusBadge: NSView {
     private func updateAppearance() {
         label.stringValue = state.displayText
         label.textColor = .labelColor
-        redetectButton.title = isRedetecting ? "检测中" : "检测"
+        redetectButton.title = isRedetecting
+            ? pasteraPreferenceString("Detecting")
+            : pasteraPreferenceString("Detect")
         redetectButton.isEnabled = !isRedetecting
         redetectButton.contentTintColor = .labelColor
         toolTip = state.tooltip

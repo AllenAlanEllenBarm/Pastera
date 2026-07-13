@@ -16,8 +16,8 @@ final class MainMenuHeaderItemView: NSControl {
     enum Metrics {
         static let width: CGFloat = MainMenuPanelLayout.width
         static let height: CGFloat = MainMenuPanelLayout.headerHeight
-        static let horizontalInset: CGFloat = 10
-        static let iconSize: CGFloat = 18
+        static let horizontalInset: CGFloat = 9
+        static let iconSize: CGFloat = 16
         static let hoverOpenDelay: TimeInterval = 0.55
     }
 
@@ -108,7 +108,7 @@ final class MainMenuHeaderItemView: NSControl {
         imageView.contentTintColor = .secondaryLabelColor
 
         titleLabel.stringValue = title
-        titleLabel.font = .systemFont(ofSize: 14.5, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
 
@@ -125,10 +125,10 @@ final class MainMenuHeaderItemView: NSControl {
             imageView.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
             imageView.heightAnchor.constraint(equalToConstant: Metrics.iconSize),
 
-            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 7),
+            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 6),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutBadge.leadingAnchor, constant: -5),
             shortcutBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalInset),
             shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])

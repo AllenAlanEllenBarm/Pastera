@@ -7,15 +7,22 @@
 import AppKit
 import Combine
 import Dependencies
+import KeyHolder
 import Testing
 @testable import Pastera
 
 @MainActor
 @Suite(.serialized)
 struct KeyboardAccessibilityTests {
+    private func makePreferencesController() -> CPYPreferencesWindowController {
+        CPYPreferencesWindowController(
+            frameAutosaveName: "KeyboardAccessibilityTests.\(UUID().uuidString)"
+        )
+    }
+
     @Test
     func shortcutRecordViewsUseDarkElevatedBackgroundInsteadOfWhite() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         let darkAppearance = try #require(NSAppearance(named: .darkAqua))
@@ -33,21 +40,21 @@ struct KeyboardAccessibilityTests {
 
     @Test
     func preferencePanesUseComfortableVerticalRhythm() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
 
-        for paneTitle in ["General", "Types", "Shortcuts", "Update"] {
+        for paneTitle in ["General", "History & Preview", "Shortcuts", "About Pastera"] {
             controller.showPreferencePaneForTesting(title: paneTitle)
-            let minimumGap = try #require(controller.minimumVisibleControlVerticalGapForTesting)
+            let minimumGap = try #require(task3PreferenceMinimumVerticalGap(controller, paneTitle: paneTitle))
             #expect(minimumGap >= 8, "\(paneTitle) pane controls are visually cramped: \(minimumGap)")
         }
     }
 
     @Test
     func preferenceSidebarCanSwitchPanesWithKeyboard() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
@@ -57,7 +64,7 @@ struct KeyboardAccessibilityTests {
         let returnEvent = try makeKeyEvent(keyCode: 36, characters: "\r")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(downEvent))
-        #expect(controller.selectedPreferencePaneTitleForTesting == "Types")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "History & Preview")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(returnEvent))
         #expect(controller.focusedPreferencePaneControlTitleForTesting != nil)
@@ -65,7 +72,7 @@ struct KeyboardAccessibilityTests {
 
     @Test
     func preferenceWindowDefaultsKeyboardFocusToSelectedSidebar() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
@@ -74,13 +81,13 @@ struct KeyboardAccessibilityTests {
 
         #expect(controller.focusedPreferenceSidebarTitleForTesting == "General")
         #expect(controller.handlePreferenceKeyboardEventForTesting(downEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Types")
-        #expect(controller.selectedPreferencePaneTitleForTesting == "Types")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "History & Preview")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "History & Preview")
     }
 
     @Test
     func preferenceSidebarTabSwitchesToNextSidebarPane() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
@@ -89,22 +96,22 @@ struct KeyboardAccessibilityTests {
         let tabEvent = try makeKeyEvent(keyCode: 48, characters: "\t")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(tabEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Types")
-        #expect(controller.selectedPreferencePaneTitleForTesting == "Types")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "History & Preview")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "History & Preview")
     }
 
     @Test
     func preferencePaneSwitchingKeepsWindowSizeStableAndUsesScrollDocuments() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
         let initialFrameSize = try #require(controller.window?.frame.size)
 
-        #expect(initialFrameSize == NSSize(width: 600, height: 340))
-        #expect(controller.window?.minSize == NSSize(width: 560, height: 320))
+        #expect(initialFrameSize == NSSize(width: 760, height: 600))
+        #expect(controller.window?.minSize == NSSize(width: 680, height: 480))
 
-        for paneTitle in ["General", "Types", "Exclude", "Shortcuts", "Update"] {
+        for paneTitle in ["General", "History & Preview", "Excluded Apps", "Shortcuts", "About Pastera"] {
             controller.showPreferencePaneForTesting(title: paneTitle)
 
             #expect(controller.window?.frame.size == initialFrameSize)
@@ -129,59 +136,61 @@ struct KeyboardAccessibilityTests {
 
     @Test
     func preferenceWindowUsesCompactSidebarAndWidePaneContent() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.showPreferencePaneForTesting(title: "Types")
+        controller.showPreferencePaneForTesting(title: "History & Preview")
 
         let contentView = try #require(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
         let sidebarView = try #require(preferenceSidebarView(in: contentView))
 
-        #expect(sidebarView.frame.width == 112)
+        #expect(sidebarView.frame.width == 184)
         #expect(controller.selectedPaneDocumentWidthForTesting >= controller.preferencePaneViewportWidthForTesting - 40)
 
         #expect(
             controller.selectedPaneDocumentOriginForTesting.y == 16,
-            "Types pane should start at the top inset"
+            "History & Preview pane should start at the top inset"
         )
     }
 
     @Test
     func typePreferenceCheckboxesAreNotClippedByTheirContainers() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.showPreferencePaneForTesting(title: "Types")
+        controller.showPreferencePaneForTesting(title: "History & Preview")
 
         let contentView = try #require(controller.window?.contentView)
-        let expectedTitles = [
-            "文本",
-            "富文本",
-            "富文本附件",
-            "文档",
-            "文件",
-            "链接",
-            "图片内容",
-            "图片",
-            "常用文本文件类型"
-        ]
+        contentView.layoutSubtreeIfNeeded()
+        let savedTypeIdentifiers = Set(PasteboardAvailableType.allCases.map(\.rawValue))
+        let previewTypeIdentifiers = Set(PasteraFilePreviewKind.allCases.map(\.rawValue))
         let buttons = preferenceButtons(in: contentView)
-            .filter { expectedTitles.contains($0.title) }
+        let savedTypeButtons = buttons.filter {
+            $0.identifier.map { savedTypeIdentifiers.contains($0.rawValue) } == true
+        }
+        let previewTypeButtons = buttons.filter {
+            $0.identifier.map { previewTypeIdentifiers.contains($0.rawValue) } == true
+        }
 
-        #expect(buttons.count == expectedTitles.count)
-        #expect(!preferenceButtons(in: contentView).contains { button in
-            ["Plain Text", "Rich Text Format (RTF)", "Rich Text Format Directory (RTFD)", "Filenames", "TIFF Image"]
-                .contains(button.title)
+        #expect(savedTypeButtons.count == 7)
+        #expect(previewTypeButtons.count == 5)
+        #expect(Set(savedTypeButtons.compactMap { $0.identifier?.rawValue }) == savedTypeIdentifiers)
+        #expect(Set(previewTypeButtons.compactMap { $0.identifier?.rawValue }) == previewTypeIdentifiers)
+        #expect((savedTypeButtons + previewTypeButtons).allSatisfy { $0.title.isEmpty })
+        #expect((savedTypeButtons + previewTypeButtons).allSatisfy {
+            $0.accessibilityLabel()?.isEmpty == false
         })
-        for button in buttons {
+
+        for button in savedTypeButtons + previewTypeButtons {
+            let identifier = button.identifier?.rawValue ?? "missing identifier"
             let containerBounds = try #require(button.superview?.bounds)
-            #expect(button.frame.minX >= 0, "\(button.title) is clipped on the leading edge")
-            #expect(button.frame.maxX <= containerBounds.width, "\(button.title) exceeds its container width")
-            #expect(button.frame.minY >= 0, "\(button.title) is clipped on the top/bottom edge")
-            #expect(button.frame.maxY <= containerBounds.height, "\(button.title) exceeds its container height")
+            #expect(button.frame.minX >= 0, "\(identifier) is clipped on the leading edge")
+            #expect(button.frame.maxX <= containerBounds.width, "\(identifier) exceeds its container width")
+            #expect(button.frame.minY >= 0, "\(identifier) is clipped on the top/bottom edge")
+            #expect(button.frame.maxY <= containerBounds.height, "\(identifier) exceeds its container height")
         }
     }
 
@@ -189,6 +198,12 @@ struct KeyboardAccessibilityTests {
     func typePreferenceCheckboxCanBeToggledFromKeyboard() throws {
         let defaults = AppEnvironment.current.defaults
         let originalStoreTypes = defaults.object(forKey: Constants.UserDefaults.storeTypes)
+        let stringIdentifier = PasteboardAvailableType.string.rawValue
+        var initialStoreTypes = PasteboardAvailableType.allCases.reduce(into: [String: NSNumber]()) {
+            $0[$1.rawValue] = NSNumber(value: true)
+        }
+        initialStoreTypes[stringIdentifier] = NSNumber(value: false)
+        defaults.set(initialStoreTypes, forKey: Constants.UserDefaults.storeTypes)
         defer {
             if let originalStoreTypes {
                 defaults.set(originalStoreTypes, forKey: Constants.UserDefaults.storeTypes)
@@ -197,33 +212,39 @@ struct KeyboardAccessibilityTests {
             }
         }
 
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.focusPreferenceSidebarForTesting(title: "Types")
-
-        let returnEvent = try makeKeyEvent(keyCode: 36, characters: "\r")
+        controller.showPreferencePaneForTesting(title: "History & Preview")
         let spaceEvent = try makeKeyEvent(keyCode: 49, characters: " ")
 
-        #expect(controller.handlePreferenceKeyboardEventForTesting(returnEvent))
-        #expect(controller.focusedPreferencePaneControlTitleForTesting == "文本")
-
         let contentView = try #require(controller.window?.contentView)
-        let plainTextButton = try #require(preferenceButtons(in: contentView).first { $0.title == "文本" })
-        let initialState = plainTextButton.state
+        let plainTextButton = try #require(preferenceButtons(in: contentView).first {
+            $0.identifier?.rawValue == stringIdentifier
+        })
+        #expect(plainTextButton.title.isEmpty)
+        #expect(plainTextButton.accessibilityLabel() == pasteraPreferenceString("Plain Text"))
+        #expect(controller.window?.makeFirstResponder(plainTextButton) == true)
+        #expect(controller.window?.firstResponder === plainTextButton)
+        #expect(controller.focusedPreferencePaneControlTitleForTesting == pasteraPreferenceString("Plain Text"))
+        #expect(plainTextButton.state == .off)
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(spaceEvent))
-        #expect(plainTextButton.state != initialState)
+        #expect(plainTextButton.state == .on)
+        let persistedStoreTypes = try #require(
+            defaults.dictionary(forKey: Constants.UserDefaults.storeTypes)
+        )
+        #expect((persistedStoreTypes[stringIdentifier] as? NSNumber)?.boolValue == true)
     }
 
     @Test
     func preferenceCompactMenuPaneFitsInsideFixedWindow() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.showPreferencePaneForTesting(title: "Menu")
+        controller.showPreferencePaneForTesting(title: "General")
 
         let initialFrameSize = try #require(controller.window?.frame.size)
 
@@ -234,11 +255,13 @@ struct KeyboardAccessibilityTests {
 
     @Test
     func preferenceTabAndShiftTabCycleBetweenSidebarAndPane() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.focusPreferenceSidebarForTesting(title: "Update")
+        controller.focusPreferenceSidebarForTesting(title: "About Pastera")
+
+        #expect(controller.cachedPreferencePageForTesting(paneID: .about) is CPYAboutPreferenceViewController)
 
         let tabEvent = try makeKeyEvent(keyCode: 48, characters: "\t")
         let shiftTabEvent = try makeKeyEvent(keyCode: 48, characters: "\t", modifierFlags: [.shift])
@@ -247,26 +270,52 @@ struct KeyboardAccessibilityTests {
         #expect(controller.focusedPreferencePaneControlTitleForTesting != nil)
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(shiftTabEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Update")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "About Pastera")
     }
 
     @Test
     func preferencePaneArrowKeysMoveBetweenFocusableControls() throws {
-        let controller = CPYPreferencesWindowController()
+        let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.focusPreferenceSidebarForTesting(title: "Shortcuts")
+        controller.focusPreferenceSidebarForTesting(title: "General")
 
         let returnEvent = try makeKeyEvent(keyCode: 36, characters: "\r")
         let downEvent = try makeKeyEvent(keyCode: 125, characters: "\u{F701}")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(returnEvent))
         let firstControl = try #require(controller.window?.firstResponder as? NSView)
+        #expect(
+            controller.focusedPreferencePaneControlTitleForTesting
+                == pasteraPreferenceString("Launch on Login")
+        )
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(downEvent))
         let secondControl = try #require(controller.window?.firstResponder as? NSView)
         #expect(secondControl !== firstControl)
+        #expect(controller.focusedPreferencePaneControlTitleForTesting == "Slider")
+    }
+
+    @Test
+    func preferenceRecordViewEventsAreNotInterceptedByWindowCommands() throws {
+        let controller = makePreferencesController()
+        defer { controller.close() }
+
+        controller.showWindow(nil)
+        controller.focusPreferenceSidebarForTesting(title: "Shortcuts")
+
+        let tabEvent = try makeKeyEvent(keyCode: 48, characters: "\t")
+        let commandFEvent = try makeKeyEvent(keyCode: 3, characters: "f", modifierFlags: [.command])
+
+        let contentView = try #require(controller.window?.contentView)
+        let recordView = try #require(preferenceRecordViews(in: contentView).first)
+        #expect(controller.window?.makeFirstResponder(recordView) == true)
+
+        #expect(!controller.handlePreferenceKeyboardEventForTesting(tabEvent))
+        #expect(controller.window?.firstResponder === recordView)
+        #expect(!controller.handlePreferenceKeyboardEventForTesting(commandFEvent))
+        #expect(controller.window?.firstResponder === recordView)
     }
 
     @Test
@@ -432,7 +481,9 @@ struct KeyboardAccessibilityTests {
             #expect(controller.toolbarUsesScrollContainerForTesting)
         }
     }
+}
 
+private extension KeyboardAccessibilityTests {
     private func makeKeyEvent(
         keyCode: UInt16,
         characters: String,
@@ -458,11 +509,54 @@ struct KeyboardAccessibilityTests {
         return buttons
     }
 
+    private func preferenceRecordViews(in view: NSView) -> [RecordView] {
+        var recordViews = view.subviews.compactMap { $0 as? RecordView }
+        view.subviews.forEach { recordViews.append(contentsOf: preferenceRecordViews(in: $0)) }
+        return recordViews
+    }
+
     private func preferenceSidebarView(in contentView: NSView) -> NSView? {
         contentView.subviews
             .filter { $0.frame.minX <= 0.5 && $0.frame.height >= contentView.bounds.height - 1 }
             .sorted { $0.frame.width < $1.frame.width }
             .first
+    }
+
+}
+
+@MainActor
+private func task3PreferenceMinimumVerticalGap(
+    _ controller: CPYPreferencesWindowController,
+    paneTitle: String
+) -> CGFloat? {
+    let paneID: PasteraPreferencePaneID?
+    switch paneTitle {
+    case "General": paneID = .general
+    case "History & Preview": paneID = .history
+    case "Shortcuts": paneID = .shortcuts
+    case "About Pastera": paneID = .about
+    default: paneID = nil
+    }
+    guard let paneID,
+          let nativePage = controller.cachedPreferencePageForTesting(paneID: paneID)
+            as? PasteraPreferencePageViewController else {
+        return controller.minimumVisibleControlVerticalGapForTesting
+    }
+    return task3MinimumNativePreferenceGroupGap(in: nativePage.view)
+}
+
+func task3MinimumNativePreferenceGroupGap(in rootView: NSView) -> CGFloat? {
+    let frames = task3PreferenceGroups(in: rootView)
+        .map { rootView.convert($0.bounds, from: $0) }
+        .sorted { $0.minY < $1.minY }
+    guard frames.count > 1 else { return nil }
+    return zip(frames, frames.dropFirst()).map { $1.minY - $0.maxY }.min()
+}
+
+private func task3PreferenceGroups(in view: NSView) -> [PasteraPreferenceGroupView] {
+    view.subviews.flatMap { subview in
+        if let group = subview as? PasteraPreferenceGroupView { return [group] }
+        return task3PreferenceGroups(in: subview)
     }
 }
 

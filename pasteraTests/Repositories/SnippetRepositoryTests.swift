@@ -679,14 +679,12 @@ private func insertDuplicateFixture(folders: [SnippetFolder], snippets: [Snippet
 }
 
 private func waitUntil(condition: @escaping @MainActor () async -> Bool) async throws {
-    try await confirmation { confirmation in
-        while true {
-            if await condition() {
-                confirmation()
-                return
-            } else {
-                try await Task.sleep(for: .seconds(0.01))
-            }
+    let deadline = Date().addingTimeInterval(2)
+    while Date() < deadline {
+        if await condition() {
+            return
         }
+        try await Task.sleep(for: .seconds(0.01))
     }
+    Issue.record("Timed out waiting for condition.")
 }

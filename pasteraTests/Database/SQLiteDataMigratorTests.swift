@@ -37,6 +37,8 @@ struct SQLiteDataMigratorTests {
             .fetchAll(database)
             #expect(tables.contains("syncSuppressions"))
             #expect(tables.contains("snippetSyncDeletions"))
+            #expect(tables.contains("pasteboardHistoryOCRTexts"))
+            #expect(tables.contains("scriptTransforms"))
         }
 
         try database.read { database in
@@ -84,6 +86,80 @@ struct SQLiteDataMigratorTests {
             #expect(deletionColumns.contains("folderTitle"))
             #expect(deletionColumns.contains("content"))
             #expect(deletionColumns.contains("deletedAt"))
+        }
+
+        try database.read { database in
+            let ocrColumns = try #sql(
+                """
+                SELECT "name"
+                FROM pragma_table_info('pasteboardHistoryOCRTexts')
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(
+                ocrColumns == [
+                    "pasteboardHistoryID",
+                    "recognizedText",
+                    "sourceHash",
+                    "updatedAt"
+                ]
+            )
+        }
+
+        try database.read { database in
+            let ocrIndexes = try #sql(
+                """
+                SELECT "name"
+                FROM "sqlite_master"
+                WHERE "type" = 'index'
+                AND "tbl_name" = 'pasteboardHistoryOCRTexts'
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(ocrIndexes.contains("index_pasteboardHistoryOCRTexts_on_sourceHash"))
+        }
+
+        try database.read { database in
+            let scriptColumns = try #sql(
+                """
+                SELECT "name"
+                FROM pragma_table_info('scriptTransforms')
+                ORDER BY "cid"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(
+                scriptColumns == [
+                    "id",
+                    "name",
+                    "code",
+                    "isEnabled",
+                    "runOnCopy",
+                    "runOnPaste",
+                    "runManually",
+                    "sortIndex",
+                    "createdAt",
+                    "updatedAt"
+                ]
+            )
+
+            let scriptIndexes = try #sql(
+                """
+                SELECT "name"
+                FROM "sqlite_master"
+                WHERE "type" = 'index'
+                AND "tbl_name" = 'scriptTransforms'
+                ORDER BY "name"
+                """,
+                as: String.self
+            )
+            .fetchAll(database)
+            #expect(scriptIndexes.contains("index_scriptTransforms_on_sortIndex_createdAt"))
         }
     }
 

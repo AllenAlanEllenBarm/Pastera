@@ -121,9 +121,11 @@ struct Constants {
         static let mainKeyCombo = "kCPYHotKeyMainKeyCombo"
         static let historyKeyCombo = "kCPYHotKeyHistoryKeyCombo"
         static let snippetKeyCombo = "kCPYHotKeySnippetKeyCombo"
+        static let passwordVaultKeyCombo = "kPasteraHotKeyPasswordVaultKeyCombo"
         static let migrateNewKeyCombo = "kCPYMigrateNewKeyCombo"
         static let migrateOptionCommandDefaultKeyCombos = "kCPYMigrateOptionCommandDefaultKeyCombos"
         static let migrateSnippetDefaultKeyComboToF = "kCPYMigrateSnippetDefaultKeyComboToF"
+        static let migratePasswordVaultDefaultKeyCombo = "kPasteraMigratePasswordVaultDefaultKeyCombo"
         static let historyPanelShortcutDefaultsMigrated = "kCPYHistoryPanelShortcutDefaultsMigrated"
         static let migrateHistoryPanelOptionCommand = "kCPYMigrateHistoryPanelOptionCommand"
         static let migrateHistoryPanelCanonicalDefaults = "kCPYMigrateHistoryPanelCanonicalDefaults"
@@ -134,6 +136,7 @@ struct Constants {
         static let historyPreviousPageKeyCombo = "kCPYHistoryPreviousPageKeyCombo"
         static let folderKeyCombos = "kCPYFolderKeyCombos"
         static let clearHistoryKeyCombo = "kCPYClearHistoryKeyCombo"
+        static let scriptTransformKeyCombo = "kPasteraScriptTransformKeyCombo"
         static let suspendDuringRemoteSession = "kPasteraSuspendHotKeysDuringRemoteSession"
     }
 

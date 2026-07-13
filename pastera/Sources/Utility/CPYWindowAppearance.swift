@@ -70,6 +70,17 @@ enum CPYWindowAppearance {
         applyAppearance(to: window, defaults: defaults)
     }
 
+    static func applyStablePreferencesAppearance(to window: NSWindow?) {
+        guard let window else { return }
+        let colors = PasteraDesignTokens.colors(for: window.effectiveAppearance, opacity: 1)
+        window.isOpaque = true
+        window.backgroundColor = colors.panelBackground
+        window.hasShadow = true
+        window.contentView?.wantsLayer = true
+        window.contentView?.layer?.backgroundColor = colors.panelBackground.cgColor
+        window.contentView?.layer?.isOpaque = true
+    }
+
     private static func applyAppearance(to window: NSWindow, defaults: UserDefaults) {
         let appearance = window.effectiveAppearance
         let colors = PasteraDesignTokens.colors(

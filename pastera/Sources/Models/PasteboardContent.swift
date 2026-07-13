@@ -140,23 +140,130 @@ private extension PasteboardContent {
 
     var fileURLHistoryTitle: String? {
         guard let url = fileURLs.first else { return nil }
-        switch PasteraFileTypeClassifier.kind(for: url) {
-        case .image where PasteraFilePreviewKind.isEnabled(.image):
+        let fileName = url.lastPathComponent
+        guard !fileName.isEmpty else { return nil }
+
+        if PasteraFileTypeClassifier.kind(for: url) == .image {
             return url.lastPathComponent
-        case .commonText where PasteraFilePreviewKind.isEnabled(.commonText):
-            guard let preview = PasteraFileTypeClassifier.textPreview(from: url) else {
-                return url.lastPathComponent
-            }
-            return "\(url.lastPathComponent)\n\(preview)"
-        default:
-            return nil
         }
+
+        guard let category = PasteraFinderFileCategory.category(for: url) else {
+            return fileName
+        }
+        let previewKind = PasteraFilePreviewKind(finderFileCategory: category)
+        guard category.supportsTextPreview,
+              PasteraFilePreviewKind.isEnabled(previewKind),
+              let preview = PasteraFileTypeClassifier.textPreview(from: url) else {
+            return fileName
+        }
+        return "\(fileName)\n\(preview)"
+    }
+}
+
+enum PasteraFinderFileCategory: String, CaseIterable, Hashable {
+    case document
+    case archive
+    case code
+    case other
+
+    private static let documentExtensions: Set<String> = [
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pages", "numbers",
+        "key", "txt", "rtf", "rtfd", "md", "csv"
+    ]
+    private static let archiveExtensions: Set<String> = [
+        "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "pkg"
+    ]
+    private static let codeExtensions: Set<String> = [
+        "swift", "js", "ts", "tsx", "java", "kt", "py", "go", "rs", "c", "cpp",
+        "h", "hpp", "cs", "rb", "php", "html", "css", "json", "xml", "yml",
+        "yaml", "toml", "sql", "sh", "zsh"
+    ]
+
+    var title: String {
+        switch self {
+        case .document:
+            return "文档"
+        case .archive:
+            return "压缩包"
+        case .code:
+            return "代码"
+        case .other:
+            return "其他"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .document:
+            return "doc.text"
+        case .archive:
+            return "archivebox"
+        case .code:
+            return "chevron.left.forwardslash.chevron.right"
+        case .other:
+            return "doc"
+        }
+    }
+
+    var supportsTextPreview: Bool {
+        self == .document || self == .code
+    }
+
+    static func category(for url: URL) -> PasteraFinderFileCategory? {
+        guard url.isFileURL, !PasteraFileTypeClassifier.isDirectory(url) else { return nil }
+        return category(forFilename: url.lastPathComponent)
+    }
+
+    static func category(forFilename filename: String) -> PasteraFinderFileCategory {
+        let pathExtension = (filename as NSString).pathExtension.lowercased()
+        if documentExtensions.contains(pathExtension) {
+            return .document
+        }
+        if archiveExtensions.contains(pathExtension) {
+            return .archive
+        }
+        if codeExtensions.contains(pathExtension) {
+            return .code
+        }
+        return .other
+    }
+
+    static func category(forHistoryTitle title: String) -> PasteraFinderFileCategory {
+        let fileName = title
+            .components(separatedBy: .newlines)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !fileName.isEmpty else { return .other }
+        return category(forFilename: fileName)
+    }
+
+    func icon() -> NSImage? {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+            ?? NSImage(systemSymbolName: "doc", accessibilityDescription: title)
+        image?.isTemplate = true
+        return image
     }
 }
 
 enum PasteraFilePreviewKind: String, CaseIterable {
     case image
-    case commonText
+    case document
+    case archive
+    case code
+    case other
+
+    init(finderFileCategory category: PasteraFinderFileCategory) {
+        switch category {
+        case .document:
+            self = .document
+        case .archive:
+            self = .archive
+        case .code:
+            self = .code
+        case .other:
+            self = .other
+        }
+    }
 
     static func defaultStates() -> [String: NSNumber] {
         allCases.reduce(into: [String: NSNumber]()) { states, kind in
@@ -197,8 +304,8 @@ enum PasteraFileTypeClassifier {
         if isImageFile(url) {
             return .image
         }
-        if textPreview(from: url) != nil {
-            return .commonText
+        if let category = PasteraFinderFileCategory.category(for: url) {
+            return PasteraFilePreviewKind(finderFileCategory: category)
         }
         return nil
     }
@@ -231,7 +338,7 @@ enum PasteraFileTypeClassifier {
         return CGImageSourceGetCount(source) > 0
     }
 
-    private static func isDirectory(_ url: URL) -> Bool {
+    fileprivate static func isDirectory(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
     }
 

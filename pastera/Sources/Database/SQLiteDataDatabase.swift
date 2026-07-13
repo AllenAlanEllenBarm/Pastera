@@ -76,7 +76,7 @@ extension DependencyValues {
         if #available(macOS 14, *), SQLiteDataDatabase.isCloudKitEnabled {
             defaultSyncEngine = try SyncEngine(
                 for: database,
-                tables: PasteboardHistory.self, PasteboardHistoryAsset.self, PasteboardHistoryThumbnailAsset.self, SnippetFolder.self, Snippet.self, SyncSuppression.self, SnippetSyncDeletion.self,
+                tables: PasteboardHistory.self, PasteboardHistoryAsset.self, PasteboardHistoryThumbnailAsset.self, PasteboardHistoryOCRText.self, SnippetFolder.self, Snippet.self, SyncSuppression.self, SnippetSyncDeletion.self,
                 // Keep iCloud synchronization disabled for now. Setting this to true starts
                 // synchronization, and a future release will make this user-configurable.
                 startImmediately: false

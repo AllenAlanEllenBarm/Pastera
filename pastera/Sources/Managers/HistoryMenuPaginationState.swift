@@ -13,7 +13,7 @@
 import Cocoa
 
 enum HistoryBrowserLayout {
-    static let width: CGFloat = 352
+    static let width: CGFloat = 520
     static let minimumTitlePreviewLength = 60
 }
 
@@ -21,7 +21,10 @@ enum HistoryMenuTypeFilter: Int, CaseIterable, Equatable {
     case all
     case text
     case images
-    case files
+    case documents
+    case archives
+    case code
+    case otherFiles
     case pdf
 
     var title: String {
@@ -32,8 +35,14 @@ enum HistoryMenuTypeFilter: Int, CaseIterable, Equatable {
             return "Text"
         case .images:
             return "Image"
-        case .files:
-            return "File"
+        case .documents:
+            return "Doc"
+        case .archives:
+            return "Zip"
+        case .code:
+            return "Code"
+        case .otherFiles:
+            return "Other"
         case .pdf:
             return "PDF"
         }
@@ -47,10 +56,25 @@ enum HistoryMenuTypeFilter: Int, CaseIterable, Equatable {
             return [.string, .deprecatedString]
         case .images:
             return NSPasteboard.PasteboardType.clipyImageTypes
-        case .files:
+        case .documents, .archives, .code, .otherFiles:
             return [.fileURL]
         case .pdf:
             return [.pdf, .deprecatedPDF]
+        }
+    }
+
+    var fileCategories: Set<PasteraFinderFileCategory> {
+        switch self {
+        case .all, .text, .images, .pdf:
+            return []
+        case .documents:
+            return [.document]
+        case .archives:
+            return [.archive]
+        case .code:
+            return [.code]
+        case .otherFiles:
+            return [.other]
         }
     }
 }
@@ -166,6 +190,10 @@ struct HistoryMenuPaginationState: Equatable {
 
     var selectedTypes: Set<NSPasteboard.PasteboardType> {
         typeFilter.pasteboardTypes
+    }
+
+    var selectedFileCategories: Set<PasteraFinderFileCategory> {
+        typeFilter.fileCategories
     }
 
     var hasActiveSearchOptions: Bool {
@@ -535,15 +563,21 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     private func segmentWidth(for filter: HistoryMenuTypeFilter) -> CGFloat {
         switch filter {
         case .all:
-            return 40
+            return 38
         case .text:
-            return 44
+            return 42
         case .images:
-            return 54
-        case .files:
-            return 44
+            return 48
+        case .documents:
+            return 38
+        case .archives:
+            return 36
+        case .code:
+            return 42
+        case .otherFiles:
+            return 48
         case .pdf:
-            return 44
+            return 38
         }
     }
 

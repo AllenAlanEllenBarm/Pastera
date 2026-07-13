@@ -154,12 +154,12 @@ struct SnippetBrowserPanelTests {
         #expect(badge.layer?.cornerRadius == PasteraShortcutBadgeView.Metrics.cornerRadius)
         #expect(badge.intrinsicContentSize.height == PasteraShortcutBadgeView.Metrics.height)
         #expect(PasteraShortcutBadgeView.Metrics.horizontalPadding == 3)
-        #expect(PasteraShortcutBadgeView.Metrics.height == 16)
-        #expect(PasteraShortcutBadgeView.Metrics.minWidth == 22)
+        #expect(PasteraShortcutBadgeView.Metrics.height == 15)
+        #expect(PasteraShortcutBadgeView.Metrics.minWidth == 20)
         #expect(PasteraShortcutBadgeView.Metrics.cornerRadius == 4)
         #expect(PasteraShortcutBadgeView.Metrics.cornerRadius < PasteraShortcutBadgeView.Metrics.height / 2)
         #expect(badge.intrinsicContentSize.width > badge.labelWidthForTesting)
-        #expect(label?.font?.pointSize == 11)
+        #expect(label?.font?.pointSize == 10.5)
 
         badge.shortcutText = nil
 
@@ -174,13 +174,13 @@ struct SnippetBrowserPanelTests {
 
         #expect(commandBadge.styleForTesting == .command)
         #expect(itemBadge.styleForTesting == .itemNumber)
-        #expect(PasteraShortcutBadgeView.Metrics.itemHorizontalPadding == 5)
-        #expect(PasteraShortcutBadgeView.Metrics.itemHeight == 20)
-        #expect(PasteraShortcutBadgeView.Metrics.itemMinWidth == 22)
+        #expect(PasteraShortcutBadgeView.Metrics.itemHorizontalPadding == 4)
+        #expect(PasteraShortcutBadgeView.Metrics.itemHeight == 18)
+        #expect(PasteraShortcutBadgeView.Metrics.itemMinWidth == 20)
         #expect(PasteraShortcutBadgeView.Metrics.itemCornerRadius == 5)
         #expect(commandBadge.intrinsicContentSize.height == PasteraShortcutBadgeView.Metrics.height)
         #expect(itemBadge.intrinsicContentSize.height == PasteraShortcutBadgeView.Metrics.itemHeight)
-        #expect(itemBadge.subviews.compactMap { ($0 as? NSTextField)?.font?.pointSize }.first == 13)
+        #expect(itemBadge.subviews.compactMap { ($0 as? NSTextField)?.font?.pointSize }.first == 11.5)
         #expect(itemBadge.intrinsicContentSize.width <= commandBadge.intrinsicContentSize.width)
     }
 
@@ -289,6 +289,7 @@ struct SnippetBrowserPanelTests {
     @Test
     func showingSnippetBrowserPanelFromTransientMenuKeepsMainMenuVisible() {
         withDependencies {
+            $0.pasteboardHistoryRepository = EmptyHistoryRepository()
             $0.snippetRepository = StaticSnippetRepository(details: [])
         } operation: {
             let manager = MenuManager()
@@ -577,6 +578,7 @@ private func withSnippetFolderPanel(
         ]
     )
     try withDependencies {
+        $0.pasteboardHistoryRepository = EmptyHistoryRepository()
         $0.snippetRepository = StaticSnippetRepository(details: [detail])
     } operation: {
         let manager = MenuManager()

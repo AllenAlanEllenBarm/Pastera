@@ -14,7 +14,7 @@ import Testing
 @Suite(.serialized)
 struct MainMenuOneDriveFooterTests {
     @Test
-    func mainMenuPanelPlacesQuitAndOneDriveStatusInDedicatedFooter() throws {
+    func mainMenuPanelPlacesOneDriveStatusInFooterWithoutQuitOrPin() throws {
         let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notRunning(
             appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
         ))
@@ -39,31 +39,27 @@ struct MainMenuOneDriveFooterTests {
         defer { controller.close() }
 
         #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuPinButton"))
-        #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
         let statusFrames = controller.mainMenuOneDriveStatusButtonFramesForTesting
-        let quitFrames = controller.mainMenuQuitButtonFramesForTesting
         #expect(statusFrames.count == 1)
-        #expect(quitFrames.count == 1)
         let statusFrame = try #require(statusFrames.first)
-        let quitFrame = try #require(quitFrames.first)
         let folderRowFrame = try #require(controller.mainMenuSnippetRowFrameForTesting(title: "AI Prompt"))
         let folderTitleFrame = try #require(controller.mainMenuSnippetTitleFrameForTesting(title: "AI Prompt"))
         let preferencesRowFrame = try #require(controller.mainMenuActionRowFrameForTesting(title: "Preferences"))
 
         #expect(statusFrame.maxX <= MainMenuPanelLayout.width - MainMenuPanelLayout.oneDriveStatusTrailingInset)
-        #expect(abs(statusFrame.midY - (MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.rowHeight / 2)) <= 1)
-        #expect(quitFrame.minX >= MainMenuPanelLayout.quitButtonLeadingInset)
-        #expect(abs(quitFrame.midY - statusFrame.midY) <= 1)
-        #expect(preferencesRowFrame.minY >= MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.rowHeight)
-        #expect(MainMenuPanelLayout.headerHeight == 32)
-        #expect(MainMenuPanelLayout.snippetFolderRowHeight == 26)
+        #expect(abs(statusFrame.midY - (
+            MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.toolbarHeight / 2
+        )) <= 1)
+        #expect(preferencesRowFrame.minY >= MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.toolbarHeight)
+        #expect(MainMenuPanelLayout.headerHeight == 40)
+        #expect(MainMenuPanelLayout.snippetFolderRowHeight == 25)
         #expect(folderRowFrame.height == MainMenuPanelLayout.snippetFolderRowHeight)
         #expect(preferencesRowFrame.height == MainMenuPanelLayout.rowHeight)
         #expect(abs(folderTitleFrame.midY - MainMenuPanelLayout.snippetFolderRowHeight / 2) <= 1)
-        #expect(controller.visibleFrame?.height == expectedMainMenuHeight(
-            snippetFolderCount: 1,
-            actionRowCount: 1,
-            separatorCount: 2
+        #expect(controller.visibleFrame?.size == NSSize(
+            width: MainMenuPanelLayout.width,
+            height: MainMenuPanelLayout.fixedHeight
         ))
     }
 
@@ -97,13 +93,13 @@ struct MainMenuOneDriveFooterTests {
             controller.mainMenuActionTitleAvailableWidthForTesting(title: "Preferences")
         )
 
-        #expect(MainMenuPanelLayout.width == 168)
+        #expect(MainMenuPanelLayout.width == 282)
         #expect(titleAvailableWidth >= menuTitleWidth("AI Prompt"))
         #expect(preferencesTitleAvailableWidth >= menuTitleWidth("Preferences"))
     }
 
     @Test
-    func visibleMainMenuPanelBackgroundFollowsOpacityChange() throws {
+    func visibleMainMenuPanelBackgroundProtectsReadabilityFromOpacityChange() throws {
         let suiteName = "MainMenuOneDriveFooterTests.opacity.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -124,11 +120,11 @@ struct MainMenuOneDriveFooterTests {
                 manager.removeStatusItemForTesting()
             }
 
-            #expect(abs((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) - 0.94) < 0.001)
+            #expect((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) >= 0.98)
 
             CPYWindowAppearance.setOpacity(0.82, defaults: defaults)
 
-            #expect(abs((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) - 0.82) < 0.001)
+            #expect((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) >= 0.98)
         }
     }
 
@@ -149,8 +145,7 @@ struct MainMenuOneDriveFooterTests {
 
         #expect(!titles.contains(String(localized: "Clear History")))
         #expect(!titles.contains(String(localized: "Quit Pastera")))
-        #expect(titles.contains(String(localized: "Edit Snippets")))
-        #expect(titles.contains(String(localized: "Preferences")))
+        #expect(!titles.contains(String(localized: "Edit Snippets")))
     }
 
     @Test
@@ -182,7 +177,7 @@ struct MainMenuOneDriveFooterTests {
         controller.reloadOneDriveStatusIfVisible()
 
         #expect(controller.mainMenuOneDriveStatusToolTipForTesting?.contains("正在运行") == true)
-        #expect(controller.mainMenuOneDriveStatusTintColorForTesting?.isEqual(NSColor.labelColor) == true)
+        #expect(controller.mainMenuOneDriveStatusTintColorForTesting?.isEqual(NSColor.systemBlue) == true)
     }
 
     @Test
@@ -353,6 +348,28 @@ struct MainMenuOneDriveFooterTests {
         #expect(!didOpenSnippet)
     }
 
+    @Test
+    func commandFExpandsMainMenuSearch() throws {
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {}
+        )
+
+        controller.show(at: NSPoint(x: 180, y: 700), pinned: true)
+        defer { controller.close() }
+
+        #expect(controller.handleMainMenuNavigationForTesting(try makeKeyboardEvent(
+            keyCode: 3,
+            characters: "f",
+            modifierFlags: .command
+        )))
+    }
+
     private func expectedMainMenuHeight(
         snippetFolderCount: Int,
         actionRowCount: Int,
@@ -368,13 +385,13 @@ struct MainMenuOneDriveFooterTests {
                 MainMenuPanelLayout.separatorHeight
                     + MainMenuPanelLayout.separatorVerticalInset * 2
             )
-            + MainMenuPanelLayout.rowHeight
+            + MainMenuPanelLayout.toolbarHeight
             + MainMenuPanelLayout.bottomInset
     }
 
     private func menuTitleWidth(_ title: String) -> CGFloat {
         ceil((title as NSString).size(withAttributes: [
-            .font: NSFont.systemFont(ofSize: 13.5, weight: .medium)
+            .font: NSFont.systemFont(ofSize: 14.5, weight: .medium)
         ]).width)
     }
 
@@ -402,11 +419,15 @@ struct MainMenuOneDriveFooterTests {
         ))
     }
 
-    private func makeKeyboardEvent(keyCode: UInt16, characters: String) throws -> NSEvent {
+    private func makeKeyboardEvent(
+        keyCode: UInt16,
+        characters: String,
+        modifierFlags: NSEvent.ModifierFlags = []
+    ) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: 0,
             context: nil,
@@ -423,7 +444,7 @@ struct MainMenuOneDriveFooterTests {
 @Suite(.serialized)
 struct MainMenuOneDriveInstallationFooterTests {
     @Test
-    func mainMenuHidesOneDriveStatusButtonWhenOneDriveIsNotInstalled() {
+    func mainMenuShowsOneDriveStatusButtonWhenOneDriveIsNotInstalled() {
         let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notInstalled)
         let controller = MainMenuPanelController(
             historyTitle: "History",
@@ -441,10 +462,10 @@ struct MainMenuOneDriveInstallationFooterTests {
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
         defer { controller.close() }
 
-        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuOneDriveStatusButton"))
-        #expect(controller.mainMenuOneDriveStatusButtonFramesForTesting.isEmpty)
-        #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
-        #expect(controller.mainMenuQuitButtonFramesForTesting.count == 1)
+        #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuOneDriveStatusButton"))
+        #expect(controller.mainMenuOneDriveStatusButtonFramesForTesting.count == 1)
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuPinButton"))
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
     }
 }
 
@@ -526,7 +547,6 @@ struct MainMenuFooterButtonActionTests {
             appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
         ))
         var didOpenHistory = false
-        var didQuit = false
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
@@ -535,8 +555,7 @@ struct MainMenuFooterButtonActionTests {
             itemsProvider: { [] },
             onOpenHistory: { didOpenHistory = true },
             onOpenSnippets: {},
-            oneDriveStatusService: oneDriveService,
-            onQuit: { didQuit = true }
+            oneDriveStatusService: oneDriveService
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
@@ -546,14 +565,12 @@ struct MainMenuFooterButtonActionTests {
 
         #expect(oneDriveService.openCallCount == 1)
         #expect(!didOpenHistory)
-        #expect(!didQuit)
     }
 
     @Test
-    func mainMenuFooterQuitButtonQuitsWithoutOpeningOneDriveOrHistory() {
+    func mainMenuFooterDoesNotExposeQuitButton() {
         let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notInstalled)
         var didOpenHistory = false
-        var didQuit = false
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
@@ -562,16 +579,13 @@ struct MainMenuFooterButtonActionTests {
             itemsProvider: { [] },
             onOpenHistory: { didOpenHistory = true },
             onOpenSnippets: {},
-            oneDriveStatusService: oneDriveService,
-            onQuit: { didQuit = true }
+            oneDriveStatusService: oneDriveService
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
         defer { controller.close() }
 
-        controller.performMainMenuQuitClickForTesting()
-
-        #expect(didQuit)
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuQuitButton"))
         #expect(oneDriveService.openCallCount == 0)
         #expect(!didOpenHistory)
     }

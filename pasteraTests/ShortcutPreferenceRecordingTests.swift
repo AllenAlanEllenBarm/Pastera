@@ -27,11 +27,11 @@ struct ShortcutPreferenceRecordingTests {
         let contentView = try #require(controller.window?.contentView)
         let previousRecordView = try #require(preferenceRecordView(
             in: contentView,
-            nextToAnyLabel: ["Previous Page:", "上一页："]
+            identifier: "shortcuts.historyPanel.previousPage"
         ))
         let nextRecordView = try #require(preferenceRecordView(
             in: contentView,
-            nextToAnyLabel: ["Next Page:", "下一页："]
+            identifier: "shortcuts.historyPanel.nextPage"
         ))
 
         let previousEvent = try makeKeyEvent(
@@ -54,6 +54,13 @@ struct ShortcutPreferenceRecordingTests {
         #expect(!controller.handlePreferenceKeyboardEventForTesting(nextEvent))
         #expect(nextRecordView.performKeyEquivalent(with: nextEvent))
         #expect(service.historyPanelKeyCombo(for: .nextPage)?.QWERTYKeyCode == 124)
+
+        previousRecordView.clear()
+        nextRecordView.clear()
+        #expect(previousRecordView.keyCombo == nil)
+        #expect(nextRecordView.keyCombo == nil)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == nil)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == nil)
     }
 
     private func makeKeyEvent(
@@ -75,23 +82,16 @@ struct ShortcutPreferenceRecordingTests {
         ))
     }
 
-    private func preferenceRecordView(in view: NSView, nextToAnyLabel labels: Set<String>) -> RecordView? {
-        if let textField = view as? NSTextField,
-           labels.contains(textField.stringValue),
-           let container = textField.superview {
-            return recordViews(in: container).first
+    private func preferenceRecordView(in view: NSView, identifier: String) -> RecordView? {
+        if let recordView = view as? RecordView,
+           recordView.accessibilityIdentifier() == identifier {
+            return recordView
         }
         for subview in view.subviews {
-            if let recordView = preferenceRecordView(in: subview, nextToAnyLabel: labels) {
+            if let recordView = preferenceRecordView(in: subview, identifier: identifier) {
                 return recordView
             }
         }
         return nil
-    }
-
-    private func recordViews(in view: NSView) -> [RecordView] {
-        var values = view.subviews.compactMap { $0 as? RecordView }
-        view.subviews.forEach { values.append(contentsOf: recordViews(in: $0)) }
-        return values
     }
 }

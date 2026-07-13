@@ -88,6 +88,7 @@ final class PasteService {
     var secureEventInputEnabledProvider: () -> Bool
     var textInputSender: (String) -> Void
     var scheduleAfter: (TimeInterval, @escaping () -> Void) -> Void
+    var clipboardScriptCoordinatorProvider: () -> ClipboardScriptCoordinating?
 
     init(
         inputPasteCommandEnabledProvider: @escaping () -> Bool = {
@@ -117,6 +118,7 @@ final class PasteService {
         textInputSender: @escaping (String) -> Void = { text in
             PasteService.postTextInput(text)
         },
+        clipboardScriptCoordinatorProvider: @escaping () -> ClipboardScriptCoordinating? = { nil },
         scheduleAfter: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
@@ -130,6 +132,7 @@ final class PasteService {
         self.pasteCommandSender = pasteCommandSender
         self.secureEventInputEnabledProvider = secureEventInputEnabledProvider
         self.textInputSender = textInputSender
+        self.clipboardScriptCoordinatorProvider = clipboardScriptCoordinatorProvider
         self.scheduleAfter = scheduleAfter
     }
 
@@ -144,6 +147,10 @@ extension PasteService {
     func paste(with history: PasteboardHistory, restoring targetContext: PasteTargetContext?) {
         guard let content = pasteboardHistoryRepository.fetchContent(id: history.id) else { return }
 
+        if content.isOnlyStringType {
+            pasteText(content.stringValue, restoring: targetContext)
+            return
+        }
         copyToPasteboard(with: content)
         paste(restoring: targetContext)
     }
@@ -228,6 +235,32 @@ extension PasteService {
     }
 
     func pasteText(_ text: String, restoring targetContext: PasteTargetContext?) {
+        guard let coordinator = clipboardScriptCoordinatorProvider(),
+              coordinator.hasEnabledScripts(for: .paste)
+        else {
+            pasteResolvedText(text, restoring: targetContext)
+            return
+        }
+
+        Task { [weak self] in
+            let outcome = await coordinator.transform(
+                text: text,
+                sourceAppBundleIdentifier: targetContext?.bundleIdentifier,
+                trigger: .paste
+            )
+            let resolvedText: String
+            if case let .transformed(output) = outcome {
+                resolvedText = output
+            } else {
+                resolvedText = text
+            }
+            await MainActor.run {
+                self?.pasteResolvedText(resolvedText, restoring: targetContext)
+            }
+        }
+    }
+
+    private func pasteResolvedText(_ text: String, restoring targetContext: PasteTargetContext?) {
         copyToPasteboard(with: text)
         paste(restoring: targetContext) { [weak self] in
             guard let self else { return }

@@ -15,6 +15,12 @@ extension MenuManager {
     var mainMenuPanelFrameForTesting: NSRect? {
         mainMenuPanelController?.visibleFrame
     }
+    var mainMenuSelectedModeForTesting: String? {
+        mainMenuPanelController?.mainMenuSelectedModeForTesting
+    }
+    var mainMenuExpandedSnippetFolderIDForTesting: SnippetFolder.ID? {
+        mainMenuPanelController?.mainMenuExpandedSnippetFolderIDForTesting
+    }
 
     var historyBrowserPanelFrameForTesting: NSRect? {
         historyPanelController?.visibleFrame
@@ -30,7 +36,12 @@ extension MenuManager {
     var statusItemImageForTesting: NSImage? { statusItem?.button?.image }
     var statusItemActionForTesting: Selector? { statusItem?.button?.action }
     var statusItemTintColorForTesting: NSColor? { statusItem?.button?.contentTintColor }
-    var shouldUseLegacyMenuFallbackForTesting: Bool { shouldUseLegacyMenuFallback }
+    var statusItemContextMenuItemsForTesting: [NSMenuItem] {
+        makeStatusItemContextMenu().items.filter { !$0.isSeparatorItem }
+    }
+    var statusItemContextMenuTitlesForTesting: [String] {
+        statusItemContextMenuItemsForTesting.map(\.title)
+    }
     var mainMenuPanelBackgroundAlphaForTesting: CGFloat? { mainMenuPanelController?.contentBackgroundAlphaForTesting }
     var historyPanelBackgroundAlphaForTesting: CGFloat? { historyPanelController?.contentBackgroundAlphaForTesting }
     var snippetPanelBackgroundAlphaForTesting: CGFloat? { snippetPanelController?.contentBackgroundAlphaForTesting }
@@ -66,6 +77,15 @@ extension MenuManager {
         }
     }
 
+    var mainMenuNoticeMessagesForTesting: [String] {
+        makeMainMenuPanelItems().compactMap { item in
+            if case let .notice(_, message, _) = item {
+                return message
+            }
+            return nil
+        }
+    }
+
     var mainMenuSnippetTitlesForTesting: [String] {
         makeMainMenuPanelItems().compactMap { item in
             if case let .snippetFolder(title, _, _, _) = item {
@@ -81,6 +101,21 @@ extension MenuManager {
 
     func makeSnippetMenuItemForTesting(_ snippet: Snippet, listNumber: Int, rowIndex: Int) -> NSMenuItem {
         makeSnippetMenuItem(snippet, listNumber: listNumber, rowIndex: rowIndex)
+    }
+
+    func statusItemContextMenuItemForTesting(title: String) -> NSMenuItem? {
+        statusItemContextMenuItemsForTesting.first { $0.title == title }
+    }
+
+    func statusItemContextMenuActionForTesting(title: String) -> Selector? {
+        statusItemContextMenuItemForTesting(title: title)?.action
+    }
+
+    func statusItemClickActionForTesting(eventType: NSEvent.EventType?) -> String {
+        switch statusItemClickAction(for: eventType) {
+        case .mainPanel: "mainPanel"
+        case .contextMenu: "contextMenu"
+        }
     }
 
     func showMainMenuPanelForTesting(at screenPoint: NSPoint) {

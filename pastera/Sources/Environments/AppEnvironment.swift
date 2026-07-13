@@ -42,6 +42,9 @@ struct AppEnvironment {
                      excludeAppService: ExcludeAppService = current.excludeAppService,
                      accessibilityService: AccessibilityService = current.accessibilityService,
                      oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
+                     passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
+                     secureClipboard: SecureClipboardWriting = current.secureClipboard,
+                     clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
                      menuManager: MenuManager = current.menuManager,
                      defaults: UserDefaults = current.defaults) {
         push(environment: Environment(clipService: clipService,
@@ -50,6 +53,9 @@ struct AppEnvironment {
                                       excludeAppService: excludeAppService,
                                       accessibilityService: accessibilityService,
                                       oneDriveProcessStatusService: oneDriveProcessStatusService,
+                                      passwordVaultStore: passwordVaultStore,
+                                      secureClipboard: secureClipboard,
+                                      clipboardScriptCoordinator: clipboardScriptCoordinator,
                                       menuManager: menuManager,
                                       defaults: defaults))
     }
@@ -60,6 +66,9 @@ struct AppEnvironment {
                                excludeAppService: ExcludeAppService = current.excludeAppService,
                                accessibilityService: AccessibilityService = current.accessibilityService,
                                oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
+                               passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
+                               secureClipboard: SecureClipboardWriting = current.secureClipboard,
+                               clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
                                menuManager: MenuManager = current.menuManager,
                                defaults: UserDefaults = current.defaults) {
         replaceCurrent(environment: Environment(clipService: clipService,
@@ -68,6 +77,9 @@ struct AppEnvironment {
                                                 excludeAppService: excludeAppService,
                                                 accessibilityService: accessibilityService,
                                                 oneDriveProcessStatusService: oneDriveProcessStatusService,
+                                                passwordVaultStore: passwordVaultStore,
+                                                secureClipboard: secureClipboard,
+                                                clipboardScriptCoordinator: clipboardScriptCoordinator,
                                                 menuManager: menuManager,
                                                 defaults: defaults))
     }
@@ -78,9 +90,7 @@ struct AppEnvironment {
             excludeApplications = applications
         }
         let excludeAppService = ExcludeAppService(applications: excludeApplications)
-        return Environment(clipService: ClipService(),
-                           hotKeyService: HotKeyService(),
-                           pasteService: PasteService(),
+        return Environment(hotKeyService: HotKeyService(defaults: defaults),
                            excludeAppService: excludeAppService,
                            accessibilityService: AccessibilityService(),
                            menuManager: MenuManager(),

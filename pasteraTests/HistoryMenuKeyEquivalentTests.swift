@@ -41,17 +41,64 @@ struct HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func mainMenuPanelUsesComfortableMenuMetrics() {
-        #expect(MainMenuPanelLayout.rowHeight == 26)
-        #expect(MainMenuPanelLayout.separatorVerticalInset == 5)
-        #expect(MainMenuPanelLayout.topInset == 6)
-        #expect(MainMenuPanelLayout.bottomInset == 6)
+    func mainMenuPanelUsesHistoryFirstWorkspaceMetrics() {
+        #expect(MainMenuPanelLayout.width == 282)
+        #expect(MainMenuPanelLayout.fixedHeight == 332)
+        #expect(MainMenuPanelLayout.headerHeight == 36)
+        #expect(MainMenuPanelLayout.toolbarHeight == 34)
+        #expect(MainMenuPanelLayout.searchHeight == 28)
     }
 
     @Test
     func mainMenuPanelUsesMenuLikeSeparatorMetrics() {
-        #expect(MainMenuPanelLayout.separatorHorizontalInset == MainMenuHeaderItemView.Metrics.horizontalInset)
+        #expect(MainMenuPanelLayout.separatorHorizontalInset == MainMenuPanelLayout.toolbarHorizontalInset)
         #expect(MainMenuPanelLayout.separatorAlpha <= 0.25)
+    }
+
+    @Test
+    func mainMenuPanelShowsRedesignedFooterToolbarButtons() {
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {}
+        )
+
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+
+        let identifiers = controller.mainMenuButtonIdentifiersForTesting
+        #expect(identifiers.contains("mainMenuSearchButton"))
+        #expect(identifiers.contains("mainMenuHistoryModeButton"))
+        #expect(identifiers.contains("mainMenuSnippetModeButton"))
+        #expect(!identifiers.contains("mainMenuShortcutsButton"))
+        #expect(identifiers.contains("mainMenuOneDriveStatusButton"))
+        #expect(identifiers.contains("mainMenuPreferencesButton"))
+        #expect(!identifiers.contains("mainMenuPinButton"))
+        #expect(!identifiers.contains("mainMenuQuitButton"))
+    }
+
+    @Test
+    func mainMenuPanelUsesDedicatedHistoryAndSnippetModeIcons() {
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {}
+        )
+
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+
+        let imageNames = controller.mainMenuButtonImageNamesForTesting
+        #expect(imageNames["mainMenuHistoryModeButton"] == "pastera.mode.history")
+        #expect(imageNames["mainMenuSnippetModeButton"] == "pastera.mode.snippets")
     }
 
     @Test
@@ -679,14 +726,14 @@ extension HistoryMenuKeyEquivalentTests {
 
 extension HistoryMenuKeyEquivalentTests {
     @Test
-    func mainMenuPanelUsesPremiumMenuWidth() {
-        #expect(MainMenuPanelLayout.width == 168)
+    func mainMenuPanelUsesCompactFixedWidth() {
+        #expect(MainMenuPanelLayout.width == 282)
         #expect(MainMenuHeaderItemView.Metrics.width == MainMenuPanelLayout.width)
     }
 
     @Test
     func historyBrowserPanelUsesReadableSearchWidth() {
-        #expect(HistoryBrowserLayout.width == 352)
+        #expect(HistoryBrowserLayout.width == 520)
     }
 
     @Test
@@ -746,6 +793,7 @@ extension HistoryMenuKeyEquivalentTests {
     @Test
     func mainMenuPopupUsesUnifiedPanelController() {
         withDependencies {
+            $0.pasteboardHistoryRepository = EmptyPasteboardHistoryRepository()
             $0.snippetRepository = EmptySnippetRepository()
         } operation: {
             let manager = MenuManager()
@@ -773,15 +821,14 @@ extension HistoryMenuKeyEquivalentTests {
     }
 
     @Test
-    func mainMenuActionTitlesDoNotUseEllipsis() {
+    func mainMenuActionTitlesDoNotExposeSnippetEditing() {
         let titles = withDependencies {
             $0.snippetRepository = EmptySnippetRepository()
         } operation: {
             MenuManager().mainMenuPanelActionTitlesForTesting
         }
 
-        #expect(titles.contains(String(localized: "Edit Snippets")))
-        #expect(titles.contains(String(localized: "Preferences")))
+        #expect(!titles.contains(String(localized: "Edit Snippets")))
         #expect(titles.allSatisfy { !$0.hasSuffix("...") && !$0.hasSuffix("…") })
     }
 

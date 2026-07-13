@@ -56,6 +56,33 @@ struct PasteboardHistoryThumbnailAsset: Identifiable, Equatable {
     }
 }
 
+@Table
+struct PasteboardHistoryOCRText: Identifiable, Equatable {
+    @Column(primaryKey: true)
+    let pasteboardHistoryID: PasteboardHistory.ID
+    let sourceHash: String
+    let recognizedText: String
+    let updatedAt: Int
+    var id: PasteboardHistory.ID { pasteboardHistoryID }
+}
+
+@Table("scriptTransforms")
+struct ScriptTransformRecord: Identifiable, Equatable {
+    typealias ID = Tagged<Self, UUID>
+
+    @Column(primaryKey: true)
+    let id: ID
+    let name: String
+    let code: String
+    let isEnabled: Bool
+    let runOnCopy: Bool
+    let runOnPaste: Bool
+    let runManually: Bool
+    let sortIndex: Int
+    let createdAt: Int
+    let updatedAt: Int
+}
+
 @Selection
 struct PasteboardHistoryDetail: Equatable {
     let history: PasteboardHistory

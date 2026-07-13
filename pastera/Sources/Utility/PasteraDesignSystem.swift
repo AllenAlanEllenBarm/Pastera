@@ -182,6 +182,9 @@ enum PasteraSemanticViewStyler {
     }
 
     private static func normalize(_ button: NSButton) {
+        if button.contentTintColor == .linkColor {
+            return
+        }
         let textColor = button.isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor
         button.contentTintColor = textColor
         guard !(button is NSPopUpButton) else { return }
@@ -396,13 +399,13 @@ final class PasteraShortcutBadgeView: NSView {
 
     enum Metrics {
         static let horizontalPadding: CGFloat = 3
-        static let height: CGFloat = 16
-        static let minWidth: CGFloat = 22
+        static let height: CGFloat = 15
+        static let minWidth: CGFloat = 20
         static let cornerRadius: CGFloat = 4
 
-        static let itemHorizontalPadding: CGFloat = 5
-        static let itemHeight: CGFloat = 20
-        static let itemMinWidth: CGFloat = 22
+        static let itemHorizontalPadding: CGFloat = 4
+        static let itemHeight: CGFloat = 18
+        static let itemMinWidth: CGFloat = 20
         static let itemCornerRadius: CGFloat = 5
     }
 
@@ -560,9 +563,9 @@ final class PasteraShortcutBadgeView: NSView {
     private var font: NSFont {
         switch style {
         case .command:
-            return .systemFont(ofSize: 11, weight: .medium)
+            return .systemFont(ofSize: 10.5, weight: .medium)
         case .itemNumber:
-            return .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+            return .monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
         }
     }
 }

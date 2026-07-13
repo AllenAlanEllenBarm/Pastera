@@ -283,32 +283,6 @@ struct CPYWindowAppearanceTests {
     }
 
     @Test @MainActor
-    func generalPreferenceOpacityControlDoesNotShiftExistingPaneContent() {
-        let controller = CPYGeneralPreferenceViewController(
-            nibName: "CPYGeneralPreferenceViewController",
-            bundle: nil
-        )
-
-        let paneView = controller.view
-        let buttons = paneView.subviews.compactMap { $0 as? NSButton }
-        let buttonTitles = Set(buttons.map(\.title))
-        let textTitles = Set(paneView.subviews.compactMap { ($0 as? NSTextField)?.stringValue })
-        let launchButton = buttons.first { ["Launch on Login", "登录时打开"].contains($0.title) }
-        let clearButton = buttons.first { $0.title == String(localized: "Clear History") }
-        let warningButton = buttons.first { $0.title == String(localized: "Show alert panel before clear history") }
-        let removedTitles: Set<String> = [
-            "Input \"⌘ + V\" after menu item selection",
-            "Send crash report and error log (reflected at the next launch)"
-        ]
-
-        #expect(buttonTitles.isDisjoint(with: removedTitles))
-        #expect(textTitles.contains("Number of characters in the menu:") || textTitles.contains("菜单中字符的个数："))
-        #expect(warningButton == nil)
-        #expect((launchButton?.frame.maxY ?? 0) > (clearButton?.frame.maxY ?? 0))
-        #expect(abs((clearButton?.frame.minX ?? 0) - (launchButton?.frame.minX ?? 0)) <= 2)
-    }
-
-    @Test @MainActor
     func preferenceWindowKeepsLegacyPaneTextReadableInDarkMode() throws {
         let controller = CPYPreferencesWindowController()
         defer { controller.close() }
@@ -330,7 +304,7 @@ struct CPYWindowAppearanceTests {
     }
 
     @Test @MainActor
-    func preferenceWindowUsesDarkTranslucentSidebarColors() throws {
+    func preferenceWindowUsesStableOpaqueDarkSidebarColors() throws {
         let suiteName = "CPYWindowAppearanceTests.preferenceDark.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -345,7 +319,7 @@ struct CPYWindowAppearanceTests {
         controller.window?.appearance = darkAppearance
         controller.showWindow(nil)
 
-        #expect(abs(controller.rootBackgroundAlphaForTesting - 0.82) < 0.001)
+        #expect(abs(controller.rootBackgroundAlphaForTesting - 1) < 0.001)
         #expect(controller.sidebarBackgroundBrightnessForTesting < 0.35)
     }
 
@@ -516,6 +490,49 @@ struct CPYWindowAppearanceTests {
             #expect(keyCombo.QWERTYKeyCode == 12)
             #expect(keyCombo.modifiers == cmdKey | optionKey)
             #expect(keyCombo.keyEquivalent.uppercased() == "Q")
+        }
+    }
+
+    @Test @MainActor
+    func snippetEditorAssignsDefaultShortcutsToFirstSixAddedFoldersOnly() throws {
+        try withSnippetEditorTemporaryFolderHotKeys {
+            let folderIDs = (0..<7).map { _ in SnippetFolder.ID(rawValue: UUID()) }
+            let folders = folderIDs.enumerated().map { index, id in
+                SnippetFolder(id: id, title: "untitled folder \(index + 1)", index: index, isEnabled: true)
+            }
+            defer {
+                folderIDs.forEach {
+                    AppEnvironment.current.hotKeyService.unregisterSnippetHotKey(with: $0.uuidString)
+                }
+            }
+
+            withDependencies {
+                $0.snippetRepository = SnippetEditorSequentialFolderRepository(folders: folders)
+            } operation: {
+                let controller = CPYSnippetsEditorWindowController()
+                defer { controller.close() }
+
+                for _ in folders {
+                    controller.addFolderForTesting()
+                }
+            }
+
+            let expectedKeyCodesAndLetters: [(keyCode: Int, letter: String)] = [
+                (12, "Q"),
+                (13, "W"),
+                (14, "E"),
+                (17, "T"),
+                (16, "Y"),
+                (32, "U")
+            ]
+
+            for (folderID, expected) in zip(folderIDs.prefix(6), expectedKeyCodesAndLetters) {
+                let keyCombo = try #require(AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folderID.uuidString))
+                #expect(keyCombo.QWERTYKeyCode == expected.keyCode)
+                #expect(keyCombo.modifiers == cmdKey | optionKey)
+                #expect(keyCombo.keyEquivalent.uppercased() == expected.letter)
+            }
+            #expect(AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folderIDs[6].uuidString) == nil)
         }
     }
 
@@ -697,6 +714,43 @@ private struct SnippetEditorInsertingSnippetRepository: SnippetRepositoryProtoco
     func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail? { nil }
     func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
     func insertFolder() -> SnippetFolder? { folder }
+    func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
+    func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
+    func removeDuplicateFoldersAndSnippets() -> Int { 0 }
+    func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool { true }
+    func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool) {}
+    func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID]) {}
+    func deleteFolder(_ id: SnippetFolder.ID) {}
+    func fetchSnippet(id: Snippet.ID) -> Snippet? { nil }
+    func insertSnippet(to id: SnippetFolder.ID) -> Snippet? { nil }
+    func updateSnippetTitle(_ id: Snippet.ID, title: String) {}
+    func updateSnippetContent(_ id: Snippet.ID, content: String) -> Bool { true }
+    func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool) {}
+    func updateSnippetIndexes(_ snippetIDs: [Snippet.ID]) {}
+    func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
+    func deleteSnippet(_ id: Snippet.ID) {}
+}
+
+private final class SnippetEditorSequentialFolderRepository: SnippetRepositoryProtocol {
+    private let folders: [SnippetFolder]
+    private var nextFolderIndex = 0
+
+    init(folders: [SnippetFolder]) {
+        self.folders = folders
+    }
+
+    func observeFolderDetails() -> AnyPublisher<[SnippetFolderDetail], Never> {
+        Just([]).eraseToAnyPublisher()
+    }
+
+    func fetchFolderDetails() -> [SnippetFolderDetail] { [] }
+    func fetchFolderDetail(id: SnippetFolder.ID) -> SnippetFolderDetail? { nil }
+    func fetchSyncSnapshot() -> SnippetSyncSnapshot { SnippetSyncSnapshot(folders: [], snippets: []) }
+    func insertFolder() -> SnippetFolder? {
+        guard nextFolderIndex < folders.count else { return nil }
+        defer { nextFolderIndex += 1 }
+        return folders[nextFolderIndex]
+    }
     func insertFolders(_ folders: [(title: String, snippets: [(title: String, content: String)])]) -> [SnippetFolderDetail]? { nil }
     func upsertSyncSnapshot(_ snapshot: SnippetSyncSnapshot) -> Int { 0 }
     func removeDuplicateFoldersAndSnippets() -> Int { 0 }
