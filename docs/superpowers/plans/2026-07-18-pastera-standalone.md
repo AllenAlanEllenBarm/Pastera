@@ -133,7 +133,7 @@ SQLiteData 是当前事实存储。Realm 只读取旧数据库并导入尚未迁
 - [x] Verify `develop`, tags, releases and Actions still exist; compare against the Task 2 metadata snapshot.
 - [x] Remove the local `upstream` remote only after remote identity verification succeeds.
 - [x] Rewrite repository docs from “fork/upstream alignment” to “independent Pastera product”; retain historical attribution in LICENSE/NOTICE.
-- [ ] Commit as `chore(repo): 将 Pastera 转为独立仓库` and push `develop`.
+- [x] Commit as `chore(repo): 将 Pastera 转为独立仓库` and push `develop`.
 
 ### Task 4: 建立许可证和依赖审计边界
 
