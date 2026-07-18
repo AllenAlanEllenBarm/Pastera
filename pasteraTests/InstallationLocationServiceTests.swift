@@ -12,6 +12,36 @@ import Testing
 
 struct InstallationLocationServiceTests {
     @Test
+    func enablingLaunchAtLoginRegistersMainAppService() throws {
+        var registerCount = 0
+        var unregisterCount = 0
+        let controller = LaunchAtLoginController(
+            register: { registerCount += 1 },
+            unregister: { unregisterCount += 1 }
+        )
+
+        try controller.setEnabled(true)
+
+        #expect(registerCount == 1)
+        #expect(unregisterCount == 0)
+    }
+
+    @Test
+    func disablingLaunchAtLoginUnregistersMainAppService() throws {
+        var registerCount = 0
+        var unregisterCount = 0
+        let controller = LaunchAtLoginController(
+            register: { registerCount += 1 },
+            unregister: { unregisterCount += 1 }
+        )
+
+        try controller.setEnabled(false)
+
+        #expect(registerCount == 0)
+        #expect(unregisterCount == 1)
+    }
+
+    @Test
     func applicationsFolderDoesNotNeedMoveRecommendation() {
         let service = InstallationLocationService(homeDirectory: URL(fileURLWithPath: "/Users/alice"))
         let appURL = URL(fileURLWithPath: "/Applications/Pastera.app")

@@ -14,6 +14,22 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct KeyboardAccessibilityTests {
+    @Test
+    func pasteShortcutResolverUsesCurrentLayoutMapping() {
+        let resolver = PasteShortcutKeyCodeResolver { keyCode, _ in
+            keyCode == 42 ? "v" : nil
+        }
+
+        #expect(resolver.keyCode(for: "v", carbonModifiers: 0) == 42)
+    }
+
+    @Test
+    func pasteShortcutResolverFallsBackToAnsiVWhenLayoutCannotBeRead() {
+        let resolver = PasteShortcutKeyCodeResolver { _, _ in nil }
+
+        #expect(resolver.keyCode(for: "v", carbonModifiers: 0) == 9)
+    }
+
     private func makePreferencesController() -> CPYPreferencesWindowController {
         CPYPreferencesWindowController(
             frameAutosaveName: "KeyboardAccessibilityTests.\(UUID().uuidString)"

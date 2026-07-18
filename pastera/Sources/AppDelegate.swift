@@ -12,13 +12,86 @@
 
 import Cocoa
 import Dependencies
-import LoginServiceKit
 import Magnet
 import RealmSwift
 import RxCocoa
 import RxSwift
-import Screeen
+import ServiceManagement
 import Sparkle
+
+struct LaunchAtLoginController {
+    private let register: () throws -> Void
+    private let unregister: () throws -> Void
+
+    init(
+        register: @escaping () throws -> Void = { try SMAppService.mainApp.register() },
+        unregister: @escaping () throws -> Void = { try SMAppService.mainApp.unregister() }
+    ) {
+        self.register = register
+        self.unregister = unregister
+    }
+
+    func setEnabled(_ isEnabled: Bool) throws {
+        if isEnabled {
+            try register()
+        } else {
+            try unregister()
+        }
+    }
+}
+
+protocol PasteraScreenshotObserverDelegate: AnyObject {
+    func screenshotObserver(_ observer: PasteraScreenshotObserver, addedItem item: NSMetadataItem)
+}
+
+final class PasteraScreenshotObserver: NSObject, NSMetadataQueryDelegate {
+    weak var delegate: PasteraScreenshotObserverDelegate?
+    var isEnabled = true
+
+    private let query = NSMetadataQuery()
+    private let notificationCenter: NotificationCenter
+
+    override convenience init() {
+        let desktopPaths = NSSearchPathForDirectoriesInDomains(.desktopDirectory, .userDomainMask, true)
+        self.init(searchDirectoryPaths: desktopPaths, notificationCenter: .default)
+    }
+
+    init(searchDirectoryPaths: [String], notificationCenter: NotificationCenter) {
+        self.notificationCenter = notificationCenter
+        super.init()
+        query.delegate = self
+        query.searchScopes = searchDirectoryPaths
+        query.predicate = NSPredicate(format: "kMDItemIsScreenCapture = 1")
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(metadataQueryDidUpdate(_:)),
+            name: .NSMetadataQueryDidUpdate,
+            object: query
+        )
+    }
+
+    deinit {
+        notificationCenter.removeObserver(self)
+        query.stop()
+        query.delegate = nil
+    }
+
+    func start() {
+        query.start()
+    }
+
+    func stop() {
+        query.stop()
+    }
+
+    @objc
+    private func metadataQueryDidUpdate(_ notification: Notification) {
+        guard isEnabled,
+              let items = notification.userInfo?[kMDQueryUpdateAddedItems as String] as? [NSMetadataItem]
+        else { return }
+        items.forEach { delegate?.screenshotObserver(self, addedItem: $0) }
+    }
+}
 
 private enum ThumbnailCompactionMaintenance {
     static let version = 6
@@ -30,7 +103,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
 
     // MARK: - Properties
     private(set) var updaterController: SPUStandardUpdaterController?
-    private let screenshotObserver = ScreenShotObserver()
+    private let screenshotObserver = PasteraScreenshotObserver()
     private let disposeBag = DisposeBag()
     private var historySearchWindowController: HistorySearchWindowController?
     private var setupGuideWindowController: PasteraSetupGuideWindowController?
@@ -165,11 +238,7 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     }
 
     private func toggleAddingToLoginItems(_ isEnable: Bool) {
-        if isEnable {
-            LoginServiceKit.addLoginItems()
-        } else {
-            LoginServiceKit.removeLoginItems()
-        }
+        try? LaunchAtLoginController().setEnabled(isEnable)
     }
 
     private func reflectLoginItemState() {
@@ -468,9 +537,9 @@ private extension AppDelegate {
     }
 }
 
-// MARK: - ScreenShotObserver Delegate
-extension AppDelegate: ScreenShotObserverDelegate {
-    func screenShotObserver(_ observer: ScreenShotObserver, addedItem item: NSMetadataItem) {
+// MARK: - Screenshot Observer Delegate
+extension AppDelegate: PasteraScreenshotObserverDelegate {
+    func screenshotObserver(_ observer: PasteraScreenshotObserver, addedItem item: NSMetadataItem) {
         guard let path = item.value(forAttribute: NSMetadataItemPathKey) as? String else { return }
         AppEnvironment.current.clipService.createScreenshot(from: URL(fileURLWithPath: path))
     }

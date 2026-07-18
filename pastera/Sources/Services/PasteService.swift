@@ -14,7 +14,57 @@ import Cocoa
 import Carbon
 import Dependencies
 import Foundation
-import Sauce
+
+struct PasteShortcutKeyCodeResolver {
+    typealias CharacterProvider = (_ keyCode: CGKeyCode, _ carbonModifiers: Int) -> String?
+
+    private let characterProvider: CharacterProvider
+
+    init(characterProvider: @escaping CharacterProvider = Self.currentKeyboardCharacter) {
+        self.characterProvider = characterProvider
+    }
+
+    func keyCode(for character: Character, carbonModifiers: Int) -> CGKeyCode {
+        let expectedCharacter = String(character).lowercased()
+        for keyCode in CGKeyCode(0)..<CGKeyCode(128) {
+            if characterProvider(keyCode, carbonModifiers)?.lowercased() == expectedCharacter {
+                return keyCode
+            }
+        }
+        return CGKeyCode(kVK_ANSI_V)
+    }
+
+    private static func currentKeyboardCharacter(keyCode: CGKeyCode, carbonModifiers: Int) -> String? {
+        let source = TISCopyCurrentKeyboardLayoutInputSource().takeRetainedValue()
+        guard let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return nil
+        }
+        let layoutData = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue() as Data
+        let modifierState = UInt32((carbonModifiers >> 8) & 0xff)
+        var deadKeyState: UInt32 = 0
+        var characters = [UniChar](repeating: 0, count: 4)
+        var characterCount = 0
+        let status = layoutData.withUnsafeBytes { bytes -> OSStatus in
+            guard let layout = bytes.bindMemory(to: UCKeyboardLayout.self).baseAddress else {
+                return OSStatus(paramErr)
+            }
+            return UCKeyTranslate(
+                layout,
+                UInt16(keyCode),
+                UInt16(kUCKeyActionDisplay),
+                modifierState,
+                UInt32(LMGetKbdType()),
+                OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                &deadKeyState,
+                characters.count,
+                &characterCount,
+                &characters
+            )
+        }
+        guard status == noErr else { return nil }
+        return String(utf16CodeUnits: characters, count: characterCount)
+    }
+}
 
 struct PasteTargetContext {
     let processIdentifier: pid_t
@@ -339,7 +389,7 @@ extension PasteService {
     }
 
     private static func postPasteCommand() {
-        let vKeyCode = Sauce.shared.keyCode(for: .v, cocoaModifiers: .command)
+        let vKeyCode = PasteShortcutKeyCodeResolver().keyCode(for: "v", carbonModifiers: cmdKey)
         let source = CGEventSource(stateID: .combinedSessionState)
         // Disable local keyboard events while pasting
         source?.setLocalEventsFilterDuringSuppressionState([.permitLocalMouseEvents, .permitSystemDefinedEvents], state: .eventSuppressionStateSuppressionInterval)

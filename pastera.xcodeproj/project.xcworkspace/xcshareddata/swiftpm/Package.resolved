@@ -1,5 +1,5 @@
 {
-  "originHash" : "413bf6f09f803eaeb329cf9882749f3e6c38fd88ff9fb1423643f918829384fc",
+  "originHash" : "93e86346af755e6f8079700b6b4083b60e12b77232b96f78a9c0e8386934e3ba",
   "pins" : [
     {
       "identity" : "aexml",
@@ -44,15 +44,6 @@
       "state" : {
         "revision" : "69cfeabc06965bf98d6aa75c5a06c430795e01e4",
         "version" : "4.3.0"
-      }
-    },
-    {
-      "identity" : "loginservicekit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Clipy/LoginServiceKit",
-      "state" : {
-        "revision" : "56dce9dbf4367c1445ef2343a2a912bbe5019a6c",
-        "version" : "2.5.0"
       }
     },
     {
@@ -116,15 +107,6 @@
       "state" : {
         "revision" : "c9ebdcfddb4b94da5b9a6ebd113ab385edda88c1",
         "version" : "2.5.0"
-      }
-    },
-    {
-      "identity" : "screeen",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Clipy/Screeen",
-      "state" : {
-        "revision" : "357a72be0060765a8e93b9a70b283fc63c75f4a9",
-        "version" : "2.1.0"
       }
     },
     {
