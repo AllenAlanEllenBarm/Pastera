@@ -1,5 +1,5 @@
 //
-//  CPYAppInfo.swift
+//  PasteraAppInfo.swift
 //
 //  Clipy
 //  GitHub: https://github.com/clipy
@@ -12,7 +12,12 @@
 
 import Cocoa
 
-final class CPYAppInfo: NSObject, NSCoding {
+@objc(CPYAppInfo)
+final class PasteraAppInfo: NSObject, NSCoding {
+
+    static func registerLegacyArchiveClassName() {
+        NSKeyedUnarchiver.setClass(self, forClassName: "Pastera.CPYAppInfo")
+    }
 
     // MARK: - Properties
     let identifier: String
@@ -43,7 +48,7 @@ final class CPYAppInfo: NSObject, NSCoding {
 
     // MARK: - Equatable
     override func isEqual(_ object: Any?) -> Bool {
-        guard let object = object as? CPYAppInfo else { return false }
+        guard let object = object as? PasteraAppInfo else { return false }
         return identifier == object.identifier && name == object.name
     }
 

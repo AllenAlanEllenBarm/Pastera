@@ -18,12 +18,12 @@ import RxCocoa
 final class ExcludeAppService {
 
     // MARK: - Properties
-    fileprivate(set) var applications = [CPYAppInfo]()
+    fileprivate(set) var applications = [PasteraAppInfo]()
     fileprivate var frontApplication = BehaviorRelay<NSRunningApplication?>(value: nil)
     fileprivate var disposeBag = DisposeBag()
 
     // MARK: - Initialize
-    init(applications: [CPYAppInfo]) {
+    init(applications: [PasteraAppInfo]) {
         self.applications = applications
     }
 
@@ -56,13 +56,13 @@ extension ExcludeAppService {
 
 // MARK: - Add or Delete
 extension ExcludeAppService {
-    func add(with appInfo: CPYAppInfo) {
+    func add(with appInfo: PasteraAppInfo) {
         if applications.contains(appInfo) { return }
         applications.append(appInfo)
         save()
     }
 
-    func delete(with appInfo: CPYAppInfo) {
+    func delete(with appInfo: PasteraAppInfo) {
         applications = applications.filter { $0 != appInfo }
         save()
     }
@@ -99,7 +99,7 @@ extension ExcludeAppService {
         }
 
         // MARK: - Excluded
-        func isExcluded(applications: [CPYAppInfo]) -> Bool {
+        func isExcluded(applications: [PasteraAppInfo]) -> Bool {
             return !applications.filter { macApplicationIdentifiers.contains($0.identifier) }.isEmpty
         }
 

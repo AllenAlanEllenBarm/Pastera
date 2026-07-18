@@ -201,7 +201,7 @@ final class CPYExcludeAppPreferenceViewController: PasteraPreferencePageViewCont
             guard
                 let bundle = Bundle(url: url),
                 let infoDictionary = bundle.infoDictionary,
-                let appInfo = CPYAppInfo(info: infoDictionary as [String: AnyObject]),
+                let appInfo = PasteraAppInfo(info: infoDictionary as [String: AnyObject]),
                 identifiers.insert(appInfo.identifier).inserted
             else {
                 continue
@@ -243,7 +243,7 @@ final class CPYExcludeAppPreferenceViewController: PasteraPreferencePageViewCont
         refreshListState()
     }
 
-    private func displayModel(for appInfo: CPYAppInfo) -> ApplicationDisplayModel {
+    private func displayModel(for appInfo: PasteraAppInfo) -> ApplicationDisplayModel {
         if let displayModel = displayModelsByIdentifier[appInfo.identifier] {
             return displayModel
         }

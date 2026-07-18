@@ -342,6 +342,22 @@ struct ExcludeAppPreferenceTests {
             UTType.applicationBundle
         ])
     }
+
+    @Test
+    func renamedAppInfoPreservesLegacyArchiveClassName() throws {
+        let appInfo = try makeAppInfo(identifier: "com.example.legacy", name: "Legacy App")
+        let archiver = NSKeyedArchiver(requiringSecureCoding: false)
+        archiver.setClassName("Pastera.CPYAppInfo", for: PasteraAppInfo.self)
+        archiver.encode([appInfo], forKey: NSKeyedArchiveRootObjectKey)
+        archiver.finishEncoding()
+
+        PasteraAppInfo.registerLegacyArchiveClassName()
+        let data = archiver.encodedData
+        let decoded = try #require(NSKeyedUnarchiver.unarchiveObject(with: data) as? [PasteraAppInfo])
+
+        #expect(NSStringFromClass(PasteraAppInfo.self) == "CPYAppInfo")
+        #expect(decoded == [appInfo])
+    }
 }
 
 private extension ExcludeAppPreferenceTests {
@@ -353,7 +369,7 @@ private extension ExcludeAppPreferenceTests {
         )
     }
 
-    private func makeContext(applications: [CPYAppInfo]) throws -> ExcludeAppPreferenceTestContext {
+    private func makeContext(applications: [PasteraAppInfo]) throws -> ExcludeAppPreferenceTestContext {
         let suiteName = "ExcludeAppPreferenceTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         let service = ExcludeAppService(applications: applications)
@@ -368,8 +384,8 @@ private extension ExcludeAppPreferenceTests {
         )
     }
 
-    private func makeAppInfo(identifier: String, name: String) throws -> CPYAppInfo {
-        try #require(CPYAppInfo(info: [
+    private func makeAppInfo(identifier: String, name: String) throws -> PasteraAppInfo {
+        try #require(PasteraAppInfo(info: [
             kCFBundleIdentifierKey as String: identifier as NSString,
             kCFBundleNameKey as String: name as NSString
         ]))
@@ -393,9 +409,9 @@ private extension ExcludeAppPreferenceTests {
         return applicationURL
     }
 
-    private func persistedApplications(in defaults: UserDefaults) throws -> [CPYAppInfo] {
+    private func persistedApplications(in defaults: UserDefaults) throws -> [PasteraAppInfo] {
         let data = try #require(defaults.data(forKey: Constants.UserDefaults.excludeApplications))
-        return try #require(NSKeyedUnarchiver.unarchiveObject(with: data) as? [CPYAppInfo])
+        return try #require(NSKeyedUnarchiver.unarchiveObject(with: data) as? [PasteraAppInfo])
     }
 
     private func makeKeyEvent(

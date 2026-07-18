@@ -150,7 +150,7 @@
 		FA1DB4BA1DDCB452007F95C8 /* NSUserDefaults+ArchiveData.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4AF1DDCB452007F95C8 /* NSUserDefaults+ArchiveData.swift */; };
 		FA1DB4BD1DDCB452007F95C8 /* String+Substring.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4B21DDCB452007F95C8 /* String+Substring.swift */; };
 		FA1DB4C91DDCB460007F95C8 /* MenuManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4C31DDCB460007F95C8 /* MenuManager.swift */; };
-		FA1DB4D21DDCB479007F95C8 /* CPYAppInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4CC1DDCB479007F95C8 /* CPYAppInfo.swift */; };
+		FA1DB4D21DDCB479007F95C8 /* PasteraAppInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4CC1DDCB479007F95C8 /* PasteraAppInfo.swift */; };
 		FA1DB4E51DDCB49C007F95C8 /* CPYUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4D91DDCB49C007F95C8 /* CPYUtilities.swift */; };
 		FA1DB4E71DDCB49C007F95C8 /* CPYDesignableButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4DD1DDCB49C007F95C8 /* CPYDesignableButton.swift */; };
 		FA1DB4E81DDCB49C007F95C8 /* CPYDesignableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1DB4DE1DDCB49C007F95C8 /* CPYDesignableView.swift */; };
@@ -330,7 +330,7 @@
 		FA1DB4AF1DDCB452007F95C8 /* NSUserDefaults+ArchiveData.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "NSUserDefaults+ArchiveData.swift"; sourceTree = "<group>"; };
 		FA1DB4B21DDCB452007F95C8 /* String+Substring.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "String+Substring.swift"; sourceTree = "<group>"; };
 		FA1DB4C31DDCB460007F95C8 /* MenuManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MenuManager.swift; sourceTree = "<group>"; };
-		FA1DB4CC1DDCB479007F95C8 /* CPYAppInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CPYAppInfo.swift; sourceTree = "<group>"; };
+		FA1DB4CC1DDCB479007F95C8 /* PasteraAppInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PasteraAppInfo.swift; sourceTree = "<group>"; };
 		FA1DB4D91DDCB49C007F95C8 /* CPYUtilities.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CPYUtilities.swift; sourceTree = "<group>"; };
 		FA1DB4DD1DDCB49C007F95C8 /* CPYDesignableButton.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CPYDesignableButton.swift; sourceTree = "<group>"; };
 		FA1DB4DE1DDCB49C007F95C8 /* CPYDesignableView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CPYDesignableView.swift; sourceTree = "<group>"; };
@@ -587,7 +587,7 @@
 		FA1DB4CB1DDCB479007F95C8 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				FA1DB4CC1DDCB479007F95C8 /* CPYAppInfo.swift */,
+				FA1DB4CC1DDCB479007F95C8 /* PasteraAppInfo.swift */,
 				C57100062FCEB02000C8F965 /* PasteboardContent.swift */,
 				C522FB942FCBD69A00E61800 /* PasteboardAvailableType.swift */,
 				C5700B3E2FC40ABF00C8F965 /* DraggedData.swift */,
@@ -1015,7 +1015,7 @@
 				FA1DB5161DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.swift in Sources */,
 				FA431F021E6718CE00ACFF56 /* Collection+Safe.swift in Sources */,
 				FA1DB4E71DDCB49C007F95C8 /* CPYDesignableButton.swift in Sources */,
-				FA1DB4D21DDCB479007F95C8 /* CPYAppInfo.swift in Sources */,
+				FA1DB4D21DDCB479007F95C8 /* PasteraAppInfo.swift in Sources */,
 				FAE911B91DE045E2008A4BEC /* HotKeyService.swift in Sources */,
 				C5A91C002FD1F0000B7C0DE /* CPYSnippetsEditorModels.swift in Sources */,
 				FA1DB5201DDCB4C0007F95C8 /* CPYSnippetsEditorWindowController.swift in Sources */,
