@@ -164,6 +164,7 @@ private final class HistoryScriptMenuController: NSObject {
     }
 }
 
+// swiftlint:disable:next type_body_length
 final class HistoryMenuRowView: NSControl {
     enum LayoutStyle {
         case regular
@@ -227,6 +228,7 @@ final class HistoryMenuRowView: NSControl {
     private let deleteButton = NSButton()
     private let onConfirm: () -> Void
     private let onEdit: (() -> Void)?
+    private let onQuickEdit: (() -> Void)?
     private let onDelete: (() -> Void)?
     private let scriptMenuController: HistoryScriptMenuController
     private let previewImage: NSImage?
@@ -248,12 +250,14 @@ final class HistoryMenuRowView: NSControl {
         previewText: String? = nil,
         layoutStyle: LayoutStyle = .regular,
         onEdit: (() -> Void)? = nil,
+        onQuickEdit: (() -> Void)? = nil,
         onDelete: (() -> Void)? = nil,
         scriptActions: [HistoryScriptAction] = [],
         onConfirm: @escaping () -> Void
     ) {
         self.onConfirm = onConfirm
         self.onEdit = onEdit
+        self.onQuickEdit = onQuickEdit
         self.onDelete = onDelete
         self.scriptMenuController = HistoryScriptMenuController(actions: scriptActions)
         self.previewImage = image
@@ -341,6 +345,15 @@ final class HistoryMenuRowView: NSControl {
             let editItem = NSMenuItem(title: String(localized: "Edit"), action: #selector(editButtonClicked(_:)), keyEquivalent: "")
             editItem.target = self
             menu.addItem(editItem)
+        }
+        if onQuickEdit != nil {
+            let quickEditItem = NSMenuItem(
+                title: String(localized: "Quick Edit"),
+                action: #selector(quickEdit(_:)),
+                keyEquivalent: ""
+            )
+            quickEditItem.target = self
+            menu.addItem(quickEditItem)
         }
         if onDelete != nil {
             if !menu.items.isEmpty {
@@ -512,7 +525,7 @@ final class HistoryMenuRowView: NSControl {
     }
 
     private var showsEditButton: Bool {
-        isFocused || isMouseInside
+        true
     }
 
     private var selectedBackgroundColor: NSColor {
@@ -604,6 +617,11 @@ final class HistoryMenuRowView: NSControl {
         onEdit?()
     }
 
+    @objc private func quickEdit(_ sender: Any) {
+        cancelTextPreview()
+        onQuickEdit?()
+    }
+
     private func delete() {
         cancelTextPreview()
         Self.hideImagePreview()
@@ -667,6 +685,14 @@ private extension HistoryMenuRowView {
 
 #if DEBUG
 extension HistoryMenuRowView {
+    var isEditButtonVisibleForTesting: Bool {
+        !editButton.isHidden
+    }
+
+    func clickEditButtonForTesting() {
+        editButton.performClick(nil)
+    }
+
     static var isImagePreviewVisibleForTesting: Bool {
         imagePreviewController.isVisibleForTesting
     }

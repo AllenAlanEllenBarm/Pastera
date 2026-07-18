@@ -189,6 +189,8 @@ protocol PasteboardHistoryRepositoryProtocol {
 
     func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int)
     @discardableResult
+    func createDerivedTextHistory(text: String, updateAt: Int) -> PasteboardHistory.ID?
+    @discardableResult
     func updateTextHistory(id: PasteboardHistory.ID, text: String, updateAt: Int) -> Bool
     @discardableResult
     func upsertOCRText(
@@ -284,6 +286,8 @@ extension PasteboardHistoryRepositoryProtocol {
     func upsertSyncPayload(_ payload: PasteboardHistorySyncPayload) -> Bool { false }
 
     func updateTextHistory(id _: PasteboardHistory.ID, text _: String, updateAt _: Int) -> Bool { false }
+
+    func createDerivedTextHistory(text _: String, updateAt _: Int) -> PasteboardHistory.ID? { nil }
 
     func upsertOCRText(
         historyID _: PasteboardHistory.ID,
@@ -563,6 +567,19 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                 }
             }
         }
+    }
+
+    @discardableResult
+    func createDerivedTextHistory(text: String, updateAt: Int) -> PasteboardHistory.ID? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let content = PasteboardContent(
+            assets: [PasteboardContent.Asset(type: .string, data: Data(text.utf8))]
+        )
+        let id = PasteboardHistory.ID(rawValue: UUID().uuidString)
+        save(id: id, content: content, updateAt: updateAt)
+        return fetchHistory(id: id) == nil ? nil : id
     }
 
     @discardableResult

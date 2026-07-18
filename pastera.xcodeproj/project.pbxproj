@@ -23,6 +23,7 @@
 		C5D2A1002FEA100000B7C0DE /* MainMenuFooterButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */; };
 		C5D2A1022FEA110000B7C0DE /* MainMenuModeIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1032FEA110000B7C0DE /* MainMenuModeIcons.swift */; };
 		C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */; };
+		C5E0D000300000000B7C0DE /* HistoryEditorWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E0D001300000000B7C0DE /* HistoryEditorWindowController.swift */; };
 		C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */; };
 		C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */; };
 		C5A90B002FD1400000B7C0DE /* SnippetBrowserPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */; };
@@ -238,6 +239,7 @@
 		C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuFooterButtons.swift; sourceTree = "<group>"; };
 		C5D2A1032FEA110000B7C0DE /* MainMenuModeIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuModeIcons.swift; sourceTree = "<group>"; };
 		C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuRowView.swift; sourceTree = "<group>"; };
+		C5E0D001300000000B7C0DE /* HistoryEditorWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryEditorWindowController.swift; sourceTree = "<group>"; };
 		C5A90A012FD1300000B7C0DE /* SnippetBrowserPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetBrowserPanelController.swift; sourceTree = "<group>"; };
 		C5A90C012FD1408000B7C0DE /* MenuManagerPanelDismissal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuManagerPanelDismissal.swift; sourceTree = "<group>"; };
 		C5A90B012FD1400000B7C0DE /* SnippetBrowserPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetBrowserPanelTests.swift; sourceTree = "<group>"; };
@@ -566,6 +568,7 @@
 				FA1DB4C31DDCB460007F95C8 /* MenuManager.swift */,
 				C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */,
 				C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */,
+				C5E0D001300000000B7C0DE /* HistoryEditorWindowController.swift */,
 				C5A906012FD0D10000B7C0DE /* HistoryMenuFocusableControls.swift */,
 				C5A903012FD0C10000B7C0DE /* HistoryMenuSearchField.swift */,
 				C5A904012FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift */,
@@ -991,6 +994,7 @@
 				C5A904002FD0C20000B7C0DE /* HistoryMenuImagePreviewController.swift in Sources */,
 				C5A905002FD0C30000B7C0DE /* HistoryBrowserPanelController.swift in Sources */,
 					C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */,
+					C5E0D000300000000B7C0DE /* HistoryEditorWindowController.swift in Sources */,
 					C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */,
 					C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
 					C5D2A1002FEA100000B7C0DE /* MainMenuFooterButtons.swift in Sources */,

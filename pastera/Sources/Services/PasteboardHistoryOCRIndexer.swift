@@ -23,6 +23,24 @@ protocol PasteboardImageTextRecognizing {
 protocol PasteboardHistoryOCRIndexing {
     func enqueueIndexing(historyID: PasteboardHistory.ID, content: PasteboardContent)
     func backfillMissingImageOCR(limit: Int)
+    func recognizeText(
+        historyID: PasteboardHistory.ID,
+        content: PasteboardContent
+    ) async -> Result<String, PasteboardHistoryOCRRecognitionError>
+}
+
+extension PasteboardHistoryOCRIndexing {
+    func recognizeText(
+        historyID _: PasteboardHistory.ID,
+        content _: PasteboardContent
+    ) async -> Result<String, PasteboardHistoryOCRRecognitionError> {
+        .failure(.unsupportedImageSource)
+    }
+}
+
+enum PasteboardHistoryOCRRecognitionError: Error, Equatable {
+    case unsupportedImageSource
+    case recognitionFailed
 }
 
 enum PasteboardHistoryOCRTextLimits {
@@ -82,6 +100,46 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
                     recognizer: recognizer,
                     now: now
                 )
+            }
+        }
+    }
+
+    func recognizeText(
+        historyID: PasteboardHistory.ID,
+        content: PasteboardContent
+    ) async -> Result<String, PasteboardHistoryOCRRecognitionError> {
+        guard let source = Self.imageSource(from: content) else {
+            return .failure(.unsupportedImageSource)
+        }
+        if let existingText = repository.fetchOCRText(historyID: historyID),
+           existingText.sourceHash == source.sourceHash {
+            return .success(existingText.recognizedText)
+        }
+        if let existingText = repository.fetchOCRText(sourceHash: source.sourceHash) {
+            _ = repository.upsertOCRText(
+                historyID: historyID,
+                sourceHash: source.sourceHash,
+                recognizedText: existingText.recognizedText,
+                updatedAt: now()
+            )
+            return .success(existingText.recognizedText)
+        }
+        return await withCheckedContinuation { continuation in
+            scheduler { [repository, recognizer, now] in
+                do {
+                    let text = PasteboardHistoryOCRTextLimits.normalized(
+                        try recognizer.recognizeText(in: source.data)
+                    )
+                    _ = repository.upsertOCRText(
+                        historyID: historyID,
+                        sourceHash: source.sourceHash,
+                        recognizedText: text,
+                        updatedAt: now()
+                    )
+                    continuation.resume(returning: .success(text))
+                } catch {
+                    continuation.resume(returning: .failure(.recognitionFailed))
+                }
             }
         }
     }
@@ -216,4 +274,10 @@ extension DependencyValues {
 private struct NoopPasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
     func enqueueIndexing(historyID _: PasteboardHistory.ID, content _: PasteboardContent) {}
     func backfillMissingImageOCR(limit _: Int) {}
+    func recognizeText(
+        historyID _: PasteboardHistory.ID,
+        content _: PasteboardContent
+    ) async -> Result<String, PasteboardHistoryOCRRecognitionError> {
+        .failure(.unsupportedImageSource)
+    }
 }

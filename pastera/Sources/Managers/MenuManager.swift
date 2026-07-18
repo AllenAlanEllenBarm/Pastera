@@ -66,6 +66,17 @@ final class MenuManager: NSObject {
         }
         return controller
     }()
+    private lazy var historyEditorWindowController = HistoryEditorWindowController(
+        repository: pasteboardHistoryRepository,
+        ocrIndexer: pasteboardHistoryOCRIndexer,
+        scriptCoordinator: AppEnvironment.current.clipboardScriptCoordinator,
+        onSaved: { [weak self] in
+            self?.refreshHistorySurfacesIfVisible()
+            if let menu = self?.historyMenu {
+                self?.configureHistoryBrowserMenu(menu)
+            }
+        }
+    )
     var panelDismissLocalMonitor: Any?
     var panelDismissGlobalMonitor: Any?
     var secureEventInputStatusTimer: Timer?
@@ -89,6 +100,8 @@ final class MenuManager: NSObject {
 
     @Dependency(\.pasteboardHistoryRepository)
     private var pasteboardHistoryRepository
+    @Dependency(\.pasteboardHistoryOCRIndexer)
+    private var pasteboardHistoryOCRIndexer
     @Dependency(\.snippetRepository)
     private var snippetRepository
     @Dependency(\.mainQueue)
@@ -887,11 +900,12 @@ extension MenuManager {
             usesLeadingNumber: false,
             usesCompactImageLabel: layoutStyle == .compactMainMenu
         )
-        let onEdit: (() -> Void)? = layoutStyle == .compactMainMenu &&
+        let onEdit: (() -> Void)? = isHistoryEditorSupported(historyDetail.history.pasteboardTypes)
+            ? { [weak self] in self?.openHistoryEditor(historyDetail.history.id) }
+            : nil
+        let onQuickEdit: (() -> Void)? = layoutStyle == .compactMainMenu &&
             isEditablePlainTextHistoryTypes(historyDetail.history.pasteboardTypes)
-            ? { [weak self] in
-                self?.mainMenuPanelController?.beginEditingHistory(historyDetail.history.id)
-            }
+            ? { [weak self] in self?.mainMenuPanelController?.beginEditingHistory(historyDetail.history.id) }
             : nil
         let scriptActions = makeHistoryScriptActions(
             historyID: historyDetail.history.id,
@@ -904,6 +918,7 @@ extension MenuManager {
             previewText: presentation.previewText,
             layoutStyle: layoutStyle,
             onEdit: onEdit,
+            onQuickEdit: onQuickEdit,
             onDelete: { [weak self] in self?.deleteHistory(historyDetail.history.id) },
             scriptActions: scriptActions,
             onConfirm: onConfirm
@@ -1092,6 +1107,16 @@ extension MenuManager {
             return nil
         }
         return content.stringValue
+    }
+
+    private func openHistoryEditor(_ historyID: PasteboardHistory.ID) {
+        mainMenuPanelController?.close()
+        historyPanelController?.close()
+        historyEditorWindowController.show(historyID: historyID)
+    }
+
+    private func isHistoryEditorSupported(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        isEditablePlainTextHistoryTypes(types) || types.contains(where: { $0.isClipyImageType })
     }
 
     private func isEditablePlainTextHistoryTypes(_ types: [NSPasteboard.PasteboardType]) -> Bool {

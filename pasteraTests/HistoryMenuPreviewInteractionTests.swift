@@ -101,6 +101,31 @@ struct HistoryMenuPreviewInteractionTests {
     }
 
     @Test
+    func editableHistoryRowKeepsEditButtonVisibleWithoutHover() {
+        let row = HistoryMenuRowView(
+            title: "Editable text",
+            image: nil,
+            onEdit: {}
+        ) {}
+
+        #expect(row.isEditButtonVisibleForTesting)
+    }
+
+    @Test
+    func editableHistoryRowEditButtonInvokesEditorAction() {
+        var editCount = 0
+        let row = HistoryMenuRowView(
+            title: "Editable text",
+            image: nil,
+            onEdit: { editCount += 1 }
+        ) {}
+
+        row.clickEditButtonForTesting()
+
+        #expect(editCount == 1)
+    }
+
+    @Test
     func focusedTruncatedHistoryRowRequestsTextPreview() throws {
         let fullTitle = "CGQ_HET_9C6377 2026-07-08 timetable item with extra route metadata"
         let row = HistoryMenuRowView(

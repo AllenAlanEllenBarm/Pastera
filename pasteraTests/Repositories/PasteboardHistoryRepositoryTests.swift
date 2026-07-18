@@ -260,6 +260,7 @@ private final class RecordingClipboardScriptCoordinator: ClipboardScriptCoordina
         try $0.bootstrapDatabase()
     }
 )
+// swiftlint:disable:next type_body_length
 struct PasteboardHistoryRepositoryTests {
     let repository: PasteboardHistoryRepository
 
@@ -318,6 +319,27 @@ struct PasteboardHistoryRepositoryTests {
                 PasteboardHistoryDetail(history: history, thumbnailAsset: nil)
             ]
         )
+    }
+
+    @Test
+    func createDerivedTextHistoryPreservesSourceImage() throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .blue, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: "source-image")
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+
+        let derivedID = try #require(repository.createDerivedTextHistory(text: "Recognized text", updateAt: 2))
+
+        #expect(derivedID != imageID)
+        #expect(repository.fetchContent(id: derivedID)?.stringValue == "Recognized text")
+        #expect(repository.fetchContent(id: imageID) == imageContent)
+    }
+
+    @Test
+    func createDerivedTextHistoryRejectsBlankText() {
+        #expect(repository.createDerivedTextHistory(text: "  \n", updateAt: 2) == nil)
+        #expect(!repository.hasHistories())
     }
 
     @Test
@@ -873,6 +895,50 @@ struct PasteboardHistoryOCRSearchTests {
         #expect(ocrText.recognizedText == "个测试通过")
         #expect(ocrText.updatedAt == 100)
         #expect(recognizer.recognizedImageDataCount == 1)
+    }
+
+    @Test
+    func onDemandOCRReusesCachedText() async throws {
+        let imageContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .red, size: NSSize(width: 24, height: 16)))
+        )
+        let imageID = PasteboardHistory.ID(rawValue: "on-demand-cache")
+        let recognizer = FakeImageTextRecognizer(result: "should not run")
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: recognizer,
+            scheduler: { $0() },
+            now: { 300 }
+        )
+        repository.save(id: imageID, content: imageContent, updateAt: 1)
+        let source = try #require(PasteboardHistoryOCRIndexer.imageSource(from: imageContent))
+        #expect(repository.upsertOCRText(
+            historyID: imageID,
+            sourceHash: source.sourceHash,
+            recognizedText: "cached text",
+            updatedAt: 2
+        ))
+
+        let result = await indexer.recognizeText(historyID: imageID, content: imageContent)
+
+        #expect(result == .success("cached text"))
+        #expect(recognizer.recognizedImageDataCount == 0)
+    }
+
+    @Test
+    func onDemandOCRReportsUnsupportedImageSource() async {
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: FakeImageTextRecognizer(result: "unused"),
+            scheduler: { $0() }
+        )
+
+        let result = await indexer.recognizeText(
+            historyID: PasteboardHistory.ID(rawValue: "text"),
+            content: PasteboardContent("not an image")
+        )
+
+        #expect(result == .failure(.unsupportedImageSource))
     }
 
     @Test
