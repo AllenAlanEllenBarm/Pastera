@@ -22,6 +22,19 @@ struct ReleasePackagingConfigurationTests {
     }
 
     @Test
+    func productionProjectDoesNotContainRealmRuntime() throws {
+        let project = try projectText("pastera.xcodeproj/project.pbxproj")
+        let resolved = try projectText(
+            "pastera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+        )
+
+        #expect(!project.localizedCaseInsensitiveContains("realm-swift"))
+        #expect(!project.contains("RealmSwift"))
+        #expect(!resolved.localizedCaseInsensitiveContains("realm-swift"))
+        #expect(!resolved.localizedCaseInsensitiveContains("realm-core"))
+    }
+
+    @Test
     func adHocSigningConfigurationDoesNotOverrideRelease() throws {
         let adHoc = try projectText("Configurations/CodeSigning-AdHoc.xcconfig")
 

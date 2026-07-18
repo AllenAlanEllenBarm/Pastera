@@ -13,7 +13,6 @@
 import Cocoa
 import Dependencies
 import Magnet
-import RealmSwift
 import RxCocoa
 import RxSwift
 import ServiceManagement
@@ -121,8 +120,6 @@ class AppDelegate: NSObject, NSMenuItemValidation {
     // MARK: - Init
     override func awakeFromNib() {
         super.awakeFromNib()
-        // Migrate Realm
-        Realm.migration()
         prepareDependencies { values in
             try! values.bootstrapDatabase()
         }

@@ -283,15 +283,18 @@ Rollback points:
 - 已用 `SMAppService`、`NSMetadataQuery` 和本地键盘布局解析器替代 `LoginServiceKit`、`Screeen` 与直接 `Sauce` 调用。
 - 快捷键与录制控件的广泛兼容面保留在 `pastera-app/Magnet` 3.5.1、`pastera-app/KeyHolder` 4.3.1 和 `pastera-app/Sauce` 2.5.1；生产依赖图不再引用 `github.com/Clipy/*`。
 - 根许可证保留 Clipy 版权并新增 Pastera 贡献者归属，`NOTICE` 和依赖迁移记录明确历史来源、第三方许可与后续维护边界。
+- 已从生产工程、Swift Package 解析结果和启动链路中移除 Realm；旧 `CPYClip`、`CPYClipData`、`CPYFolder`、`CPYSnippet` 模型与 Realm 扩展一并删除，当前 SQLite 数据链保持不变。
+- 新增生产工程静态约束，阻止 Realm package、product 或源码引用回流。
 
 ### Plan Deviations
 
 - 原计划描述为 serialized suite/change-count cleanup；实际根因还包含系统 Secure Event Input 状态，最终采用依赖注入隔离两个系统全局状态，覆盖更完整且不改变生产默认行为。
 - `docs/verification/VERIFICATION.md` 的 Finder、Notes、Preview 和 OneDrive 双配置人工矩阵无法由本轮命令行验证代替，保留为人工验收项。
+- 用户明确批准跳过原计划中的兼容发布观察期并直接删除 Realm，因此未交付一次性 `LegacyClipyImportService`；磁盘上已有 `.realm` 文件未被删除，仍可用于外部恢复。
 
 ### Impact
 
-- Task 1 影响当前 macOS 功能基线、测试隔离、本地化和 `PasteService` 的可测试性；尚未改变 GitHub fork 身份、Git remotes 或依赖图。
+- Tasks 1–5 已完成 macOS 基线收敛、GitHub 独立化、Clipy 依赖迁移和 Realm 运行时移除；当前持久化事实源继续使用 SQLite，不改写现有用户数据。
 
 ### Verification
 
@@ -305,16 +308,20 @@ Rollback points:
 - 恢复证据：bundle SHA-256 `ec1a5b28e05c5494e02e42acd7dcd113e3f77a6e877986f6ae6c9102403f6f2c`，`git bundle verify` 通过。
 - Task 4 聚焦回归：40 tests / 3 suites 通过；完整 macOS 回归：665 tests / 75 suites 通过，`** TEST SUCCEEDED **`。
 - Swift Package 解析结果：`Magnet`、`KeyHolder`、`Sauce` 均来自 `https://github.com/pastera-app/*`；静态测试阻止 `github.com/Clipy/*` 回流。
+- Realm 静态聚焦回归：15 tests / 1 suite 通过；完整 macOS 回归：666 tests / 75 suites 通过，`** TEST SUCCEEDED **`。
+- `./script/install_local.sh`：Realm 删除后重新构建并安装成功；`/Applications/Pastera.app` 正常运行（PID 93102），`codesign --verify --deep --strict` 通过。
+- `git diff --check` 与 Realm/旧导入源码扫描通过，生产工程和 `Package.resolved` 均无 Realm 运行时引用。
 
 ### Remaining Risks
 
 - Finder/Notes/Preview 的图片与文件粘贴，以及 OneDrive 双配置人工矩阵尚未执行。
 - Windows 最终冻结基线仍需 Tasks 4–7。
 - GitHub fork 身份已解除且不可恢复；代码与 refs 可通过本地 bundle 和基线 tag 恢复。
+- 仅持有未迁移 Realm 数据的极老版本用户无法再通过应用内导入；这是本轮直接删除决策的已接受风险，原 `.realm` 文件仍保留在磁盘。
 
 ### Follow-ups
 
-- 开始 Task 5：将 Realm 收敛为一次性旧数据导入通道，再按兼容窗口移除运行时依赖。
+- 开始 Task 6：按域盘点并清理遗留 `Clipy` / `CPY*` 产品命名，保留必要的历史归属和协议兼容标识。
 
 ### ZenTao Closeout
 
