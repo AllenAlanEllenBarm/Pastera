@@ -1,0 +1,22 @@
+{
+  "fixtureVersion": 1,
+  "baselineTag": "windows-v1-baseline-20260718",
+  "format": "KDBX",
+  "path": "<OneDrive>/PasteraSync/vault/PasteraVault.kdbx",
+  "rootCredential": "master-password",
+  "localConvenienceUnlock": {
+    "macOS": "LocalAuthentication+Keychain",
+    "Windows": "Windows-Hello+DPAPI",
+    "portable": false
+  },
+  "requiredSemantics": [
+    "single-level-folders",
+    "folder-and-entry-order",
+    "deleted-object-tombstones",
+    "last-modification-wins",
+    "equal-time-conflict-copy",
+    "atomic-write-with-backup",
+    "external-revision-check"
+  ],
+  "secretFixturePolicy": "Generate synthetic KDBX files during tests. Never commit a real password or locally protected unlock blob."
+}

@@ -1,0 +1,35 @@
+{
+  "fixtureVersion": 1,
+  "baselineTag": "windows-v1-baseline-20260718",
+  "cases": [
+    {
+      "id": "unicode-text",
+      "protocolType": "public.utf8-plain-text",
+      "utf8Base64": "UGFzdGVyYSDkuK3mlocg8J+Tiw==",
+      "expectedText": "Pastera 中文 📋"
+    },
+    {
+      "id": "url-text",
+      "protocolType": "public.url",
+      "utf8Base64": "aHR0cHM6Ly9wYXN0ZXJhLmFwcC93aW5kb3dzP3E9JUU0JUI4JUFEJUU2JTk2JTg3",
+      "expectedText": "https://pastera.app/windows?q=%E4%B8%AD%E6%96%87"
+    },
+    {
+      "id": "html-text",
+      "protocolType": "public.html",
+      "utf8Base64": "PHA+PGI+UGFzdGVyYTwvYj4gV2luZG93czwvcD4=",
+      "expectedPlainText": "Pastera Windows"
+    },
+    {
+      "id": "rtf-text",
+      "protocolType": "public.rtf",
+      "utf8Base64": "e1xydGYxXGFuc2kgUGFzdGVyYSBXaW5kb3dzfQ==",
+      "expectedPlainText": "Pastera Windows"
+    }
+  ],
+  "binaryCases": {
+    "required": ["image", "pdf", "file-list"],
+    "source": "Generate from the baseline macOS tests before implementing the matching Windows adapter.",
+    "privacy": "Only synthetic assets are allowed. Never export a user's clipboard history."
+  }
+}

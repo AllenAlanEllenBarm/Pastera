@@ -109,7 +109,7 @@ windows/
 - Consumes: 当前 macOS 工作区、`docs/sync/ONEDRIVE_SYNC.md` 和现有 macOS 测试。
 - Produces: 干净 baseline tag、功能对等清单、clipboard type map、跨平台 sync/KDBX fixtures 与预期摘要。
 
-- [ ] 验证 macOS 当前功能和测试，整理未提交改动后生成唯一 baseline commit/tag。
+- [x] 验证 macOS 当前功能和测试，整理未提交改动后生成唯一 baseline commit/tag。
 - [ ] 从 baseline 逐页、逐服务、逐测试登记九个功能域的行为和错误语义。
 - [ ] 导出文本、URL、HTML/RTF、图片、PDF、文件列表的类型样本和规范化预期。
 - [ ] 导出 history schema v4、snippet schema v3、file manifest v1 和 KDBX 的无敏感测试 fixtures。
@@ -327,9 +327,9 @@ windows/
 ## Delivery Metadata
 
 - Plan Path: `docs/superpowers/plans/2026-07-18-pastera-windows-v1.md`
-- Plan Status: `design-approved; implementation-not-started`
+- Plan Status: `M0 baseline prepared; Windows implementation not started`
 - Evidence Profile: `standard`
-- Baseline Status: `pending M0 clean baseline commit/tag`
+- Baseline Status: `windows-v1-baseline-20260718`
 - Story ID: `not-synced`
 - Task IDs: `not-synced`
 - ZenTao Sync Status: `not-synced`
@@ -340,27 +340,27 @@ windows/
 
 ### Actual Implementation
 
-尚未开始；本轮只完成并确认 Windows V1 设计。
+M0 已完成 macOS 基线审计、全量回归和跨平台契约清单；Windows 客户端尚未开始。
 
 ### Plan Deviations
 
-无。设计过程明确由最初的“文本最小闭环”调整为九个核心功能域完整对等。
+无实现偏差。二进制 SQLite/KDBX 双向 fixtures 将由 Windows 测试从合成数据生成，避免在仓库中保存固定口令或本机保护材料。
 
 ### Impact
 
-计划新增同仓库 `windows/` 客户端，不修改 macOS 运行时行为。跨平台影响集中在 OneDrive 协议、fixtures、KDBX 和类型映射。
+本轮只新增 `windows/fixtures/` 契约清单并补充 Windows 移植文档，没有修改 macOS 运行时行为。后续影响仍集中在同仓库 Windows 客户端、OneDrive 协议、KDBX 和类型映射。
 
 ### Verification
 
-设计已逐段确认：总体架构、九域功能对等矩阵、数据流/失败语义、M0-M5 实施阶段与发布门。代码、构建和真实 Windows 验证尚未开始。
+设计已逐段确认。macOS 基线运行完整 `xcodebuild ... clean test`，673 tests / 75 suites 通过，命令退出码为 0；日志包含 CoreSimulator 版本、AppKit 约束、颜色空间和 xcresult writer 噪声，但测试最终汇总为 `TEST SUCCEEDED`。随后运行 `./script/install_local.sh --clean --verify`，构建成功，应用安装到 `/Applications/Pastera.app`，并确认进程从该安装路径启动。真实 Windows 验证尚未开始。
 
 ### Remaining Risks
 
-开工前仍需完成 M0：整理当前 macOS 未提交改动、生成干净 baseline commit/tag，并在真实 Windows 11 x64 环境确定具体 JS/KDBX/MSIX 库版本。
+M1 开始前仍需在真实 Windows 11 x64 环境确定具体 JS、KDBX 和 MSIX 库版本。macOS 测试日志中的现有 UI/颜色空间噪声不阻断 baseline，但应避免 Windows 测试复制这种无界输出模式。
 
 ### Follow-ups
 
-用户确认本 plan 后，在 macOS 仓库先执行 M0；M1-M5 必须由 Windows 机器上的 Codex/开发者实施并验收。
+M1-M5 必须由 Windows 机器上的 Codex/开发者实施并验收；Windows 侧生成的双向 fixtures 需要回到 macOS compatibility tests 复核。
 
 ### ZenTao Closeout
 

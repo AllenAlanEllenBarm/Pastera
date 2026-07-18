@@ -1,5 +1,19 @@
 # Pastera Windows Porting Guide
 
+## Frozen V1 Baseline
+
+Windows V1 uses the annotated tag `windows-v1-baseline-20260718` as its frozen
+macOS behavior reference. Later macOS commits do not automatically expand the
+Windows V1 scope. A scope change must update the single Windows V1 plan at
+`docs/superpowers/plans/2026-07-18-pastera-windows-v1.md`.
+
+The baseline verification command passed 673 tests in 75 suites on macOS. The
+cross-platform contract manifests live under `windows/fixtures/`; they contain
+only synthetic data and protocol invariants. Windows implementation must add
+two-way generated SQLite and KDBX compatibility artifacts without exporting a
+user's clipboard history, passwords, Keychain data, DPAPI blobs, or other local
+credentials.
+
 ## Scope
 
 This guide starts from the standalone macOS baseline tagged

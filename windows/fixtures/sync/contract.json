@@ -1,0 +1,26 @@
+{
+  "fixtureVersion": 1,
+  "baselineTag": "windows-v1-baseline-20260718",
+  "root": "<OneDrive>/Pastera/sync",
+  "history": {
+    "schemaVersion": 4,
+    "snapshotPath": "history/devices/<device-id>.sqlite",
+    "remoteAbsenceDeletesLocal": false,
+    "conflictRule": "last-write-wins-by-updatedAt"
+  },
+  "snippets": {
+    "schemaVersion": 3,
+    "snapshotPath": "snippets/devices/<device-id>.sqlite",
+    "tables": ["folders", "snippets", "deletedFolders", "deletedSnippets"],
+    "remoteAbsenceDeletesLocal": false
+  },
+  "files": {
+    "manifestVersion": 1,
+    "schemaVersion": 1,
+    "manifestPath": "files/devices/<device-id>/manifest.json",
+    "supportedClasses": ["image/tiff", "pdf", "rtf", "rtfd"],
+    "finderFileURLsPortable": false,
+    "maximumAssetsPerDevice": 10,
+    "maximumBytesPerAsset": 26214400
+  }
+}
