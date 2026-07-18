@@ -1,5 +1,5 @@
 {
-  "originHash" : "93e86346af755e6f8079700b6b4083b60e12b77232b96f78a9c0e8386934e3ba",
+  "originHash" : "f57001d3cd72dba0eeb633ad413c4191ea4816aee24becb345ed2f45b74acdd6",
   "pins" : [
     {
       "identity" : "aexml",
@@ -40,19 +40,19 @@
     {
       "identity" : "keyholder",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Clipy/KeyHolder",
+      "location" : "https://github.com/pastera-app/KeyHolder",
       "state" : {
-        "revision" : "69cfeabc06965bf98d6aa75c5a06c430795e01e4",
-        "version" : "4.3.0"
+        "revision" : "19a166ecc6b64db8b15d6c4449fe9258624df626",
+        "version" : "4.3.1"
       }
     },
     {
       "identity" : "magnet",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Clipy/Magnet",
+      "location" : "https://github.com/pastera-app/Magnet",
       "state" : {
-        "revision" : "c721032f386a6664a234e04b98cb68823865369a",
-        "version" : "3.5.0"
+        "revision" : "3634645d7bdc74ed609d7cdec8e07877315f66ed",
+        "version" : "3.5.1"
       }
     },
     {
@@ -103,10 +103,10 @@
     {
       "identity" : "sauce",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/clipy/sauce",
+      "location" : "https://github.com/pastera-app/Sauce",
       "state" : {
-        "revision" : "c9ebdcfddb4b94da5b9a6ebd113ab385edda88c1",
-        "version" : "2.5.0"
+        "revision" : "84d03fcddebf78e08f3105b1159300bfdae3b217",
+        "version" : "2.5.1"
       }
     },
     {

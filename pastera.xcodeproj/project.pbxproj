@@ -1420,18 +1420,18 @@
 		};
 		C5D3A75D2FB86A0200C9DCB6 /* XCRemoteSwiftPackageReference "Magnet" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Clipy/Magnet";
+			repositoryURL = "https://github.com/pastera-app/Magnet";
 			requirement = {
 				kind = upToNextMinorVersion;
-				minimumVersion = 3.5.0;
+				minimumVersion = 3.5.1;
 			};
 		};
 		C5D3A7602FB86A1C00C9DCB6 /* XCRemoteSwiftPackageReference "KeyHolder" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Clipy/KeyHolder";
+			repositoryURL = "https://github.com/pastera-app/KeyHolder";
 			requirement = {
 				kind = upToNextMinorVersion;
-				minimumVersion = 4.3.0;
+				minimumVersion = 4.3.1;
 			};
 		};
 		C5D76D9C2FBA939E0083839F /* XCRemoteSwiftPackageReference "RxSwift" */ = {

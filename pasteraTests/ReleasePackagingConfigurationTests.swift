@@ -11,6 +11,17 @@ import Testing
 
 struct ReleasePackagingConfigurationTests {
     @Test
+    func productionPackagesDoNotReferenceClipyOrganization() throws {
+        let project = try projectText("pastera.xcodeproj/project.pbxproj")
+        let resolved = try projectText(
+            "pastera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+        )
+
+        #expect(!project.localizedCaseInsensitiveContains("github.com/Clipy/"))
+        #expect(!resolved.localizedCaseInsensitiveContains("github.com/Clipy/"))
+    }
+
+    @Test
     func adHocSigningConfigurationDoesNotOverrideRelease() throws {
         let adHoc = try projectText("Configurations/CodeSigning-AdHoc.xcconfig")
 

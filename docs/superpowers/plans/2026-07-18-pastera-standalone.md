@@ -148,14 +148,14 @@ SQLiteData 是当前事实存储。Realm 只读取旧数据库并导入尚未迁
 - Consumes: current package graph and actual import/call paths.
 - Produces: a checked dependency disposition for every `Clipy/*` package and durable attribution rules.
 
-- [ ] Record each imported API and call site for `Sauce`, `Magnet`, `KeyHolder`, `LoginServiceKit` and `Screeen`.
-- [ ] Remove `Screeen` if its import has no active production call path.
-- [ ] Replace `LoginServiceKit` with `SMAppService` behind a small launch-at-login service and focused tests.
-- [ ] Replace the single `Sauce` Command-V lookup with a local keyboard-layout-aware adapter and focused tests.
-- [ ] Decide `Magnet` and `KeyHolder` from evidence: replace with focused local components when practical; otherwise migrate maintained forks to `pastera-app` with preserved licenses.
-- [ ] Add a CI/static check that fails when production package URLs contain `github.com/Clipy/`.
-- [ ] Run package resolution, focused tests and the full macOS suite.
-- [ ] Commit each independently testable dependency removal separately.
+- [x] Record each imported API and call site for `Sauce`, `Magnet`, `KeyHolder`, `LoginServiceKit` and `Screeen`.
+- [x] Replace `Screeen` with a local `NSMetadataQuery` observer after confirming its active screenshot call path.
+- [x] Replace `LoginServiceKit` with `SMAppService` behind a small launch-at-login service and focused tests.
+- [x] Replace the single `Sauce` Command-V lookup with a local keyboard-layout-aware adapter and focused tests.
+- [x] Decide `Magnet` and `KeyHolder` from evidence: retain their broad compatibility surface in Pastera-maintained forks with preserved licenses.
+- [x] Add a CI/static check that fails when production package URLs contain `github.com/Clipy/`.
+- [x] Run package resolution, focused tests and the full macOS suite.
+- [x] Commit each independently testable dependency removal separately.
 
 ### Task 5: 将 Realm 收敛为一次性导入并移除运行时
 
@@ -280,6 +280,9 @@ Rollback points:
 - 当前功能源码、测试、KDBX store、脚本和 UI 改动作为独立化前 Pastera 基线统一收敛。
 - 已在 `.build/repository-backups/` 生成并验证完整 Git bundle 和 GitHub 元数据快照，推送 `pastera-pre-standalone` annotated tag。
 - GitHub 仓库已解除 fork 网络身份；文档改为独立 Pastera 产品边界，本地仅保留 `origin` remote。
+- 已用 `SMAppService`、`NSMetadataQuery` 和本地键盘布局解析器替代 `LoginServiceKit`、`Screeen` 与直接 `Sauce` 调用。
+- 快捷键与录制控件的广泛兼容面保留在 `pastera-app/Magnet` 3.5.1、`pastera-app/KeyHolder` 4.3.1 和 `pastera-app/Sauce` 2.5.1；生产依赖图不再引用 `github.com/Clipy/*`。
+- 根许可证保留 Clipy 版权并新增 Pastera 贡献者归属，`NOTICE` 和依赖迁移记录明确历史来源、第三方许可与后续维护边界。
 
 ### Plan Deviations
 
@@ -300,6 +303,8 @@ Rollback points:
 - 远端身份：`isFork=false`、`parent=null`、public、默认分支 `develop`。
 - 远端完整性：`develop` 和 `pastera-pre-standalone^{}` 均指向 `509223ce063b9bc9545460adf94a69ce69265f45`；2 branches、3 tags、2 releases、4 workflows、0 issues、1 pull request。
 - 恢复证据：bundle SHA-256 `ec1a5b28e05c5494e02e42acd7dcd113e3f77a6e877986f6ae6c9102403f6f2c`，`git bundle verify` 通过。
+- Task 4 聚焦回归：40 tests / 3 suites 通过；完整 macOS 回归：665 tests / 75 suites 通过，`** TEST SUCCEEDED **`。
+- Swift Package 解析结果：`Magnet`、`KeyHolder`、`Sauce` 均来自 `https://github.com/pastera-app/*`；静态测试阻止 `github.com/Clipy/*` 回流。
 
 ### Remaining Risks
 
@@ -309,7 +314,7 @@ Rollback points:
 
 ### Follow-ups
 
-- 提交并推送 Task 3 文档收尾，然后开始逐项替换 Clipy 生产依赖。
+- 开始 Task 5：将 Realm 收敛为一次性旧数据导入通道，再按兼容窗口移除运行时依赖。
 
 ### ZenTao Closeout
 

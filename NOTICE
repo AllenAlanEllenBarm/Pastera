@@ -1,0 +1,20 @@
+Pastera
+=======
+
+Pastera began as a fork of Clipy and retains portions of Clipy's MIT-licensed
+source code and Git history. Copyright notices in source files and the root
+LICENSE remain in effect for that work.
+
+Subsequent Pastera-specific design, features, documentation, and platform work
+are maintained by the Pastera contributors under the same MIT license unless a
+file states otherwise.
+
+The macOS app currently uses Pastera-maintained forks of Magnet, KeyHolder, and
+Sauce. Those repositories preserve their original licenses and attribution:
+
+- https://github.com/pastera-app/Magnet
+- https://github.com/pastera-app/KeyHolder
+- https://github.com/pastera-app/Sauce
+
+Third-party dependency licenses remain the property of their respective
+authors. Shipping builds must retain the notices required by those licenses.
