@@ -14,6 +14,10 @@ two-way generated SQLite and KDBX compatibility artifacts without exporting a
 user's clipboard history, passwords, Keychain data, DPAPI blobs, or other local
 credentials.
 
+The macOS UI evidence, screen-state inventory, Windows-native adaptation rules,
+and screenshot acceptance matrix live under `docs/windows-reference/`. Those
+screens define information hierarchy and behavior, not pixel-level AppKit styling.
+
 ## Scope
 
 This guide starts from the standalone macOS baseline tagged

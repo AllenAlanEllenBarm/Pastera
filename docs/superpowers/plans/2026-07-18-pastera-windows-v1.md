@@ -15,6 +15,7 @@
 - V1 对等的是 baseline 中已经可运行、可验收的能力；仅存在于路线图中的截图捕获、截图翻译等未来功能不进入 V1。
 - 九个核心功能域全部属于 V1；实施里程碑只表示依赖顺序，不能用于提前宣称 V1 完成。
 - UI 使用 Windows 11 原生信息结构和交互，不做 AppKit 像素级复刻。
+- macOS 界面证据与 Windows 原生适配规则固定在 `docs/windows-reference/`；实现 UI 的任务必须对照其截图索引和验收矩阵，并使用合成数据补充 Windows 实机截图。
 - 使用 Windows App SDK 稳定通道；不依赖 Preview 或 Experimental API。
 - JavaScript 保持 `transform(clip)` 契约，禁止访问文件、网络、进程和系统 API。
 - KDBX 主密码是密码箱根凭据；Windows Hello 和 DPAPI 仅作为本机便捷解锁层。
@@ -340,7 +341,7 @@ windows/
 
 ### Actual Implementation
 
-M0 已完成 macOS 基线审计、全量回归和跨平台契约清单；Windows 客户端尚未开始。
+M0 已完成 macOS 基线审计、全量回归、跨平台契约清单和 `docs/windows-reference/` UI 参考包；Windows 客户端尚未开始。UI 参考包包含 14 张脱敏 macOS 界面截图、截图索引、Windows 原生适配规则和实机截图验收矩阵。
 
 ### Plan Deviations
 
@@ -348,11 +349,11 @@ M0 已完成 macOS 基线审计、全量回归和跨平台契约清单；Windows
 
 ### Impact
 
-本轮只新增 `windows/fixtures/` 契约清单并补充 Windows 移植文档，没有修改 macOS 运行时行为。后续影响仍集中在同仓库 Windows 客户端、OneDrive 协议、KDBX 和类型映射。
+本轮新增 `windows/fixtures/` 契约清单和 `docs/windows-reference/` UI 参考包，并补充 Windows 移植文档，没有修改 macOS 运行时行为。后续影响仍集中在同仓库 Windows 客户端、OneDrive 协议、KDBX、类型映射和 WinUI 3 界面验收。
 
 ### Verification
 
-设计已逐段确认。macOS 基线运行完整 `xcodebuild ... clean test`，673 tests / 75 suites 通过，命令退出码为 0；日志包含 CoreSimulator 版本、AppKit 约束、颜色空间和 xcresult writer 噪声，但测试最终汇总为 `TEST SUCCEEDED`。随后运行 `./script/install_local.sh --clean --verify`，构建成功，应用安装到 `/Applications/Pastera.app`，并确认进程从该安装路径启动。真实 Windows 验证尚未开始。
+设计已逐段确认。macOS 基线运行完整 `xcodebuild ... clean test`，673 tests / 75 suites 通过，命令退出码为 0；日志包含 CoreSimulator 版本、AppKit 约束、颜色空间和 xcresult writer 噪声，但测试最终汇总为 `TEST SUCCEEDED`。随后运行 `./script/install_local.sh --clean --verify`，构建成功，应用安装到 `/Applications/Pastera.app`，并确认进程从该安装路径启动。UI 参考包逐页通过 Computer Use 采集和人工脱敏检查，14 个图像文件均确认为有效 JPEG；临时隔离数据库已删除，截图辅助代码已撤销，`git diff --check` 通过。真实 Windows 验证尚未开始。
 
 ### Remaining Risks
 
@@ -360,7 +361,7 @@ M1 开始前仍需在真实 Windows 11 x64 环境确定具体 JS、KDBX 和 MSIX
 
 ### Follow-ups
 
-M1-M5 必须由 Windows 机器上的 Codex/开发者实施并验收；Windows 侧生成的双向 fixtures 需要回到 macOS compatibility tests 复核。
+M1-M5 必须由 Windows 机器上的 Codex/开发者实施并验收；Windows 侧生成的双向 fixtures 需要回到 macOS compatibility tests 复核。每个 UI 里程碑使用合成数据补充 Windows 11 浅色、深色和 125% 缩放截图，不覆盖 macOS 基线图。
 
 ### ZenTao Closeout
 
