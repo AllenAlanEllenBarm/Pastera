@@ -2,13 +2,14 @@
 
 ## Project Context
 
-Pastera is a macOS clipboard extension app. This fork tracks
-`upstream` (`https://github.com/Clipy/Clipy.git`) for the original project
-and keeps local development on `codex/*` branches before pushing to `origin`.
+Pastera is an independent clipboard productivity product. The current macOS app
+is the executable behavior baseline; native Windows work belongs under
+`windows/` and must preserve the shared contracts without copying AppKit UI.
+`origin` is the only product remote; do not recreate a Clipy tracking remote.
 
 The app currently targets macOS 13+ and is built with Xcode 26.5. Dependencies
 are resolved through Xcode Swift Package Manager; do not reintroduce CocoaPods,
-SwiftGen, or BartyCrouch without an explicit upstream-alignment reason.
+SwiftGen, or BartyCrouch without an explicit product requirement.
 
 ## Architecture Boundaries
 
@@ -20,15 +21,13 @@ SwiftGen, or BartyCrouch without an explicit upstream-alignment reason.
   `pastera/Sources/Database/`.
 - Snippet persistence already uses SQLiteData via
   `pastera/Sources/Repositories/SnippetRepository.swift`.
-- Pasteboard history work should follow the upstream SQLiteData direction
-  described in `docs/development/PASTERA_FORK_PLAN.md`; avoid adding new
-  Realm-backed history behavior.
+- SQLiteData is the current fact store. Realm may only remain as a bounded,
+  read-only legacy import path; do not add new Realm-backed product behavior.
 
 ## Local Development
 
 Local builds may enable `Configurations/CodeSigning-AdHoc.xcconfig` through
-`Configurations/CodeSigning.xcconfig` because upstream maintainer signing
-certificates are not available locally. Preserve existing user changes in this
+`Configurations/CodeSigning.xcconfig`. Preserve existing user changes in this
 file unless the user asks to change signing mode.
 
 Do not commit `.DS_Store` or SwiftPM cache contents. The project-local
@@ -71,7 +70,10 @@ last local install.
 
 ## Documentation Boundaries
 
-- Fork roadmap and upstream alignment: `docs/development/PASTERA_FORK_PLAN.md`.
+- Independent product roadmap and historical migration boundary:
+  `docs/development/PASTERA_FORK_PLAN.md`.
+- Windows native porting entrypoint:
+  `docs/development/WINDOWS_PORTING_GUIDE.md`.
 - Verification matrix and known manual checks:
   `docs/verification/VERIFICATION.md`.
 - OneDrive folder-sync protocol and credential boundaries:
@@ -94,5 +96,10 @@ passphrases, or OAuth material into this repo, `AGENTS.md`, docs, or chat.
   `$superpowers:subagent-driven-development`.
 - New features or bug fixes: use `$superpowers:test-driven-development` and
   watch the relevant test fail before production edits.
+- Any code modification, refactor, review, or test-impact assessment: use
+  `$coding-guardrails` before the platform-specific implementation skill.
 - Bugs, build failures, pasteboard regressions, performance issues, or failing
   tests: use `$superpowers:systematic-debugging` before proposing fixes.
+- Implementation and verification closeout, Delivery Record updates, commit,
+  push, tag, or branch integration: use `$change-sync`; it must reuse the
+  already-confirmed unique plan.

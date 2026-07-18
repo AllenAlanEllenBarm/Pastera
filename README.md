@@ -18,18 +18,20 @@
 
 # Pastera
 
-Pastera is a refined macOS clipboard manager forked from
-[Clipy](https://github.com/Clipy/Clipy). It keeps the lightweight menu-bar
-workflow, then adds searchable history, snippet folders, image pasteboard
-compatibility, a polished translucent interface, and a keyboard-first operating
-model for fast pasteback.
+Pastera is an independent, open-source clipboard productivity product. The
+current macOS app combines searchable history, snippet folders, script
+transforms, KDBX password-vault workflows, OneDrive folder sync, rich pasteboard
+compatibility, and a keyboard-first operating model for fast pasteback. A native
+Windows client is planned in the same repository against shared product
+contracts rather than a shared UI framework.
 
 ## Project Status
 
-Pastera is an active beta fork. The project is maintained in the
-`pastera-app/Pastera` GitHub organization and follows upstream Clipy development
-where it makes sense, while shipping fork-specific clipboard search, snippets,
-sync, installer guidance, and permission controls.
+Pastera is an active beta maintained in the `pastera-app/Pastera` GitHub
+organization. The repository is standalone and does not track a product
+upstream. macOS is the current executable baseline; Windows will use native
+Windows APIs while preserving the same product capabilities and cross-platform
+data contracts.
 
 Current public beta builds are unsigned and not notarized yet. macOS may show a
 Gatekeeper warning on first launch. The project is working toward a compliant
@@ -49,10 +51,11 @@ manual trust bypass steps.
 - **Native macOS feel**: lightweight menu-bar app, semantic colors, translucent
   surfaces, and no heavy background effects.
 
-## Why This Fork Exists
+## Product Direction
 
-Pastera is derived from Clipy, but it is not a rebranded binary. The fork exists
-to explore a focused macOS clipboard workflow with:
+Pastera began from Clipy source history but is now developed as an independent
+product with its own architecture, interaction design, data model, and release
+direction:
 
 - Search and storage behavior separated from the compact menu display limit.
 - Snippet folders and item shortcuts for prompt and text reuse.
@@ -62,8 +65,8 @@ to explore a focused macOS clipboard workflow with:
 - Distribution work for DMG packaging, Homebrew Cask metadata, and future
   notarized releases.
 
-See `docs/development/PASTERA_FORK_PLAN.md` for the current fork direction and
-upstream alignment notes.
+See `docs/development/PASTERA_FORK_PLAN.md` for the independent product roadmap
+and historical migration boundary.
 
 ## Requirements
 
@@ -129,8 +132,8 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 ```
 
 Local builds may use ad-hoc signing through
-`Configurations/CodeSigning.xcconfig` because the upstream maintainer signing
-certificates are not available for this fork.
+`Configurations/CodeSigning.xcconfig`; public releases require Pastera-owned
+Developer ID signing and notarization credentials.
 
 ## Local Install
 
@@ -148,11 +151,11 @@ Codex local development also uses `.codex/hooks.json`: the Stop hook runs
 `script/codex_stop_install_if_changed.sh`, which reinstalls only when
 build-relevant app paths changed since the last local install.
 
-## Upstream Attribution
+## Historical Attribution
 
-Pastera is derived from Clipy and keeps the original MIT license terms. The
-fork uses a different product name in line with the upstream distribution
-request not to ship derived work as `Clipy` or `ClipMenu`.
+Pastera preserves the Git history, copyright notices, and MIT terms of source
+originally derived from [Clipy](https://github.com/Clipy/Clipy). This attribution
+does not imply an active fork relationship or upstream tracking workflow.
 
 ## Community And Governance
 

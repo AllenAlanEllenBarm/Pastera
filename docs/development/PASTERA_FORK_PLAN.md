@@ -1,26 +1,18 @@
-# Pastera 派生版开发计划
+# Pastera 独立产品路线与历史迁移边界
 
-## 上游方向
+## 仓库身份
 
-本派生版跟随 2026 年 5 月恢复推进的上游开发方向：
+`pastera-app/Pastera` 已脱离 `Clipy/Clipy` fork 网络，是 Pastera 唯一产品仓库。
+仓库不再设置或跟踪 `upstream` remote，也不以 Clipy 的 PR、分支或发布节奏作为
+开发输入。历史 Git 提交、原作者版权和 MIT 许可继续完整保留。
 
-- 支持 Xcode 26 和现代 macOS 构建环境。
-- 使用 Swift Package Manager 作为依赖管理工具。
-- 使用 Swift Testing 编写自动化测试。
-- 使用 SQLiteData / GRDB 作为持久化基础。
-- 清理 Apple Silicon、通用二进制和发布签名相关工作。
+## 产品方向
 
-当前派生功能的主要上游基线是 PR #615：“Migrate pasteboard histories to
-SQLiteData”。在该工作合并到 `upstream/develop` 之前，本地功能开发应从
-`refs/pull/615/head` 集成，并将新的历史记录行为保持在
-`PasteboardHistoryRepository` / `PasteboardContent` 模型之上。
-
-## 派生版目标
-
-1. 增加历史搜索能力，让搜索可以覆盖菜单显示数量之外的已存储历史记录。
-2. 修复并保持基于现代 pasteboard 类型的图片复制和粘贴行为。
-3. 通过用户选择的 OneDrive 文件夹，增加可选的历史记录和片段同步能力。
-4. 保持菜单弹窗和剪贴板监听轻量。
+1. macOS 与 Windows 都提供完整的 Pastera 核心能力，不将 Windows 缩减为纯文本版本。
+2. 两端使用原生 UI 和系统 API，共享产品语义、同步协议、KDBX 和无隐私测试样本。
+3. 历史存储与菜单显示数量分离，搜索覆盖已存储数据而非仅可见行。
+4. OneDrive 只使用本地同步文件夹，云传输由 OneDrive 桌面客户端负责。
+5. SQLiteData/SQLite 是当前事实存储；Realm 仅允许作为一次性只读导入通道。
 
 ## 未来目标功能
 
@@ -28,16 +20,16 @@ SQLiteData”。在该工作合并到 `upstream/develop` 之前，本地功能�
   OCR 索引，支持按识别文本搜索图片。
 - 截图工作流：增加截图捕获、截图 OCR 和截图翻译能力。
 - 脚本功能：支持用户自定义脚本动作，用于处理剪贴板内容、片段和常用自动化流程。
-- 密码箱：已实现仅限本机的 macOS Keychain 轻量密码箱。密码箱数据与普通
-  剪贴板历史隔离，不会写入 SQLite、OneDrive 同步导出、仓库文档或日志；
-  跨设备同步、自动填充和浏览器扩展仍属于后续范围。
+- 密码箱：KDBX 是跨平台事实来源；macOS 系统认证和 Windows Hello/DPAPI
+  只能作为本机快捷解锁层，秘密不得写入普通历史、日志或测试样本。
 - 收藏：支持将重要历史记录或片段标记为收藏，方便快速找回。
 
 ## Windows 移植
 
-Windows 实现交接以 `docs/development/WINDOWS_PORTING_GUIDE.md` 作为迁移入口。
-该文档总结了 `v1.2.2-beta..develop` 的工作、跨平台 OneDrive 同步契约、
-macOS 到 Windows 的替换点，以及 Windows 客户端的建议实现顺序。
+Windows 实现交接以 `docs/development/WINDOWS_PORTING_GUIDE.md` 作为唯一入口。
+Windows 11 x64 客户端使用 C#、WinUI 3、Windows App SDK 和 SQLite，在
+`windows/` 中实现；共享协议和无隐私样本后续进入 `contracts/` 与
+`test-fixtures/`。
 
 ## 存储策略
 
@@ -48,11 +40,11 @@ macOS 到 Windows 的替换点，以及 Windows 客户端的建议实现顺序�
 - 搜索读取已存储的历史记录集合，而不只是当前可见的菜单项。
 - 大体积资源必须设置同步边界，避免造成过多 OneDrive 变更和冲突。
 
-## 当前本地状态
+## 历史来源与依赖清理
 
-本地开发分支会有意保留 `Configurations/CodeSigning.xcconfig` 中的
-ad-hoc 签名 include，用于在没有维护者签名证书时完成构建。本地 `.DS_Store`
-可能会出现在工作区中，应保持未跟踪状态。
+仍源自 Clipy 的文件保留原版权和 MIT 条款，但不得把历史来源描述成当前产品
+上下游关系。生产依赖需要逐步移除或替换 `github.com/Clipy/*` 包；在完成替换
+前，每项依赖必须有明确调用点和迁移处置记录。
 
 ## V1 不包含范围
 

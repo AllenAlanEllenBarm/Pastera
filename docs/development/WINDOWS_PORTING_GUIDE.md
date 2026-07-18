@@ -2,14 +2,19 @@
 
 ## Scope
 
-This guide summarizes the macOS fork work from `v1.2.2-beta..develop`, with
-the current public target being `v2.0.1-beta`. It is written for a future Codex
-or developer working on a Windows version of Pastera.
+This guide starts from the standalone macOS baseline tagged
+`pastera-pre-standalone`, with the current public target being `v2.0.1-beta`.
+It is the implementation entrypoint for the native Windows version of Pastera.
 
 Treat the macOS code as the behavior reference, not as a framework template.
-Windows should reuse the product contracts, sync protocol, data model, and user
-flows, while replacing AppKit, NSPasteboard, Accessibility, Sparkle, and macOS
-packaging with native Windows equivalents.
+Windows must reproduce all core product capabilities through native Windows
+equivalents. It should reuse the product contracts, sync protocol, data model,
+restricted JavaScript `transform(clip)` behavior, and user flows, while replacing
+AppKit, NSPasteboard, Accessibility, Sparkle, and macOS packaging.
+
+Windows V1 targets Windows 11 x64 with C#, WinUI 3, Windows App SDK, and SQLite.
+KDBX remains the password-vault source of truth; Windows Hello and DPAPI may
+protect a local convenience key but must not create a Windows-only vault format.
 
 Do not write local credentials, signing secrets, sync passphrases, OAuth
 material, or machine-specific credential-store values into repository docs,
@@ -20,8 +25,9 @@ issues, commits, or chat.
 - History search is now a first-class workflow. Menu rendering stays bounded,
   while stored history can be searched beyond the visible menu limit.
 - History records support text, URL-like text, images, files, PDF, RTF/RTFD,
-  thumbnails, and asset-backed pasteback on macOS. Windows should start with
-  text and URL text, then add binary asset pasteback behind a clear type map.
+  thumbnails, and asset-backed pasteback. All are Windows V1 parity targets;
+  implementation may be staged internally, but release acceptance cannot omit
+  these core types.
 - Snippets use SQLiteData-backed folders and items, with shortcut-oriented
   browsing, duplicate cleanup, and sync deletion tombstones.
 - OneDrive sync is file-folder based. Pastera writes ordinary files under
@@ -56,7 +62,13 @@ issues, commits, or chat.
    - Preserve snippet folders, item order, enabled state, and deletion
      tombstones.
 
-4. Implement the OneDrive folder sync protocol.
+4. Implement scripts and the KDBX password vault.
+   - Preserve the restricted JavaScript `transform(clip)` contract without
+     substituting PowerShell or allowing arbitrary process execution.
+   - Support KDBX folders, entries, reveal/copy/paste, editing, deletion, search,
+     and local quick unlock through Windows-native authentication.
+
+5. Implement the OneDrive folder sync protocol.
    - Locate the Windows OneDrive root, then write the same
      `<OneDrive>/Pastera/sync/` protocol tree as macOS.
    - Implement export/import with local test fixtures before connecting it to
@@ -64,12 +76,12 @@ issues, commits, or chat.
    - Keep OneDrive cloud status wording conservative: local file writes are not
      proof that the cloud upload has finished.
 
-5. Add global shortcuts and optional paste injection.
+6. Add global shortcuts and optional paste injection.
    - Register shortcuts independently from clipboard capture.
    - If Windows blocks injection or the target app rejects paste, report that
      state without losing the selected history or snippet.
 
-6. Add installer, updater, and first-run guidance.
+7. Add installer, updater, and first-run guidance.
    - Windows should not copy DMG, PKG, Homebrew, or Sparkle mechanics.
    - The equivalent deliverable is an installer that places the app in a stable
      location, configures startup/update expectations, and opens a setup guide
@@ -183,6 +195,12 @@ Start with these files when porting behavior:
   paste toggle, and blocked-input reporting.
 - `pastera/Sources/Services/HotKeyService.swift`: shortcut registration,
   remote-session handling, and snippet/history shortcut wiring.
+- `pastera/Sources/Services/ClipboardScriptCoordinator.swift` and script
+  preference controllers: restricted JavaScript transforms, triggers, ordering,
+  templates, testing, and manual shortcuts.
+- `pastera/Sources/Services/KDBXPasswordVaultStore.swift` and
+  `PasswordVaultUIController.swift`: KDBX persistence, folder/entry behavior,
+  authentication boundaries, and secure clipboard actions.
 - `pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift`:
   current sync settings information architecture and OneDrive status wording.
 - `pastera/Sources/Services/InstallationLocationService.swift` and
@@ -214,6 +232,10 @@ Use the tests as executable behavior notes:
   `schemaVersion=3` snippet snapshot.
 - File asset sync skips unsupported or oversized assets without failing text
   history or snippet sync.
+- Script transforms preserve the restricted `transform(clip)` contract and do
+  not expose PowerShell or unrestricted OS execution.
+- KDBX databases created or updated by either platform remain readable by the
+  other platform; Windows Hello/DPAPI data is only a local unlock convenience.
 - Sync status never claims cloud completion based only on local file writes.
 - Installer/update work is kept separate from clipboard correctness and sync
   correctness.

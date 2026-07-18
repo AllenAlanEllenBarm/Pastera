@@ -106,13 +106,13 @@ SQLiteData 是当前事实存储。Realm 只读取旧数据库并导入尚未迁
 - Consumes: verified Task 1 commit and current `origin` state.
 - Produces: a local recovery bundle, metadata snapshot and pushed annotated tag.
 
-- [ ] Confirm `git status --short` contains only intentional local-only files.
-- [ ] Fetch all `origin` refs and record the exact `develop` commit.
-- [ ] Create a full `git bundle` containing all refs and verify it with `git bundle verify`.
-- [ ] Export repository identity, branches, tags, releases, rulesets, Actions workflows, issues and pull request counts to the local backup directory without credentials.
-- [ ] Create annotated tag `pastera-pre-standalone` at the verified baseline commit.
-- [ ] Push `develop` and `pastera-pre-standalone` to `origin`.
-- [ ] Verify remote branch and tag SHAs with `git ls-remote`.
+- [x] Confirm `git status --short` contains only intentional local-only files.
+- [x] Fetch all `origin` refs and record the exact `develop` commit.
+- [x] Create a full `git bundle` containing all refs and verify it with `git bundle verify`.
+- [x] Export repository identity, branches, tags, releases, rulesets, Actions workflows, issues and pull request counts to the local backup directory without credentials.
+- [x] Create annotated tag `pastera-pre-standalone` at the verified baseline commit.
+- [x] Push `develop` and `pastera-pre-standalone` to `origin`.
+- [x] Verify remote branch and tag SHAs with `git ls-remote`.
 
 ### Task 3: 解除 GitHub fork 网络身份
 
@@ -127,12 +127,12 @@ SQLiteData 是当前事实存储。Realm 只读取旧数据库并导入尚未迁
 - Consumes: Task 2 recovery artifacts and pushed tag.
 - Produces: `pastera-app/Pastera` with `isFork=false`, no `parent`, and no local `upstream` remote.
 
-- [ ] Reconfirm the repository is public, below 1 GB, has no child forks, and the backup bundle verifies.
-- [ ] Use GitHub Settings → General → Danger Zone → `Leave fork network`; this irreversible action requires a final user confirmation immediately before clicking.
-- [ ] Poll `gh repo view pastera-app/Pastera --json isFork,parent` until it reports `false` and `null`.
-- [ ] Verify `develop`, tags, releases and Actions still exist; compare against the Task 2 metadata snapshot.
-- [ ] Remove the local `upstream` remote only after remote identity verification succeeds.
-- [ ] Rewrite repository docs from “fork/upstream alignment” to “independent Pastera product”; retain historical attribution in LICENSE/NOTICE.
+- [x] Reconfirm the repository is public, below 1 GB, has no child forks, and the backup bundle verifies.
+- [x] Use GitHub Settings → General → Danger Zone → `Leave fork network`; this irreversible action requires a final user confirmation immediately before clicking.
+- [x] Poll `gh repo view pastera-app/Pastera --json isFork,parent` until it reports `false` and `null`.
+- [x] Verify `develop`, tags, releases and Actions still exist; compare against the Task 2 metadata snapshot.
+- [x] Remove the local `upstream` remote only after remote identity verification succeeds.
+- [x] Rewrite repository docs from “fork/upstream alignment” to “independent Pastera product”; retain historical attribution in LICENSE/NOTICE.
 - [ ] Commit as `chore(repo): 将 Pastera 转为独立仓库` and push `develop`.
 
 ### Task 4: 建立许可证和依赖审计边界
@@ -278,6 +278,8 @@ Rollback points:
 - 已收敛当前 macOS 工作区：偏好设置契约更新为七页，UI-only 测试显式注入历史仓库和内存数据库，新脚本设置文案补齐全部支持语言。
 - `PasteService` 新增可注入 pasteboard provider，生产默认仍使用系统剪贴板；真实 KDBX/AppKit 测试使用独立命名剪贴板，并固定 Secure Event Input 状态，消除全量并行污染。
 - 当前功能源码、测试、KDBX store、脚本和 UI 改动作为独立化前 Pastera 基线统一收敛。
+- 已在 `.build/repository-backups/` 生成并验证完整 Git bundle 和 GitHub 元数据快照，推送 `pastera-pre-standalone` annotated tag。
+- GitHub 仓库已解除 fork 网络身份；文档改为独立 Pastera 产品边界，本地仅保留 `origin` remote。
 
 ### Plan Deviations
 
@@ -295,16 +297,19 @@ Rollback points:
 - 偏好窗口聚焦回归：12 tests / 1 suite 通过；相关 KDBX 与粘贴聚焦回归通过。
 - 默认全量并行回归：660 tests / 75 suites 通过，`** TEST SUCCEEDED **`。
 - `./script/install_local.sh`：构建成功并安装到 `/Applications/Pastera.app`；运行进程 PID 54227，Bundle ID `com.pastera-app.Pastera.debug`，版本 `2.0.1-beta`，adhoc 签名。
+- 远端身份：`isFork=false`、`parent=null`、public、默认分支 `develop`。
+- 远端完整性：`develop` 和 `pastera-pre-standalone^{}` 均指向 `509223ce063b9bc9545460adf94a69ce69265f45`；2 branches、3 tags、2 releases、4 workflows、0 issues、1 pull request。
+- 恢复证据：bundle SHA-256 `ec1a5b28e05c5494e02e42acd7dcd113e3f77a6e877986f6ae6c9102403f6f2c`，`git bundle verify` 通过。
 
 ### Remaining Risks
 
 - Finder/Notes/Preview 的图片与文件粘贴，以及 OneDrive 双配置人工矩阵尚未执行。
-- Task 1 提交完成后才可作为后续独立化检查点；Windows 最终冻结基线仍需 Tasks 2–7。
-- GitHub fork 关系尚未解除。
+- Windows 最终冻结基线仍需 Tasks 4–7。
+- GitHub fork 身份已解除且不可恢复；代码与 refs 可通过本地 bundle 和基线 tag 恢复。
 
 ### Follow-ups
 
-- 提交 Task 1 基线，然后执行 Task 2 的 bundle、GitHub 元数据快照、tag、push 和远端 SHA 核验。
+- 提交并推送 Task 3 文档收尾，然后开始逐项替换 Clipy 生产依赖。
 
 ### ZenTao Closeout
 
