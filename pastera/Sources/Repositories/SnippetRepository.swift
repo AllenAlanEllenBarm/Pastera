@@ -184,6 +184,7 @@ protocol SnippetRepositoryProtocol {
     func updateFolderTitle(_ id: SnippetFolder.ID, title: String) -> Bool
     func updateFolderIsEnabled(_ id: SnippetFolder.ID, isEnabled: Bool)
     func updateFolderIndexes(_ folderIDs: [SnippetFolder.ID])
+    func reorderFolders(_ folderIDs: [SnippetFolder.ID]) -> Bool
     func deleteFolder(_ id: SnippetFolder.ID)
 
     func fetchSnippet(id: Snippet.ID) -> Snippet?
@@ -194,6 +195,11 @@ protocol SnippetRepositoryProtocol {
     func updateSnippetIsEnabled(_ id: Snippet.ID, isEnabled: Bool)
     func updateSnippetIndexes(_ snippetIDs: [Snippet.ID])
     func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID])
+    func moveSnippet(
+        _ id: Snippet.ID,
+        to folderID: SnippetFolder.ID,
+        orderedSnippetIDsByFolder: [SnippetFolder.ID: [Snippet.ID]]
+    ) -> Bool
     func deleteSnippet(_ id: Snippet.ID)
 }
 
@@ -207,6 +213,14 @@ extension SnippetRepositoryProtocol {
     func fetchFolders() -> [SnippetFolder] {
         fetchFolderDetails().map(\.folder)
     }
+
+    func reorderFolders(_ folderIDs: [SnippetFolder.ID]) -> Bool { false }
+
+    func moveSnippet(
+        _ id: Snippet.ID,
+        to folderID: SnippetFolder.ID,
+        orderedSnippetIDsByFolder: [SnippetFolder.ID: [Snippet.ID]]
+    ) -> Bool { false }
 
 }
 
@@ -591,6 +605,77 @@ final class SnippetRepository: SnippetRepositoryProtocol {
                 try Snippet.delete().where { $0.id.eq(id) }.execute(database)
             }
         }
+    }
+}
+
+extension SnippetRepository {
+    func reorderFolders(_ folderIDs: [SnippetFolder.ID]) -> Bool {
+        withErrorReporting {
+            try database.write { database in
+                let existingIDs = try SnippetFolder.all.fetchAll(database).map(\.id)
+                guard folderIDs.count == existingIDs.count, Set(folderIDs) == Set(existingIDs) else {
+                    return false
+                }
+                try folderIDs.enumerated().forEach { index, folderID in
+                    try SnippetFolder.where { $0.id.eq(folderID) }
+                        .update {
+                            $0.index = index
+                            $0.updatedAt = currentUnixTime()
+                            $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                        }
+                        .execute(database)
+                }
+                return true
+            }
+        } ?? false
+    }
+
+    func moveSnippet(
+        _ id: Snippet.ID,
+        to folderID: SnippetFolder.ID,
+        orderedSnippetIDsByFolder: [SnippetFolder.ID: [Snippet.ID]]
+    ) -> Bool {
+        withErrorReporting {
+            try database.write { database in
+                guard let movingSnippet = try Snippet.find(id).fetchOne(database),
+                      try SnippetFolder.find(folderID).fetchOne(database) != nil else {
+                    return false
+                }
+                let sourceFolderID = movingSnippet.folderID
+                let affectedFolderIDs: Set<SnippetFolder.ID> = [sourceFolderID, folderID]
+                guard Set(orderedSnippetIDsByFolder.keys) == affectedFolderIDs else { return false }
+                let existingSnippets = try Snippet.all.fetchAll(database)
+                for affectedFolderID in affectedFolderIDs {
+                    guard let orderedIDs = orderedSnippetIDsByFolder[affectedFolderID],
+                          orderedIDs.count == Set(orderedIDs).count else {
+                        return false
+                    }
+                    var expectedIDs = Set(existingSnippets.filter { $0.folderID == affectedFolderID }.map(\.id))
+                    if sourceFolderID == affectedFolderID { expectedIDs.remove(id) }
+                    if folderID == affectedFolderID { expectedIDs.insert(id) }
+                    guard Set(orderedIDs) == expectedIDs else { return false }
+                }
+                try Snippet.where { $0.id.eq(id) }
+                    .update {
+                        $0.folderID = folderID
+                        $0.updatedAt = currentUnixTime()
+                        $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                    }
+                    .execute(database)
+                for orderedIDs in orderedSnippetIDsByFolder.values {
+                    try orderedIDs.enumerated().forEach { index, snippetID in
+                        try Snippet.where { $0.id.eq(snippetID) }
+                            .update {
+                                $0.index = index
+                                $0.updatedAt = currentUnixTime()
+                                $0.lastModifiedDeviceID = CPYUtilities.deviceID
+                            }
+                            .execute(database)
+                    }
+                }
+                return true
+            }
+        } ?? false
     }
 }
 

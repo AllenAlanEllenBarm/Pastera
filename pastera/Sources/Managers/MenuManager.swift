@@ -516,6 +516,16 @@ extension MenuManager {
                 deleteSnippet: { [weak self] snippetID in
                     self?.snippetRepository.deleteSnippet(snippetID)
                 },
+                reorderFolders: { [weak self] folderIDs in
+                    self?.snippetRepository.reorderFolders(folderIDs) ?? false
+                },
+                moveSnippet: { [weak self] snippetID, folderID, orders in
+                    self?.snippetRepository.moveSnippet(
+                        snippetID,
+                        to: folderID,
+                        orderedSnippetIDsByFolder: orders
+                    ) ?? false
+                },
                 folderKeyCombo: { folderID in
                     AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folderID.uuidString)
                 },
@@ -530,6 +540,19 @@ extension MenuManager {
                 }
             ),
             passwordVaultDataSource: MainMenuPasswordVaultDataSource(
+                state: { [weak self] in self?.passwordVaultUIController.state ?? .failed("unavailable") },
+                checkQuickUnlockAvailability: { [weak self] completion in
+                    self?.passwordVaultUIController.checkQuickUnlockAvailability(completion: completion)
+                },
+                createDatabase: { [weak self] password, completion in
+                    self?.passwordVaultUIController.createDatabase(masterPassword: password, completion: completion)
+                },
+                unlock: { [weak self] password, completion in
+                    self?.passwordVaultUIController.unlock(masterPassword: password, completion: completion)
+                },
+                unlockWithQuickKey: { [weak self] completion in
+                    self?.passwordVaultUIController.unlockWithQuickKey(completion: completion)
+                },
                 fetchFolders: { [weak self] in
                     try self?.passwordVaultUIController.folders() ?? []
                 },
@@ -538,6 +561,12 @@ extension MenuManager {
                 },
                 copyPassword: { [weak self] id, completion in
                     self?.passwordVaultUIController.copyPassword(id: id, completion: completion)
+                },
+                pasteUsername: { [weak self] id, context, completion in
+                    self?.passwordVaultUIController.pasteUsername(id: id, targetContext: context, completion: completion)
+                },
+                pastePassword: { [weak self] id, context, completion in
+                    self?.passwordVaultUIController.pastePassword(id: id, targetContext: context, completion: completion)
                 },
                 loadDraft: { [weak self] id, completion in
                     self?.passwordVaultUIController.loadDraft(id: id, completion: completion)
@@ -551,22 +580,33 @@ extension MenuManager {
                 deleteEntry: { [weak self] id, completion in
                     self?.passwordVaultUIController.deleteEntry(id: id, completion: completion)
                 },
-                createFolder: { [weak self] name in
-                    guard let self else { throw PasswordVaultError.keychainUnavailable }
-                    return try self.passwordVaultUIController.createFolder(name: name)
+                createFolder: { _ in throw PasswordVaultError.keychainUnavailable },
+                renameFolder: { _, _ in throw PasswordVaultError.keychainUnavailable },
+                deleteFolder: { _ in throw PasswordVaultError.keychainUnavailable },
+                createFolderAsync: { [weak self] name, completion in
+                    self?.passwordVaultUIController.createFolder(name: name, completion: completion)
                 },
-                renameFolder: { [weak self] id, name in
-                    guard let self else { throw PasswordVaultError.keychainUnavailable }
-                    return try self.passwordVaultUIController.renameFolder(id: id, name: name)
+                renameFolderAsync: { [weak self] id, name, completion in
+                    self?.passwordVaultUIController.renameFolder(id: id, name: name, completion: completion)
                 },
-                deleteFolder: { [weak self] id in
-                    guard let self else { throw PasswordVaultError.keychainUnavailable }
-                    try self.passwordVaultUIController.deleteFolder(id: id)
+                deleteFolderAsync: { [weak self] id, completion in
+                    self?.passwordVaultUIController.deleteFolder(id: id, completion: completion)
+                },
+                reorderFolders: { [weak self] folderIDs, completion in
+                    self?.passwordVaultUIController.reorderFolders(folderIDs, completion: completion)
+                },
+                moveEntry: { [weak self] id, folderID, orders, completion in
+                    self?.passwordVaultUIController.moveEntry(
+                        id: id,
+                        to: folderID,
+                        orderedEntryIDsByFolder: orders,
+                        completion: completion
+                    )
                 }
             ),
             oneDriveStatusService: AppEnvironment.current.oneDriveProcessStatusService,
             onOpenPreferences: {
-                NSApp.sendAction(#selector(AppDelegate.showPreferenceWindow), to: nil, from: nil)
+                (NSApp.delegate as? AppDelegate)?.showPreferenceWindow()
             },
             onCloseChildPanels: {}
         )
@@ -853,6 +893,10 @@ extension MenuManager {
                 self?.mainMenuPanelController?.beginEditingHistory(historyDetail.history.id)
             }
             : nil
+        let scriptActions = makeHistoryScriptActions(
+            historyID: historyDetail.history.id,
+            layoutStyle: layoutStyle
+        )
         return HistoryMenuRowView(
             title: presentation.title,
             image: presentation.image,
@@ -861,8 +905,69 @@ extension MenuManager {
             layoutStyle: layoutStyle,
             onEdit: onEdit,
             onDelete: { [weak self] in self?.deleteHistory(historyDetail.history.id) },
+            scriptActions: scriptActions,
             onConfirm: onConfirm
         )
+    }
+
+    private func makeHistoryScriptActions(
+        historyID: PasteboardHistory.ID,
+        layoutStyle: HistoryMenuRowView.LayoutStyle
+    ) -> [HistoryScriptAction] {
+        guard let text = editableTextHistoryContent(historyID) else { return [] }
+        let coordinator = AppEnvironment.current.clipboardScriptCoordinator
+        return coordinator.availableHistoryScripts().map { script in
+            let target = layoutStyle == .compactMainMenu
+                ? mainMenuPanelController?.childPasteTargetContext
+                : historyPanelController?.childPasteTargetContext
+            let closeSurface = { [weak self] in
+                if layoutStyle == .compactMainMenu {
+                    self?.mainMenuPanelController?.close()
+                } else {
+                    self?.historyPanelController?.close()
+                }
+            }
+            let perform: (@escaping (String) -> Void, @escaping (ScriptExecutionError) -> Void) -> Void = { completion, failure in
+                Task {
+                    let outcome = await coordinator.transformHistoryText(
+                        text,
+                        using: script.id,
+                        sourceAppBundleIdentifier: target?.bundleIdentifier
+                    )
+                    let output: String
+                    switch outcome {
+                    case let .transformed(transformed): output = transformed
+                    case .unchanged: output = text
+                    case let .failed(error):
+                        await MainActor.run { failure(error) }
+                        return
+                    }
+                    await MainActor.run { completion(output) }
+                }
+            }
+            return HistoryScriptAction(
+                id: script.id,
+                title: script.name,
+                copy: {
+                    closeSurface()
+                    perform({ output in
+                        coordinator.writeHistoryTransformResult(output)
+                        HistoryScriptFeedbackPresenter.shared.show(.copied(scriptName: script.name))
+                    }, { error in
+                        HistoryScriptFeedbackPresenter.shared.show(.failed(scriptName: script.name, error: error))
+                    })
+                },
+                paste: {
+                    closeSurface()
+                    perform({ output in
+                        AppEnvironment.current.pasteService.pasteResolvedScriptText(output, restoring: target)
+                        HistoryScriptFeedbackPresenter.shared.show(.pasted(scriptName: script.name))
+                    }, { error in
+                        HistoryScriptFeedbackPresenter.shared.show(.failed(scriptName: script.name, error: error))
+                    })
+                }
+            )
+        }
     }
 
     func makeHistoryItemPresentation(

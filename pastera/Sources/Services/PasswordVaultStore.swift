@@ -1,5 +1,277 @@
+import CryptoKit
+import AppKit
 import Foundation
+import KDBXKit
+import LocalAuthentication
 import Security
+
+enum PasswordVaultState: Equatable {
+    case notConfigured
+    case locked
+    case unlocking
+    case unlocked
+    case readOnlyWarning(String)
+    case failed(String)
+}
+
+struct PasswordVaultViewState: Equatable {
+    var state: PasswordVaultState
+    var folders: [PasswordVaultFolder]
+    var entries: [PasswordVaultEntry]
+    var isBusy: Bool
+    var error: PasswordVaultError?
+
+    init(
+        state: PasswordVaultState,
+        folders: [PasswordVaultFolder] = [],
+        entries: [PasswordVaultEntry] = [],
+        isBusy: Bool = false,
+        error: PasswordVaultError? = nil
+    ) {
+        self.state = state
+        self.folders = folders
+        self.entries = entries
+        self.isBusy = isBusy
+        self.error = error
+    }
+}
+
+final class VaultSessionController {
+    static let allowedTimeouts: [TimeInterval] = [60, 300, 900, 1_800]
+
+    private let timeoutProvider: () -> TimeInterval
+    private let lockAction: () -> Void
+    private var lockWorkItem: DispatchWorkItem?
+    private var observers = [NSObjectProtocol]()
+
+    init(
+        timeoutProvider: @escaping () -> TimeInterval = {
+            let value = UserDefaults.standard.double(forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
+            return VaultSessionController.allowedTimeouts.contains(value) ? value : 300
+        },
+        notificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        lockAction: @escaping () -> Void
+    ) {
+        self.timeoutProvider = timeoutProvider
+        self.lockAction = lockAction
+        observers = [
+            notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.lockNow()
+            },
+            notificationCenter.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.lockNow()
+            },
+            NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.lockNow()
+            }
+        ]
+    }
+
+    deinit {
+        lockWorkItem?.cancel()
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        observers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+    }
+
+    func touch() {
+        lockWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.lockNow() }
+        lockWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeoutProvider(), execute: item)
+    }
+
+    func cancel() {
+        lockWorkItem?.cancel()
+        lockWorkItem = nil
+    }
+
+    func lockNow() {
+        cancel()
+        lockAction()
+    }
+}
+
+final class VaultFileCoordinator {
+    static func vaultURL(for syncRootURL: URL) -> URL {
+        syncRootURL
+            .appendingPathComponent("PasteraSync", isDirectory: true)
+            .appendingPathComponent("vault", isDirectory: true)
+            .appendingPathComponent("PasteraVault.kdbx", isDirectory: false)
+    }
+
+    private let fileManager: FileManager
+
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+    }
+
+    func read(from url: URL) throws -> Data {
+        guard fileManager.fileExists(atPath: url.path) else { throw PasswordVaultError.databaseNotConfigured }
+        return try Data(contentsOf: url)
+    }
+
+    func revision(of data: Data) -> Data {
+        Data(SHA256.hash(data: data))
+    }
+
+    func write(_ data: Data, to url: URL) throws {
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: url.path) {
+            let backupURL = url.appendingPathExtension("bak")
+            if fileManager.fileExists(atPath: backupURL.path) {
+                try fileManager.removeItem(at: backupURL)
+            }
+            try fileManager.copyItem(at: url, to: backupURL)
+        }
+        try data.write(to: url, options: .atomic)
+    }
+
+    func conflictFiles(alongside url: URL) throws -> [URL] {
+        let directory = url.deletingLastPathComponent()
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        return try fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ).filter {
+            $0 != url && $0.pathExtension.lowercased() == "kdbx"
+        }
+    }
+
+    func archiveResolvedConflict(_ conflictURL: URL, alongside vaultURL: URL) throws {
+        let resolved = vaultURL.deletingLastPathComponent()
+            .appendingPathComponent("conflicts", isDirectory: true)
+            .appendingPathComponent("resolved", isDirectory: true)
+        try fileManager.createDirectory(at: resolved, withIntermediateDirectories: true)
+        var destination = resolved.appendingPathComponent(conflictURL.lastPathComponent)
+        if fileManager.fileExists(atPath: destination.path) {
+            destination = resolved.appendingPathComponent("\(UUID().uuidString)-\(conflictURL.lastPathComponent)")
+        }
+        try fileManager.moveItem(at: conflictURL, to: destination)
+    }
+}
+
+struct KDBXVaultMergeResult {
+    let content: KDBXContent
+    let hasConflictCopies: Bool
+}
+
+final class KDBXVaultMerger {
+    func merge(local: KDBXContent, remote: KDBXContent) -> KDBXVaultMergeResult {
+        var output = remote
+        var hasConflicts = false
+        output.database.root.group = mergeGroup(
+            local.database.root.group,
+            remote.database.root.group,
+            hasConflicts: &hasConflicts
+        )
+        let tombstones = (local.database.root.deletedObjects + remote.database.root.deletedObjects).reduce(into: [UUID: KDBX.DeletedObject]()) {
+            if ($0[$1.uuid]?.deletionTime ?? .distantPast) < $1.deletionTime { $0[$1.uuid] = $1 }
+        }
+        output.database.root.deletedObjects = Array(tombstones.values)
+        removeDeleted(from: &output.database.root.group, tombstones: tombstones)
+        return KDBXVaultMergeResult(content: output, hasConflictCopies: hasConflicts)
+    }
+
+    private func mergeGroup(
+        _ local: KDBX.Group,
+        _ remote: KDBX.Group,
+        hasConflicts: inout Bool
+    ) -> KDBX.Group {
+        var output = newer(local, remote)
+        output.entries = mergeEntries(local.entries, remote.entries, hasConflicts: &hasConflicts)
+        var groups = Dictionary(uniqueKeysWithValues: remote.groups.map { ($0.uuid, $0) })
+        for group in local.groups {
+            if let remoteGroup = groups[group.uuid] {
+                groups[group.uuid] = mergeGroup(group, remoteGroup, hasConflicts: &hasConflicts)
+            } else {
+                groups[group.uuid] = group
+            }
+        }
+        output.groups = Array(groups.values)
+        return output
+    }
+
+    private func mergeEntries(
+        _ local: [KDBX.Entry],
+        _ remote: [KDBX.Entry],
+        hasConflicts: inout Bool
+    ) -> [KDBX.Entry] {
+        var entries = Dictionary(uniqueKeysWithValues: remote.map { ($0.uuid, $0) })
+        for entry in local {
+            guard let remoteEntry = entries[entry.uuid] else {
+                entries[entry.uuid] = entry
+                continue
+            }
+            guard !sameEntryContent(entry, remoteEntry) else { continue }
+            let localTime = entry.times?.lastModificationTime ?? .distantPast
+            let remoteTime = remoteEntry.times?.lastModificationTime ?? .distantPast
+            if localTime == remoteTime {
+                var conflict = entry
+                conflict.uuid = UUID()
+                setTitle(on: &conflict, title: "\(title(of: entry)) (Conflict)")
+                entries[conflict.uuid] = conflict
+                hasConflicts = true
+            } else {
+                var winner = localTime > remoteTime ? entry : remoteEntry
+                var loser = localTime > remoteTime ? remoteEntry : entry
+                loser.history = []
+                winner.history = Array((winner.history + [loser]).suffix(10))
+                entries[entry.uuid] = winner
+            }
+        }
+        return Array(entries.values)
+    }
+
+    private func sameEntryContent(_ lhs: KDBX.Entry, _ rhs: KDBX.Entry) -> Bool {
+        lhs.iconID == rhs.iconID &&
+            lhs.customIconUUID == rhs.customIconUUID &&
+            lhs.foregroundColor == rhs.foregroundColor &&
+            lhs.backgroundColor == rhs.backgroundColor &&
+            lhs.overrideURL == rhs.overrideURL &&
+            lhs.qualityCheck == rhs.qualityCheck &&
+            lhs.tags == rhs.tags &&
+            lhs.previousParentGroup == rhs.previousParentGroup &&
+            lhs.strings == rhs.strings &&
+            lhs.binaries == rhs.binaries &&
+            lhs.autoType == rhs.autoType &&
+            lhs.customData == rhs.customData
+    }
+
+    private func newer(_ local: KDBX.Group, _ remote: KDBX.Group) -> KDBX.Group {
+        (local.times?.lastModificationTime ?? .distantPast) > (remote.times?.lastModificationTime ?? .distantPast)
+            ? local : remote
+    }
+
+    private func removeDeleted(
+        from group: inout KDBX.Group,
+        tombstones: [UUID: KDBX.DeletedObject]
+    ) {
+        group.entries.removeAll { entry in
+            guard let deletion = tombstones[entry.uuid] else { return false }
+            return deletion.deletionTime > (entry.times?.lastModificationTime ?? .distantPast)
+        }
+        group.groups.removeAll { child in
+            guard let deletion = tombstones[child.uuid] else { return false }
+            return deletion.deletionTime > (child.times?.lastModificationTime ?? .distantPast)
+        }
+        for index in group.groups.indices {
+            removeDeleted(from: &group.groups[index], tombstones: tombstones)
+        }
+    }
+
+    private func title(of entry: KDBX.Entry) -> String {
+        entry.strings.first(where: { $0.key == "Title" })?.value.revealedString ?? "Password"
+    }
+
+    private func setTitle(on entry: inout KDBX.Entry, title: String) {
+        if let index = entry.strings.firstIndex(where: { $0.key == "Title" }) {
+            entry.strings[index].value = .regular(title)
+        } else {
+            entry.strings.append(.init(key: "Title", value: .regular(title)))
+        }
+    }
+}
 
 struct PasswordVaultEntry: Codable, Equatable, Identifiable {
     let id: UUID
@@ -61,6 +333,7 @@ struct PasswordVaultMetadata: Codable, Equatable {
 
 enum PasswordVaultError: Error, Equatable {
     case invalidTitle
+    case invalidUsername
     case invalidPassword
     case entryNotFound
     case userCancelled
@@ -71,19 +344,45 @@ enum PasswordVaultError: Error, Equatable {
     case folderNotFound
     case folderNotEmpty
     case keychainUnavailable
+    case databaseNotConfigured
+    case vaultLocked
+    case wrongMasterPassword
+    case unsupportedFormat
+    case cloudUnavailable
+    case externalConflict
+    case saveFailed
 }
 
 protocol PasswordVaultStore {
+    var state: PasswordVaultState { get }
+    var canQuickUnlock: Bool { get }
+    func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws
+    func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws
+    func unlockWithQuickKey(reason: String) throws
+    func lock()
+    func reloadAndMerge() throws
     func listFolders() throws -> [PasswordVaultFolder]
     func listEntries() throws -> [PasswordVaultEntry]
     func createFolder(name: String) throws -> PasswordVaultFolder
     func renameFolder(id: UUID, name: String) throws -> PasswordVaultFolder
     func deleteFolder(id: UUID) throws
+    func reorderFolders(_ folderIDs: [UUID]) throws
     func moveEntry(id: UUID, to folderID: UUID) throws
+    func moveEntry(id: UUID, to folderID: UUID, orderedEntryIDsByFolder: [UUID: [UUID]]) throws
     func create(_ draft: PasswordVaultDraft) throws -> PasswordVaultEntry
     func update(id: UUID, draft: PasswordVaultDraft) throws -> PasswordVaultEntry
     func revealPassword(id: UUID, reason: String) throws -> String
     func delete(id: UUID, reason: String) throws
+}
+
+extension PasswordVaultStore {
+    var state: PasswordVaultState { .unlocked }
+    var canQuickUnlock: Bool { false }
+    func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
+    func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
+    func unlockWithQuickKey(reason: String) throws { throw PasswordVaultError.keychainUnavailable }
+    func lock() {}
+    func reloadAndMerge() throws {}
 }
 
 protocol PasswordVaultKeychainClient {
@@ -92,6 +391,94 @@ protocol PasswordVaultKeychainClient {
     func readSecret(id: UUID, reason: String) throws -> Data
     func writeSecret(id: UUID, data: Data) throws
     func deleteSecret(id: UUID, reason: String?) throws
+}
+
+protocol VaultUnlockKeyStoring {
+    var containsKey: Bool { get }
+    func save(_ data: Data) throws
+    func load(reason: String) throws -> Data
+    func delete() throws
+}
+
+final class VaultUnlockKeyStore: VaultUnlockKeyStoring {
+    static let service = "com.pastera-app.Pastera.password-vault.kdbx-unlock"
+    private static let account = "PasteraVault"
+
+    static var availabilityQuery: [String: Any] {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: false,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: context
+        ]
+    }
+
+    var containsKey: Bool {
+        SecItemCopyMatching(Self.availabilityQuery as CFDictionary, nil) == errSecSuccess
+    }
+
+    func save(_ data: Data) throws {
+        guard data.count == 32 else { throw PasswordVaultError.keychainUnavailable }
+        try? delete()
+        var error: Unmanaged<CFError>?
+        guard let access = SecAccessControlCreateWithFlags(
+            nil,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            .userPresence,
+            &error
+        ) else { throw PasswordVaultError.keychainUnavailable }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
+            kSecAttrSynchronizable as String: false,
+            kSecAttrAccessControl as String: access,
+            kSecValueData as String: data
+        ]
+        guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else {
+            throw PasswordVaultError.keychainUnavailable
+        }
+    }
+
+    func load(reason: String) throws -> Data {
+        let context = LAContext()
+        context.localizedReason = reason
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
+            kSecAttrSynchronizable as String: false,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: context
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data, data.count == 32 else {
+            if status == errSecUserCanceled { throw PasswordVaultError.userCancelled }
+            if status == errSecAuthFailed || status == errSecInteractionNotAllowed {
+                throw PasswordVaultError.authenticationFailed
+            }
+            throw PasswordVaultError.keychainUnavailable
+        }
+        return data
+    }
+
+    func delete() throws {
+        let status = SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
+            kSecAttrSynchronizable as String: false
+        ] as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw PasswordVaultError.keychainUnavailable
+        }
+    }
 }
 
 final class KeychainPasswordVaultStore: PasswordVaultStore {
@@ -109,17 +496,11 @@ final class KeychainPasswordVaultStore: PasswordVaultStore {
     }
 
     func listEntries() throws -> [PasswordVaultEntry] {
-        try loadMetadata().entries.sorted {
-            if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
-            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-        }
+        try loadMetadata().entries
     }
 
     func listFolders() throws -> [PasswordVaultFolder] {
-        try loadMetadata().folders.sorted {
-            if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        try loadMetadata().folders
     }
 
     func createFolder(name: String) throws -> PasswordVaultFolder {
@@ -162,7 +543,32 @@ final class KeychainPasswordVaultStore: PasswordVaultStore {
         try saveMetadata(metadata)
     }
 
+    func reorderFolders(_ folderIDs: [UUID]) throws {
+        var metadata = try loadMetadata()
+        guard folderIDs.count == metadata.folders.count,
+              Set(folderIDs) == Set(metadata.folders.map(\.id)) else {
+            throw PasswordVaultError.folderNotFound
+        }
+        let foldersByID = Dictionary(uniqueKeysWithValues: metadata.folders.map { ($0.id, $0) })
+        metadata.folders = try folderIDs.map { id in
+            guard let folder = foldersByID[id] else { throw PasswordVaultError.folderNotFound }
+            return folder
+        }
+        try saveMetadata(metadata)
+    }
+
     func moveEntry(id: UUID, to folderID: UUID) throws {
+        let metadata = try loadMetadata()
+        guard let entry = metadata.entries.first(where: { $0.id == id }) else {
+            throw PasswordVaultError.entryNotFound
+        }
+        var ordered = [UUID: [UUID]]()
+        ordered[entry.folderID] = metadata.entries.filter { $0.folderID == entry.folderID && $0.id != id }.map(\.id)
+        ordered[folderID] = metadata.entries.filter { $0.folderID == folderID && $0.id != id }.map(\.id) + [id]
+        try moveEntry(id: id, to: folderID, orderedEntryIDsByFolder: ordered)
+    }
+
+    func moveEntry(id: UUID, to folderID: UUID, orderedEntryIDsByFolder: [UUID: [UUID]]) throws {
         var metadata = try loadMetadata()
         guard metadata.folders.contains(where: { $0.id == folderID }) else {
             throw PasswordVaultError.folderNotFound
@@ -170,8 +576,35 @@ final class KeychainPasswordVaultStore: PasswordVaultStore {
         guard let index = metadata.entries.firstIndex(where: { $0.id == id }) else {
             throw PasswordVaultError.entryNotFound
         }
+        let sourceFolderID = metadata.entries[index].folderID
+        let affectedFolderIDs: Set<UUID> = [sourceFolderID, folderID]
+        guard Set(orderedEntryIDsByFolder.keys) == affectedFolderIDs else {
+            throw PasswordVaultError.entryNotFound
+        }
+        let entriesByID = Dictionary(uniqueKeysWithValues: metadata.entries.map { ($0.id, $0) })
+        for affectedFolderID in affectedFolderIDs {
+            guard let orderedIDs = orderedEntryIDsByFolder[affectedFolderID],
+                  orderedIDs.count == Set(orderedIDs).count else {
+                throw PasswordVaultError.entryNotFound
+            }
+            var expectedIDs = Set(metadata.entries.filter { $0.folderID == affectedFolderID }.map(\.id))
+            if sourceFolderID == affectedFolderID { expectedIDs.remove(id) }
+            if folderID == affectedFolderID { expectedIDs.insert(id) }
+            guard Set(orderedIDs) == expectedIDs else { throw PasswordVaultError.entryNotFound }
+        }
         metadata.entries[index].folderID = folderID
         metadata.entries[index].updatedAt = now()
+        let updatedEntriesByID = Dictionary(uniqueKeysWithValues: metadata.entries.map { ($0.id, $0) })
+        metadata.entries = try metadata.folders.flatMap { folder in
+            if let orderedIDs = orderedEntryIDsByFolder[folder.id] {
+                return try orderedIDs.map { entryID in
+                    guard let entry = updatedEntriesByID[entryID] else { throw PasswordVaultError.entryNotFound }
+                    return entry
+                }
+            }
+            return metadata.entries.filter { $0.folderID == folder.id }
+        }
+        guard entriesByID.count == metadata.entries.count else { throw PasswordVaultError.entryNotFound }
         try saveMetadata(metadata)
     }
 

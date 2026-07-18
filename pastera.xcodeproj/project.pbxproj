@@ -50,6 +50,7 @@
 		C5D2A1042FEA120000B7C0DE /* MainMenuModeIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1052FEA120000B7C0DE /* MainMenuModeIconTests.swift */; };
 		C5F300002FF3000000B7C0DE /* PasswordVaultStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300012FF3000000B7C0DE /* PasswordVaultStoreTests.swift */; };
 		C5F300022FF3000000B7C0DE /* PasswordVaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300032FF3000000B7C0DE /* PasswordVaultStore.swift */; };
+		C5F601002FF6000000B7C0DE /* KDBXPasswordVaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F601012FF6000000B7C0DE /* KDBXPasswordVaultStore.swift */; };
 		C5F300042FF3000000B7C0DE /* SecureClipboardServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300052FF3000000B7C0DE /* SecureClipboardServiceTests.swift */; };
 		C5F300062FF3000000B7C0DE /* SecureClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300072FF3000000B7C0DE /* SecureClipboardService.swift */; };
 		C5F300082FF3000000B7C0DE /* PasswordVaultMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300092FF3000000B7C0DE /* PasswordVaultMenuTests.swift */; };
@@ -107,6 +108,7 @@
 		C5700B482FC40BC000C8F965 /* SnippetRepositoryDeletionSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5700B492FC40BC000C8F965 /* SnippetRepositoryDeletionSync.swift */; };
 		C5700B492FC5C0E500C8F965 /* SQLiteDataMigratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5700B482FC5C0DD00C8F965 /* SQLiteDataMigratorTests.swift */; };
 		C5700B4C2FC5C3D500C8F965 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = C5700B4B2FC5C3D500C8F965 /* Dependencies */; };
+		C5F600002FF6000000B7C0DE /* KDBXKit in Frameworks */ = {isa = PBXBuildFile; productRef = C5F600012FF6000000B7C0DE /* KDBXKit */; };
 		C5700B4E2FC5C3D500C8F965 /* DependenciesTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = C5700B4D2FC5C3D500C8F965 /* DependenciesTestSupport */; };
 		C57100012FCAE00000C8F965 /* SnippetRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57100002FCAE00000C8F965 /* SnippetRepositoryTests.swift */; };
 		C5F400012FF4000000B7C0DE /* ScriptRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F400022FF4000000B7C0DE /* ScriptRepositoryTests.swift */; };
@@ -273,6 +275,7 @@
 		C5D2A1052FEA120000B7C0DE /* MainMenuModeIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuModeIconTests.swift; sourceTree = "<group>"; };
 		C5F300012FF3000000B7C0DE /* PasswordVaultStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultStoreTests.swift; sourceTree = "<group>"; };
 		C5F300032FF3000000B7C0DE /* PasswordVaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultStore.swift; sourceTree = "<group>"; };
+		C5F601012FF6000000B7C0DE /* KDBXPasswordVaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDBXPasswordVaultStore.swift; sourceTree = "<group>"; };
 		C5F300052FF3000000B7C0DE /* SecureClipboardServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardServiceTests.swift; sourceTree = "<group>"; };
 		C5F300072FF3000000B7C0DE /* SecureClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardService.swift; sourceTree = "<group>"; };
 		C5F300092FF3000000B7C0DE /* PasswordVaultMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultMenuTests.swift; sourceTree = "<group>"; };
@@ -377,6 +380,7 @@
 		FAC43DC31B35D8B100C06102 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				C5F600002FF6000000B7C0DE /* KDBXKit in Frameworks */,
 				C587AF512FBF4E040043D5E7 /* SQLiteData in Frameworks */,
 				C5E3D0512FB43570005D632A /* Screeen in Frameworks */,
 				C53FC6C02FCCA1C400219A25 /* Collections in Frameworks */,
@@ -503,6 +507,7 @@
 				C5E0C0112FEF00000B7C0DE /* PasteboardHistoryOCRIndexer.swift */,
 				C5C000012FD870000B7C0DE /* SyncCoordinator.swift */,
 				C5F300032FF3000000B7C0DE /* PasswordVaultStore.swift */,
+				C5F601012FF6000000B7C0DE /* KDBXPasswordVaultStore.swift */,
 				C5F300072FF3000000B7C0DE /* SecureClipboardService.swift */,
 				C5F4000A2FF4000000B7C0DE /* ScriptExecutionService.swift */,
 				C5F510000000000000000006 /* ScriptTemplateCatalog.swift */,
@@ -842,6 +847,7 @@
 			packageProductDependencies = (
 				C5700B4B2FC5C3D500C8F965 /* Dependencies */,
 				C53FC6BF2FCCA1C400219A25 /* Collections */,
+				C5F600012FF6000000B7C0DE /* KDBXKit */,
 			);
 			productName = pastera;
 			productReference = FAC43DC61B35D8B100C06102 /* Pastera.app */;
@@ -923,6 +929,7 @@
 				C587AF4F2FBF4E040043D5E7 /* XCRemoteSwiftPackageReference "sqlite-data" */,
 				C5700B4A2FC5C3D500C8F965 /* XCRemoteSwiftPackageReference "swift-dependencies" */,
 				C53FC6BE2FCCA1C400219A25 /* XCRemoteSwiftPackageReference "swift-collections" */,
+				C5F600022FF6000000B7C0DE /* XCRemoteSwiftPackageReference "KDBXKit" */,
 			);
 			preferredProjectObjectVersion = 46;
 			productRefGroup = FAC43DC71B35D8B100C06102 /* Products */;
@@ -980,6 +987,7 @@
 				C5E0C0102FEF00000B7C0DE /* PasteboardHistoryOCRIndexer.swift in Sources */,
 					C5C000002FD870000B7C0DE /* SyncCoordinator.swift in Sources */,
 					C5F300022FF3000000B7C0DE /* PasswordVaultStore.swift in Sources */,
+					C5F601002FF6000000B7C0DE /* KDBXPasswordVaultStore.swift in Sources */,
 				C5F300062FF3000000B7C0DE /* SecureClipboardService.swift in Sources */,
 				C5F400092FF4000000B7C0DE /* ScriptExecutionService.swift in Sources */,
 				C5F510000000000000000005 /* ScriptTemplateCatalog.swift in Sources */,
@@ -1208,7 +1216,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1274,7 +1282,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1491,6 +1499,14 @@
 				minimumVersion = 2.1.0;
 			};
 		};
+		C5F600022FF6000000B7C0DE /* XCRemoteSwiftPackageReference "KDBXKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/shadone/KDBXKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.3.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1508,6 +1524,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C5700B4A2FC5C3D500C8F965 /* XCRemoteSwiftPackageReference "swift-dependencies" */;
 			productName = DependenciesTestSupport;
+		};
+		C5F600012FF6000000B7C0DE /* KDBXKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C5F600022FF6000000B7C0DE /* XCRemoteSwiftPackageReference "KDBXKit" */;
+			productName = KDBXKit;
 		};
 		C587AF502FBF4E040043D5E7 /* SQLiteData */ = {
 			isa = XCSwiftPackageProductDependency;

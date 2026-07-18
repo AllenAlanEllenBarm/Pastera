@@ -35,7 +35,7 @@ struct Environment {
          excludeAppService: ExcludeAppService = ExcludeAppService(applications: []),
          accessibilityService: AccessibilityService = AccessibilityService(),
          oneDriveProcessStatusService: OneDriveProcessStatusServicing = OneDriveProcessStatusService(),
-         passwordVaultStore: PasswordVaultStore = KeychainPasswordVaultStore(),
+         passwordVaultStore: PasswordVaultStore = KDBXPasswordVaultStore(),
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
          clipboardScriptCoordinator: ClipboardScriptCoordinating = ClipboardScriptCoordinator(
              repository: ScriptRepository(),

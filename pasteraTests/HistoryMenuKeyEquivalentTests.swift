@@ -42,10 +42,10 @@ struct HistoryMenuKeyEquivalentTests {
 
     @Test
     func mainMenuPanelUsesHistoryFirstWorkspaceMetrics() {
-        #expect(MainMenuPanelLayout.width == 282)
-        #expect(MainMenuPanelLayout.fixedHeight == 332)
-        #expect(MainMenuPanelLayout.headerHeight == 36)
-        #expect(MainMenuPanelLayout.toolbarHeight == 34)
+        #expect(MainMenuPanelLayout.width == 300)
+        #expect(MainMenuPanelLayout.fixedHeight == 356)
+        #expect(MainMenuPanelLayout.headerHeight == 38)
+        #expect(MainMenuPanelLayout.toolbarHeight == 40)
         #expect(MainMenuPanelLayout.searchHeight == 28)
     }
 
@@ -727,7 +727,7 @@ extension HistoryMenuKeyEquivalentTests {
 extension HistoryMenuKeyEquivalentTests {
     @Test
     func mainMenuPanelUsesCompactFixedWidth() {
-        #expect(MainMenuPanelLayout.width == 282)
+        #expect(MainMenuPanelLayout.width == 300)
         #expect(MainMenuHeaderItemView.Metrics.width == MainMenuPanelLayout.width)
     }
 

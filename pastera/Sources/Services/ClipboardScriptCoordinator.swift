@@ -36,11 +36,18 @@ final class SystemScriptPasteboard: ScriptPasteboard {
 
 protocol ClipboardScriptCoordinating: AnyObject {
     func hasEnabledScripts(for trigger: ScriptTrigger) -> Bool
+    func availableHistoryScripts() -> [ScriptTransform]
     func transform(
         text: String,
         sourceAppBundleIdentifier: String?,
         trigger: ScriptTrigger
     ) async -> ScriptTransformOutcome
+    func transformHistoryText(
+        _ text: String,
+        using scriptID: UUID,
+        sourceAppBundleIdentifier: String?
+    ) async -> ScriptTransformOutcome
+    func writeHistoryTransformResult(_ text: String)
     func runManualTransform() async
     func consumeSuppression(changeCount: Int) -> Bool
 }
@@ -72,6 +79,18 @@ final class ClipboardScriptCoordinator: ClipboardScriptCoordinating {
         return !scripts.isEmpty
     }
 
+    func availableHistoryScripts() -> [ScriptTransform] {
+        guard let scripts = try? repository.fetchAll() else { return [] }
+        return scripts
+            .filter { $0.isEnabled && $0.runManually }
+            .sorted { lhs, rhs in
+                if lhs.sortIndex == rhs.sortIndex {
+                    return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.sortIndex < rhs.sortIndex
+            }
+    }
+
     func transform(
         text: String,
         sourceAppBundleIdentifier: String?,
@@ -95,6 +114,29 @@ final class ClipboardScriptCoordinator: ClipboardScriptCoordinating {
         }
     }
 
+    func transformHistoryText(
+        _ text: String,
+        using scriptID: UUID,
+        sourceAppBundleIdentifier: String?
+    ) async -> ScriptTransformOutcome {
+        guard let script = availableHistoryScripts().first(where: { $0.id == scriptID }) else {
+            return .unchanged
+        }
+        let result = await executor.execute(
+            scripts: [script],
+            input: ScriptExecutionInput(
+                text: text,
+                sourceAppBundleIdentifier: sourceAppBundleIdentifier
+            )
+        )
+        switch result {
+        case let .success(output):
+            return output == text ? .unchanged : .transformed(output)
+        case let .failure(error):
+            return .failed(error)
+        }
+    }
+
     func runManualTransform() async {
         guard let text = pasteboard.readString() else { return }
         let outcome = await transform(
@@ -104,6 +146,13 @@ final class ClipboardScriptCoordinator: ClipboardScriptCoordinating {
         )
         guard case let .transformed(output) = outcome else { return }
         let changeCount = pasteboard.writeString(output)
+        suppressionLock.lock()
+        suppressedChangeCounts.insert(changeCount)
+        suppressionLock.unlock()
+    }
+
+    func writeHistoryTransformResult(_ text: String) {
+        let changeCount = pasteboard.writeString(text)
         suppressionLock.lock()
         suppressedChangeCounts.insert(changeCount)
         suppressionLock.unlock()

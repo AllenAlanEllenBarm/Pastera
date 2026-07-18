@@ -398,6 +398,11 @@ private extension CPYPreferencesWindowController {
         let newView = controller.view
         CPYWindowAppearance.apply(to: newView)
         PasteraSemanticViewStyler.apply(to: newView, appearance: window?.effectiveAppearance)
+        rootView.layoutSubtreeIfNeeded()
+        let viewportWidth = max(1, paneScrollView.contentView.bounds.width)
+        newView.frame.size.width = max(1, viewportWidth - Metrics.paneDocumentInset * 2)
+        newView.needsLayout = true
+        newView.layoutSubtreeIfNeeded()
         let paneSize = newView.fittingSize
         paneSizes[paneID] = paneSize
 

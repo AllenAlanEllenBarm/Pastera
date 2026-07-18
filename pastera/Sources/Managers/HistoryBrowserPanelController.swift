@@ -389,6 +389,8 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
         selectHistory(historyID, targetContext)
     }
 
+    var childPasteTargetContext: PasteTargetContext? { pasteTargetContext }
+
     private func handleHistoryPanelShortcut(_ event: NSEvent) -> Bool {
         guard !headerView.shouldPreserveSearchFieldEditingCommand(event) else {
             return false

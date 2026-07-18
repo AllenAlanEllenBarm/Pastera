@@ -185,7 +185,7 @@ struct SnippetRepositoryTests {
         #expect(repository.fetchFolderDetail(id: folder.id)?.folder.isEnabled == false)
 
         let folder2 = try #require(repository.insertFolder())
-        repository.updateFolderIndexes([folder2.id, folder.id])
+        #expect(repository.reorderFolders([folder2.id, folder.id]))
         #expect(repository.fetchFolderDetail(id: folder2.id)?.folder.index == 0)
         #expect(repository.fetchFolderDetail(id: folder.id)?.folder.index == 1)
         #expect(repository.fetchFolderDetails().map(\.folder.id) == [folder2.id, folder.id])
@@ -262,11 +262,18 @@ struct SnippetRepositoryTests {
         let snippet4 = try #require(repository.insertSnippet(to: folder2.id))
         let snippet5 = try #require(repository.insertSnippet(to: folder2.id))
 
-        repository.moveSnippet(snippet4.id, to: folder.id, snippetIDs: [snippet.id, snippet4.id, snippet2.id])
+        #expect(repository.moveSnippet(
+            snippet4.id,
+            to: folder.id,
+            orderedSnippetIDsByFolder: [
+                folder.id: [snippet.id, snippet4.id, snippet2.id],
+                folder2.id: [snippet3.id, snippet5.id]
+            ]
+        ))
         #expect(repository.fetchFolderDetail(id: folder.id)?.snippets.map(\.id) == [snippet.id, snippet4.id, snippet2.id])
         #expect(repository.fetchFolderDetail(id: folder.id)?.snippets.map(\.index) == [0, 1, 2])
         #expect(repository.fetchFolderDetail(id: folder2.id)?.snippets.map(\.id) == [snippet3.id, snippet5.id])
-        #expect(repository.fetchFolderDetail(id: folder2.id)?.snippets.map(\.index) == [0, 2])
+        #expect(repository.fetchFolderDetail(id: folder2.id)?.snippets.map(\.index) == [0, 1])
     }
 
     @Test

@@ -2,6 +2,12 @@ import AppKit
 
 @MainActor
 final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldDelegate {
+    private enum Metrics {
+        static let minimumWidth: CGFloat = 560
+        static let idealWidth: CGFloat = 760
+        static let minimumHeight: CGFloat = 460
+        static let idealHeight: CGFloat = 650
+    }
     private let catalog: ScriptTemplateCatalog
     private let onSelect: (ScriptTemplate) -> Void
     private let searchField = NSSearchField()
@@ -37,15 +43,22 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
         listStack.translatesAutoresizingMaskIntoConstraints = true
         listStack.autoresizingMask = [.width]
         documentView.frame = NSRect(x: 0, y: 0, width: 760, height: 2_000)
+        documentView.autoresizingMask = [.width]
         listStack.frame = NSRect(x: 0, y: 0, width: 760, height: 2_000)
         documentView.addSubview(listStack)
         scroll.documentView = documentView
         root.addSubview(header)
         root.addSubview(controls)
         root.addSubview(scroll)
+        let idealWidth = root.widthAnchor.constraint(equalToConstant: Metrics.idealWidth)
+        idealWidth.priority = .defaultHigh
+        let idealHeight = root.heightAnchor.constraint(equalToConstant: Metrics.idealHeight)
+        idealHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 760),
-            root.heightAnchor.constraint(equalToConstant: 650),
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumWidth),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
+            idealWidth,
+            idealHeight,
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -164,7 +177,8 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
         add.setAccessibilityLabel(pasteraPreferenceString("Add \(template.name) template"))
         card.addArrangedSubview(labels)
         card.addArrangedSubview(add)
-        labels.widthAnchor.constraint(greaterThanOrEqualToConstant: 590).isActive = true
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return card
     }
 
@@ -183,6 +197,10 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
     func selectTemplateForTesting(id: String) {
         guard let template = visibleTemplates.first(where: { $0.id == id }) else { return }
         onSelect(template)
+    }
+    var minimumSheetWidthForTesting: CGFloat { Metrics.minimumWidth }
+    var usesFlexibleTemplateRowsForTesting: Bool {
+        documentView.autoresizingMask.contains(.width)
     }
 }
 

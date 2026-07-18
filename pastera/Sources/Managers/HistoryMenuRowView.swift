@@ -12,6 +12,158 @@
 
 import Cocoa
 
+struct HistoryScriptAction {
+    let id: UUID
+    let title: String
+    let copy: () -> Void
+    let paste: () -> Void
+}
+
+enum HistoryScriptFeedback {
+    case copied(scriptName: String)
+    case pasted(scriptName: String)
+    case failed(scriptName: String, error: ScriptExecutionError)
+
+    var message: String {
+        switch self {
+        case let .copied(scriptName):
+            return pasteraScriptString("\(scriptName) finished — copied to clipboard", "\(scriptName) 转换完成，已复制到剪贴板")
+        case let .pasted(scriptName):
+            return pasteraScriptString("\(scriptName) finished — pasted", "\(scriptName) 转换完成，已粘贴")
+        case let .failed(scriptName, error):
+            return pasteraScriptString(
+                "\(scriptName) failed: \(error.shortDescription)",
+                "\(scriptName) 执行失败：\(error.shortDescription)"
+            )
+        }
+    }
+}
+
+private extension ScriptExecutionError {
+    var shortDescription: String {
+        switch self {
+        case .inputTooLarge: return pasteraScriptString("input is too large", "输入内容过大")
+        case .sourceTooLarge: return pasteraScriptString("script is too large", "脚本内容过大")
+        case .missingTransform: return pasteraScriptString("transform(clip) is missing", "缺少 transform(clip)")
+        case .javaScriptException: return pasteraScriptString("JavaScript error", "JavaScript 运行错误")
+        case .invalidResult: return pasteraScriptString("invalid result type", "返回值类型无效")
+        case .timeout: return pasteraScriptString("execution timed out", "执行超时")
+        case .capacityExhausted: return pasteraScriptString("script runner is busy", "脚本执行器繁忙")
+        }
+    }
+}
+
+final class HistoryScriptFeedbackPresenter {
+    static let shared = HistoryScriptFeedbackPresenter()
+
+    private var panel: NSPanel?
+    private var dismissWorkItem: DispatchWorkItem?
+
+    func show(_ feedback: HistoryScriptFeedback) {
+        dismissWorkItem?.cancel()
+        panel?.orderOut(nil)
+
+        let isFailure: Bool
+        if case .failed = feedback { isFailure = true } else { isFailure = false }
+        let symbol = isFailure ? "xmark.circle.fill" : "checkmark.circle.fill"
+        let color: NSColor = isFailure ? .systemRed : .systemGreen
+        let image = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
+        image.contentTintColor = color
+        image.translatesAutoresizingMaskIntoConstraints = false
+        let label = NSTextField(labelWithString: feedback.message)
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
+        let stack = NSStackView(views: [image, label])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+
+        let content = NSVisualEffectView()
+        content.material = .hudWindow
+        content.state = .active
+        content.wantsLayer = true
+        content.layer?.cornerRadius = 10
+        content.layer?.masksToBounds = true
+        content.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            image.widthAnchor.constraint(equalToConstant: 16),
+            image.heightAnchor.constraint(equalToConstant: 16),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: 420)
+        ])
+
+        let size = content.fittingSize
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .popUpMenu
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.contentView = content
+        let mouse = NSEvent.mouseLocation
+        panel.setFrameOrigin(NSPoint(x: mouse.x - size.width / 2, y: mouse.y + 14))
+        panel.orderFrontRegardless()
+        NSAccessibility.post(element: NSApp, notification: .announcementRequested, userInfo: [
+            .announcement: feedback.message,
+            .priority: NSAccessibilityPriorityLevel.medium.rawValue
+        ])
+        self.panel = panel
+
+        let workItem = DispatchWorkItem { [weak self, weak panel] in
+            panel?.orderOut(nil)
+            if self?.panel === panel { self?.panel = nil }
+        }
+        dismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
+}
+
+private final class HistoryScriptMenuController: NSObject {
+    private let actions: [HistoryScriptAction]
+
+    init(actions: [HistoryScriptAction]) {
+        self.actions = actions
+    }
+
+    var hasActions: Bool { !actions.isEmpty }
+
+    func makeItem(title: String, performsPaste: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: title)
+        for action in actions {
+            let selector = performsPaste ? #selector(paste(_:)) : #selector(copy(_:))
+            let child = NSMenuItem(title: action.title, action: selector, keyEquivalent: "")
+            child.target = self
+            child.representedObject = action.id.uuidString
+            submenu.addItem(child)
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func copy(_ sender: NSMenuItem) {
+        action(for: sender)?.copy()
+    }
+
+    @objc private func paste(_ sender: NSMenuItem) {
+        action(for: sender)?.paste()
+    }
+
+    private func action(for sender: NSMenuItem) -> HistoryScriptAction? {
+        guard let id = UUID(uuidString: sender.representedObject as? String ?? "") else { return nil }
+        return actions.first { $0.id == id }
+    }
+}
+
 final class HistoryMenuRowView: NSControl {
     enum LayoutStyle {
         case regular
@@ -50,7 +202,7 @@ final class HistoryMenuRowView: NSControl {
             width: MainMenuPanelLayout.width,
             textRowHeight: MainMenuPanelLayout.rowHeight,
             imageRowHeight: MainMenuPanelLayout.compactImageRowHeight,
-            horizontalInset: 9,
+            horizontalInset: 7,
             imageWidth: 34,
             imageHeight: 20,
             textSpacing: 7,
@@ -76,6 +228,7 @@ final class HistoryMenuRowView: NSControl {
     private let onConfirm: () -> Void
     private let onEdit: (() -> Void)?
     private let onDelete: (() -> Void)?
+    private let scriptMenuController: HistoryScriptMenuController
     private let previewImage: NSImage?
     private let previewText: String?
     private let fullTitle: String
@@ -96,11 +249,13 @@ final class HistoryMenuRowView: NSControl {
         layoutStyle: LayoutStyle = .regular,
         onEdit: (() -> Void)? = nil,
         onDelete: (() -> Void)? = nil,
+        scriptActions: [HistoryScriptAction] = [],
         onConfirm: @escaping () -> Void
     ) {
         self.onConfirm = onConfirm
         self.onEdit = onEdit
         self.onDelete = onDelete
+        self.scriptMenuController = HistoryScriptMenuController(actions: scriptActions)
         self.previewImage = image
         self.previewText = Self.boundedPreviewText(previewText)
         self.fullTitle = title
@@ -169,9 +324,20 @@ final class HistoryMenuRowView: NSControl {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard onEdit != nil || onDelete != nil else { return nil }
+        guard onEdit != nil || onDelete != nil || scriptMenuController.hasActions else { return nil }
         let menu = NSMenu()
+        if scriptMenuController.hasActions {
+            menu.addItem(scriptMenuController.makeItem(
+                title: pasteraScriptString("Copy As", "复制为"),
+                performsPaste: false
+            ))
+            menu.addItem(scriptMenuController.makeItem(
+                title: pasteraScriptString("Paste As", "粘贴为"),
+                performsPaste: true
+            ))
+        }
         if onEdit != nil {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
             let editItem = NSMenuItem(title: String(localized: "Edit"), action: #selector(editButtonClicked(_:)), keyEquivalent: "")
             editItem.target = self
             menu.addItem(editItem)
@@ -228,19 +394,6 @@ final class HistoryMenuRowView: NSControl {
         guard onDelete != nil else { return false }
         delete()
         return true
-    }
-
-    static func hideImagePreview() {
-        imagePreviewController.hide()
-    }
-
-    static func hideTextPreview() {
-        textPreviewController.hide()
-    }
-
-    static func hidePreviews() {
-        hideImagePreview()
-        hideTextPreview()
     }
 
     private func setup(title: String, image: NSImage?, shortcutText: String?) {
@@ -463,15 +616,31 @@ final class HistoryMenuRowView: NSControl {
         return flags == .command && event.charactersIgnoringModifiers?.lowercased() == "d"
     }
 
-    private static func boundedPreviewText(_ text: String?) -> String? {
+}
+
+extension HistoryMenuRowView {
+    static func hideImagePreview() {
+        imagePreviewController.hide()
+    }
+
+    static func hideTextPreview() {
+        textPreviewController.hide()
+    }
+
+    static func hidePreviews() {
+        hideImagePreview()
+        hideTextPreview()
+    }
+}
+
+private extension HistoryMenuRowView {
+    static func boundedPreviewText(_ text: String?) -> String? {
         let trimmedText = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmedText, !trimmedText.isEmpty else { return nil }
         guard trimmedText.utf16.count > Metrics.maxPreviewTextLength else { return trimmedText }
         return (trimmedText as NSString).substring(to: Metrics.maxPreviewTextLength - 1) + "…"
     }
-}
 
-private extension HistoryMenuRowView {
     func textPreviewCandidate() -> String? {
         if let previewText, !previewText.isEmpty { return previewText }
         guard isTitleVisuallyTruncated else {

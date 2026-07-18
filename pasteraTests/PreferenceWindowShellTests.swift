@@ -5,11 +5,19 @@
 //
 
 import AppKit
+import Combine
+import Dependencies
+import DependenciesTestSupport
 import Testing
 @testable import Pastera
 
 @MainActor
-@Suite(.serialized)
+@Suite(
+    .serialized,
+    .dependencies {
+        try $0.bootstrapDatabase()
+    }
+)
 struct PreferenceWindowShellTests {
     @Test
     func windowUsesApprovedFrameSidebarPagesAndAutosave() throws {
@@ -28,6 +36,7 @@ struct PreferenceWindowShellTests {
         #expect(controller.preferenceSidebarTitlesForTesting == [
             "基础设置",
             "历史记录",
+            "脚本",
             "快捷键",
             "忽略应用",
             "云同步",
@@ -36,6 +45,7 @@ struct PreferenceWindowShellTests {
         #expect(controller.preferenceSidebarSymbolNamesForTesting == [
             "gearshape",
             "clock.arrow.circlepath",
+            "curlybraces.square",
             "keyboard",
             "app.badge.checkmark",
             "icloud",
@@ -50,7 +60,7 @@ struct PreferenceWindowShellTests {
         #expect(controller.preferenceSidebarIconSlotWidthForTesting == 26)
         #expect(controller.preferenceSidebarIconPointSizeForTesting == 20)
         let iconDrawRects = controller.preferenceSidebarIconDrawRectsForTesting
-        #expect(iconDrawRects.count == 6)
+        #expect(iconDrawRects.count == 7)
         #expect(iconDrawRects.allSatisfy { $0.width <= 20 && $0.height <= 20 })
         #expect(iconDrawRects[2].width > iconDrawRects[2].height)
         #expect(iconDrawRects[4].width > iconDrawRects[4].height)
@@ -141,7 +151,7 @@ struct PreferenceWindowShellTests {
         for paneID in PasteraPreferencePaneID.allCases {
             controller.showPreferencePaneForTesting(paneID: paneID)
         }
-        #expect(controller.cachedPreferencePageCountForTesting == 6)
+        #expect(controller.cachedPreferencePageCountForTesting == 7)
 
         controller.showPreferencePaneForTesting(paneID: .general)
         #expect(controller.cachedPreferencePageForTesting(paneID: .general) === firstGeneralController)
@@ -157,25 +167,30 @@ struct PreferenceWindowShellTests {
 
     @Test
     func defaultFactoryUsesEveryNativePageAndRevealsEveryAnchor() throws {
-        let controller = makeNativeController()
-        defer { controller.close() }
-        controller.showWindow(nil)
+        try withDependencies {
+            $0.pasteboardHistoryRepository = PreferenceWindowEmptyHistoryRepository()
+        } operation: {
+            let controller = makeNativeController()
+            defer { controller.close() }
+            controller.showWindow(nil)
 
-        for paneID in PasteraPreferencePaneID.allCases {
-            let page = try #require(PasteraPreferenceCatalog.default.pages.first { $0.paneID == paneID })
-            for item in page.searchItems {
-                controller.setPreferenceSearchQueryForTesting(item.title)
-                #expect(controller.activatePreferenceSearchResultForTesting(itemID: item.id))
-                #expect(controller.selectedPreferencePaneIDForTesting == paneID)
+            for paneID in PasteraPreferencePaneID.allCases {
+                let page = try #require(PasteraPreferenceCatalog.default.pages.first { $0.paneID == paneID })
+                for item in page.searchItems {
+                    controller.setPreferenceSearchQueryForTesting(item.title)
+                    #expect(controller.activatePreferenceSearchResultForTesting(itemID: item.id))
+                    #expect(controller.selectedPreferencePaneIDForTesting == paneID)
+                }
             }
-        }
 
-        #expect(controller.cachedPreferencePageForTesting(paneID: .general) is CPYGeneralPreferenceViewController)
-        #expect(controller.cachedPreferencePageForTesting(paneID: .history) is CPYHistoryPreferenceViewController)
-        #expect(controller.cachedPreferencePageForTesting(paneID: .shortcuts) is CPYShortcutsPreferenceViewController)
-        #expect(controller.cachedPreferencePageForTesting(paneID: .excludedApps) is CPYExcludeAppPreferenceViewController)
-        #expect(controller.cachedPreferencePageForTesting(paneID: .sync) is CPYSyncPreferenceViewController)
-        #expect(controller.cachedPreferencePageForTesting(paneID: .about) is CPYAboutPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .general) is CPYGeneralPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .history) is CPYHistoryPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .scripts) is CPYScriptsPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .shortcuts) is CPYShortcutsPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .excludedApps) is CPYExcludeAppPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .sync) is CPYSyncPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .about) is CPYAboutPreferenceViewController)
+        }
     }
 
     @Test
@@ -243,13 +258,17 @@ struct PreferenceWindowShellTests {
 
     @Test
     func everyPreferencePaneUsesTheSameTopAlignedDocumentOrigin() {
-        let controller = makeNativeController()
-        defer { controller.close() }
-        controller.showWindow(nil)
+        withDependencies {
+            $0.pasteboardHistoryRepository = PreferenceWindowEmptyHistoryRepository()
+        } operation: {
+            let controller = makeNativeController()
+            defer { controller.close() }
+            controller.showWindow(nil)
 
-        for paneID in PasteraPreferencePaneID.allCases {
-            controller.showPreferencePaneForTesting(paneID: paneID)
-            #expect(controller.selectedPaneDocumentOriginForTesting.y == 16)
+            for paneID in PasteraPreferencePaneID.allCases {
+                controller.showPreferencePaneForTesting(paneID: paneID)
+                #expect(controller.selectedPaneDocumentOriginForTesting.y == 16)
+            }
         }
     }
 
@@ -332,11 +351,15 @@ struct PreferenceWindowShellTests {
     }
 
     private func makeNativeController() -> CPYPreferencesWindowController {
-        CPYPreferencesWindowController(
-            frameAutosaveName: "PreferenceWindowShellTests.Native.\(UUID().uuidString)",
-            reduceMotion: { true },
-            deactivateApplication: {}
-        )
+        withDependencies {
+            $0.pasteboardHistoryRepository = PreferenceWindowEmptyHistoryRepository()
+        } operation: {
+            CPYPreferencesWindowController(
+                frameAutosaveName: "PreferenceWindowShellTests.Native.\(UUID().uuidString)",
+                reduceMotion: { true },
+                deactivateApplication: {}
+            )
+        }
     }
 
     private func makeKeyEvent(
@@ -357,6 +380,20 @@ struct PreferenceWindowShellTests {
             keyCode: keyCode
         ))
     }
+}
+
+private struct PreferenceWindowEmptyHistoryRepository: PasteboardHistoryRepositoryProtocol {
+    func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> { Just([]).eraseToAnyPublisher() }
+    func hasHistories() -> Bool { false }
+    func fetchHistoryDetails(ascending: Bool, includesThumbnailAsset: Bool, limit: Int, offset: Int) -> [PasteboardHistoryDetail] { [] }
+    func searchHistoryDetails(query: HistorySearchQuery, includesThumbnailAsset: Bool, limit: Int, offset: Int) throws -> [PasteboardHistoryDetail] { [] }
+    func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? { nil }
+    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
+    func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {}
+    func deleteHistory(id: PasteboardHistory.ID) {}
+    func deleteAll() {}
+    func deleteOverflowingHistories(maxHistorySize: Int) {}
+    func pruneHistories(settings: HistoryRetentionSettings) {}
 }
 
 private func preferenceTextFields(in view: NSView) -> [NSTextField] {

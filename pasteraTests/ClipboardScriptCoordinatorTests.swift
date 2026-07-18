@@ -119,6 +119,81 @@ struct ClipboardScriptCoordinatorTests {
         #expect(failedPasteboard.text == "hello")
     }
 
+    @Test
+    func historyScriptsContainOnlyEnabledManualScriptsInRepositoryOrder() {
+        var disabled = makeScript(runManually: true)
+        disabled.isEnabled = false
+        var second = makeScript(runManually: true)
+        second.name = "Second"
+        second.sortIndex = 2
+        var first = makeScript(runManually: true)
+        first.name = "First"
+        first.sortIndex = 1
+        let automaticOnly = makeScript(runOnCopy: true)
+        let coordinator = ClipboardScriptCoordinator(
+            repository: StaticScriptRepository(scripts: [second, disabled, automaticOnly, first]),
+            executor: RecordingScriptExecutor(result: .success("unused")),
+            pasteboard: TestScriptPasteboard(text: nil)
+        )
+
+        #expect(coordinator.availableHistoryScripts().map(\.name) == ["First", "Second"])
+    }
+
+    @Test
+    func historyTransformExecutesOnlyTheRequestedCurrentScript() async {
+        var first = makeScript(runManually: true)
+        first.name = "First"
+        let second = makeScript(runManually: true)
+        let executor = RecordingScriptExecutor(result: .success("HELLO"))
+        let coordinator = ClipboardScriptCoordinator(
+            repository: StaticScriptRepository(scripts: [first, second]),
+            executor: executor,
+            pasteboard: TestScriptPasteboard(text: nil)
+        )
+
+        let outcome = await coordinator.transformHistoryText(
+            "hello",
+            using: first.id,
+            sourceAppBundleIdentifier: "com.example.target"
+        )
+
+        #expect(outcome == .transformed("HELLO"))
+        #expect(executor.receivedScripts == [first])
+        #expect(executor.receivedInput == .init(text: "hello", sourceAppBundleIdentifier: "com.example.target"))
+    }
+
+    @Test
+    func historyTransformRejectsMissingDisabledAndNonManualScripts() async {
+        var disabled = makeScript(runManually: true)
+        disabled.isEnabled = false
+        let automaticOnly = makeScript(runOnCopy: true)
+        let coordinator = ClipboardScriptCoordinator(
+            repository: StaticScriptRepository(scripts: [disabled, automaticOnly]),
+            executor: RecordingScriptExecutor(result: .success("unexpected")),
+            pasteboard: TestScriptPasteboard(text: nil)
+        )
+
+        #expect(await coordinator.transformHistoryText("text", using: UUID(), sourceAppBundleIdentifier: nil) == .unchanged)
+        #expect(await coordinator.transformHistoryText("text", using: disabled.id, sourceAppBundleIdentifier: nil) == .unchanged)
+        #expect(await coordinator.transformHistoryText("text", using: automaticOnly.id, sourceAppBundleIdentifier: nil) == .unchanged)
+    }
+
+    @Test
+    func writingHistoryTransformResultSuppressesRecaptureOnce() {
+        let pasteboard = TestScriptPasteboard(text: nil)
+        let coordinator = ClipboardScriptCoordinator(
+            repository: StaticScriptRepository(scripts: []),
+            executor: RecordingScriptExecutor(result: .success("unused")),
+            pasteboard: pasteboard
+        )
+
+        coordinator.writeHistoryTransformResult("resolved")
+
+        #expect(pasteboard.text == "resolved")
+        #expect(coordinator.consumeSuppression(changeCount: pasteboard.changeCount))
+        #expect(!coordinator.consumeSuppression(changeCount: pasteboard.changeCount))
+    }
+
     private func makeScript(
         runOnCopy: Bool = false,
         runOnPaste: Bool = false,

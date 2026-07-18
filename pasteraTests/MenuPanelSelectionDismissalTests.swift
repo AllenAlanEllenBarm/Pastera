@@ -532,6 +532,18 @@ private final class PasteTransformCoordinatorMock: ClipboardScriptCoordinating {
         return outcome
     }
 
+    func availableHistoryScripts() -> [ScriptTransform] { [] }
+
+    func transformHistoryText(
+        _ text: String,
+        using scriptID: UUID,
+        sourceAppBundleIdentifier: String?
+    ) async -> ScriptTransformOutcome {
+        .unchanged
+    }
+
+    func writeHistoryTransformResult(_ text: String) {}
+
     func runManualTransform() async {}
     func consumeSuppression(changeCount: Int) -> Bool { false }
 }

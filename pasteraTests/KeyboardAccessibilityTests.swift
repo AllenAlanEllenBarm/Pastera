@@ -146,7 +146,7 @@ struct KeyboardAccessibilityTests {
         contentView.layoutSubtreeIfNeeded()
         let sidebarView = try #require(preferenceSidebarView(in: contentView))
 
-        #expect(sidebarView.frame.width == 184)
+        #expect(sidebarView.frame.width == 188)
         #expect(controller.selectedPaneDocumentWidthForTesting >= controller.preferencePaneViewportWidthForTesting - 40)
 
         #expect(

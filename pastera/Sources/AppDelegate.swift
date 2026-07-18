@@ -424,6 +424,14 @@ extension AppDelegate: NSApplicationDelegate {
             .disposed(by: disposeBag)
 
         compactThumbnailAssetsIfNeeded()
+
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--open-preferences") {
+            DispatchQueue.main.async { [weak self] in
+                self?.showPreferenceWindow()
+            }
+        }
+#endif
     }
 
 }

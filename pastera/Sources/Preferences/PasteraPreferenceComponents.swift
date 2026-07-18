@@ -122,8 +122,84 @@ private final class PasteraPreferenceAnchorRevealer {
     }
 }
 
+final class PasteraPreferenceAdaptiveGridView: NSView {
+    static let breakpoint: CGFloat = 760
+    static let columnSpacing: CGFloat = 16
+    static let rowSpacing: CGFloat = 12
+
+    private let stack = NSStackView()
+    private var items = [NSView]()
+    private(set) var columnCount = 1
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Self.rowSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func addItem(_ item: NSView) {
+        items.append(item)
+        rebuild(columns: preferredColumnCount(for: bounds.width))
+    }
+
+    func removeAllItems() {
+        items.removeAll()
+        rebuild(columns: 1)
+    }
+
+    override func layout() {
+        let preferredColumns = preferredColumnCount(for: bounds.width)
+        if preferredColumns != columnCount {
+            rebuild(columns: preferredColumns)
+        }
+        super.layout()
+    }
+
+    var rowCount: Int {
+        stack.arrangedSubviews.count
+    }
+
+    private func preferredColumnCount(for width: CGFloat) -> Int {
+        width >= Self.breakpoint ? 2 : 1
+    }
+
+    private func rebuild(columns: Int) {
+        columnCount = columns
+        stack.arrangedSubviews.forEach { row in
+            stack.removeArrangedSubview(row)
+            row.removeFromSuperview()
+        }
+
+        for startIndex in stride(from: 0, to: items.count, by: columns) {
+            let endIndex = min(startIndex + columns, items.count)
+            let row = NSStackView(views: Array(items[startIndex..<endIndex]))
+            row.orientation = .horizontal
+            row.alignment = .top
+            row.distribution = .fillEqually
+            row.spacing = Self.columnSpacing
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        invalidateIntrinsicContentSize()
+    }
+}
+
 class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePage {
     static let pageTopInset: CGFloat = 14
+    static let pageHorizontalInset: CGFloat = 24
 
     let paneID: PasteraPreferencePaneID
     let contentStack = NSStackView()
@@ -131,6 +207,7 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
 
     private let pageTitle: String
     private let documentView = PasteraPreferencePageDocumentView()
+    private let adaptiveGrid = PasteraPreferenceAdaptiveGridView()
     private let anchorRevealer = PasteraPreferenceAnchorRevealer()
     private var anchors = [String: NSView]()
 
@@ -145,6 +222,7 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
     }
 
     override func loadView() {
+        adaptiveGrid.removeAllItems()
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = 12
@@ -155,14 +233,22 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
         titleLabel.textColor = .labelColor
         contentStack.addArrangedSubview(titleLabel)
         contentStack.setCustomSpacing(14, after: titleLabel)
+        contentStack.addArrangedSubview(adaptiveGrid)
+        adaptiveGrid.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
 
         documentView.addSubview(contentStack)
         documentView.measuredContentView = contentStack
         view = documentView
 
         NSLayoutConstraint.activate([
-            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 16),
-            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -16),
+            contentStack.leadingAnchor.constraint(
+                equalTo: documentView.leadingAnchor,
+                constant: Self.pageHorizontalInset
+            ),
+            contentStack.trailingAnchor.constraint(
+                equalTo: documentView.trailingAnchor,
+                constant: -Self.pageHorizontalInset
+            ),
             contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: Self.pageTopInset),
             contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -22)
         ])
@@ -171,11 +257,16 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
 
     func addGroup(_ group: PasteraPreferenceGroupView, anchorID: String? = nil) {
         _ = view
-        contentStack.addArrangedSubview(group)
-        group.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        addAdaptiveContent(group)
         if let anchorID {
             registerAnchor(anchorID, view: group)
         }
+        invalidateContentSize()
+    }
+
+    func addAdaptiveContent(_ content: NSView) {
+        _ = view
+        adaptiveGrid.addItem(content)
         invalidateContentSize()
     }
 
@@ -218,7 +309,7 @@ private final class PasteraPreferencePageDocumentView: NSView {
         }
         let contentSize = measuredContentView.fittingSize
         return NSSize(
-            width: max(480, contentSize.width + 32),
+            width: max(480, contentSize.width + PasteraPreferencePageViewController.pageHorizontalInset * 2),
             height: max(1, contentSize.height + 44)
         )
     }
@@ -226,6 +317,11 @@ private final class PasteraPreferencePageDocumentView: NSView {
 
 #if DEBUG
 extension PasteraPreferencePageViewController {
+    var adaptiveColumnCountForTesting: Int { adaptiveGrid.columnCount }
+    var adaptiveRowCountForTesting: Int { adaptiveGrid.rowCount }
+    var preferencePageHorizontalInsetForTesting: CGFloat { Self.pageHorizontalInset }
+    var preferencePageColumnSpacingForTesting: CGFloat { PasteraPreferenceAdaptiveGridView.columnSpacing }
+
     var highlightedAnchorIDForTesting: String? {
         anchorRevealer.highlightedAnchorID
     }
@@ -290,7 +386,7 @@ final class PasteraPreferenceGroupView: NSView {
         let colors = PasteraDesignTokens.colors(for: effectiveAppearance, opacity: 1)
         wantsLayer = true
         layer?.cornerRadius = PasteraDesignTokens.Metrics.rowCornerRadius
-        layer?.backgroundColor = colors.surface.cgColor
+        layer?.backgroundColor = colors.surface.withAlphaComponent(0.58).cgColor
         layer?.borderColor = colors.separator.cgColor
         layer?.borderWidth = PasteraDesignTokens.Metrics.hairlineWidth
         layer?.masksToBounds = true
@@ -302,18 +398,12 @@ final class PasteraPreferenceGroupView: NSView {
         addSubview(contentStack)
 
         if !title.isEmpty {
-            let iconPlate = NSView()
-            iconPlate.wantsLayer = true
-            iconPlate.layer?.cornerRadius = 8
-            iconPlate.layer?.backgroundColor = accentColor.withAlphaComponent(0.18).cgColor
-
             let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) ?? NSImage()
             let imageView = NSImageView(image: image)
             imageView.contentTintColor = accentColor
-            imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             imageView.setAccessibilityIdentifier("preference.group.icon")
             imageView.translatesAutoresizingMaskIntoConstraints = false
-            iconPlate.addSubview(imageView)
 
             let label = NSTextField(labelWithString: title)
             label.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -321,19 +411,15 @@ final class PasteraPreferenceGroupView: NSView {
 
             let spacer = NSView()
             spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            let headerStack = NSStackView(views: [iconPlate, label, spacer])
+            let headerStack = NSStackView(views: [imageView, label, spacer])
             headerStack.orientation = .horizontal
             headerStack.alignment = .centerY
-            headerStack.spacing = 10
-            headerStack.edgeInsets = NSEdgeInsets(top: 5, left: 12, bottom: 5, right: 12)
+            headerStack.spacing = 8
+            headerStack.edgeInsets = NSEdgeInsets(top: 5, left: 14, bottom: 5, right: 12)
             contentStack.addArrangedSubview(headerStack)
             self.headerStack = headerStack
 
             NSLayoutConstraint.activate([
-                iconPlate.widthAnchor.constraint(equalToConstant: 28),
-                iconPlate.heightAnchor.constraint(equalToConstant: 28),
-                imageView.centerXAnchor.constraint(equalTo: iconPlate.centerXAnchor),
-                imageView.centerYAnchor.constraint(equalTo: iconPlate.centerYAnchor),
                 imageView.widthAnchor.constraint(equalToConstant: 16),
                 imageView.heightAnchor.constraint(equalToConstant: 16),
                 headerStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),

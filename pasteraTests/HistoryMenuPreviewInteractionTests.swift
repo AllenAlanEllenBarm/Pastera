@@ -136,6 +136,64 @@ struct HistoryMenuPreviewInteractionTests {
         #expect(HistoryMenuRowView.isTextPreviewVisibleForTesting)
     }
 
+    @Test
+    func historyRowGroupsManualScriptsUnderCopyAsAndPasteAs() throws {
+        var copied = false
+        var pasted = false
+        let row = HistoryMenuRowView(
+            title: "Copied value",
+            image: nil,
+            scriptActions: [
+                HistoryScriptAction(
+                    id: UUID(),
+                    title: "Uppercase",
+                    copy: { copied = true },
+                    paste: { pasted = true }
+                )
+            ],
+            onConfirm: {}
+        )
+
+        let menu = try #require(row.menu(for: try makePreviewMouseEvent()))
+        #expect(menu.items.prefix(2).map(\.title) == [
+            pasteraScriptString("Copy As", "复制为"),
+            pasteraScriptString("Paste As", "粘贴为")
+        ])
+        let copyItem = try #require(menu.items[0].submenu?.items.first)
+        let pasteItem = try #require(menu.items[1].submenu?.items.first)
+        _ = NSApp.sendAction(copyItem.action!, to: copyItem.target, from: copyItem)
+        _ = NSApp.sendAction(pasteItem.action!, to: pasteItem.target, from: pasteItem)
+        #expect(copied)
+        #expect(pasted)
+    }
+
+    @Test
+    func historyScriptFeedbackIncludesScriptNameActionAndFailureReason() {
+        let scriptID = UUID()
+        #expect(HistoryScriptFeedback.copied(scriptName: "Uppercase").message.contains("Uppercase"))
+        #expect(HistoryScriptFeedback.pasted(scriptName: "Uppercase").message.contains("Uppercase"))
+        let failure = HistoryScriptFeedback.failed(
+            scriptName: "Uppercase",
+            error: .timeout(scriptID: scriptID)
+        ).message
+        #expect(failure.contains("Uppercase"))
+        #expect(failure.contains(pasteraScriptString("timed out", "超时")))
+    }
+
+    private func makePreviewMouseEvent() throws -> NSEvent {
+        try #require(NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+    }
+
     private func makePreviewTestWindow(width: CGFloat, height: CGFloat) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),

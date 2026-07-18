@@ -89,6 +89,7 @@ final class PasteService {
     var textInputSender: (String) -> Void
     var scheduleAfter: (TimeInterval, @escaping () -> Void) -> Void
     var clipboardScriptCoordinatorProvider: () -> ClipboardScriptCoordinating?
+    var pasteboardProvider: () -> NSPasteboard
 
     init(
         inputPasteCommandEnabledProvider: @escaping () -> Bool = {
@@ -119,6 +120,7 @@ final class PasteService {
             PasteService.postTextInput(text)
         },
         clipboardScriptCoordinatorProvider: @escaping () -> ClipboardScriptCoordinating? = { nil },
+        pasteboardProvider: @escaping () -> NSPasteboard = { .general },
         scheduleAfter: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
@@ -133,6 +135,7 @@ final class PasteService {
         self.secureEventInputEnabledProvider = secureEventInputEnabledProvider
         self.textInputSender = textInputSender
         self.clipboardScriptCoordinatorProvider = clipboardScriptCoordinatorProvider
+        self.pasteboardProvider = pasteboardProvider
         self.scheduleAfter = scheduleAfter
     }
 
@@ -158,13 +161,13 @@ extension PasteService {
     func copyToPasteboard(with string: String) {
         lock.lock(); defer { lock.unlock() }
 
-        let pasteboard = NSPasteboard.general
+        let pasteboard = pasteboardProvider()
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(string, forType: .string)
     }
 
     private func copyToPasteboard(with content: PasteboardContent) {
-        copyContentToPasteboard(content, to: .general)
+        copyContentToPasteboard(content, to: pasteboardProvider())
     }
 
     func copyContentToPasteboard(_ content: PasteboardContent, to pasteboard: NSPasteboard) {
@@ -258,6 +261,13 @@ extension PasteService {
                 self?.pasteResolvedText(resolvedText, restoring: targetContext)
             }
         }
+    }
+
+    /// Pastes text that has already been resolved by an explicitly selected script.
+    /// This deliberately bypasses the automatic `.paste` pipeline so the selected
+    /// script is never followed by a second transform.
+    func pasteResolvedScriptText(_ text: String, restoring targetContext: PasteTargetContext?) {
+        pasteResolvedText(text, restoring: targetContext)
     }
 
     private func pasteResolvedText(_ text: String, restoring targetContext: PasteTargetContext?) {

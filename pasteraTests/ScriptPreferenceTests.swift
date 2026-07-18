@@ -14,12 +14,28 @@ struct ScriptPreferenceTests {
         )
         _ = page.view
 
-        #expect(page.emptyStateMinimumHeightForTesting >= 120)
-        #expect(page.emptyStateMinimumHeightForTesting <= 150)
+        #expect(page.emptyStateMinimumHeightForTesting >= 96)
+        #expect(page.emptyStateMinimumHeightForTesting <= 120)
         #expect(!page.hasEmbeddedTestControlsForTesting)
         #expect(page.hasSeparateShortcutCardForTesting)
         #expect(!page.isTestActionEnabledForTesting)
         #expect(page.view.fittingSize.height > 200)
+    }
+
+    @Test
+    func scriptSheetsShareResponsiveDesktopSizing() {
+        let editor = ScriptEditorViewController(script: nil, onSave: { _ in })
+        let market = ScriptTemplateMarketViewController { _ in }
+        let test = ScriptTestViewController(scripts: [], executor: ScriptExecutionService())
+        _ = editor.view
+        _ = market.view
+        _ = test.view
+
+        #expect(editor.minimumSheetWidthForTesting == 560)
+        #expect(market.minimumSheetWidthForTesting == 560)
+        #expect(test.minimumSheetWidthForTesting == 560)
+        #expect(editor.usesFlexibleDocumentWidthForTesting)
+        #expect(market.usesFlexibleTemplateRowsForTesting)
     }
 
     @Test

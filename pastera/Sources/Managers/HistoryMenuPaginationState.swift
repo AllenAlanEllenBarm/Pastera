@@ -27,6 +27,7 @@ enum HistoryMenuTypeFilter: Int, CaseIterable, Equatable {
     case otherFiles
     case pdf
 
+    static let displayCases: [HistoryMenuTypeFilter] = [.all, .text, .images, .documents, .archives, .code, .pdf, .otherFiles]
     var title: String {
         switch self {
         case .all:
@@ -300,7 +301,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         action: nil
     )
     private let typeSegmentedControl = HistoryMenuFocusableSegmentedControl(
-        labels: HistoryMenuTypeFilter.allCases.map(\.title),
+        labels: HistoryMenuTypeFilter.displayCases.map(\.title),
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -375,7 +376,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         searchField.updateHistoryShortcutPlaceholder()
         regexOptionControl.setSelected(state.mode == .regex, forSegment: 0)
         caseSensitiveOptionControl.setSelected(state.caseSensitive, forSegment: 0)
-        typeSegmentedControl.selectedSegment = state.typeFilter.rawValue
+        typeSegmentedControl.selectedSegment = HistoryMenuTypeFilter.displayCases.firstIndex(of: state.typeFilter) ?? 0
         previousButton.isEnabled = state.pageIndex > 0
         nextButton.isEnabled = hasNextPage
         pageLabel.stringValue = "\(state.displayPage)"
@@ -446,7 +447,7 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
         typeSegmentedControl.target = self
         typeSegmentedControl.action = #selector(typeFilterChanged(_:))
         typeSegmentedControl.toolTip = "Type"
-        for (index, filter) in HistoryMenuTypeFilter.allCases.enumerated() {
+        for (index, filter) in HistoryMenuTypeFilter.displayCases.enumerated() {
             typeSegmentedControl.setLabel(filter.title, forSegment: index)
             typeSegmentedControl.setWidth(segmentWidth(for: filter), forSegment: index)
         }
@@ -678,8 +679,8 @@ final class HistoryMenuHeaderView: NSView, NSSearchFieldDelegate {
     }
 
     @objc private func typeFilterChanged(_ sender: NSSegmentedControl) {
-        let selectedFilter = HistoryMenuTypeFilter(rawValue: sender.selectedSegment) ?? .all
-        typeSegmentedControl.focusSegment(at: selectedFilter.rawValue)
+        let selectedFilter = HistoryMenuTypeFilter.displayCases[safe: sender.selectedSegment] ?? .all
+        typeSegmentedControl.focusSegment(at: sender.selectedSegment)
         onTypeFilterChange?(selectedFilter)
     }
 

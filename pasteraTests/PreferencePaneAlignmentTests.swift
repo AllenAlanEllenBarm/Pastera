@@ -34,10 +34,10 @@ struct PreferenceSidebarTests {
 
         let titles = controller.preferenceSidebarTitlesForTesting
         let symbolNames = controller.preferenceSidebarSymbolNamesForTesting
-        let syncIndex = try #require(titles.firstIndex(of: "同步"))
-        let aboutIndex = try #require(titles.firstIndex(of: "关于 Pastera"))
+        let syncIndex = try #require(titles.firstIndex(of: "云同步"))
+        let aboutIndex = try #require(titles.firstIndex(of: "关于"))
 
-        #expect(titles == ["通用", "历史与预览", "快捷键", "排除应用", "同步", "关于 Pastera"])
+        #expect(titles == ["基础设置", "历史记录", "脚本", "快捷键", "忽略应用", "云同步", "关于"])
         #expect(!titles.contains("Types"))
         #expect(!titles.contains("Exclude"))
         #expect(!titles.contains("Update"))
@@ -113,12 +113,12 @@ struct PreferencePaneAlignmentTests {
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.showPreferencePaneForTesting(title: "Exclude")
+        controller.showPreferencePaneForTesting(paneID: .excludedApps)
 
         let contentView = try #require(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
         let titleFrame = try #require(controller.selectedPaneTextFrameForTesting(
-            matching: ["Excluded Apps", "排除应用"]
+            matching: ["Excluded Apps", "忽略应用"]
         ))
         let tableFrame = try #require(controller.selectedPaneDescendantFrameForTesting(
             accessibilityIdentifier: "exclude.apps.scroll"

@@ -103,6 +103,7 @@ extension ClipService {
         // Pasteboard types
         let pasteboardTypes = pasteboard.pasteboardItems?.flatMap { $0.types } ?? []
         guard !pasteboardTypes.isEmpty else { return false }
+        guard SecurePasteboardTypes.all.isDisjoint(with: pasteboardTypes) else { return true }
         let types = PasteboardAvailableType.availableTypes(
             from: pasteboardTypes,
             storeAvailableTypes: storeTypes.filter { $0.value.boolValue }.compactMap { PasteboardAvailableType(rawValue: $0.key) }

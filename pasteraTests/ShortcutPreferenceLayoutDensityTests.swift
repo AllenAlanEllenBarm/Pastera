@@ -13,6 +13,29 @@ import Testing
 @Suite(.serialized)
 struct ShortcutPreferenceLayoutDensityTests {
     @Test
+    func preferenceGroupsReflowFromSingleColumnToTwoColumnsAtWideWidths() {
+        let page = PasteraPreferencePageViewController(paneID: .general, title: "Layout")
+        page.loadView()
+
+        for index in 0..<4 {
+            page.addGroup(PasteraPreferenceGroupView(title: "Group \(index)"))
+        }
+
+        page.view.frame.size.width = 640 + 48
+        page.view.layoutSubtreeIfNeeded()
+        #expect(page.adaptiveColumnCountForTesting == 1)
+        #expect(page.adaptiveRowCountForTesting == 4)
+
+        page.view.frame.size.width = 960 + 48
+        page.view.needsLayout = true
+        page.view.layoutSubtreeIfNeeded()
+        #expect(page.adaptiveColumnCountForTesting == 2)
+        #expect(page.adaptiveRowCountForTesting == 2)
+        #expect(page.preferencePageHorizontalInsetForTesting == 24)
+        #expect(page.preferencePageColumnSpacingForTesting == 16)
+    }
+
+    @Test
     func shortcutsPaneUsesTwoNativeGroupCardsWithoutDuplicateLabelsOrClipping() throws {
         let controller = CPYPreferencesWindowController(deactivateApplication: {})
         defer { controller.close() }

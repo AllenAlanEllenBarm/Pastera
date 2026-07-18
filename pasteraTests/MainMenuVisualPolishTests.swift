@@ -29,7 +29,7 @@ struct MainMenuVisualPolishTests {
     }
 
     @Test
-    func embeddedHeaderSeparatesTitleTypeFilterAndPagination() throws {
+    func embeddedHeaderUsesCurrentTypeAsCompactFilterControl() throws {
         let controller = makeHistoryController()
         controller.show(at: NSPoint(x: 160, y: 640), pinned: false)
         defer { controller.close() }
@@ -41,15 +41,13 @@ struct MainMenuVisualPolishTests {
         let pageFrame = try #require(frames["page"])
         let pageTextFrame = try #require(frames["pageText"])
         let nextFrame = try #require(frames["next"])
-        let controlGroupFrame = typeFrame
-            .union(previousFrame)
-            .union(pageFrame)
-            .union(nextFrame)
+        let paginationFrame = previousFrame.union(pageFrame).union(nextFrame)
 
-        #expect(!titleFrame.intersects(typeFrame))
-        #expect(typeFrame.minX >= titleFrame.maxX + 6)
-        #expect(controlGroupFrame.width <= 116)
-        #expect(typeFrame.maxX == previousFrame.minX)
+        #expect(titleFrame.width == 0)
+        #expect(typeFrame.minX == MainMenuPanelLayout.sectionInset + 9)
+        #expect(typeFrame.width == 175)
+        #expect(typeFrame.maxX + 11 <= previousFrame.minX)
+        #expect(paginationFrame.width == 80)
         #expect(previousFrame.maxX == pageFrame.minX)
         #expect(pageFrame.maxX == nextFrame.minX)
         #expect(previousFrame.size == NSSize(width: 22, height: 26))
@@ -64,8 +62,23 @@ struct MainMenuVisualPolishTests {
         #expect(abs(nextFrame.midY - pageTextFrame.midY) <= 0.5)
 
         let cornerRadii = try #require(controller.mainMenuEmbeddedHeaderCornerRadiiForTesting)
-        #expect(cornerRadii["typeFilter"] == 13)
+        #expect(cornerRadii["typeFilter"] == 8)
         #expect(cornerRadii["next"] == 11)
+    }
+
+    @Test
+    func typeFilterUsesCompactIconRailWithoutOpeningAChildPanel() throws {
+        let controller = makeHistoryController()
+        controller.show(at: NSPoint(x: 160, y: 640), pinned: false)
+        defer { controller.close() }
+
+        let frames = controller.mainMenuTypeFilterItemFramesForTesting
+        #expect(frames.count == HistoryMenuTypeFilter.allCases.count)
+        #expect(Set(frames.map(\.minX)).count == HistoryMenuTypeFilter.allCases.count)
+        #expect(Set(frames.map(\.minY)).count == 1)
+        #expect(frames.allSatisfy { $0.size == NSSize(width: 21, height: 26) })
+        #expect(controller.mainMenuSelectedTypeFilterTitlesForTesting == [HistoryMenuTypeFilter.all.title])
+        #expect(HistoryMenuTypeFilter.displayCases.suffix(2) == [.pdf, .otherFiles])
     }
 
     @Test
@@ -103,6 +116,72 @@ struct MainMenuVisualPolishTests {
     }
 
     @Test
+    func footerToolbarUsesOneSelectedModeAndQuietUtilityFeedback() throws {
+        let toolbar = MainMenuToolbarView(
+            frame: NSRect(x: 0, y: 0, width: 262, height: MainMenuPanelLayout.toolbarHeight),
+            configuration: MainMenuToolbarViewConfiguration(
+                selectedMode: .history,
+                oneDriveStatus: .notInstalled
+            ),
+            actions: MainMenuToolbarActions(
+                onSearch: {},
+                onHistory: {},
+                onSnippets: {},
+                onPasswordVault: {},
+                onOneDrive: {},
+                onPreferences: {}
+            )
+        )
+
+        let history = try #require(toolbar.buttonVisualStateForTesting(identifier: "mainMenuHistoryModeButton"))
+        let snippets = try #require(toolbar.buttonVisualStateForTesting(identifier: "mainMenuSnippetModeButton"))
+        let search = try #require(toolbar.buttonVisualStateForTesting(identifier: "mainMenuSearchButton"))
+        #expect(history.backgroundAlpha > 0)
+        #expect(snippets.backgroundAlpha == 0)
+        #expect(search.backgroundAlpha == 0)
+
+        toolbar.setHoveredForTesting(true, identifier: "mainMenuSearchButton")
+        let hoveredSearch = try #require(toolbar.buttonVisualStateForTesting(identifier: "mainMenuSearchButton"))
+        #expect(hoveredSearch.backgroundAlpha > 0)
+        #expect(hoveredSearch.backgroundAlpha < history.backgroundAlpha)
+    }
+
+    @Test
+    func footerModeHintsUseConfiguredShortcutsAndReplaceNativeToolTips() throws {
+        let service = HotKeyService()
+        service.resetMenuShortcutsToDefaults()
+        AppEnvironment.push(hotKeyService: service)
+        defer { _ = AppEnvironment.popLast() }
+
+        let toolbar = MainMenuToolbarView(
+            frame: NSRect(x: 0, y: 0, width: 284, height: MainMenuPanelLayout.toolbarHeight),
+            configuration: MainMenuToolbarViewConfiguration(
+                selectedMode: .history,
+                oneDriveStatus: .notInstalled
+            ),
+            actions: MainMenuToolbarActions(
+                onSearch: {},
+                onHistory: {},
+                onSnippets: {},
+                onPasswordVault: {},
+                onOneDrive: {},
+                onPreferences: {}
+            )
+        )
+
+        let expectations: [(String, String?)] = [
+            ("mainMenuHistoryModeButton", PasteraShortcutFormatter.string(for: service.historyKeyCombo)),
+            ("mainMenuSnippetModeButton", PasteraShortcutFormatter.string(for: service.snippetKeyCombo)),
+            ("mainMenuPasswordVaultModeButton", PasteraShortcutFormatter.string(for: service.passwordVaultKeyCombo))
+        ]
+        for (identifier, shortcut) in expectations {
+            #expect(toolbar.hoverTipForTesting(identifier: identifier)?.shortcut == shortcut)
+            #expect(shortcut?.isEmpty == false)
+            #expect(toolbar.nativeToolTipForTesting(identifier: identifier) == nil)
+        }
+    }
+
+    @Test
     func shortcutsArePresentedByTheirOwningComponents() throws {
         let controller = makeHistoryController()
         controller.show(at: NSPoint(x: 160, y: 640), pinned: false)
@@ -111,7 +190,7 @@ struct MainMenuVisualPolishTests {
         #expect(controller.mainMenuToolbarToolTipForTesting(identifier: "mainMenuSearchButton")?.contains("⌘F") == true)
         #expect(controller.mainMenuHeaderToolTipsForTesting["previous"]?.contains("←") == true)
         #expect(controller.mainMenuHeaderToolTipsForTesting["next"]?.contains("→") == true)
-        #expect(controller.mainMenuHeaderToolTipsForTesting["typeFilter"]?.contains("Tab") == true)
+        #expect(controller.mainMenuHeaderToolTipsForTesting["typeFilter"] == HistoryMenuTypeFilter.all.title)
 
         let rowToolTip = try #require(controller.mainMenuRowToolTipForTesting(title: "First copied value"))
         #expect(rowToolTip.contains("↩"))
@@ -119,27 +198,48 @@ struct MainMenuVisualPolishTests {
     }
 
     @Test
-    func embeddedMainMenuUsesThreeInsetSurfaceBlocks() throws {
+    func embeddedMainMenuUsesContinuousChromeWithoutNestedSurfaceCards() throws {
         let controller = makeHistoryController()
         controller.show(at: NSPoint(x: 160, y: 640), pinned: false)
         defer { controller.close() }
 
-        #expect(controller.mainMenuPanelContentSizeForTesting == NSSize(width: 282, height: 332))
+        #expect(controller.mainMenuPanelContentSizeForTesting == NSSize(
+            width: MainMenuPanelLayout.width,
+            height: MainMenuPanelLayout.fixedHeight
+        ))
 
         let sections = try #require(controller.mainMenuEmbeddedSectionFramesForTesting)
         let headerFrame = try #require(sections["header"])
         let contentFrame = try #require(sections["content"])
         let footerFrame = try #require(sections["footer"])
 
-        #expect(headerFrame == NSRect(x: 7, y: 289, width: 268, height: 36))
-        #expect(contentFrame.minX == 7)
-        #expect(contentFrame.width == 268)
-        #expect(footerFrame == NSRect(x: 7, y: 6, width: 268, height: 34))
-        #expect(headerFrame.minY - contentFrame.maxY >= 5)
-        #expect(contentFrame.minY - footerFrame.maxY >= 5)
+        #expect(headerFrame == NSRect(
+            x: MainMenuPanelLayout.sectionInset,
+            y: MainMenuPanelLayout.fixedHeight - MainMenuPanelLayout.sectionInset - MainMenuPanelLayout.headerHeight,
+            width: MainMenuPanelLayout.width - MainMenuPanelLayout.sectionInset * 2,
+            height: MainMenuPanelLayout.headerHeight
+        ))
+        #expect(contentFrame.minX == MainMenuPanelLayout.sectionInset)
+        #expect(contentFrame.width == MainMenuPanelLayout.width - MainMenuPanelLayout.sectionInset * 2)
+        #expect(footerFrame == NSRect(
+            x: MainMenuPanelLayout.sectionInset,
+            y: MainMenuPanelLayout.bottomInset,
+            width: MainMenuPanelLayout.width - MainMenuPanelLayout.sectionInset * 2,
+            height: MainMenuPanelLayout.toolbarHeight
+        ))
+        #expect(headerFrame.minY - contentFrame.maxY == MainMenuPanelLayout.sectionGap)
+        #expect(contentFrame.minY - footerFrame.maxY == MainMenuPanelLayout.sectionGap)
         #expect(!headerFrame.intersects(contentFrame))
         #expect(!contentFrame.intersects(footerFrame))
         #expect(controller.mainMenuEmbeddedSeparatorCountForTesting == 0)
+
+        let chrome = controller.mainMenuEmbeddedChromeForTesting
+        #expect(chrome["header"]?.backgroundAlpha == 0)
+        #expect(chrome["header"]?.borderWidth == 0)
+        #expect(chrome["content"]?.backgroundAlpha == 0)
+        #expect(chrome["content"]?.borderWidth == 0)
+        #expect(chrome["footer"]?.backgroundAlpha == 0)
+        #expect(chrome["footer"]?.borderWidth == 0)
     }
 
     @Test
@@ -207,18 +307,18 @@ struct MainMenuVisualPolishTests {
 
     @Test
     func compactVisualTokensAvoidLargeSaturatedBlueBlocks() {
-        #expect(MainMenuPanelLayout.width == 282)
-        #expect(MainMenuPanelLayout.fixedHeight == 332)
-        #expect(MainMenuPanelLayout.headerHeight == 40)
-        #expect(MainMenuPanelLayout.toolbarHeight == 34)
-        #expect(MainMenuPanelLayout.rowHeight == 30)
-        #expect(MainMenuPanelLayout.compactImageRowHeight == 30)
-        #expect(MainMenuPanelLayout.sectionInset == 10)
-        #expect(MainMenuPanelLayout.sectionGap == 8)
-        #expect(MainMenuPanelLayout.contentInnerPadding == 8)
+        #expect(MainMenuPanelLayout.width == 300)
+        #expect(MainMenuPanelLayout.fixedHeight == 356)
+        #expect(MainMenuPanelLayout.headerHeight == 38)
+        #expect(MainMenuPanelLayout.toolbarHeight == 40)
+        #expect(MainMenuPanelLayout.rowHeight == 32)
+        #expect(MainMenuPanelLayout.compactImageRowHeight == 32)
+        #expect(MainMenuPanelLayout.sectionInset == 8)
+        #expect(MainMenuPanelLayout.sectionGap == 4)
+        #expect(MainMenuPanelLayout.contentInnerPadding == 3)
         #expect(MainMenuPanelLayout.sectionRadius == 12)
-        #expect(MainMenuPanelLayout.toolbarHeight == 36)
-        #expect(MainMenuPanelLayout.toolbarButtonSize == 28)
+        #expect(MainMenuPanelLayout.toolbarHeight == 40)
+        #expect(MainMenuPanelLayout.toolbarButtonSize == 30)
         #expect(MainMenuVisualColors.panelBackground.alphaComponent == 1)
         #expect(MainMenuVisualColors.selectedRow.alphaComponent <= 0.16)
         #expect(MainMenuVisualColors.accentFill.alphaComponent <= 0.18)

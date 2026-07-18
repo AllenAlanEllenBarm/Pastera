@@ -1,8 +1,18 @@
 import AppKit
 
-final class PasswordVaultReturnTextField: NSTextField {
+final class PasswordVaultReturnTextField: NSTextField, NSTextFieldDelegate {
     var onReturn: (() -> Void)?
     var onEscape: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        delegate = self
+    }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
@@ -14,11 +24,34 @@ final class PasswordVaultReturnTextField: NSTextField {
             super.keyDown(with: event)
         }
     }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.insertNewline(_:)):
+            onReturn?()
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            onEscape?()
+            return true
+        default:
+            return false
+        }
+    }
 }
 
-final class PasswordVaultReturnSecureField: NSSecureTextField {
+final class PasswordVaultReturnSecureField: NSSecureTextField, NSTextFieldDelegate {
     var onReturn: (() -> Void)?
     var onEscape: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        delegate = self
+    }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
@@ -28,6 +61,19 @@ final class PasswordVaultReturnSecureField: NSSecureTextField {
             onEscape?()
         default:
             super.keyDown(with: event)
+        }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.insertNewline(_:)):
+            onReturn?()
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            onEscape?()
+            return true
+        default:
+            return false
         }
     }
 }
@@ -45,6 +91,166 @@ final class PasswordVaultNoteTextView: NSTextView {
             super.keyDown(with: event)
         }
     }
+}
+
+enum PasswordVaultEditorStep: String {
+    case title
+    case username
+    case password
+}
+
+final class PasswordVaultStepEditorView: NSView {
+    private let textField = PasswordVaultReturnTextField()
+    private let secureField = PasswordVaultReturnSecureField()
+    private let revealedPasswordField = PasswordVaultReturnTextField()
+    private let iconView = NSImageView()
+    private let passwordVisibilityButton = NSButton()
+    private let onCommit: (String) -> Void
+    private let onEscape: () -> Void
+    private var isPasswordVisible = false
+    let step: PasswordVaultEditorStep
+
+    var value: String {
+        get {
+            guard step == .password else { return textField.stringValue }
+            return isPasswordVisible ? revealedPasswordField.stringValue : secureField.stringValue
+        }
+        set {
+            if step == .password {
+                secureField.stringValue = newValue
+                if isPasswordVisible { revealedPasswordField.stringValue = newValue }
+            } else {
+                textField.stringValue = newValue
+            }
+        }
+    }
+
+    init(
+        step: PasswordVaultEditorStep,
+        value: String,
+        onCommit: @escaping (String) -> Void,
+        onEscape: @escaping () -> Void
+    ) {
+        self.step = step
+        self.onCommit = onCommit
+        self.onEscape = onEscape
+        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.rowHeight))
+        setup(value: value)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    private func setup(value: String) {
+        let symbolName: String
+        let placeholder: String
+        switch step {
+        case .title:
+            symbolName = "tag"
+            placeholder = String(localized: "Password Name")
+        case .username:
+            symbolName = "person"
+            placeholder = String(localized: "Username")
+        case .password:
+            symbolName = "key"
+            placeholder = String(localized: "Password")
+        }
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: placeholder)
+        iconView.contentTintColor = .secondaryLabelColor
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.frame = NSRect(x: 28, y: 8, width: 14, height: 14)
+        addSubview(iconView)
+
+        let field: NSView
+        if step == .password {
+            secureField.stringValue = value
+            secureField.placeholderString = placeholder
+            secureField.onReturn = { [weak self] in self?.commit() }
+            secureField.onEscape = { [weak self] in self?.onEscape() }
+            secureField.setAccessibilityLabel(placeholder)
+            revealedPasswordField.placeholderString = placeholder
+            revealedPasswordField.onReturn = { [weak self] in self?.commit() }
+            revealedPasswordField.onEscape = { [weak self] in self?.onEscape() }
+            revealedPasswordField.setAccessibilityLabel(placeholder)
+            revealedPasswordField.isHidden = true
+            addSubview(revealedPasswordField)
+            configurePasswordVisibilityButton()
+            field = secureField
+        } else {
+            textField.stringValue = value
+            textField.placeholderString = placeholder
+            textField.onReturn = { [weak self] in self?.commit() }
+            textField.onEscape = { [weak self] in self?.onEscape() }
+            textField.setAccessibilityLabel(placeholder)
+            field = textField
+        }
+        field.frame = fieldFrame
+        field.autoresizingMask = [.width]
+        addSubview(field)
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        iconView.frame = NSRect(x: 28, y: 8, width: 14, height: 14)
+        textField.frame = fieldFrame
+        secureField.frame = fieldFrame
+        revealedPasswordField.frame = fieldFrame
+        passwordVisibilityButton.frame = NSRect(x: max(48, bounds.width - 32), y: 3, width: 24, height: 24)
+    }
+
+    private var fieldFrame: NSRect {
+        let trailingInset: CGFloat = step == .password ? 40 : 10
+        return NSRect(x: 48, y: 3, width: max(0, bounds.width - 48 - trailingInset), height: 24)
+    }
+
+    private func configurePasswordVisibilityButton() {
+        passwordVisibilityButton.identifier = NSUserInterfaceItemIdentifier("passwordVaultPasswordVisibilityButton")
+        passwordVisibilityButton.isBordered = false
+        passwordVisibilityButton.bezelStyle = .inline
+        passwordVisibilityButton.imagePosition = .imageOnly
+        passwordVisibilityButton.contentTintColor = .secondaryLabelColor
+        passwordVisibilityButton.target = self
+        passwordVisibilityButton.action = #selector(togglePasswordVisibility(_:))
+        updatePasswordVisibilityButton()
+        addSubview(passwordVisibilityButton)
+    }
+
+    private func updatePasswordVisibilityButton() {
+        let label = isPasswordVisible ? String(localized: "Hide Password") : String(localized: "Show Password")
+        let symbol = isPasswordVisible ? "eye.slash" : "eye"
+        passwordVisibilityButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        passwordVisibilityButton.setAccessibilityLabel(label)
+        passwordVisibilityButton.toolTip = label
+    }
+
+    @objc private func togglePasswordVisibility(_ sender: Any?) {
+        guard step == .password else { return }
+        let currentValue = value
+        isPasswordVisible.toggle()
+        secureField.stringValue = currentValue
+        revealedPasswordField.stringValue = isPasswordVisible ? currentValue : ""
+        secureField.isHidden = isPasswordVisible
+        revealedPasswordField.isHidden = !isPasswordVisible
+        updatePasswordVisibilityButton()
+        window?.makeFirstResponder(isPasswordVisible ? revealedPasswordField : secureField)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window != nil else { return }
+            self.window?.makeFirstResponder(self.step == .password ? self.secureField : self.textField)
+        }
+    }
+
+    func commit() { onCommit(value) }
+
+#if DEBUG
+    var isPasswordVisibleForTesting: Bool { isPasswordVisible }
+    var visiblePasswordValueForTesting: String? { isPasswordVisible ? revealedPasswordField.stringValue : nil }
+    var passwordVisibilityButtonForTesting: NSButton? { step == .password ? passwordVisibilityButton : nil }
+    func togglePasswordVisibilityForTesting() { togglePasswordVisibility(nil) }
+#endif
 }
 
 final class PasswordVaultEditorView: NSView {

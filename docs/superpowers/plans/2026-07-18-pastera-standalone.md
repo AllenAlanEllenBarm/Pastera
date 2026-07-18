@@ -85,14 +85,14 @@ SQLiteData 是当前事实存储。Realm 只读取旧数据库并导入尚未迁
 - Consumes: current seven-pane `PasteraPreferenceCatalog`, `PasteboardHistoryRepositoryProtocol`, system clipboard and KDBX store behavior.
 - Produces: a test-clean macOS baseline without restoring obsolete six-pane Clipy expectations.
 
-- [ ] Update stale preference expectations to the current seven-pane order: `general, history, scripts, shortcuts, excludedApps, sync, about`.
-- [ ] Inject an explicit empty `PasteboardHistoryRepositoryProtocol` into UI-only tests that construct `MenuManager`; do not let tests fall through to the live SQLiteData dependency.
-- [ ] Add every new preference key to all supported `Localizable.xcstrings` locales and keep the localization completeness test enabled.
-- [ ] Isolate the real KDBX clipboard integration test from other system-clipboard tests using serialized suite execution and change-count-aware cleanup.
-- [ ] Run the previously failing suites serially and require zero failures.
-- [ ] Run the repository default `xcodebuild ... clean test` command and require zero failures.
-- [ ] Run `./script/install_local.sh`, verify `/Applications/Pastera.app` is running, and perform the manual clipboard matrix from `docs/verification/VERIFICATION.md`.
-- [ ] Update only the already-associated plans' `Delivery Record` with real verification evidence; do not create another feature plan.
+- [x] Update stale preference expectations to the current seven-pane order: `general, history, scripts, shortcuts, excludedApps, sync, about`.
+- [x] Inject an explicit empty `PasteboardHistoryRepositoryProtocol` into UI-only tests that construct `MenuManager`; do not let tests fall through to the live SQLiteData dependency.
+- [x] Add every new preference key to all supported `Localizable.xcstrings` locales and keep the localization completeness test enabled.
+- [x] Isolate the real KDBX clipboard integration test from other system-clipboard tests using an injectable named pasteboard and explicit Secure Event Input state.
+- [x] Run the previously failing suites serially and require zero failures.
+- [x] Run the repository default `xcodebuild ... clean test` command and require zero failures.
+- [ ] Run `./script/install_local.sh`, verify `/Applications/Pastera.app` is running, and perform the manual clipboard matrix from `docs/verification/VERIFICATION.md`.（安装和进程核验已完成；Finder/Notes/Preview/OneDrive 人工矩阵待人工验收。）
+- [x] Update only the already-associated plan's `Delivery Record` with real verification evidence; do not create another feature plan.
 - [ ] Commit the consolidated baseline as `feat(app): 固化 Pastera 独立化前功能基线`.
 
 ### Task 2: 建立可恢复的远端脱离检查点
@@ -275,28 +275,36 @@ Rollback points:
 
 ### Actual Implementation
 
-- 尚未开始；当前仅完成设计决策和计划收敛。
+- 已收敛当前 macOS 工作区：偏好设置契约更新为七页，UI-only 测试显式注入历史仓库和内存数据库，新脚本设置文案补齐全部支持语言。
+- `PasteService` 新增可注入 pasteboard provider，生产默认仍使用系统剪贴板；真实 KDBX/AppKit 测试使用独立命名剪贴板，并固定 Secure Event Input 状态，消除全量并行污染。
+- 当前功能源码、测试、KDBX store、脚本和 UI 改动作为独立化前 Pastera 基线统一收敛。
 
 ### Plan Deviations
 
-- 尚无。
+- 原计划描述为 serialized suite/change-count cleanup；实际根因还包含系统 Secure Event Input 状态，最终采用依赖注入隔离两个系统全局状态，覆盖更完整且不改变生产默认行为。
+- `docs/verification/VERIFICATION.md` 的 Finder、Notes、Preview 和 OneDrive 双配置人工矩阵无法由本轮命令行验证代替，保留为人工验收项。
 
 ### Impact
 
-- 预计影响 GitHub 仓库身份、Git remotes、macOS package graph、旧数据导入、源码命名、测试、文档和后续 Windows 目录。
+- Task 1 影响当前 macOS 功能基线、测试隔离、本地化和 `PasteService` 的可测试性；尚未改变 GitHub fork 身份、Git remotes 或依赖图。
 
 ### Verification
 
-- 计划前基线验证：默认全量测试运行了 660 tests，出现 46 issues；串行复跑相关 10 suites 为 112 tests / 43 issues。失败已归因到旧设置测试契约、缺少测试 repository 注入、本地化缺口和全量并行剪贴板污染，尚未修复。
+- `git diff --check`：通过。
+- `jq empty pastera/Resources/Localizable.xcstrings`：通过。
+- 偏好窗口聚焦回归：12 tests / 1 suite 通过；相关 KDBX 与粘贴聚焦回归通过。
+- 默认全量并行回归：660 tests / 75 suites 通过，`** TEST SUCCEEDED **`。
+- `./script/install_local.sh`：构建成功并安装到 `/Applications/Pastera.app`；运行进程 PID 54227，Bundle ID `com.pastera-app.Pastera.debug`，版本 `2.0.1-beta`，adhoc 签名。
 
 ### Remaining Risks
 
-- 当前工作区尚不可作为 Windows 冻结基线。
+- Finder/Notes/Preview 的图片与文件粘贴，以及 OneDrive 双配置人工矩阵尚未执行。
+- Task 1 提交完成后才可作为后续独立化检查点；Windows 最终冻结基线仍需 Tasks 2–7。
 - GitHub fork 关系尚未解除。
 
 ### Follow-ups
 
-- 用户确认本计划后，从 Task 1 开始执行。
+- 提交 Task 1 基线，然后执行 Task 2 的 bundle、GitHub 元数据快照、tag、push 和远端 SHA 核验。
 
 ### ZenTao Closeout
 

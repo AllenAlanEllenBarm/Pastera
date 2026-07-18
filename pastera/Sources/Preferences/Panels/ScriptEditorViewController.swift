@@ -2,6 +2,12 @@ import AppKit
 
 @MainActor
 final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, NSTextViewDelegate {
+    private enum Metrics {
+        static let minimumWidth: CGFloat = 560
+        static let idealWidth: CGFloat = 760
+        static let minimumHeight: CGFloat = 480
+        static let idealHeight: CGFloat = 680
+    }
     private let original: ScriptTransform?
     private let executor: ScriptExecuting
     private let onSave: (ScriptTransform) -> Void
@@ -51,6 +57,7 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
         content.translatesAutoresizingMaskIntoConstraints = true
         content.autoresizingMask = [.width]
         documentView.frame = NSRect(x: 0, y: 0, width: 760, height: 1_200)
+        documentView.autoresizingMask = [.width]
         content.frame = NSRect(x: 0, y: 0, width: 760, height: 1_200)
         documentView.addSubview(content)
         scrollView.documentView = documentView
@@ -63,9 +70,15 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
 
         root.addSubview(header)
         root.addSubview(scrollView)
+        let idealWidth = root.widthAnchor.constraint(equalToConstant: Metrics.idealWidth)
+        idealWidth.priority = .defaultHigh
+        let idealHeight = root.heightAnchor.constraint(equalToConstant: Metrics.idealHeight)
+        idealHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 760),
-            root.heightAnchor.constraint(equalToConstant: 680),
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumWidth),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
+            idealWidth,
+            idealHeight,
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -297,4 +310,7 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
     func validateForTesting(input: String) async {
         await validate(input: input)
     }
+
+    var minimumSheetWidthForTesting: CGFloat { Metrics.minimumWidth }
+    var usesFlexibleDocumentWidthForTesting: Bool { documentView.autoresizingMask.contains(.width) }
 }

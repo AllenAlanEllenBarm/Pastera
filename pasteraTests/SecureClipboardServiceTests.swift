@@ -47,7 +47,7 @@ struct SecureClipboardServiceTests {
             schedule: { _, action in scheduled = action }
         )
         service.copySecret("secret-value", clearAfter: .seconds(60))
-        pasteboard.writeString("replacement")
+        pasteboard.writeSecret("replacement")
 
         let action = try #require(scheduled)
         action()
@@ -69,7 +69,7 @@ private final class TestSecretPasteboard: SecretPasteboard {
     private(set) var changeCount = 0
     private(set) var string: String?
 
-    func writeString(_ value: String) {
+    func writeSecret(_ value: String) {
         string = value
         changeCount += 1
     }

@@ -2893,6 +2893,51 @@
         }
       }
     },
+    "Manual Script Shortcut" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Manueller Skript-Kurzbefehl" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manual Script Shortcut" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Scorciatoia manuale per script" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "手動スクリプトのショートカット" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "手动脚本快捷键" } }
+      }
+    },
+    "Run enabled manual scripts on the current clipboard." : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Aktivierte manuelle Skripte auf die aktuelle Zwischenablage anwenden." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Run enabled manual scripts on the current clipboard." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Esegui gli script manuali abilitati sugli appunti correnti." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "有効な手動スクリプトを現在のクリップボードに実行します。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对当前剪贴板运行已启用的手动脚本。" } }
+      }
+    },
+    "Script Transforms" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Skripttransformationen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Script Transforms" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Trasformazioni tramite script" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "スクリプト変換" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "脚本转换" } }
+      }
+    },
+    "Scripts" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Skripte" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scripts" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Script" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "スクリプト" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "脚本" } }
+      }
+    },
+    "Transform plain-text clipboard content with local JavaScript." : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Text aus der Zwischenablage mit lokalem JavaScript umwandeln." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Transform plain-text clipboard content with local JavaScript." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Trasforma il testo degli appunti con JavaScript locale." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ローカルJavaScriptでクリップボードのテキストを変換します。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用本地 JavaScript 转换剪贴板纯文本。" } }
+      }
+    },
     "Manual Sync" : {
       "localizations" : {
         "en" : {
@@ -6485,6 +6530,16 @@
         }
       }
     },
+    "+ New Folder" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "+ 新建文件夹" } }
+      }
+    },
+    "New Folder" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新建文件夹" } }
+      }
+    },
     "Delete Password" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除密码" } }
@@ -6519,6 +6574,96 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱" } }
       }
     },
+    "Unlock Password Vault" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor entsperren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unlock Password Vault" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Sblocca cassaforte password" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫をロック解除" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁密码箱" } }
+      }
+    },
+    "Create Password Vault" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor erstellen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Create Password Vault" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Crea cassaforte password" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫を作成" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建密码箱" } }
+      }
+    },
+    "Create" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Erstellen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Create" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Crea" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "作成" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建" } }
+      }
+    },
+    "Enter your master password to continue." : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Gib dein Master-Passwort ein, um fortzufahren." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter your master password to continue." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Inserisci la password principale per continuare." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "続けるにはマスターパスワードを入力してください。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入主密码以继续。" } }
+      }
+    },
+    "Set a master password to protect your vault." : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Lege ein Master-Passwort zum Schutz deines Tresors fest." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set a master password to protect your vault." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Imposta una password principale per proteggere la cassaforte." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保管庫を守るマスターパスワードを設定します。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置主密码以保护密码箱。" } }
+      }
+    },
+    "Master Password" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Master-Passwort" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Master Password" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Password principale" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "マスターパスワード" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主密码" } }
+      }
+    },
+    "Confirm Master Password" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Master-Passwort bestätigen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirm Master Password" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Conferma password principale" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "マスターパスワードを確認" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认主密码" } }
+      }
+    },
+    "Unlock" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Entsperren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unlock" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Sblocca" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ロック解除" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁" } }
+      }
+    },
+    "Unlocking…" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Wird entsperrt…" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unlocking…" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Sblocco…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ロック解除中…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在解锁…" } }
+      }
+    },
+    "Use Quick Unlock" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Schnellentsperrung verwenden" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use Quick Unlock" } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Usa sblocco rapido" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クイックロック解除を使用" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用快速解锁" } }
+      }
+    },
     "Password Vault Unavailable" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱不可用" } }
@@ -6527,6 +6672,26 @@
     "Passwords are stored only in this Mac's Keychain." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码仅存储在这台 Mac 的钥匙串中。" } }
+      }
+    },
+    "Paste Password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "粘贴密码" } }
+      }
+    },
+    "Paste Username" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "粘贴账号" } }
+      }
+    },
+    "More" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更多" } }
+      }
+    },
+    "Quick paste is available here" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "右侧可快速粘贴" } }
       }
     },
     "Show password" : {

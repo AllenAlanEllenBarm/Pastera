@@ -2,6 +2,12 @@ import AppKit
 
 @MainActor
 final class ScriptTestViewController: NSViewController {
+    private enum Metrics {
+        static let minimumWidth: CGFloat = 560
+        static let idealWidth: CGFloat = 620
+        static let minimumHeight: CGFloat = 430
+        static let idealHeight: CGFloat = 500
+    }
     private let scripts: [ScriptTransform]
     private let executor: ScriptExecuting
     private let scriptPicker = NSPopUpButton()
@@ -33,9 +39,15 @@ final class ScriptTestViewController: NSViewController {
         let content = makeContent()
         root.addSubview(header)
         root.addSubview(content)
+        let idealWidth = root.widthAnchor.constraint(equalToConstant: Metrics.idealWidth)
+        idealWidth.priority = .defaultHigh
+        let idealHeight = root.heightAnchor.constraint(equalToConstant: Metrics.idealHeight)
+        idealHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 620),
-            root.heightAnchor.constraint(equalToConstant: 500),
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumWidth),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
+            idealWidth,
+            idealHeight,
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -199,4 +211,5 @@ final class ScriptTestViewController: NSViewController {
     func runSelectedScriptForTesting(input: String) async {
         await runSelectedScript(input: input)
     }
+    var minimumSheetWidthForTesting: CGFloat { Metrics.minimumWidth }
 }

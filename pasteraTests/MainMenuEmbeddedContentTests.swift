@@ -258,7 +258,7 @@ struct MainMenuEmbeddedContentTests {
                 selectSnippet: { _, _ in }
             )
         )
-        let fixedSize = NSSize(width: 282, height: 356)
+        let fixedSize = NSSize(width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.fixedHeight)
 
         controller.show(at: NSPoint(x: 160, y: 700))
         defer { controller.close() }
@@ -318,8 +318,8 @@ struct MainMenuEmbeddedContentTests {
 
         controller.openSnippetsFromMainMenu()
         #expect(controller.mainMenuSelectedModeForTesting == "snippets")
-        #expect(controller.mainMenuSnippetFolderTitleForTesting == "AI Prompt")
-        #expect(controller.mainMenuVisibleRowTitlesForTesting == ["AI Prompt", "Ask GPT"])
+        #expect(controller.mainMenuSnippetFolderTitleForTesting == nil)
+        #expect(controller.mainMenuVisibleRowTitlesForTesting == ["AI Prompt"])
 
         controller.selectMainMenuItemForTesting(title: "AI Prompt")
         #expect(controller.handleMainMenuNavigationForTesting(try makeReturnEvent()))
@@ -382,7 +382,7 @@ struct MainMenuEmbeddedContentTests {
     }
 
     @Test
-    func snippetTreeDefaultsToFirstFolderAndKeepsOnlyOneFolderExpanded() throws {
+    func snippetTreeDefaultsToCollapsedAndKeepsOnlyOneFolderExpanded() throws {
         let firstFolderID = SnippetFolder.ID(rawValue: UUID())
         let secondFolderID = SnippetFolder.ID(rawValue: UUID())
         let details = [
@@ -405,8 +405,8 @@ struct MainMenuEmbeddedContentTests {
         defer { controller.close() }
         controller.openSnippetsFromMainMenu()
 
-        #expect(controller.mainMenuSnippetFolderTitleForTesting == "AI Prompt")
-        #expect(controller.mainMenuVisibleRowTitlesForTesting == ["AI Prompt", "Ask GPT", "Workflows"])
+        #expect(controller.mainMenuSnippetFolderTitleForTesting == nil)
+        #expect(controller.mainMenuVisibleRowTitlesForTesting == ["AI Prompt", "Workflows"])
 
         controller.selectMainMenuItemForTesting(title: "Workflows")
         #expect(controller.handleMainMenuNavigationForTesting(try makeReturnEvent()))
@@ -446,6 +446,7 @@ struct MainMenuEmbeddedContentTests {
             controller.show(at: NSPoint(x: 100, y: 100))
             defer { controller.close() }
             controller.openSnippetsFromMainMenu()
+            controller.performMainMenuRowConfirmForTesting(title: "AI Prompt")
             controller.selectMainMenuItemForTesting(title: "Workflows")
             #expect(controller.handleMainMenuNavigationForTesting(returnEvent))
 
@@ -471,6 +472,7 @@ struct MainMenuEmbeddedContentTests {
             controller.show(at: NSPoint(x: 100, y: 100))
             defer { controller.close() }
             controller.openSnippetsFromMainMenu()
+            controller.performMainMenuRowConfirmForTesting(title: "AI Prompt")
 
             let rowFrame = try #require(controller.mainMenuActionRowFrameForTesting(title: "Ask GPT"))
             let titleFrame = try #require(controller.mainMenuActionTitleFrameForTesting(title: "Ask GPT"))
@@ -568,6 +570,7 @@ struct MainMenuEmbeddedContentTests {
         controller.show(at: NSPoint(x: 100, y: 100))
         defer { controller.close() }
         controller.openSnippetsFromMainMenu()
+        controller.performMainMenuRowConfirmForTesting(title: "AI Prompt")
         #expect(controller.mainMenuSnippetFolderTitleForTesting == "AI Prompt")
 
         controller.updateMainMenuSearchQueryForTesting("Ship")
@@ -606,6 +609,7 @@ struct MainMenuEmbeddedContentTests {
         controller.show(at: NSPoint(x: 100, y: 100))
         defer { controller.close() }
         controller.openSnippetsFromMainMenu()
+        controller.performMainMenuRowConfirmForTesting(title: "AI Prompt")
 
         #expect(controller.mainMenuRowButtonIdentifiersForTesting(title: "Ask GPT").contains("mainMenuRowDeleteButton"))
         #expect(controller.mainMenuRowContextMenuTitlesForTesting(title: "Ask GPT") == [
@@ -648,6 +652,7 @@ struct MainMenuEmbeddedContentTests {
         controller.show(at: NSPoint(x: 100, y: 100))
         defer { controller.close() }
         controller.openSnippetsFromMainMenu()
+        controller.performMainMenuRowConfirmForTesting(title: "AI Prompt")
         controller.selectMainMenuItemForTesting(title: "Ask GPT")
         controller.setMainMenuDeleteConfirmationRunnerForTesting { _, _ in .cancelled }
 
@@ -658,7 +663,7 @@ struct MainMenuEmbeddedContentTests {
     }
 
     @Test
-    func deletingSnippetFolderExpandsNextAvailableFolder() throws {
+    func deletingSnippetFolderLeavesNextAvailableFolderCollapsed() throws {
         let firstFolderID = SnippetFolder.ID(rawValue: UUID())
         let secondFolderID = SnippetFolder.ID(rawValue: UUID())
         var details = [
@@ -688,6 +693,7 @@ struct MainMenuEmbeddedContentTests {
         controller.show(at: NSPoint(x: 100, y: 100))
         defer { controller.close() }
         controller.openSnippetsFromMainMenu()
+        controller.performMainMenuRowConfirmForTesting(title: "AI Prompt")
         #expect(controller.mainMenuSnippetFolderTitleForTesting == "AI Prompt")
         #expect(controller.mainMenuRowContextMenuTitlesForTesting(title: "AI Prompt") == [
             String(localized: "Edit"),
@@ -706,9 +712,9 @@ struct MainMenuEmbeddedContentTests {
         #expect(deletedFolderIDs == [firstFolderID])
         #expect(confirmationOptions?.title == String(localized: "Delete Folder"))
         #expect(confirmationOptions?.isDestructive == true)
-        #expect(controller.mainMenuSnippetFolderTitleForTesting == "Workflows")
-        #expect(controller.mainMenuVisibleRowTitlesForTesting == ["Workflows", "Ship It"])
-        #expect(controller.selectedMainMenuTitleForTesting == "Workflows")
+        #expect(controller.mainMenuSnippetFolderTitleForTesting == nil)
+        #expect(controller.mainMenuVisibleRowTitlesForTesting == ["Workflows"])
+        #expect(controller.selectedMainMenuTitleForTesting == nil)
     }
 
     @Test

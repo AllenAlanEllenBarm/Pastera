@@ -52,8 +52,8 @@ struct MainMenuOneDriveFooterTests {
             MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.toolbarHeight / 2
         )) <= 1)
         #expect(preferencesRowFrame.minY >= MainMenuPanelLayout.bottomInset + MainMenuPanelLayout.toolbarHeight)
-        #expect(MainMenuPanelLayout.headerHeight == 40)
-        #expect(MainMenuPanelLayout.snippetFolderRowHeight == 25)
+        #expect(MainMenuPanelLayout.headerHeight == 38)
+        #expect(MainMenuPanelLayout.snippetFolderRowHeight == 32)
         #expect(folderRowFrame.height == MainMenuPanelLayout.snippetFolderRowHeight)
         #expect(preferencesRowFrame.height == MainMenuPanelLayout.rowHeight)
         #expect(abs(folderTitleFrame.midY - MainMenuPanelLayout.snippetFolderRowHeight / 2) <= 1)
@@ -93,7 +93,7 @@ struct MainMenuOneDriveFooterTests {
             controller.mainMenuActionTitleAvailableWidthForTesting(title: "Preferences")
         )
 
-        #expect(MainMenuPanelLayout.width == 282)
+        #expect(MainMenuPanelLayout.width == 300)
         #expect(titleAvailableWidth >= menuTitleWidth("AI Prompt"))
         #expect(preferencesTitleAvailableWidth >= menuTitleWidth("Preferences"))
     }

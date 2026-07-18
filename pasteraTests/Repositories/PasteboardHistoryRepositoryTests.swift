@@ -64,6 +64,29 @@ struct ClipServiceCaptureTests {
         }
     }
 
+    @Test
+    func concealedPasswordClipboardContentIsNeverCaptured() {
+        let repository = RecordingPasteboardHistoryRepository()
+        let pasteboard = NSPasteboard(name: .init("ClipServiceCaptureTests.secret.\(UUID().uuidString)"))
+        let item = NSPasteboardItem()
+        item.setString("secret-value", forType: .string)
+        item.setString("", forType: .init("org.nspasteboard.ConcealedType"))
+        item.setString("", forType: .init("org.nspasteboard.TransientType"))
+        pasteboard.writeObjects([item])
+        defer { pasteboard.clearContents() }
+
+        withDependencies {
+            $0.pasteboardHistoryRepository = repository
+        } operation: {
+            let service = ClipService()
+            service.setStoreTypesForTesting(["String": NSNumber(value: true)])
+
+            #expect(service.createForTesting(from: pasteboard))
+        }
+
+        #expect(repository.savedContents.isEmpty)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func successfulCopyTransformWritesAndSavesOnlyFinalText() async throws {
         let repository = RecordingPasteboardHistoryRepository()
@@ -214,6 +237,18 @@ private final class RecordingClipboardScriptCoordinator: ClipboardScriptCoordina
         receivedTexts.append(text)
         return outcome
     }
+
+    func availableHistoryScripts() -> [ScriptTransform] { [] }
+
+    func transformHistoryText(
+        _ text: String,
+        using scriptID: UUID,
+        sourceAppBundleIdentifier: String?
+    ) async -> ScriptTransformOutcome {
+        .unchanged
+    }
+
+    func writeHistoryTransformResult(_ text: String) {}
 
     func runManualTransform() async {}
     func consumeSuppression(changeCount: Int) -> Bool { false }

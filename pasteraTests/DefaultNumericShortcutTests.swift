@@ -5,6 +5,8 @@
 //
 
 import AppKit
+import Combine
+import Dependencies
 import Testing
 @testable import Pastera
 
@@ -118,6 +120,24 @@ struct DefaultNumericShortcutTests {
         }
 
         CPYUtilities.registerUserDefaultKeys()
-        try operation(defaults)
+        try withDependencies {
+            $0.pasteboardHistoryRepository = NumericShortcutEmptyHistoryRepository()
+        } operation: {
+            try operation(defaults)
+        }
     }
+}
+
+private struct NumericShortcutEmptyHistoryRepository: PasteboardHistoryRepositoryProtocol {
+    func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> { Just([]).eraseToAnyPublisher() }
+    func hasHistories() -> Bool { false }
+    func fetchHistoryDetails(ascending: Bool, includesThumbnailAsset: Bool, limit: Int, offset: Int) -> [PasteboardHistoryDetail] { [] }
+    func searchHistoryDetails(query: HistorySearchQuery, includesThumbnailAsset: Bool, limit: Int, offset: Int) throws -> [PasteboardHistoryDetail] { [] }
+    func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? { nil }
+    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
+    func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {}
+    func deleteHistory(id: PasteboardHistory.ID) {}
+    func deleteAll() {}
+    func deleteOverflowingHistories(maxHistorySize: Int) {}
+    func pruneHistories(settings: HistoryRetentionSettings) {}
 }

@@ -15,31 +15,31 @@ import Magnet
 // swiftlint:disable file_length
 
 enum MainMenuPanelLayout {
-    static let width: CGFloat = 282
+    static let width: CGFloat = 300
     static let fixedHeight: CGFloat = 356
     static let topInset: CGFloat = 10
     static let bottomInset: CGFloat = 10
-    static let rowHeight: CGFloat = 30
-    static let compactImageRowHeight: CGFloat = 30
-    static let snippetFolderRowHeight: CGFloat = 30
+    static let rowHeight: CGFloat = 32
+    static let compactImageRowHeight: CGFloat = 32
+    static let snippetFolderRowHeight: CGFloat = 32
     static let noticeHeight: CGFloat = 52
-    static let headerHeight: CGFloat = 40
-    static let toolbarHeight: CGFloat = 36
+    static let headerHeight: CGFloat = 38
+    static let toolbarHeight: CGFloat = 40
     static let searchHeight: CGFloat = 28
-    static let sectionInset: CGFloat = 10
-    static let sectionGap: CGFloat = 8
+    static let sectionInset: CGFloat = 8
+    static let sectionGap: CGFloat = 4
     static let sectionRadius: CGFloat = 12
-    static let contentInnerPadding: CGFloat = 8
+    static let contentInnerPadding: CGFloat = 3
     static let inlineEditorHeight: CGFloat = 210
     static let folderShortcutEditorHeight: CGFloat = 38
     static let separatorHeight: CGFloat = 1
-    static let separatorHorizontalInset: CGFloat = 7
+    static let separatorHorizontalInset: CGFloat = 8
     static let separatorVerticalInset: CGFloat = 3
     static let separatorAlpha: CGFloat = 0.10
     static let oneDriveStatusButtonSize: CGFloat = 28
     static let oneDriveStatusIconSize: CGFloat = 14
     static let oneDriveStatusTrailingInset: CGFloat = 7
-    static let toolbarButtonSize: CGFloat = 28
+    static let toolbarButtonSize: CGFloat = 30
     static let toolbarHorizontalInset: CGFloat = 8
     static let modeButtonWidth: CGFloat = 31
     static let modeControlHeight: CGFloat = 28
@@ -64,6 +64,13 @@ enum MainMenuVisualColors {
     static let accentFill = NSColor.controlAccentColor.withAlphaComponent(0.16)
     static let separator = NSColor(calibratedWhite: 1.0, alpha: 0.095)
 }
+
+#if DEBUG
+struct MainMenuChromeStyle {
+    let backgroundAlpha: CGFloat
+    let borderWidth: CGFloat
+}
+#endif
 
 enum MainMenuPanelItem {
     case separator
@@ -114,6 +121,8 @@ struct MainMenuSnippetDataSource {
     let updateSnippetContent: (Snippet.ID, String) -> Bool
     let deleteFolder: (SnippetFolder.ID) -> Void
     let deleteSnippet: (Snippet.ID) -> Void
+    let reorderFolders: ([SnippetFolder.ID]) -> Bool
+    let moveSnippet: (Snippet.ID, SnippetFolder.ID, [SnippetFolder.ID: [Snippet.ID]]) -> Bool
     let folderKeyCombo: (SnippetFolder.ID) -> KeyCombo?
     let updateFolderKeyCombo: (SnippetFolder.ID, KeyCombo) -> Void
     let clearFolderKeyCombo: (SnippetFolder.ID) -> Void
@@ -129,6 +138,8 @@ struct MainMenuSnippetDataSource {
         updateSnippetContent: @escaping (Snippet.ID, String) -> Bool = { _, _ in false },
         deleteFolder: @escaping (SnippetFolder.ID) -> Void = { _ in },
         deleteSnippet: @escaping (Snippet.ID) -> Void = { _ in },
+        reorderFolders: @escaping ([SnippetFolder.ID]) -> Bool = { _ in false },
+        moveSnippet: @escaping (Snippet.ID, SnippetFolder.ID, [SnippetFolder.ID: [Snippet.ID]]) -> Bool = { _, _, _ in false },
         folderKeyCombo: @escaping (SnippetFolder.ID) -> KeyCombo? = { _ in nil },
         updateFolderKeyCombo: @escaping (SnippetFolder.ID, KeyCombo) -> Void = { _, _ in },
         clearFolderKeyCombo: @escaping (SnippetFolder.ID) -> Void = { _ in }
@@ -143,6 +154,8 @@ struct MainMenuSnippetDataSource {
         self.updateSnippetContent = updateSnippetContent
         self.deleteFolder = deleteFolder
         self.deleteSnippet = deleteSnippet
+        self.reorderFolders = reorderFolders
+        self.moveSnippet = moveSnippet
         self.folderKeyCombo = folderKeyCombo
         self.updateFolderKeyCombo = updateFolderKeyCombo
         self.clearFolderKeyCombo = clearFolderKeyCombo
@@ -150,16 +163,84 @@ struct MainMenuSnippetDataSource {
 }
 
 struct MainMenuPasswordVaultDataSource {
+    let state: () -> PasswordVaultState
+    let checkQuickUnlockAvailability: (@escaping (Bool) -> Void) -> Void
+    let createDatabase: (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let unlock: (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let unlockWithQuickKey: (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let fetchFolders: () throws -> [PasswordVaultFolder]
     let fetchEntries: () throws -> [PasswordVaultEntry]
     let copyPassword: (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let pasteUsername: (PasswordVaultEntry.ID, PasteTargetContext?, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let pastePassword: (PasswordVaultEntry.ID, PasteTargetContext?, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let loadDraft: (PasswordVaultEntry.ID, @escaping (Result<PasswordVaultDraft, PasswordVaultError>) -> Void) -> Void
     let createEntry: (PasswordVaultDraft, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let updateEntry: (PasswordVaultEntry.ID, PasswordVaultDraft, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let deleteEntry: (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
-    let createFolder: (String) throws -> PasswordVaultFolder
-    let renameFolder: (PasswordVaultFolder.ID, String) throws -> PasswordVaultFolder
-    let deleteFolder: (PasswordVaultFolder.ID) throws -> Void
+    let createFolder: (String, @escaping (Result<PasswordVaultFolder, PasswordVaultError>) -> Void) -> Void
+    let renameFolder: (PasswordVaultFolder.ID, String, @escaping (Result<PasswordVaultFolder, PasswordVaultError>) -> Void) -> Void
+    let deleteFolder: (PasswordVaultFolder.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let reorderFolders: ([PasswordVaultFolder.ID], @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let moveEntry: (PasswordVaultEntry.ID, PasswordVaultFolder.ID, [PasswordVaultFolder.ID: [PasswordVaultEntry.ID]], @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+
+    init(
+        state: @escaping () -> PasswordVaultState = { .unlocked },
+        checkQuickUnlockAvailability: @escaping (@escaping (Bool) -> Void) -> Void = { completion in
+            completion(false)
+        },
+        createDatabase: @escaping (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, completion in completion(.failure(.databaseNotConfigured)) },
+        unlock: @escaping (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, completion in completion(.failure(.vaultLocked)) },
+        unlockWithQuickKey: @escaping (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { completion in completion(.failure(.keychainUnavailable)) },
+        fetchFolders: @escaping () throws -> [PasswordVaultFolder],
+        fetchEntries: @escaping () throws -> [PasswordVaultEntry],
+        copyPassword: @escaping (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void,
+        pasteUsername: @escaping (PasswordVaultEntry.ID, PasteTargetContext?, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, _, completion in completion(.failure(.entryNotFound)) },
+        pastePassword: @escaping (PasswordVaultEntry.ID, PasteTargetContext?, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, _, completion in completion(.failure(.entryNotFound)) },
+        loadDraft: @escaping (PasswordVaultEntry.ID, @escaping (Result<PasswordVaultDraft, PasswordVaultError>) -> Void) -> Void,
+        createEntry: @escaping (PasswordVaultDraft, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void,
+        updateEntry: @escaping (PasswordVaultEntry.ID, PasswordVaultDraft, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void,
+        deleteEntry: @escaping (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void,
+        createFolder: @escaping (String) throws -> PasswordVaultFolder,
+        renameFolder: @escaping (PasswordVaultFolder.ID, String) throws -> PasswordVaultFolder,
+        deleteFolder: @escaping (PasswordVaultFolder.ID) throws -> Void,
+        createFolderAsync: ((String, @escaping (Result<PasswordVaultFolder, PasswordVaultError>) -> Void) -> Void)? = nil,
+        renameFolderAsync: ((PasswordVaultFolder.ID, String, @escaping (Result<PasswordVaultFolder, PasswordVaultError>) -> Void) -> Void)? = nil,
+        deleteFolderAsync: ((PasswordVaultFolder.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void)? = nil,
+        reorderFolders: @escaping ([PasswordVaultFolder.ID], @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, completion in completion(.failure(.saveFailed)) },
+        moveEntry: @escaping (PasswordVaultEntry.ID, PasswordVaultFolder.ID, [PasswordVaultFolder.ID: [PasswordVaultEntry.ID]], @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, _, _, completion in completion(.failure(.saveFailed)) }
+    ) {
+        self.state = state
+        self.checkQuickUnlockAvailability = checkQuickUnlockAvailability
+        self.createDatabase = createDatabase
+        self.unlock = unlock
+        self.unlockWithQuickKey = unlockWithQuickKey
+        self.fetchFolders = fetchFolders
+        self.fetchEntries = fetchEntries
+        self.copyPassword = copyPassword
+        self.pasteUsername = pasteUsername
+        self.pastePassword = pastePassword
+        self.loadDraft = loadDraft
+        self.createEntry = createEntry
+        self.updateEntry = updateEntry
+        self.deleteEntry = deleteEntry
+        self.createFolder = createFolderAsync ?? { name, completion in
+            do { completion(.success(try createFolder(name))) }
+            catch let error as PasswordVaultError { completion(.failure(error)) }
+            catch { completion(.failure(.saveFailed)) }
+        }
+        self.renameFolder = renameFolderAsync ?? { id, name, completion in
+            do { completion(.success(try renameFolder(id, name))) }
+            catch let error as PasswordVaultError { completion(.failure(error)) }
+            catch { completion(.failure(.saveFailed)) }
+        }
+        self.deleteFolder = deleteFolderAsync ?? { id, completion in
+            do { try deleteFolder(id); completion(.success(())) }
+            catch let error as PasswordVaultError { completion(.failure(error)) }
+            catch { completion(.failure(.saveFailed)) }
+        }
+        self.reorderFolders = reorderFolders
+        self.moveEntry = moveEntry
+    }
 }
 
 private final class MainMenuPanel: NSPanel {
@@ -186,6 +267,12 @@ private final class MainMenuPanel: NSPanel {
 }
 
 final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
+    private enum PasswordVaultQuickUnlockAvailability {
+        case unknown
+        case checking
+        case available
+        case unavailable
+    }
     private enum DisplayMode {
         case history
         case snippets
@@ -196,6 +283,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         case none
         case snippetFolder(SnippetFolder.ID)
         case snippet(Snippet.ID)
+        case passwordEntry(PasswordVaultEntry.ID)
     }
 
     private enum InlineEditorState {
@@ -261,13 +349,18 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     }
 
     private enum PasswordVaultEditorState {
-        case create(PasswordVaultDraft, error: String?)
-        case edit(PasswordVaultEntry.ID, PasswordVaultDraft, error: String?)
+        case create(PasswordVaultDraft, step: PasswordVaultEditorStep, error: String?)
+        case edit(PasswordVaultEntry.ID, PasswordVaultDraft, step: PasswordVaultEditorStep, error: String?)
     }
 
     private enum PasswordVaultFolderEditorState {
         case create(error: String?)
         case rename(PasswordVaultFolder, error: String?)
+    }
+
+    private enum PasswordVaultPendingDeletion: Equatable {
+        case folder(PasswordVaultFolder.ID)
+        case entry(PasswordVaultEntry.ID)
     }
 
     private let historyTitle: String
@@ -305,8 +398,17 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var passwordVaultSearchQuery = ""
     private var expandedPasswordVaultFolderID: PasswordVaultFolder.ID?
     private var passwordVaultEditorState: PasswordVaultEditorState?
+    private var passwordVaultStepEditorView: PasswordVaultStepEditorView?
     private var passwordVaultFolderEditorState: PasswordVaultFolderEditorState?
     private var passwordVaultStatusMessage: String?
+    private var passwordVaultPendingDeletion: PasswordVaultPendingDeletion?
+    private var passwordVaultAccessError: String?
+    private var passwordVaultAccessView: PasswordVaultAccessView?
+    private var passwordVaultAccessModeInFlight: PasswordVaultAccessView.Mode?
+    private var passwordVaultAutomaticQuickUnlockAttempted = false
+    private var passwordVaultQuickUnlockAvailability = PasswordVaultQuickUnlockAvailability.unknown
+    private weak var passwordVaultQuickActionsCoachmarkView: PasswordVaultQuickActionsCoachmarkView?
+    private var passwordVaultQuickActionsCoachmarkWorkItem: DispatchWorkItem?
     private var visibleHistoryIDs = [PasteboardHistory.ID]()
     private var visibleSnippetIDs = [Snippet.ID]()
     private var visibleMainMenuRowTitles = [String]()
@@ -334,7 +436,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         passwordVaultDataSource: MainMenuPasswordVaultDataSource? = nil,
         oneDriveStatusService: OneDriveProcessStatusServicing = AppEnvironment.current.oneDriveProcessStatusService,
         onOpenPreferences: @escaping () -> Void = {
-            NSApp.sendAction(#selector(AppDelegate.showPreferenceWindow), to: nil, from: nil)
+            (NSApp.delegate as? AppDelegate)?.showPreferenceWindow()
         },
         onCloseChildPanels: @escaping () -> Void = {}
     ) {
@@ -356,6 +458,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     }
 
     func show(at screenPoint: NSPoint, pinned: Bool = false, pasteTargetContext: PasteTargetContext? = nil) {
+        isWorkspaceEditing = false
         isPinned = pinned
         self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
         isSearchVisible = false
@@ -370,6 +473,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     }
 
     func show(anchoredTo menuFrame: NSRect, pinned: Bool = true, pasteTargetContext: PasteTargetContext? = nil) {
+        isWorkspaceEditing = false
         isPinned = pinned
         self.pasteTargetContext = pasteTargetContext ?? self.pasteTargetContext ?? PasteTargetContext.capture()
         isSearchVisible = false
@@ -382,6 +486,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     }
 
     func show(attachedToStatusItemFrame statusItemFrame: NSRect, pinned: Bool = false, pasteTargetContext: PasteTargetContext? = nil) {
+        isWorkspaceEditing = false
         isPinned = pinned
         self.pasteTargetContext = pasteTargetContext ?? PasteTargetContext.capture()
         isSearchVisible = false
@@ -466,6 +571,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         }
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
+        resetPasswordVaultAccessPresentation()
         selectedMode = .history
         reloadContentIfVisible()
         onCloseChildPanels()
@@ -478,6 +584,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         }
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
+        resetPasswordVaultAccessPresentation()
         selectedMode = .snippets
         expandedSnippetFolderID = nil
         reloadContentIfVisible()
@@ -491,6 +598,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         }
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
+        resetPasswordVaultAccessPresentation()
         selectedMode = .snippets
         expandedSnippetFolderID = folderID
         reloadContentIfVisible()
@@ -502,8 +610,12 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
         selectedMode = .passwordVault
+        passwordVaultAccessError = nil
         reloadContentIfVisible()
         onCloseChildPanels()
+        DispatchQueue.main.async { [weak self] in
+            self?.attemptAutomaticPasswordVaultQuickUnlockIfNeeded()
+        }
     }
 
     private func openLegacyHistoryFromMainMenu() {
@@ -807,8 +919,7 @@ extension MainMenuPanelController {
     private func addEmbeddedViewport(_ content: EmbeddedContent, notices: [MainMenuPanelItem], frame: NSRect) {
         let surfaceView = MainMenuSurfaceView(
             frame: frame,
-            identifier: "mainMenuContentBlock",
-            fillColor: MainMenuVisualColors.contentSurface
+            identifier: "mainMenuContentBlock"
         )
         let scrollFrame = surfaceView.bounds.insetBy(
             dx: MainMenuPanelLayout.contentInnerPadding,
@@ -964,14 +1075,17 @@ extension MainMenuPanelController {
                 return makeSnippetContent()
             } else if let inlineEditorState, case .newSnippetFolder = inlineEditorState {
                 return mergedEditorAtEnd(makeInlineEditorContent(inlineEditorState), list: makeSnippetContent())
+            } else if let inlineEditorState,
+                      case .snippetFolder = inlineEditorState {
+                return makeSnippetContent()
+            } else if let inlineEditorState,
+                      case .snippet = inlineEditorState {
+                return makeSnippetContent()
             } else if let inlineEditorState {
                 return mergedEditor(makeInlineEditorContent(inlineEditorState), list: makeSnippetContent())
             }
             return makeSnippetContent()
         case .passwordVault:
-            if let passwordVaultEditorState {
-                return mergedEditor(makePasswordVaultEditorContent(passwordVaultEditorState), list: makePasswordVaultContent())
-            }
             if let passwordVaultFolderEditorState {
                 switch passwordVaultFolderEditorState {
                 case .create:
@@ -980,7 +1094,7 @@ extension MainMenuPanelController {
                         list: makePasswordVaultContent()
                     )
                 case .rename:
-                    return mergedEditor(makePasswordVaultFolderEditorContent(passwordVaultFolderEditorState), list: makePasswordVaultContent())
+                    return makePasswordVaultContent()
                 }
             }
             return makePasswordVaultContent()
@@ -1178,11 +1292,10 @@ extension MainMenuPanelController {
     }
 
     private func beginCreatingSnippet(in requestedFolderID: SnippetFolder.ID? = nil) {
-        let folderID = requestedFolderID ?? expandedSnippetFolderID ?? enabledSnippetFolderDetails().first?.folder.id
-        guard let folderID else {
-            beginCreatingSnippetFolder()
-            return
-        }
+        guard isWorkspaceEditing,
+              let folderID = expandedSnippetFolderID,
+              requestedFolderID == nil || requestedFolderID == folderID,
+              enabledSnippetFolderDetails().contains(where: { $0.folder.id == folderID }) else { return }
         inlineEditorState = .newSnippet(folderID, draftTitle: "", draftContent: "", error: nil)
         reloadContentKeepingTopLeft()
     }
@@ -1394,17 +1507,16 @@ extension MainMenuPanelController {
                 canGoToPreviousPage: false,
                 canGoToNextPage: false,
                 typeFilter: nil,
-                rows: isWorkspaceEditing ? snippetCreateRows(hasFolders: false) : [emptyRow(title: String(localized: "No Snippets"))]
+                rows: isWorkspaceEditing ? [newSnippetFolderCreateRow()] : [emptyRow(title: String(localized: "No Snippets"))]
             )
         }
 
+        let query = snippetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if let expandedID = expandedSnippetFolderID, !details.contains(where: { $0.folder.id == expandedID }) {
-            expandedSnippetFolderID = details.first?.folder.id
-        } else if expandedSnippetFolderID == nil && !isWorkspaceEditing {
+            expandedSnippetFolderID = query.isEmpty ? nil : details.first?.folder.id
+        } else if expandedSnippetFolderID == nil && !query.isEmpty {
             expandedSnippetFolderID = details.first?.folder.id
         }
-
-        let query = snippetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let rows = details.flatMap { detail -> [EmbeddedRow] in
             let isExpanded = detail.folder.id == expandedSnippetFolderID
             let folderTitleMatches = !query.isEmpty && detail.folder.title.localizedCaseInsensitiveContains(query)
@@ -1424,6 +1536,7 @@ extension MainMenuPanelController {
                     onEdit: { [weak self] in
                         self?.beginEditingSnippetFolder(detail.folder.id)
                     },
+                    showsEditButton: false,
                     onEditShortcut: { [weak self] in
                         self?.beginEditingFolderShortcut(detail.folder.id)
                     },
@@ -1433,16 +1546,32 @@ extension MainMenuPanelController {
                     onDelete: { [weak self] in
                         self?.confirmDeleteSnippetFolder(detail.folder.id)
                     },
-                    onDoubleClick: { [weak self] in self?.beginEditingSnippetFolder(detail.folder.id) },
+                    onDoubleClick: isWorkspaceEditing
+                        ? { [weak self] in self?.beginEditingSnippetFolder(detail.folder.id) } : nil,
+                    dragIdentifier: isWorkspaceEditing ? "snippet-folder:\(detail.folder.id.rawValue.uuidString)" : nil,
+                    onDragHover: isWorkspaceEditing && !isExpanded ? { [weak self] in
+                        self?.expandSnippetFolder(detail.folder.id)
+                    } : nil,
+                    onDrop: isWorkspaceEditing ? { [weak self] payload, after in
+                        self?.handleSnippetDrop(payload, onFolder: detail.folder.id, after: after) ?? false
+                    } : nil,
                     deleteTitle: String(localized: "Delete Folder"),
                     onConfirm: { [weak self] _ in
-                        self?.expandSnippetFolder(detail.folder.id)
+                        self?.toggleSnippetFolder(detail.folder.id)
                     }
                 ),
-                confirm: { [weak self] in self?.expandSnippetFolder(detail.folder.id) },
+                confirm: { [weak self] in self?.toggleSnippetFolder(detail.folder.id) },
                 role: .snippetFolder(detail.folder.id)
             )
-            guard isExpanded else { return [folderRow] }
+            let folderRows: [EmbeddedRow]
+            if let inlineEditorState,
+               case let .snippetFolder(folderID, _, _, _) = inlineEditorState,
+               folderID == detail.folder.id {
+                folderRows = makeInlineEditorContent(inlineEditorState).rows
+            } else {
+                folderRows = [folderRow]
+            }
+            guard isExpanded else { return folderRows }
 
             currentSnippetFolderTitle = detail.folder.title
             let snippets = enabledSnippets(in: detail, folderTitleMatches: folderTitleMatches)
@@ -1460,8 +1589,13 @@ extension MainMenuPanelController {
             } else {
                 shortcutEditorRows = []
             }
-            let snippetRows = snippets.enumerated().map { index, snippet in
-                EmbeddedRow(
+            let snippetRows = snippets.enumerated().flatMap { index, snippet -> [EmbeddedRow] in
+                if let inlineEditorState,
+                   case let .snippet(snippetID, _, _, _, _, _) = inlineEditorState,
+                   snippetID == snippet.id {
+                    return makeInlineEditorContent(inlineEditorState).rows
+                }
+                return [EmbeddedRow(
                     title: snippet.title,
                     view: MainMenuPanelRowView(
                         title: snippet.title,
@@ -1473,10 +1607,16 @@ extension MainMenuPanelController {
                         onEdit: { [weak self] in
                             self?.beginEditingSnippet(snippet.id)
                         },
+                        showsEditButton: false,
                         onDelete: { [weak self] in
                             self?.confirmDeleteSnippet(snippet.id)
                         },
-                        onDoubleClick: { [weak self] in self?.beginEditingSnippet(snippet.id) },
+                        onDoubleClick: isWorkspaceEditing
+                            ? { [weak self] in self?.beginEditingSnippet(snippet.id) } : nil,
+                        dragIdentifier: isWorkspaceEditing ? "snippet:\(snippet.id.rawValue.uuidString)" : nil,
+                        onDrop: isWorkspaceEditing ? { [weak self] payload, after in
+                            self?.handleSnippetDrop(payload, onSnippet: snippet.id, after: after) ?? false
+                        } : nil,
                         deleteTitle: String(localized: "Delete Snippet"),
                         onConfirm: { [weak self] _ in
                             self?.confirmSnippetSelection(snippet.id)
@@ -1484,11 +1624,11 @@ extension MainMenuPanelController {
                     ),
                     confirm: { [weak self] in self?.confirmSnippetSelection(snippet.id) },
                     role: .snippet(snippet.id)
-                )
+                )]
             }
-            let contextualRows = isWorkspaceEditing && query.isEmpty
-                ? [snippetInFolderCreateRow(folderID: detail.folder.id)] : []
-            return [folderRow] + shortcutEditorRows + snippetRows + contextualRows
+            let createRows = isWorkspaceEditing && query.isEmpty && inlineEditorState == nil
+                ? [newSnippetCreateRow(folderID: detail.folder.id)] : []
+            return folderRows + shortcutEditorRows + snippetRows + createRows
         }
 
         if currentSnippetFolderTitle == nil,
@@ -1504,32 +1644,29 @@ extension MainMenuPanelController {
             canGoToPreviousPage: false,
             canGoToNextPage: false,
             typeFilter: nil,
-            rows: rows + (isWorkspaceEditing && expandedSnippetFolderID == nil ? snippetCreateRows(hasFolders: false) : [])
+            rows: rows + (isWorkspaceEditing && query.isEmpty && inlineEditorState == nil
+                && expandedSnippetFolderID == nil ? [newSnippetFolderCreateRow()] : [])
         )
     }
 
-    private func snippetCreateRows(hasFolders: Bool) -> [EmbeddedRow] {
-        guard isWorkspaceEditing, inlineEditorState == nil else { return [] }
+    private func newSnippetCreateRow(folderID: SnippetFolder.ID) -> EmbeddedRow {
         let view = MainMenuCreateActionsView(
-            primaryTitle: hasFolders ? String(localized: "+ New Snippet") : String(localized: "Create Your First Folder"),
-            primaryIdentifier: hasFolders ? "mainMenuContentCreateSnippetButton" : "mainMenuContentCreateSnippetFolderButton",
-            secondaryTitle: hasFolders ? String(localized: "New Folder") : nil,
-            secondaryIdentifier: hasFolders ? "mainMenuContentCreateSnippetFolderButton" : nil,
-            onPrimary: { [weak self] in
-                if hasFolders { self?.beginCreatingSnippet() } else { self?.beginCreatingSnippetFolder() }
-            },
-            onSecondary: hasFolders ? { [weak self] in self?.beginCreatingSnippetFolder() } : nil
+            title: String(localized: "New Snippet"),
+            identifier: "mainMenuContentCreateSnippetButton",
+            indentationLevel: 1,
+            onAction: { [weak self] in self?.beginCreatingSnippet(in: folderID) }
         )
-        return [EmbeddedRow(title: String(localized: "Create"), view: view, confirm: {}, participatesInNavigation: false)]
+        return EmbeddedRow(title: String(localized: "Create"), view: view, confirm: {}, participatesInNavigation: false)
     }
 
-    private func snippetInFolderCreateRow(folderID: SnippetFolder.ID) -> EmbeddedRow {
+    private func newSnippetFolderCreateRow() -> EmbeddedRow {
         let view = MainMenuCreateActionsView(
-            primaryTitle: String(localized: "+ New Snippet in This Folder"),
-            primaryIdentifier: "mainMenuCreateSnippetInFolderButton",
-            onPrimary: { [weak self] in self?.beginCreatingSnippet(in: folderID) }
+            title: String(localized: "New Folder"),
+            identifier: "mainMenuContentCreateSnippetFolderButton",
+            indentationLevel: 0,
+            onAction: { [weak self] in self?.beginCreatingSnippetFolder() }
         )
-        return EmbeddedRow(title: String(localized: "New Snippet"), view: view, confirm: {}, participatesInNavigation: false)
+        return EmbeddedRow(title: String(localized: "Create"), view: view, confirm: {}, participatesInNavigation: false)
     }
 
     private func folderRowImage() -> NSImage? {
@@ -1537,11 +1674,33 @@ extension MainMenuPanelController {
     }
 
     private func makePasswordVaultContent() -> EmbeddedContent {
+        guard let passwordVaultDataSource else {
+            return passwordVaultFailureContent(message: String(localized: "Password Vault Unavailable"))
+        }
+        switch passwordVaultDataSource.state() {
+        case .notConfigured:
+            return passwordVaultAccessContent(mode: .create, isBusy: false)
+        case .locked:
+            return passwordVaultAccessContent(mode: .unlock, isBusy: false)
+        case .unlocking:
+            return passwordVaultAccessContent(mode: passwordVaultAccessModeInFlight ?? .unlock, isBusy: true)
+        case .unlocked, .readOnlyWarning:
+            passwordVaultAccessView = nil
+            passwordVaultAccessError = nil
+            break
+        case let .failed(message):
+            return passwordVaultFailureContent(message: message.isEmpty
+                ? String(localized: "Password Vault Unavailable") : message)
+        }
         let folders: [PasswordVaultFolder]
         let entries: [PasswordVaultEntry]
         do {
-            folders = try passwordVaultDataSource?.fetchFolders() ?? []
-            entries = try passwordVaultDataSource?.fetchEntries() ?? []
+            folders = try passwordVaultDataSource.fetchFolders()
+            entries = try passwordVaultDataSource.fetchEntries()
+        } catch PasswordVaultError.databaseNotConfigured {
+            return passwordVaultAccessContent(mode: .create, isBusy: false)
+        } catch PasswordVaultError.vaultLocked {
+            return passwordVaultAccessContent(mode: .unlock, isBusy: false)
         } catch {
             return EmbeddedContent(
                 headerTitle: String(localized: "Password Vault"),
@@ -1554,9 +1713,7 @@ extension MainMenuPanelController {
             )
         }
         if let expandedID = expandedPasswordVaultFolderID, !folders.contains(where: { $0.id == expandedID }) {
-            expandedPasswordVaultFolderID = folders.first?.id
-        } else if expandedPasswordVaultFolderID == nil && !isWorkspaceEditing {
-            expandedPasswordVaultFolderID = folders.first?.id
+            expandedPasswordVaultFolderID = nil
         }
         let query = passwordVaultSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let matchingEntries = entries.filter { query.isEmpty || $0.matches(query) }
@@ -1573,42 +1730,105 @@ extension MainMenuPanelController {
                     showsChevron: true,
                     isExpanded: isExpanded,
                     onEdit: { [weak self] in self?.passwordVaultFolderEditorState = .rename(folder, error: nil); self?.reloadContentKeepingTopLeft() },
+                    showsEditButton: false,
                     onDelete: { [weak self] in self?.deletePasswordVaultFolder(folder.id) },
-                    onDoubleClick: { [weak self] in
-                        self?.passwordVaultFolderEditorState = .rename(folder, error: nil)
+                    onDoubleClick: isWorkspaceEditing ? { [weak self] in
+                            self?.passwordVaultFolderEditorState = .rename(folder, error: nil)
+                            self?.reloadContentKeepingTopLeft()
+                        } : nil,
+                    dragIdentifier: isWorkspaceEditing ? "password-folder:\(folder.id.uuidString)" : nil,
+                    onDragHover: isWorkspaceEditing && !isExpanded ? { [weak self] in
+                        self?.expandedPasswordVaultFolderID = folder.id
                         self?.reloadContentKeepingTopLeft()
-                    },
+                    } : nil,
+                    onDrop: isWorkspaceEditing ? { [weak self] payload, after in
+                        self?.handlePasswordDrop(payload, onFolder: folder.id, after: after) ?? false
+                    } : nil,
                     deleteTitle: String(localized: "Delete Folder"),
                     onConfirm: { [weak self] _ in self?.togglePasswordVaultFolder(folder.id) }
                 ),
                 confirm: { [weak self] in self?.togglePasswordVaultFolder(folder.id) }
             )
-            guard isExpanded else { return [folderRow] }
-            let entryRows = folderEntries.map { entry in
-                EmbeddedRow(
+            let folderRows: [EmbeddedRow]
+            if let passwordVaultFolderEditorState,
+               case let .rename(editingFolder, _) = passwordVaultFolderEditorState,
+               editingFolder.id == folder.id {
+                folderRows = makePasswordVaultFolderEditorContent(passwordVaultFolderEditorState).rows
+            } else {
+                folderRows = [folderRow]
+            }
+            guard isExpanded else { return folderRows }
+            let entryRows = folderEntries.flatMap { entry -> [EmbeddedRow] in
+                let row = EmbeddedRow(
                     title: entry.title,
                     view: MainMenuPanelRowView(
                         title: entry.title,
                         image: MainMenuModeIcons.passwordVault(),
                         rowKind: .action,
                         indentationLevel: 1,
+                        contextActions: [
+                            .init(title: String(localized: "Paste Username"), keyEquivalent: "u", action: { [weak self] in
+                                self?.pastePasswordVaultUsername(entry.id)
+                            }),
+                            .init(title: String(localized: "Paste Password"), keyEquivalent: "p", action: { [weak self] in
+                                self?.pastePasswordVaultPassword(entry.id)
+                            })
+                        ],
+                        quickActions: isWorkspaceEditing ? [] : [
+                            .init(
+                                identifier: "mainMenuPasswordPasteUsernameButton",
+                                symbolName: "person.text.rectangle",
+                                title: String(localized: "Paste Username"),
+                                shortcutText: "⌥⌘U",
+                                action: { [weak self] in self?.pastePasswordVaultUsername(entry.id) }
+                            ),
+                            .init(
+                                identifier: "mainMenuPasswordPastePasswordButton",
+                                symbolName: "key.fill",
+                                title: String(localized: "Paste Password"),
+                                shortcutText: "⌥⌘P",
+                                action: { [weak self] in self?.pastePasswordVaultPassword(entry.id) }
+                            ),
+                            .init(
+                                identifier: "mainMenuPasswordMoreButton",
+                                symbolName: "ellipsis",
+                                title: String(localized: "More"),
+                                shortcutText: nil,
+                                action: nil
+                            )
+                        ],
                         onEdit: { [weak self] in self?.beginEditingPasswordVaultEntry(entry.id) },
+                        showsEditButton: false,
                         onDelete: { [weak self] in self?.deletePasswordVaultEntry(entry.id) },
-                        onDoubleClick: { [weak self] in self?.beginEditingPasswordVaultEntry(entry.id) },
+                        showsDeleteButton: isWorkspaceEditing,
+                        onDoubleClick: isWorkspaceEditing
+                            ? { [weak self] in self?.beginEditingPasswordVaultEntry(entry.id) } : nil,
+                        dragIdentifier: isWorkspaceEditing ? "password-entry:\(entry.id.uuidString)" : nil,
+                        onDrop: isWorkspaceEditing ? { [weak self] payload, after in
+                            self?.handlePasswordDrop(payload, onEntry: entry.id, after: after) ?? false
+                        } : nil,
                         deleteTitle: String(localized: "Delete Password"),
                         onConfirm: { [weak self] _ in self?.copyPasswordVaultEntry(entry.id) }
                     ),
-                    confirm: { [weak self] in self?.copyPasswordVaultEntry(entry.id) }
+                    confirm: { [weak self] in self?.copyPasswordVaultEntry(entry.id) },
+                    role: .passwordEntry(entry.id)
                 )
+                guard passwordVaultEditingEntryID == entry.id else { return [row] }
+                return [passwordVaultStepEditorRow()]
             }
-            let contextualRows = isWorkspaceEditing && query.isEmpty
-                ? [passwordInFolderCreateRow(folderID: folder.id)] : []
-            return [folderRow] + entryRows + contextualRows
+            let createEditorRows = passwordVaultCreatingFolderID == folder.id
+                ? [passwordVaultStepEditorRow()] : []
+            let createRows = isWorkspaceEditing && query.isEmpty
+                && passwordVaultEditorState == nil && passwordVaultFolderEditorState == nil
+                ? [newPasswordVaultCreateRow(folderID: folder.id)] : []
+            return folderRows + entryRows + createEditorRows + createRows
         }
-        let trailingCreateRows = isWorkspaceEditing && expandedPasswordVaultFolderID == nil
-            ? passwordVaultCreateRows(hasFolders: false) : []
-        let visibleRows = passwordVaultStatusMessage.map { [emptyRow(title: $0)] + rows + trailingCreateRows }
-            ?? (rows + trailingCreateRows)
+        let trailingCreateRows = isWorkspaceEditing && query.isEmpty
+            && passwordVaultEditorState == nil && passwordVaultFolderEditorState == nil
+            && expandedPasswordVaultFolderID == nil ? [newPasswordVaultFolderCreateRow()] : []
+        let contentRows = rows + trailingCreateRows
+        let visibleRows = passwordVaultStatusMessage.map { [emptyRow(title: $0)] + contentRows }
+            ?? contentRows
         return EmbeddedContent(
             headerTitle: String(localized: "Password Vault"),
             headerSubtitle: nil,
@@ -1616,56 +1836,153 @@ extension MainMenuPanelController {
             canGoToPreviousPage: false,
             canGoToNextPage: false,
             typeFilter: nil,
-            rows: visibleRows.isEmpty
-                ? [emptyRow(title: String(localized: query.isEmpty ? "No Passwords" : "No Results"))]
+            rows: visibleRows.isEmpty && !query.isEmpty
+                ? [emptyRow(title: String(localized: "No Results"))]
                 : visibleRows
         )
     }
 
-    private func passwordVaultCreateRows(hasFolders: Bool) -> [EmbeddedRow] {
-        guard isWorkspaceEditing, passwordVaultEditorState == nil, passwordVaultFolderEditorState == nil else { return [] }
-        let view = MainMenuCreateActionsView(
-            primaryTitle: hasFolders ? String(localized: "+ New Password") : String(localized: "Create Your First Folder"),
-            primaryIdentifier: hasFolders ? "mainMenuContentCreatePasswordButton" : "mainMenuContentCreatePasswordFolderButton",
-            secondaryTitle: hasFolders ? String(localized: "New Folder") : nil,
-            secondaryIdentifier: hasFolders ? "mainMenuContentCreatePasswordFolderButton" : nil,
-            onPrimary: { [weak self] in
-                if hasFolders { self?.beginCreatingPasswordVaultEntry() } else { self?.beginCreatingPasswordVaultFolder() }
-            },
-            onSecondary: hasFolders ? { [weak self] in self?.beginCreatingPasswordVaultFolder() } : nil
+    private func passwordVaultAccessContent(
+        mode: PasswordVaultAccessView.Mode,
+        isBusy: Bool
+    ) -> EmbeddedContent {
+        let view = PasswordVaultAccessView(
+            mode: mode,
+            canQuickUnlock: mode == .unlock && passwordVaultQuickUnlockAvailability == .available,
+            isBusy: isBusy,
+            errorMessage: passwordVaultAccessError,
+            onSubmit: { [weak self] password in self?.submitPasswordVaultAccess(password: password, mode: mode) },
+            onQuickUnlock: { [weak self] in self?.performPasswordVaultQuickUnlock() }
         )
-        return [EmbeddedRow(title: String(localized: "Create"), view: view, confirm: {}, participatesInNavigation: false)]
-    }
-
-    private func passwordInFolderCreateRow(folderID: PasswordVaultFolder.ID) -> EmbeddedRow {
-        let view = MainMenuCreateActionsView(
-            primaryTitle: String(localized: "+ New Password in This Folder"),
-            primaryIdentifier: "mainMenuCreatePasswordInFolderButton",
-            onPrimary: { [weak self] in self?.beginCreatingPasswordVaultEntry(in: folderID) }
-        )
-        return EmbeddedRow(title: String(localized: "New Password"), view: view, confirm: {}, participatesInNavigation: false)
-    }
-
-    private func makePasswordVaultEditorContent(_ state: PasswordVaultEditorState) -> EmbeddedContent {
-        let folders = (try? passwordVaultDataSource?.fetchFolders()) ?? []
-        let draft: PasswordVaultDraft
-        let error: String?
-        switch state {
-        case let .create(value, message): (draft, error) = (value, message)
-        case let .edit(_, value, message): (draft, error) = (value, message)
-        }
-        let editor = PasswordVaultEditorView(
-            draft: draft,
-            folders: folders,
-            errorMessage: error,
-            onSave: { [weak self] draft in self?.savePasswordVaultDraft(draft) },
-            onCancel: { [weak self] in self?.discardPasswordVaultEditor() }
-        )
+        passwordVaultAccessView = view
+        let title = mode == .create
+            ? String(localized: "Create Password Vault") : String(localized: "Unlock Password Vault")
         return EmbeddedContent(
-            headerTitle: String(localized: "Password Vault"), headerSubtitle: nil, showsBackButton: false,
-            canGoToPreviousPage: false, canGoToNextPage: false, typeFilter: nil,
-            rows: [EmbeddedRow(title: String(localized: "Password"), view: editor, confirm: {})]
+            headerTitle: String(localized: "Password Vault"), headerSubtitle: nil,
+            showsBackButton: false, canGoToPreviousPage: false, canGoToNextPage: false,
+            typeFilter: nil,
+            rows: [EmbeddedRow(title: title, view: view, confirm: { [weak view] in view?.submit() }, participatesInNavigation: false)]
         )
+    }
+
+    private func passwordVaultFailureContent(message: String) -> EmbeddedContent {
+        EmbeddedContent(
+            headerTitle: String(localized: "Password Vault"), headerSubtitle: nil,
+            showsBackButton: false, canGoToPreviousPage: false, canGoToNextPage: false,
+            typeFilter: nil, rows: [emptyRow(title: message)]
+        )
+    }
+
+    private func submitPasswordVaultAccess(password: String, mode: PasswordVaultAccessView.Mode) {
+        passwordVaultAccessError = nil
+        passwordVaultAccessModeInFlight = mode
+        let completion: (Result<Void, PasswordVaultError>) -> Void = { [weak self] result in
+            self?.handlePasswordVaultAccessResult(result)
+        }
+        switch mode {
+        case .create:
+            passwordVaultDataSource?.createDatabase(password, completion)
+        case .unlock:
+            passwordVaultDataSource?.unlock(password, completion)
+        }
+    }
+
+    private func attemptAutomaticPasswordVaultQuickUnlockIfNeeded() {
+        guard !passwordVaultAutomaticQuickUnlockAttempted,
+              passwordVaultDataSource?.state() == .locked else { return }
+        passwordVaultAutomaticQuickUnlockAttempted = true
+        passwordVaultQuickUnlockAvailability = .checking
+        passwordVaultDataSource?.checkQuickUnlockAvailability { [weak self] isAvailable in
+            guard let self else { return }
+            self.passwordVaultQuickUnlockAvailability = isAvailable ? .available : .unavailable
+            guard isAvailable, self.passwordVaultDataSource?.state() == .locked else { return }
+            self.performPasswordVaultQuickUnlock()
+        }
+    }
+
+    private func performPasswordVaultQuickUnlock() {
+        passwordVaultAccessError = nil
+        passwordVaultAccessModeInFlight = .unlock
+        passwordVaultDataSource?.unlockWithQuickKey { [weak self] result in
+            self?.handlePasswordVaultAccessResult(result)
+        }
+    }
+
+    private func handlePasswordVaultAccessResult(_ result: Result<Void, PasswordVaultError>) {
+        passwordVaultAccessView?.clearSecrets()
+        passwordVaultAccessModeInFlight = nil
+        switch result {
+        case .success, .failure(.userCancelled):
+            passwordVaultAccessError = nil
+        case let .failure(error):
+            passwordVaultAccessError = passwordVaultMessage(error)
+        }
+        reloadContentKeepingTopLeft()
+    }
+
+    private func resetPasswordVaultAccessPresentation() {
+        passwordVaultAccessView?.clearSecrets()
+        passwordVaultAccessView = nil
+        passwordVaultAccessError = nil
+        passwordVaultAccessModeInFlight = nil
+        passwordVaultAutomaticQuickUnlockAttempted = false
+        passwordVaultQuickUnlockAvailability = .unknown
+    }
+
+    private func newPasswordVaultCreateRow(folderID: PasswordVaultFolder.ID) -> EmbeddedRow {
+        let view = MainMenuCreateActionsView(
+            title: String(localized: "New Password"),
+            identifier: "mainMenuContentCreatePasswordButton",
+            indentationLevel: 1,
+            onAction: { [weak self] in self?.beginCreatingPasswordVaultEntry(in: folderID) }
+        )
+        return EmbeddedRow(title: String(localized: "Create"), view: view, confirm: {}, participatesInNavigation: false)
+    }
+
+    private func newPasswordVaultFolderCreateRow() -> EmbeddedRow {
+        let view = MainMenuCreateActionsView(
+            title: String(localized: "New Folder"),
+            identifier: "mainMenuContentCreatePasswordFolderButton",
+            indentationLevel: 0,
+            onAction: { [weak self] in self?.beginCreatingPasswordVaultFolder() }
+        )
+        return EmbeddedRow(title: String(localized: "Create"), view: view, confirm: {}, participatesInNavigation: false)
+    }
+
+    private var passwordVaultCreatingFolderID: PasswordVaultFolder.ID? {
+        guard case let .create(draft, _, _) = passwordVaultEditorState else { return nil }
+        return draft.folderID
+    }
+
+    private var passwordVaultEditingEntryID: PasswordVaultEntry.ID? {
+        guard case let .edit(id, _, _, _) = passwordVaultEditorState else { return nil }
+        return id
+    }
+
+    private func passwordVaultStepEditorRow() -> EmbeddedRow {
+        guard let passwordVaultEditorState else {
+            return emptyRow(title: String(localized: "Password Vault Unavailable"))
+        }
+        let draft: PasswordVaultDraft
+        let step: PasswordVaultEditorStep
+        switch passwordVaultEditorState {
+        case let .create(value, currentStep, _), let .edit(_, value, currentStep, _):
+            (draft, step) = (value, currentStep)
+        }
+        let value: String
+        switch step {
+        case .title: value = draft.title
+        case .username: value = draft.username
+        case .password: value = draft.password
+        }
+        let editor = PasswordVaultStepEditorView(
+            step: step,
+            value: value,
+            onCommit: { [weak self] value in self?.commitPasswordVaultStep(value) },
+            onEscape: { [weak self] in self?.goBackPasswordVaultStep() }
+        )
+        passwordVaultStepEditorView = editor
+        return EmbeddedRow(title: String(localized: "Password"), view: editor, confirm: {}, participatesInNavigation: false)
     }
 
     private func makePasswordVaultFolderEditorContent(_ state: PasswordVaultFolderEditorState) -> EmbeddedContent {
@@ -1689,6 +2006,7 @@ extension MainMenuPanelController {
     }
 
     private func deletePasswordVaultEntry(_ id: PasswordVaultEntry.ID) {
+        guard confirmPasswordVaultDeletion(.entry(id)) else { return }
         passwordVaultDataSource?.deleteEntry(id) { [weak self] result in
             self?.handlePasswordVaultResult(result)
         }
@@ -1701,14 +2019,14 @@ extension MainMenuPanelController {
 
     private func beginCreatingPasswordVaultEntry(in requestedFolderID: PasswordVaultFolder.ID? = nil) {
         let folders = (try? passwordVaultDataSource?.fetchFolders()) ?? []
-        guard let folderID = requestedFolderID ?? expandedPasswordVaultFolderID ?? folders.first?.id else {
-            passwordVaultFolderEditorState = .create(error: nil)
-            reloadContentKeepingTopLeft()
-            return
-        }
+        guard isWorkspaceEditing,
+              let folderID = expandedPasswordVaultFolderID,
+              requestedFolderID == nil || requestedFolderID == folderID,
+              folders.contains(where: { $0.id == folderID }) else { return }
+        expandedPasswordVaultFolderID = folderID
         passwordVaultEditorState = .create(PasswordVaultDraft(
             folderID: folderID, title: "", website: "", username: "", note: "", password: ""
-        ), error: nil)
+        ), step: .title, error: nil)
         reloadContentKeepingTopLeft()
     }
 
@@ -1716,7 +2034,8 @@ extension MainMenuPanelController {
         passwordVaultDataSource?.loadDraft(id) { [weak self] result in
             switch result {
             case let .success(draft):
-                self?.passwordVaultEditorState = .edit(id, draft, error: nil)
+                self?.expandedPasswordVaultFolderID = draft.folderID
+                self?.passwordVaultEditorState = .edit(id, draft, step: .title, error: nil)
                 self?.reloadContentKeepingTopLeft()
             case .failure(.userCancelled):
                 break
@@ -1724,6 +2043,78 @@ extension MainMenuPanelController {
                 self?.passwordVaultStatusMessage = self?.passwordVaultMessage(error)
                 self?.reloadContentKeepingTopLeft()
             }
+        }
+    }
+
+    private func commitPasswordVaultStep(_ value: String) {
+        guard let state = passwordVaultEditorState else { return }
+        var draft: PasswordVaultDraft
+        let step: PasswordVaultEditorStep
+        let entryID: PasswordVaultEntry.ID?
+        switch state {
+        case let .create(value, currentStep, _):
+            (draft, step, entryID) = (value, currentStep, nil)
+        case let .edit(id, value, currentStep, _):
+            (draft, step, entryID) = (value, currentStep, id)
+        }
+
+        switch step {
+        case .title:
+            let title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else {
+                updatePasswordVaultEditorError(String(localized: "Enter a name."), draft: draft)
+                return
+            }
+            draft.title = title
+            setPasswordVaultEditorState(entryID: entryID, draft: draft, step: .username)
+        case .username:
+            draft.username = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            setPasswordVaultEditorState(entryID: entryID, draft: draft, step: .password)
+        case .password:
+            guard !value.isEmpty else {
+                updatePasswordVaultEditorError(String(localized: "Enter a password."), draft: draft)
+                return
+            }
+            draft.password = value
+            passwordVaultStepEditorView?.value = ""
+            savePasswordVaultDraft(draft)
+            return
+        }
+        reloadContentKeepingTopLeft()
+    }
+
+    private func goBackPasswordVaultStep() {
+        guard let state = passwordVaultEditorState else { return }
+        let draft: PasswordVaultDraft
+        let step: PasswordVaultEditorStep
+        let entryID: PasswordVaultEntry.ID?
+        switch state {
+        case let .create(value, currentStep, _): (draft, step, entryID) = (value, currentStep, nil)
+        case let .edit(id, value, currentStep, _): (draft, step, entryID) = (value, currentStep, id)
+        }
+        switch step {
+        case .title:
+            discardPasswordVaultEditor()
+            return
+        case .username:
+            setPasswordVaultEditorState(entryID: entryID, draft: draft, step: .title)
+        case .password:
+            var clearedDraft = draft
+            clearedDraft.password = ""
+            setPasswordVaultEditorState(entryID: entryID, draft: clearedDraft, step: .username)
+        }
+        reloadContentKeepingTopLeft()
+    }
+
+    private func setPasswordVaultEditorState(
+        entryID: PasswordVaultEntry.ID?,
+        draft: PasswordVaultDraft,
+        step: PasswordVaultEditorStep
+    ) {
+        if let entryID {
+            passwordVaultEditorState = .edit(entryID, draft, step: step, error: nil)
+        } else {
+            passwordVaultEditorState = .create(draft, step: step, error: nil)
         }
     }
 
@@ -1741,7 +2132,7 @@ extension MainMenuPanelController {
             passwordVaultDataSource?.createEntry(draft) { [weak self] result in
                 self?.finishPasswordVaultSave(result, draft: draft)
             }
-        case let .edit(id, _, _):
+        case let .edit(id, _, _, _):
             passwordVaultDataSource?.updateEntry(id, draft) { [weak self] result in
                 self?.finishPasswordVaultSave(result, draft: draft)
             }
@@ -1766,10 +2157,10 @@ extension MainMenuPanelController {
 
     private func updatePasswordVaultEditorError(_ message: String, draft: PasswordVaultDraft) {
         switch passwordVaultEditorState {
-        case .create:
-            passwordVaultEditorState = .create(draft, error: message)
-        case let .edit(id, _, _):
-            passwordVaultEditorState = .edit(id, draft, error: message)
+        case let .create(_, step, _):
+            passwordVaultEditorState = .create(draft, step: step, error: message)
+        case let .edit(id, _, step, _):
+            passwordVaultEditorState = .edit(id, draft, step: step, error: message)
         case nil:
             break
         }
@@ -1778,6 +2169,7 @@ extension MainMenuPanelController {
 
     private func discardPasswordVaultEditor() {
         passwordVaultEditorState = nil
+        passwordVaultStepEditorView = nil
         reloadContentKeepingTopLeft()
     }
 
@@ -1787,7 +2179,32 @@ extension MainMenuPanelController {
         }
     }
 
+    private func pastePasswordVaultUsername(_ id: PasswordVaultEntry.ID) {
+        passwordVaultDataSource?.pasteUsername(id, pasteTargetContext) { [weak self] result in
+            self?.handlePasswordVaultPasteResult(result)
+        }
+    }
+
+    private func pastePasswordVaultPassword(_ id: PasswordVaultEntry.ID) {
+        passwordVaultDataSource?.pastePassword(id, pasteTargetContext) { [weak self] result in
+            self?.handlePasswordVaultPasteResult(result)
+        }
+    }
+
+    private func handlePasswordVaultPasteResult(_ result: Result<Void, PasswordVaultError>) {
+        switch result {
+        case .success:
+            close()
+        case .failure(.userCancelled):
+            break
+        case let .failure(error):
+            passwordVaultStatusMessage = passwordVaultMessage(error)
+            reloadContentKeepingTopLeft()
+        }
+    }
+
     private func handlePasswordVaultResult(_ result: Result<Void, PasswordVaultError>) {
+        passwordVaultPendingDeletion = nil
         switch result {
         case .success, .failure(.userCancelled):
             passwordVaultStatusMessage = nil
@@ -1803,19 +2220,26 @@ extension MainMenuPanelController {
     }
 
     private func savePasswordVaultFolder(name: String) {
-        do {
-            switch passwordVaultFolderEditorState {
-            case .create:
-                let folder = try passwordVaultDataSource?.createFolder(name)
-                expandedPasswordVaultFolderID = folder?.id
-            case let .rename(folder, _):
-                _ = try passwordVaultDataSource?.renameFolder(folder.id, name)
-            case nil:
-                return
+        switch passwordVaultFolderEditorState {
+        case .create:
+            passwordVaultDataSource?.createFolder(name) { [weak self] result in
+                self?.finishPasswordVaultFolderSave(result)
             }
+        case let .rename(folder, _):
+            passwordVaultDataSource?.renameFolder(folder.id, name) { [weak self] result in
+                self?.finishPasswordVaultFolderSave(result)
+            }
+        case nil:
+            return
+        }
+    }
+
+    private func finishPasswordVaultFolderSave(_ result: Result<PasswordVaultFolder, PasswordVaultError>) {
+        switch result {
+        case let .success(folder):
+            expandedPasswordVaultFolderID = folder.id
             passwordVaultFolderEditorState = nil
-            reloadContentKeepingTopLeft()
-        } catch let error as PasswordVaultError {
+        case let .failure(error):
             switch passwordVaultFolderEditorState {
             case .create:
                 passwordVaultFolderEditorState = .create(error: passwordVaultMessage(error))
@@ -1824,35 +2248,55 @@ extension MainMenuPanelController {
             case nil:
                 break
             }
-            reloadContentKeepingTopLeft()
-        } catch {
-            passwordVaultStatusMessage = String(localized: "Password Vault Unavailable")
         }
+        reloadContentKeepingTopLeft()
     }
 
     private func deletePasswordVaultFolder(_ id: PasswordVaultFolder.ID) {
-        do {
-            try passwordVaultDataSource?.deleteFolder(id)
-            if expandedPasswordVaultFolderID == id { expandedPasswordVaultFolderID = nil }
-        } catch let error as PasswordVaultError {
-            passwordVaultStatusMessage = passwordVaultMessage(error)
-        } catch {
-            passwordVaultStatusMessage = String(localized: "Password Vault Unavailable")
+        guard confirmPasswordVaultDeletion(.folder(id)) else { return }
+        passwordVaultDataSource?.deleteFolder(id) { [weak self] result in
+            self?.passwordVaultPendingDeletion = nil
+            switch result {
+            case .success:
+                if self?.expandedPasswordVaultFolderID == id { self?.expandedPasswordVaultFolderID = nil }
+                self?.passwordVaultStatusMessage = nil
+            case let .failure(error):
+                self?.passwordVaultStatusMessage = self?.passwordVaultMessage(error)
+            }
+            self?.reloadContentKeepingTopLeft()
         }
-        reloadContentKeepingTopLeft()
+    }
+
+    private func confirmPasswordVaultDeletion(_ deletion: PasswordVaultPendingDeletion) -> Bool {
+        guard passwordVaultPendingDeletion == deletion else {
+            passwordVaultPendingDeletion = deletion
+            passwordVaultStatusMessage = String(localized: "Delete again to confirm.")
+            reloadContentKeepingTopLeft()
+            return false
+        }
+        passwordVaultStatusMessage = nil
+        return true
     }
 
     private func passwordVaultMessage(_ error: PasswordVaultError) -> String {
         switch error {
         case .invalidTitle: return String(localized: "Enter a name.")
+        case .invalidUsername: return String(localized: "This password entry has no username.")
         case .invalidPassword: return String(localized: "Enter a password.")
         case .duplicateFolder: return String(localized: "A folder with this name already exists.")
         case .folderNotEmpty: return String(localized: "Move or delete the passwords in this folder first.")
         case .folderNotFound, .entryNotFound: return String(localized: "This item no longer exists.")
         case .authenticationFailed: return String(localized: "Authentication failed.")
-        case .corruptedData: return String(localized: "This Keychain item cannot be read.")
+        case .corruptedData: return String(localized: "The password database cannot be read.")
         case .duplicateEntry: return String(localized: "This password already exists.")
         case .keychainUnavailable: return String(localized: "The macOS Keychain is unavailable.")
+        case .databaseNotConfigured: return String(localized: "Create the password database first.")
+        case .vaultLocked: return String(localized: "Unlock the password database first.")
+        case .wrongMasterPassword: return String(localized: "The database password is incorrect.")
+        case .unsupportedFormat: return String(localized: "This password database format is not supported.")
+        case .cloudUnavailable: return String(localized: "The configured OneDrive folder is unavailable.")
+        case .externalConflict: return String(localized: "Password database changes need conflict recovery.")
+        case .saveFailed: return String(localized: "The password database could not be saved.")
         case .userCancelled: return ""
         }
     }
@@ -1922,7 +2366,8 @@ extension MainMenuPanelController {
     }
 
     private func addEmbeddedHeader(_ content: EmbeddedContent, frame: NSRect) {
-        let supportsWorkspaceEditing = selectedMode == .snippets || selectedMode == .passwordVault
+        let supportsWorkspaceEditing = selectedMode == .snippets
+            || (selectedMode == .passwordVault && passwordVaultDataSource?.state() == .unlocked)
         let header = MainMenuEmbeddedHeaderView(
             frame: frame,
             title: content.headerTitle,
@@ -1950,6 +2395,109 @@ extension MainMenuPanelController {
             passwordVaultFolderEditorState = nil
         }
         reloadContentKeepingTopLeft()
+    }
+
+    private func draggedID(_ payload: String, prefix: String) -> UUID? {
+        guard payload.hasPrefix(prefix) else { return nil }
+        return UUID(uuidString: String(payload.dropFirst(prefix.count)))
+    }
+
+    private func reorderedIDs<ID: Equatable>(_ ids: [ID], moving source: ID, around target: ID, after: Bool) -> [ID]? {
+        guard source != target, ids.contains(source), let targetIndex = ids.firstIndex(of: target) else { return nil }
+        var result = ids.filter { $0 != source }
+        let adjustedTargetIndex = result.firstIndex(of: target) ?? targetIndex
+        result.insert(source, at: min(result.count, adjustedTargetIndex + (after ? 1 : 0)))
+        return result
+    }
+
+    private func handleSnippetDrop(_ payload: String, onFolder targetID: SnippetFolder.ID, after: Bool) -> Bool {
+        guard let rawSourceID = draggedID(payload, prefix: "snippet-folder:") else {
+            guard let rawSnippetID = draggedID(payload, prefix: "snippet:") else { return false }
+            let snippetID = Snippet.ID(rawValue: rawSnippetID)
+            return moveSnippet(snippetID, toFolder: targetID, targetSnippetID: nil, after: true)
+        }
+        let sourceID = SnippetFolder.ID(rawValue: rawSourceID)
+        let ids = enabledSnippetFolderDetails().map(\.folder.id)
+        guard let reordered = reorderedIDs(ids, moving: sourceID, around: targetID, after: after),
+              snippetDataSource?.reorderFolders(reordered) == true else { return false }
+        reloadContentKeepingTopLeft()
+        return true
+    }
+
+    private func handleSnippetDrop(_ payload: String, onSnippet targetID: Snippet.ID, after: Bool) -> Bool {
+        guard let rawSnippetID = draggedID(payload, prefix: "snippet:") else { return false }
+        let snippetID = Snippet.ID(rawValue: rawSnippetID)
+        guard let targetFolderID = enabledSnippetFolderDetails().first(where: {
+            $0.snippets.contains(where: { $0.id == targetID })
+        })?.folder.id else { return false }
+        return moveSnippet(snippetID, toFolder: targetFolderID, targetSnippetID: targetID, after: after)
+    }
+
+    private func moveSnippet(
+        _ id: Snippet.ID,
+        toFolder folderID: SnippetFolder.ID,
+        targetSnippetID: Snippet.ID?,
+        after: Bool
+    ) -> Bool {
+        let details = enabledSnippetFolderDetails()
+        var orders = Dictionary(uniqueKeysWithValues: details.map { ($0.folder.id, $0.snippets.map(\.id)) })
+        for key in orders.keys { orders[key]?.removeAll { $0 == id } }
+        guard var destination = orders[folderID] else { return false }
+        if let targetSnippetID, let index = destination.firstIndex(of: targetSnippetID) {
+            destination.insert(id, at: index + (after ? 1 : 0))
+        } else {
+            destination.append(id)
+        }
+        orders[folderID] = destination
+        guard snippetDataSource?.moveSnippet(id, folderID, orders) == true else { return false }
+        expandedSnippetFolderID = folderID
+        reloadContentKeepingTopLeft()
+        return true
+    }
+
+    private func handlePasswordDrop(_ payload: String, onFolder targetID: UUID, after: Bool) -> Bool {
+        if let sourceID = draggedID(payload, prefix: "password-folder:") {
+            guard let folders = try? passwordVaultDataSource?.fetchFolders(),
+                  let reordered = reorderedIDs(folders.map(\.id), moving: sourceID, around: targetID, after: after),
+                  let dataSource = passwordVaultDataSource else { return false }
+            dataSource.reorderFolders(reordered) { [weak self] result in
+                if case .success = result { self?.reloadContentKeepingTopLeft() }
+            }
+            return true
+        }
+        guard let entryID = draggedID(payload, prefix: "password-entry:") else { return false }
+        return movePasswordEntry(entryID, toFolder: targetID, targetEntryID: nil, after: true)
+    }
+
+    private func handlePasswordDrop(_ payload: String, onEntry targetID: UUID, after: Bool) -> Bool {
+        guard let entryID = draggedID(payload, prefix: "password-entry:"),
+              let entries = try? passwordVaultDataSource?.fetchEntries(),
+              let targetFolderID = entries.first(where: { $0.id == targetID })?.folderID else { return false }
+        return movePasswordEntry(entryID, toFolder: targetFolderID, targetEntryID: targetID, after: after)
+    }
+
+    private func movePasswordEntry(_ id: UUID, toFolder folderID: UUID, targetEntryID: UUID?, after: Bool) -> Bool {
+        guard let dataSource = passwordVaultDataSource,
+              let folders = try? dataSource.fetchFolders(),
+              let entries = try? dataSource.fetchEntries() else { return false }
+        var orders = Dictionary(uniqueKeysWithValues: folders.map { folder in
+            (folder.id, entries.filter { $0.folderID == folder.id }.map(\.id))
+        })
+        for key in orders.keys { orders[key]?.removeAll { $0 == id } }
+        guard var destination = orders[folderID] else { return false }
+        if let targetEntryID, let index = destination.firstIndex(of: targetEntryID) {
+            destination.insert(id, at: index + (after ? 1 : 0))
+        } else {
+            destination.append(id)
+        }
+        orders[folderID] = destination
+        dataSource.moveEntry(id, folderID, orders) { [weak self] result in
+            if case .success = result {
+                self?.expandedPasswordVaultFolderID = folderID
+                self?.reloadContentKeepingTopLeft()
+            }
+        }
+        return true
     }
 
     private func addToolbar(at verticalPosition: CGFloat) {
@@ -2228,6 +2776,14 @@ extension MainMenuPanelController {
         selectSnippetFolderRowIfVisible(folderID)
     }
 
+    private func toggleSnippetFolder(_ folderID: SnippetFolder.ID) {
+        if expandedSnippetFolderID == folderID {
+            returnToSnippetFolders()
+        } else {
+            expandSnippetFolder(folderID)
+        }
+    }
+
     private func returnToSnippetFolders() {
         guard selectedMode == .snippets else { return }
         expandedSnippetFolderID = nil
@@ -2433,6 +2989,9 @@ extension MainMenuPanelController {
         if handleSnippetDeleteShortcut(event) {
             return true
         }
+        if handlePasswordVaultPasteShortcut(event) {
+            return true
+        }
         if usesEmbeddedContent, selectedMode == .snippets {
             switch event.keyCode {
             case 123:
@@ -2529,8 +3088,24 @@ extension MainMenuPanelController {
         case let .snippet(snippetID):
             confirmDeleteSnippet(snippetID)
             return true
-        case .none:
+        case .none, .passwordEntry:
             return false
+        }
+    }
+
+    private func handlePasswordVaultPasteShortcut(_ event: NSEvent) -> Bool {
+        guard passwordVaultEditorState == nil,
+              passwordVaultFolderEditorState == nil,
+              selectedMode == .passwordVault,
+              let selectedKeyboardEntryIndex,
+              keyboardEntries.indices.contains(selectedKeyboardEntryIndex),
+              case let .passwordEntry(id) = keyboardEntries[selectedKeyboardEntryIndex].role else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
+        guard flags == [.command, .option] else { return false }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "u": pastePasswordVaultUsername(id); return true
+        case "p": pastePasswordVaultPassword(id); return true
+        default: return false
         }
     }
 
@@ -2598,22 +3173,63 @@ extension MainMenuPanelController {
         }
         selectedKeyboardEntryIndex = index
         keyboardEntries[index].setSelected(true)
+        if case .passwordEntry = keyboardEntries[index].role {
+            showPasswordVaultQuickActionsCoachmarkIfNeeded()
+        }
         if triggerChildPanel {
             keyboardEntries[index].openChildPanel?()
         }
     }
+
+    private func showPasswordVaultQuickActionsCoachmarkIfNeeded() {
+        guard selectedMode == .passwordVault,
+              !isWorkspaceEditing,
+              passwordVaultQuickActionsCoachmarkView == nil,
+              !AppEnvironment.current.defaults.bool(
+                forKey: Constants.UserDefaults.passwordVaultQuickActionsCoachmarkShown
+              ),
+              let surface = collectViews(in: contentView).first(where: {
+                $0.identifier?.rawValue == "mainMenuContentBlock"
+              }) else { return }
+
+        AppEnvironment.current.defaults.set(
+            true,
+            forKey: Constants.UserDefaults.passwordVaultQuickActionsCoachmarkShown
+        )
+        let coachmark = PasswordVaultQuickActionsCoachmarkView(
+            title: String(localized: "Quick paste is available here")
+        )
+        let width = min(surface.bounds.width - 20, coachmark.preferredWidth)
+        coachmark.frame = NSRect(x: (surface.bounds.width - width) / 2, y: 10, width: width, height: 28)
+        coachmark.alphaValue = 1
+        surface.addSubview(coachmark, positioned: .above, relativeTo: nil)
+        passwordVaultQuickActionsCoachmarkView = coachmark
+
+        passwordVaultQuickActionsCoachmarkWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self, weak coachmark] in
+            guard let coachmark else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                coachmark.animator().alphaValue = 0
+            } completionHandler: { [weak self, weak coachmark] in
+                coachmark?.removeFromSuperview()
+                if self?.passwordVaultQuickActionsCoachmarkView === coachmark {
+                    self?.passwordVaultQuickActionsCoachmarkView = nil
+                }
+            }
+        }
+        passwordVaultQuickActionsCoachmarkWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: workItem)
+    }
 }
 
 private final class MainMenuSurfaceView: NSView {
-    init(frame frameRect: NSRect, identifier: String, fillColor: NSColor) {
+    init(frame frameRect: NSRect, identifier: String) {
         super.init(frame: frameRect)
         self.identifier = NSUserInterfaceItemIdentifier(identifier)
         wantsLayer = true
-        layer?.cornerRadius = MainMenuPanelLayout.sectionRadius
-        layer?.masksToBounds = true
-        layer?.backgroundColor = fillColor.cgColor
-        layer?.borderColor = MainMenuVisualColors.sectionBorder.cgColor
-        layer?.borderWidth = 0.5
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.borderWidth = 0
     }
 
     required init?(coder: NSCoder) { nil }
@@ -2646,16 +3262,58 @@ private final class MainMenuCenteredLabel: NSTextField {
     required init?(coder: NSCoder) { nil }
 }
 
+private final class MainMenuTypeFilterButton: NSButton {
+    var isCurrent = false
+    private var isHovered = false
+    private var trackingAreaReference: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateAppearance()
+    }
+
+    func updateAppearance() {
+        let background: NSColor
+        if isCurrent {
+            background = MainMenuVisualColors.accentFill
+        } else if isHovered {
+            background = MainMenuVisualColors.hoveredRow
+        } else {
+            background = .clear
+        }
+        layer?.backgroundColor = background.cgColor
+        contentTintColor = isCurrent ? .controlAccentColor : .labelColor
+    }
+}
+
 private final class MainMenuEmbeddedHeaderView: NSView {
     private enum Metrics {
         static let horizontalInset: CGFloat = 9
         static let buttonHeight: CGFloat = 26
         static let navButtonWidth: CGFloat = 22
+        static let typeButtonWidth: CGFloat = 21
+        static let typeButtonSpacing: CGFloat = 1
         static let buttonSpacing: CGFloat = 3
         static let titleTrailingSpacing: CGFloat = 6
         static let pageLabelWidth: CGFloat = 36
-        static let typeWidth: CGFloat = 26
-        static let controlGroupWidth: CGFloat = 106
+        static let paginationWidth: CGFloat = 80
     }
 
     private let titleLabel = NSTextField(labelWithString: "")
@@ -2663,14 +3321,13 @@ private final class MainMenuEmbeddedHeaderView: NSView {
     private let backButton = NSButton()
     private let previousButton = NSButton()
     private let nextButton = NSButton()
-    private let typeButton = NSButton()
+    private var typeButtons = [MainMenuTypeFilterButton]()
     private let editButton = NSButton()
     private let onBack: () -> Void
     private let onPreviousPage: () -> Void
     private let onNextPage: () -> Void
     private let onTypeFilter: (HistoryMenuTypeFilter) -> Void
     private let onToggleEditing: () -> Void
-    private var selectedTypeFilter: HistoryMenuTypeFilter?
 
     init(
         frame frameRect: NSRect,
@@ -2721,11 +3378,8 @@ private final class MainMenuEmbeddedHeaderView: NSView {
         isEditing: Bool
     ) {
         wantsLayer = true
-        layer?.cornerRadius = MainMenuPanelLayout.sectionRadius
-        layer?.masksToBounds = true
-        layer?.backgroundColor = MainMenuVisualColors.headerSurface.cgColor
-        layer?.borderColor = MainMenuVisualColors.sectionBorder.cgColor
-        layer?.borderWidth = 0.5
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.borderWidth = 0
 
         if showsEditButton {
             configureButton(editButton, symbolName: isEditing ? "checkmark" : "pencil", action: #selector(editClicked(_:)))
@@ -2757,19 +3411,13 @@ private final class MainMenuEmbeddedHeaderView: NSView {
             : Metrics.horizontalInset
         let hasPagination = subtitle != nil || canGoToPreviousPage || canGoToNextPage
         let controlGroupFrame = NSRect(
-            x: bounds.maxX - Metrics.horizontalInset - Metrics.controlGroupWidth,
+            x: bounds.maxX - Metrics.horizontalInset - Metrics.paginationWidth,
             y: bounds.midY - Metrics.buttonHeight / 2,
-            width: Metrics.controlGroupWidth,
-            height: Metrics.buttonHeight
-        )
-        let typeFrame = NSRect(
-            x: controlGroupFrame.minX,
-            y: controlGroupFrame.minY,
-            width: Metrics.typeWidth,
+            width: Metrics.paginationWidth,
             height: Metrics.buttonHeight
         )
         let previousButtonFrame = NSRect(
-            x: typeFrame.maxX,
+            x: controlGroupFrame.minX,
             y: controlGroupFrame.minY,
             width: Metrics.navButtonWidth,
             height: Metrics.buttonHeight
@@ -2786,9 +3434,9 @@ private final class MainMenuEmbeddedHeaderView: NSView {
             width: Metrics.navButtonWidth,
             height: Metrics.buttonHeight
         )
-        let titleTrailing = typeFilter == nil
-            ? (hasPagination ? previousButtonFrame.minX : (showsEditButton ? editButton.frame.minX : bounds.maxX - Metrics.horizontalInset))
-            : typeFrame.minX
+        let titleTrailing = hasPagination
+            ? previousButtonFrame.minX
+            : (showsEditButton ? editButton.frame.minX : bounds.maxX - Metrics.horizontalInset)
         titleLabel.stringValue = title
         titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
         titleLabel.textColor = .labelColor
@@ -2796,10 +3444,10 @@ private final class MainMenuEmbeddedHeaderView: NSView {
         titleLabel.frame = NSRect(
             x: titleLeading,
             y: bounds.midY - 9,
-            width: max(48, titleTrailing - titleLeading - Metrics.titleTrailingSpacing),
+            width: typeFilter == nil ? max(48, titleTrailing - titleLeading - Metrics.titleTrailingSpacing) : 0,
             height: 18
         )
-        addSubview(titleLabel)
+        if typeFilter == nil { addSubview(titleLabel) }
 
         subtitleLabel.stringValue = subtitle ?? ""
         subtitleLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
@@ -2822,10 +3470,7 @@ private final class MainMenuEmbeddedHeaderView: NSView {
         styleNavigationButton(nextButton)
 
         if let typeFilter {
-            configureTypeButton(selectedFilter: typeFilter)
-            typeButton.frame = typeFrame
-            styleNavigationButton(typeButton)
-            addSubview(typeButton)
+            configureTypeButtons(selectedFilter: typeFilter, leading: titleLeading, verticalOrigin: controlGroupFrame.minY)
         }
         if hasPagination {
             addSubview(previousButton)
@@ -2858,22 +3503,52 @@ private final class MainMenuEmbeddedHeaderView: NSView {
         button.alphaValue = button.isEnabled ? 1 : 0.45
     }
 
-    private func configureTypeButton(selectedFilter: HistoryMenuTypeFilter) {
-        selectedTypeFilter = selectedFilter
-        typeButton.setButtonType(.momentaryPushIn)
-        typeButton.bezelStyle = .inline
-        typeButton.isBordered = false
-        typeButton.image = NSImage(
-            systemSymbolName: "line.3.horizontal.decrease.circle",
-            accessibilityDescription: String(localized: "Type Filter")
-        )
-        typeButton.image?.isTemplate = true
-        typeButton.imagePosition = .imageOnly
-        typeButton.contentTintColor = .secondaryLabelColor
-        typeButton.target = self
-        typeButton.action = #selector(typeFilterClicked(_:))
-        typeButton.toolTip = "\(String(localized: "Type Filter")) · Tab"
-        typeButton.setAccessibilityLabel(typeButton.toolTip ?? "")
+    private func configureTypeButtons(
+        selectedFilter: HistoryMenuTypeFilter,
+        leading: CGFloat,
+        verticalOrigin: CGFloat
+    ) {
+        for (index, filter) in HistoryMenuTypeFilter.displayCases.enumerated() {
+            let button = MainMenuTypeFilterButton(frame: NSRect(
+                x: leading + CGFloat(index) * (Metrics.typeButtonWidth + Metrics.typeButtonSpacing),
+                y: verticalOrigin,
+                width: Metrics.typeButtonWidth,
+                height: Metrics.buttonHeight
+            ))
+            button.identifier = NSUserInterfaceItemIdentifier("mainMenuTypeFilter.\(filter.rawValue)")
+            button.tag = filter.rawValue
+            button.setButtonType(.momentaryPushIn)
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.image = NSImage(systemSymbolName: symbolName(for: filter), accessibilityDescription: filter.title)
+            button.image?.isTemplate = true
+            button.imagePosition = .imageOnly
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 8
+            button.layer?.masksToBounds = true
+            button.isCurrent = filter == selectedFilter
+            button.target = self
+            button.action = #selector(typeFilterClicked(_:))
+            button.toolTip = filter.title
+            button.setAccessibilityLabel(filter.title)
+            button.setAccessibilityValue(filter == selectedFilter ? String(localized: "Selected") : "")
+            button.updateAppearance()
+            addSubview(button)
+            typeButtons.append(button)
+        }
+    }
+
+    private func symbolName(for filter: HistoryMenuTypeFilter) -> String {
+        switch filter {
+        case .all: return "square.grid.2x2"
+        case .text: return "text.alignleft"
+        case .images: return "photo"
+        case .documents: return "doc.text"
+        case .archives: return "archivebox"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        case .otherFiles: return "ellipsis"
+        case .pdf: return "doc.richtext"
+        }
     }
 
     @objc private func backClicked(_ sender: NSButton) {
@@ -2889,21 +3564,16 @@ private final class MainMenuEmbeddedHeaderView: NSView {
     }
 
     @objc private func typeFilterClicked(_ sender: NSButton) {
-        let menu = NSMenu()
-        HistoryMenuTypeFilter.allCases.forEach { filter in
-            let item = NSMenuItem(title: filter.title, action: #selector(typeFilterItemClicked(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = filter.rawValue
-            item.state = filter == selectedTypeFilter ? .on : .off
-            menu.addItem(item)
-        }
-        menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4), in: sender)
-    }
-
-    @objc private func typeFilterItemClicked(_ sender: NSMenuItem) {
         guard let filter = HistoryMenuTypeFilter(rawValue: sender.tag) else { return }
         onTypeFilter(filter)
     }
+
+    #if DEBUG
+    var typeFilterItemFramesForTesting: [NSRect] { typeButtons.map(\.frame) }
+    var selectedTypeFilterTitlesForTesting: [String] {
+        typeButtons.filter(\.isCurrent).compactMap(\.toolTip)
+    }
+    #endif
 }
 
 private final class MainMenuInlineEditorTitleField: NSTextField {
@@ -3199,6 +3869,49 @@ private final class MainMenuEmbeddedEmptyRowView: NSControl {
             ? MainMenuVisualColors.hoveredRow.cgColor
             : NSColor.clear.cgColor
     }
+
+    #if DEBUG
+    var titleForTesting: String? { titleLabel.stringValue }
+    #endif
+}
+
+private final class PasswordVaultQuickActionsCoachmarkView: NSView {
+    private enum Metrics {
+        static let horizontalInset: CGFloat = 9
+        static let height: CGFloat = 28
+    }
+
+    private let titleLabel: NSTextField
+
+    init(title: String) {
+        titleLabel = NSTextField(labelWithString: title)
+        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: Metrics.height))
+        wantsLayer = true
+        identifier = NSUserInterfaceItemIdentifier("passwordVaultQuickActionsCoachmark")
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor(calibratedWhite: 0.14, alpha: 0.96).cgColor
+        layer?.borderColor = MainMenuVisualColors.sectionBorder.cgColor
+        layer?.borderWidth = 0.5
+        titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        addSubview(titleLabel)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        titleLabel.frame = bounds.insetBy(dx: Metrics.horizontalInset, dy: 6)
+    }
+
+    var preferredWidth: CGFloat {
+        min(210, max(170, titleLabel.attributedStringValue.size().width + Metrics.horizontalInset * 2 + 8))
+    }
+
+    #if DEBUG
+    var titleForTesting: String { titleLabel.stringValue }
+    #endif
 }
 
 private final class MainMenuFolderShortcutEditorView: NSView, RecordViewDelegate {
@@ -3332,87 +4045,260 @@ private final class MainMenuActionButton: NSButton {
     @objc private func clicked(_ sender: NSButton) { onAction?() }
 }
 
-private final class MainMenuCreateActionsView: NSView {
-    private var primaryAction: (() -> Void)?
-    private var secondaryAction: (() -> Void)?
-    private var primaryMenuTitle = ""
-    private var secondaryMenuTitle = ""
+#if DEBUG
+struct PasswordVaultAccessLayoutSnapshot {
+    let title: String
+    let fieldLabel: String
+    let titleFontSize: CGFloat
+    let verticalGapFromFieldToButton: CGFloat
+    let primaryButtonWidth: CGFloat
+    let controlsFitBounds: Bool
+}
+#endif
+
+private final class PasswordVaultAccessView: NSView {
+    enum Mode: Equatable { case create, unlock }
+
+    private let mode: Mode
+    private let passwordField = NSSecureTextField()
+    private let confirmationField = NSSecureTextField()
+    private let passwordLabel = NSTextField(labelWithString: String(localized: "Master Password"))
+    private let confirmationLabel = NSTextField(labelWithString: String(localized: "Confirm Master Password"))
+    private let errorLabel = NSTextField(labelWithString: "")
+    private let titleLabel: NSTextField
+    private let explanationLabel: NSTextField
+    private let primaryButton: NSButton
+    private var quickUnlockButton: NSButton?
+    private let onSubmit: (String) -> Void
+    private let onQuickUnlock: () -> Void
 
     init(
-        primaryTitle: String,
-        primaryIdentifier: String,
-        secondaryTitle: String? = nil,
-        secondaryIdentifier: String? = nil,
-        onPrimary: @escaping () -> Void,
-        onSecondary: (() -> Void)? = nil
+        mode: Mode,
+        canQuickUnlock: Bool,
+        isBusy: Bool,
+        errorMessage: String?,
+        onSubmit: @escaping (String) -> Void,
+        onQuickUnlock: @escaping () -> Void
     ) {
-        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.rowHeight))
-        primaryAction = onPrimary
-        secondaryAction = onSecondary
-        primaryMenuTitle = primaryTitle
-        secondaryMenuTitle = secondaryTitle ?? ""
-        let primary = makeButton(
-            title: primaryTitle,
-            identifier: "mainMenuContextCreateButton",
-            symbolName: "plus",
-            isPrimary: false
-        )
-        primary.onAction = { [weak self, weak primary] in self?.showCreateMenu(from: primary) }
-        addSubview(primary)
+        self.mode = mode
+        self.onSubmit = onSubmit
+        self.onQuickUnlock = onQuickUnlock
+        titleLabel = NSTextField(labelWithString: mode == .create
+            ? String(localized: "Create Password Vault") : String(localized: "Unlock Password Vault"))
+        explanationLabel = NSTextField(labelWithString: mode == .create
+            ? String(localized: "Set a master password to protect your vault.")
+            : String(localized: "Enter your master password to continue."))
+        primaryButton = NSButton(title: isBusy
+            ? String(localized: "Unlocking…")
+            : (mode == .create ? String(localized: "Create") : String(localized: "Unlock")),
+            target: nil, action: nil)
+        let height: CGFloat = mode == .create ? 230 : 174
+        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: height))
 
-        let xPosition: CGFloat = 10
-        primary.frame = NSRect(x: xPosition, y: 3, width: 24, height: 24)
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        addSubview(titleLabel)
+
+        explanationLabel.font = .systemFont(ofSize: 11)
+        explanationLabel.textColor = .secondaryLabelColor
+        explanationLabel.lineBreakMode = .byTruncatingTail
+        addSubview(explanationLabel)
+
+        configureFieldLabel(passwordLabel)
+        addSubview(passwordLabel)
+        configureSecureField(passwordField, identifier: "passwordVaultMasterPasswordField")
+        addSubview(passwordField)
+
+        if mode == .create {
+            configureFieldLabel(confirmationLabel)
+            addSubview(confirmationLabel)
+            configureSecureField(confirmationField, identifier: "passwordVaultConfirmPasswordField")
+            addSubview(confirmationField)
+        }
+
+        errorLabel.font = .systemFont(ofSize: 11)
+        errorLabel.textColor = .systemRed
+        errorLabel.lineBreakMode = .byTruncatingTail
+        errorLabel.stringValue = errorMessage ?? ""
+        errorLabel.identifier = NSUserInterfaceItemIdentifier("passwordVaultAccessErrorLabel")
+        addSubview(errorLabel)
+
+        primaryButton.target = self
+        primaryButton.action = #selector(primaryClicked(_:))
+        primaryButton.identifier = NSUserInterfaceItemIdentifier("passwordVaultAccessPrimaryButton")
+        primaryButton.bezelStyle = .rounded
+        primaryButton.controlSize = .large
+        primaryButton.keyEquivalent = "\r"
+        primaryButton.isEnabled = !isBusy
+        addSubview(primaryButton)
+
+        if mode == .unlock && canQuickUnlock {
+            let quick = NSButton(title: String(localized: "Use Quick Unlock"), target: self, action: #selector(quickUnlockClicked(_:)))
+            quick.identifier = NSUserInterfaceItemIdentifier("passwordVaultQuickUnlockButton")
+            quick.bezelStyle = .inline
+            quick.isBordered = false
+            quick.contentTintColor = .secondaryLabelColor
+            quick.isEnabled = !isBusy
+            quickUnlockButton = quick
+            addSubview(quick)
+        }
+        layoutControls()
     }
 
     required init?(coder: NSCoder) { nil }
 
-    private func showCreateMenu(from button: NSButton?) {
-        guard let button else { return }
-        if secondaryAction == nil {
-            primaryAction?()
-            return
-        }
-        let menu = NSMenu()
-        let primaryItem = NSMenuItem(title: primaryMenuTitle, action: #selector(primarySelected(_:)), keyEquivalent: "")
-        primaryItem.target = self
-        menu.addItem(primaryItem)
-        let secondaryItem = NSMenuItem(title: secondaryMenuTitle, action: #selector(secondarySelected(_:)), keyEquivalent: "")
-        secondaryItem.target = self
-        menu.addItem(secondaryItem)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+    override func layout() {
+        super.layout()
+        layoutControls()
     }
 
-    @objc private func primarySelected(_ sender: NSMenuItem) { primaryAction?() }
-    @objc private func secondarySelected(_ sender: NSMenuItem) { secondaryAction?() }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, window?.firstResponder !== self.passwordField else { return }
+            window?.makeFirstResponder(self.passwordField)
+        }
+    }
 
-    private func makeButton(
+    private func layoutControls() {
+        let inset: CGFloat = 12
+        let availableWidth = max(0, bounds.width - inset * 2)
+        titleLabel.frame = NSRect(x: inset, y: bounds.height - 31, width: availableWidth, height: 20)
+        explanationLabel.frame = NSRect(x: inset, y: bounds.height - 53, width: availableWidth, height: 16)
+        passwordLabel.frame = NSRect(x: inset, y: bounds.height - 78, width: availableWidth, height: 16)
+        passwordField.frame = NSRect(x: inset, y: bounds.height - 112, width: availableWidth, height: 30)
+        if mode == .create {
+            confirmationLabel.frame = NSRect(x: inset, y: bounds.height - 137, width: availableWidth, height: 16)
+            confirmationField.frame = NSRect(x: inset, y: bounds.height - 171, width: availableWidth, height: 30)
+        }
+        errorLabel.frame = NSRect(x: inset, y: 39, width: availableWidth, height: 15)
+        let buttonWidth = min(96, availableWidth)
+        primaryButton.frame = NSRect(x: bounds.width - inset - buttonWidth, y: 6, width: buttonWidth, height: 32)
+        quickUnlockButton?.frame = NSRect(x: inset, y: 6, width: max(0, availableWidth - buttonWidth - 8), height: 32)
+    }
+
+    func submit() {
+        let password = passwordField.stringValue
+        guard !password.isEmpty else {
+            errorLabel.stringValue = String(localized: "Enter a password.")
+            return
+        }
+        if mode == .create, confirmationField.stringValue != password {
+            errorLabel.stringValue = String(localized: "The passwords do not match.")
+            confirmationField.stringValue = ""
+            return
+        }
+        onSubmit(password)
+    }
+
+    func clearSecrets() {
+        passwordField.stringValue = ""
+        confirmationField.stringValue = ""
+    }
+
+    private func configureFieldLabel(_ label: NSTextField) {
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .secondaryLabelColor
+    }
+
+    private func configureSecureField(_ field: NSSecureTextField, identifier: String) {
+        field.identifier = NSUserInterfaceItemIdentifier(identifier)
+        field.font = .systemFont(ofSize: 13)
+        field.bezelStyle = .roundedBezel
+        field.target = self
+        field.action = #selector(primaryClicked(_:))
+    }
+
+    @objc private func primaryClicked(_ sender: Any?) { submit() }
+    @objc private func quickUnlockClicked(_ sender: Any?) { onQuickUnlock() }
+
+#if DEBUG
+    var secureFieldCountForTesting: Int { mode == .create ? 2 : 1 }
+    var layoutForTesting: PasswordVaultAccessLayoutSnapshot {
+        layoutSubtreeIfNeeded()
+        let activeField = mode == .create ? confirmationField : passwordField
+        let controls = [titleLabel, explanationLabel, passwordLabel, passwordField, errorLabel, primaryButton]
+            + (mode == .create ? [confirmationLabel, confirmationField] : [])
+        return PasswordVaultAccessLayoutSnapshot(
+            title: titleLabel.stringValue,
+            fieldLabel: passwordLabel.stringValue,
+            titleFontSize: titleLabel.font?.pointSize ?? 0,
+            verticalGapFromFieldToButton: activeField.frame.minY - primaryButton.frame.maxY,
+            primaryButtonWidth: primaryButton.frame.width,
+            controlsFitBounds: controls.allSatisfy { bounds.contains($0.frame) }
+        )
+    }
+    func setValuesForTesting(password: String, confirmation: String?) {
+        passwordField.stringValue = password
+        confirmationField.stringValue = confirmation ?? ""
+    }
+#endif
+}
+
+private final class MainMenuCreateActionsView: NSView {
+    private let indentationLevel: Int
+    private let actionButton: MainMenuActionButton
+
+    init(
         title: String,
         identifier: String,
-        symbolName: String,
-        isPrimary: Bool
-    ) -> MainMenuActionButton {
-        let button = MainMenuActionButton(title: "", target: nil, action: nil)
-        button.identifier = NSUserInterfaceItemIdentifier(identifier)
-        button.toolTip = title
-        button.setAccessibilityLabel(title)
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
-        button.imagePosition = .imageOnly
-        button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 9
-        button.layer?.backgroundColor = isPrimary
-            ? NSColor.controlAccentColor.withAlphaComponent(0.82).cgColor
-            : MainMenuVisualColors.controlSurface.cgColor
-        button.layer?.borderColor = MainMenuVisualColors.controlBorder.cgColor
-        button.layer?.borderWidth = 0.5
-        button.contentTintColor = isPrimary ? .white : .secondaryLabelColor
-        button.connectAction()
-        return button
+        indentationLevel: Int,
+        onAction: @escaping () -> Void
+    ) {
+        self.indentationLevel = indentationLevel
+        actionButton = MainMenuActionButton(title: "", target: nil, action: nil)
+        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.rowHeight))
+        actionButton.identifier = NSUserInterfaceItemIdentifier(identifier)
+        actionButton.toolTip = title
+        actionButton.setAccessibilityLabel(title)
+        actionButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: title)
+        actionButton.imagePosition = .imageOnly
+        actionButton.isBordered = false
+        actionButton.wantsLayer = true
+        actionButton.layer?.cornerRadius = 9
+        actionButton.layer?.backgroundColor = MainMenuVisualColors.controlSurface.cgColor
+        actionButton.layer?.borderColor = MainMenuVisualColors.controlBorder.cgColor
+        actionButton.layer?.borderWidth = 0.5
+        actionButton.contentTintColor = .secondaryLabelColor
+        actionButton.onAction = onAction
+        actionButton.connectAction()
+        addSubview(actionButton)
+        layoutActionButton()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        layoutActionButton()
+    }
+
+    private func layoutActionButton() {
+        actionButton.frame = NSRect(
+            x: MainMenuPanelRowView.leadingInset(for: indentationLevel),
+            y: 3,
+            width: 24,
+            height: 24
+        )
     }
 }
 
 // swiftlint:disable:next type_body_length
-private final class MainMenuPanelRowView: NSControl {
+private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
+    private static let dragPasteboardType = NSPasteboard.PasteboardType("com.pastera.main-menu-row")
+    struct ContextAction {
+        let title: String
+        let keyEquivalent: String
+        let action: () -> Void
+    }
+    struct QuickAction {
+        let identifier: String
+        let symbolName: String
+        let title: String
+        let shortcutText: String?
+        let action: (() -> Void)?
+    }
     enum RowKind {
         case snippetFolder
         case action
@@ -3424,7 +4310,7 @@ private final class MainMenuPanelRowView: NSControl {
     }
 
     private enum Metrics {
-        static let horizontalInset: CGFloat = 10
+        static let horizontalInset: CGFloat = 8
         static let iconSize: CGFloat = 14
         static let iconSpacing: CGFloat = 7
         static let titleAccessorySpacing: CGFloat = 5
@@ -3434,10 +4320,16 @@ private final class MainMenuPanelRowView: NSControl {
         static let indentationWidth: CGFloat = 14
     }
 
+    fileprivate static func leadingInset(for indentationLevel: Int) -> CGFloat {
+        Metrics.horizontalInset + CGFloat(indentationLevel) * Metrics.indentationWidth
+    }
+
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let shortcutBadge = PasteraShortcutBadgeView()
     private let shortcutButton = NSButton()
+    private let quickActionStack = NSStackView()
+    private var quickActionButtons = [MainMenuActionButton]()
     private let chevronView = NSImageView()
     private let editButton = NSButton()
     private let deleteButton = NSButton()
@@ -3450,17 +4342,25 @@ private final class MainMenuPanelRowView: NSControl {
     private let shortcutPlacement: ShortcutPlacement
     private let onHoverOpen: ((NSRect?) -> Void)?
     private let onEdit: (() -> Void)?
+    private let showsEditButton: Bool
     private let onEditShortcut: (() -> Void)?
     private let onClearShortcut: (() -> Void)?
     private let onDelete: (() -> Void)?
+    private let showsDeleteButton: Bool
     private let onDoubleClick: (() -> Void)?
     private let onConfirm: (NSRect?) -> Void
+    private let contextActions: [ContextAction]
+    private let quickActions: [QuickAction]
+    private let dragIdentifier: String?
+    private let onDragHover: (() -> Void)?
+    private let onDrop: ((String, Bool) -> Bool)?
     private var trackingArea: NSTrackingArea?
     private var hoverOpenWorkItem: DispatchWorkItem?
     private var isMouseInside = false
     private var isKeyboardSelected = false
     private var didDragWindow = false
     private var pendingSingleClick: DispatchWorkItem?
+    private var dragHoverWorkItem: DispatchWorkItem?
     var onHoverFocus: (() -> Void)?
 
     init(
@@ -3472,13 +4372,20 @@ private final class MainMenuPanelRowView: NSControl {
         showsChevron: Bool = false,
         isExpanded: Bool = false,
         indentationLevel: Int = 0,
+        contextActions: [ContextAction] = [],
+        quickActions: [QuickAction] = [],
         shortcutPlacement: ShortcutPlacement = .trailingCommand,
         onHoverOpen: ((NSRect?) -> Void)? = nil,
         onEdit: (() -> Void)? = nil,
+        showsEditButton: Bool = true,
         onEditShortcut: (() -> Void)? = nil,
         onClearShortcut: (() -> Void)? = nil,
         onDelete: (() -> Void)? = nil,
+        showsDeleteButton: Bool = true,
         onDoubleClick: (() -> Void)? = nil,
+        dragIdentifier: String? = nil,
+        onDragHover: (() -> Void)? = nil,
+        onDrop: ((String, Bool) -> Bool)? = nil,
         deleteTitle: String? = nil,
         onConfirm: @escaping (NSRect?) -> Void
     ) {
@@ -3488,15 +4395,25 @@ private final class MainMenuPanelRowView: NSControl {
         self.isExpanded = isExpanded
         self.deleteTitle = deleteTitle ?? String(localized: "Delete")
         self.indentationLevel = indentationLevel
+        self.contextActions = contextActions
+        self.quickActions = quickActions
         self.shortcutPlacement = shortcutPlacement
         self.onHoverOpen = onHoverOpen
         self.onEdit = onEdit
+        self.showsEditButton = showsEditButton
         self.onEditShortcut = onEditShortcut
         self.onClearShortcut = onClearShortcut
         self.onDelete = onDelete
+        self.showsDeleteButton = showsDeleteButton
         self.onDoubleClick = onDoubleClick
+        self.dragIdentifier = dragIdentifier
+        self.onDragHover = onDragHover
+        self.onDrop = onDrop
         self.onConfirm = onConfirm
         super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: rowHeight))
+        if onDrop != nil {
+            registerForDraggedTypes([Self.dragPasteboardType])
+        }
         setup(title: title, image: image, shortcutText: shortcutText)
     }
 
@@ -3523,7 +4440,58 @@ private final class MainMenuPanelRowView: NSControl {
     override func mouseDragged(with event: NSEvent) {
         didDragWindow = true
         cancelHoverOpen()
+        if let dragIdentifier {
+            let item = NSPasteboardItem()
+            item.setString(dragIdentifier, forType: Self.dragPasteboardType)
+            let draggingItem = NSDraggingItem(pasteboardWriter: item)
+            let image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: nil)
+            draggingItem.setDraggingFrame(bounds, contents: image)
+            beginDraggingSession(with: [draggingItem], event: event, source: self)
+            return
+        }
         window?.performDrag(with: event)
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation { .move }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard dragPayload(from: sender) != nil else { return [] }
+        scheduleDragHoverIfNeeded()
+        return .move
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dragPayload(from: sender) == nil ? [] : .move
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        cancelDragHover()
+        guard let payload = dragPayload(from: sender), let onDrop else { return false }
+        let location = convert(sender.draggingLocation, from: nil)
+        return onDrop(payload, location.y < bounds.midY)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        cancelDragHover()
+    }
+
+    private func scheduleDragHoverIfNeeded() {
+        guard let onDragHover, dragHoverWorkItem == nil else { return }
+        let workItem = DispatchWorkItem(block: onDragHover)
+        dragHoverWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + MainMenuPanelLayout.folderHoverOpenDelay, execute: workItem)
+    }
+
+    private func cancelDragHover() {
+        dragHoverWorkItem?.cancel()
+        dragHoverWorkItem = nil
+    }
+
+    private func dragPayload(from sender: NSDraggingInfo) -> String? {
+        sender.draggingPasteboard.string(forType: Self.dragPasteboardType)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -3566,8 +4534,18 @@ private final class MainMenuPanelRowView: NSControl {
     }
 
     private func makeContextMenu() -> NSMenu? {
-        guard onEdit != nil || onEditShortcut != nil || onClearShortcut != nil || onDelete != nil else { return nil }
+        guard !contextActions.isEmpty || onEdit != nil || onEditShortcut != nil || onClearShortcut != nil || onDelete != nil else { return nil }
         let menu = NSMenu()
+        for (index, action) in contextActions.enumerated() {
+            let item = NSMenuItem(title: action.title, action: #selector(contextActionClicked(_:)), keyEquivalent: action.keyEquivalent)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.tag = index
+            item.target = self
+            menu.addItem(item)
+        }
+        if !contextActions.isEmpty && (onEdit != nil || onEditShortcut != nil || onClearShortcut != nil || onDelete != nil) {
+            menu.addItem(.separator())
+        }
         let editItem = NSMenuItem(title: String(localized: "Edit"), action: #selector(editMenuItemClicked(_:)), keyEquivalent: "")
         if onEdit != nil {
             editItem.target = self
@@ -3600,6 +4578,11 @@ private final class MainMenuPanelRowView: NSControl {
             menu.addItem(deleteItem)
         }
         return menu
+    }
+
+    @objc private func contextActionClicked(_ sender: NSMenuItem) {
+        guard contextActions.indices.contains(sender.tag) else { return }
+        contextActions[sender.tag].action()
     }
 
     func setKeyboardSelected(_ selected: Bool) {
@@ -3648,6 +4631,36 @@ private final class MainMenuPanelRowView: NSControl {
         shortcutButton.action = #selector(shortcutButtonClicked(_:))
         shortcutButton.isHidden = true
 
+        quickActionStack.orientation = .horizontal
+        quickActionStack.alignment = .centerY
+        quickActionStack.spacing = 2
+        quickActionStack.distribution = .fillEqually
+        for quickAction in quickActions {
+            let button = MainMenuActionButton(title: "", target: nil, action: nil)
+            button.identifier = NSUserInterfaceItemIdentifier(quickAction.identifier)
+            button.setButtonType(.momentaryPushIn)
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.image = NSImage(systemSymbolName: quickAction.symbolName, accessibilityDescription: quickAction.title)
+            button.imagePosition = .imageOnly
+            button.contentTintColor = .secondaryLabelColor
+            let help = [quickAction.title, quickAction.shortcutText].compactMap { $0 }.joined(separator: "  ")
+            button.toolTip = help
+            button.setAccessibilityLabel(quickAction.title)
+            button.setAccessibilityHelp(help)
+            button.onAction = { [weak self, weak button] in
+                if let action = quickAction.action {
+                    action()
+                } else if let button {
+                    self?.presentContextMenu(from: button)
+                }
+            }
+            button.connectAction()
+            button.isHidden = true
+            quickActionStack.addArrangedSubview(button)
+            quickActionButtons.append(button)
+        }
+
         editButton.identifier = NSUserInterfaceItemIdentifier("mainMenuRowEditButton")
         editButton.setButtonType(.momentaryPushIn)
         editButton.bezelStyle = .inline
@@ -3675,7 +4688,7 @@ private final class MainMenuPanelRowView: NSControl {
         deleteButton.action = #selector(deleteButtonClicked(_:))
         deleteButton.isHidden = true
 
-        [imageView, titleLabel, shortcutBadge, shortcutButton, editButton, deleteButton, chevronView].forEach {
+        [imageView, titleLabel, shortcutBadge, quickActionStack, shortcutButton, editButton, deleteButton, chevronView].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
@@ -3683,13 +4696,17 @@ private final class MainMenuPanelRowView: NSControl {
         let leadingInset = Metrics.horizontalInset + CGFloat(indentationLevel) * Metrics.indentationWidth
         let shortcutButtonWidth: CGFloat = onEditShortcut == nil ? 0 : Metrics.accessoryButtonSize
         let shortcutButtonSpacing: CGFloat = onEditShortcut == nil ? 0 : Metrics.titleAccessorySpacing
-        let shortcutEditSpacing: CGFloat = onEditShortcut == nil || onEdit == nil ? 0 : Metrics.titleAccessorySpacing
-        let editButtonWidth: CGFloat = onEdit == nil ? 0 : Metrics.accessoryButtonSize
-        let editButtonSpacing: CGFloat = onEdit == nil || onDelete == nil ? 0 : Metrics.titleAccessorySpacing
-        let deleteButtonWidth: CGFloat = onDelete == nil ? 0 : Metrics.accessoryButtonSize
-        let trailingAccessoryAnchor = shortcutPlacement == .leadingItemNumber
-            ? shortcutButton.leadingAnchor
-            : shortcutBadge.leadingAnchor
+        let hasVisibleEditButton = showsEditButton && onEdit != nil
+        let shortcutEditSpacing: CGFloat = onEditShortcut == nil || !hasVisibleEditButton ? 0 : Metrics.titleAccessorySpacing
+        let editButtonWidth: CGFloat = hasVisibleEditButton ? Metrics.accessoryButtonSize : 0
+        let editButtonSpacing: CGFloat = !hasVisibleEditButton || onDelete == nil ? 0 : Metrics.titleAccessorySpacing
+        let deleteButtonWidth: CGFloat = onDelete == nil || !showsDeleteButton ? 0 : Metrics.accessoryButtonSize
+        let quickActionWidth = CGFloat(quickActions.count) * Metrics.accessoryButtonSize
+            + CGFloat(max(0, quickActions.count - 1)) * quickActionStack.spacing
+        let quickActionSpacing: CGFloat = quickActions.isEmpty ? 0 : Metrics.titleAccessorySpacing
+        let trailingAccessoryAnchor = quickActions.isEmpty
+            ? (shortcutPlacement == .leadingItemNumber ? shortcutButton.leadingAnchor : shortcutBadge.leadingAnchor)
+            : quickActionStack.leadingAnchor
 
         var constraints = [
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -3702,6 +4719,14 @@ private final class MainMenuPanelRowView: NSControl {
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            quickActionStack.trailingAnchor.constraint(
+                equalTo: shortcutButton.leadingAnchor,
+                constant: -quickActionSpacing
+            ),
+            quickActionStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            quickActionStack.widthAnchor.constraint(equalToConstant: quickActionWidth),
+            quickActionStack.heightAnchor.constraint(equalToConstant: Metrics.accessoryButtonSize),
 
             shortcutButton.trailingAnchor.constraint(
                 equalTo: editButton.leadingAnchor,
@@ -3834,6 +4859,11 @@ private final class MainMenuPanelRowView: NSControl {
         onClearShortcut?()
     }
 
+    private func presentContextMenu(from button: NSButton) {
+        guard let menu = makeContextMenu() else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: button.bounds.minX, y: button.bounds.minY), in: button)
+    }
+
     private func updateAppearance() {
         let isEmphasized = isMouseInside || isKeyboardSelected
         layer?.backgroundColor = isEmphasized
@@ -3844,10 +4874,14 @@ private final class MainMenuPanelRowView: NSControl {
         shortcutBadge.setState(isEmphasized: isEmphasized)
         shortcutButton.contentTintColor = isEmphasized ? .secondaryLabelColor : .tertiaryLabelColor
         shortcutButton.isHidden = onEditShortcut == nil || !isEmphasized
+        quickActionButtons.forEach {
+            $0.contentTintColor = isEmphasized ? .secondaryLabelColor : .tertiaryLabelColor
+            $0.isHidden = !isEmphasized
+        }
         editButton.contentTintColor = isEmphasized ? .secondaryLabelColor : .tertiaryLabelColor
-        editButton.isHidden = onEdit == nil || !isEmphasized
+        editButton.isHidden = !showsEditButton || onEdit == nil || !isEmphasized
         deleteButton.contentTintColor = isEmphasized ? .secondaryLabelColor : .tertiaryLabelColor
-        deleteButton.isHidden = onDelete == nil || !isEmphasized
+        deleteButton.isHidden = onDelete == nil || !showsDeleteButton || !isEmphasized
         chevronView.contentTintColor = isEmphasized ? .secondaryLabelColor : .tertiaryLabelColor
     }
 
@@ -3857,7 +4891,13 @@ private final class MainMenuPanelRowView: NSControl {
     }
 
     var buttonIdentifiersForTesting: [String] {
-        [shortcutButton, editButton, deleteButton].compactMap { $0.identifier?.rawValue }
+        ([shortcutButton, editButton, deleteButton] + quickActionButtons).compactMap { $0.identifier?.rawValue }
+    }
+
+    var visibleButtonIdentifiersForTesting: [String] {
+        ([shortcutButton, editButton, deleteButton] + quickActionButtons)
+            .filter { !$0.isHidden }
+            .compactMap { $0.identifier?.rawValue }
     }
     #endif
 }
@@ -3867,6 +4907,18 @@ extension MainMenuPanelController {
     var mainMenuPanelContentSizeForTesting: NSSize {
         contentView.layoutSubtreeIfNeeded()
         return contentView.bounds.size
+    }
+
+    func mainMenuSnapshotPNGForTesting() throws -> Data {
+        contentView.layoutSubtreeIfNeeded()
+        guard let representation = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) else {
+            throw PasswordVaultError.saveFailed
+        }
+        contentView.cacheDisplay(in: contentView.bounds, to: representation)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            throw PasswordVaultError.saveFailed
+        }
+        return data
     }
 
     var mainMenuOneDriveStatusButtonFramesForTesting: [NSRect] {
@@ -3885,9 +4937,9 @@ extension MainMenuPanelController {
     }
 
     func mainMenuToolbarToolTipForTesting(identifier: String) -> String? {
-        collectButtons(in: contentView)
-            .first { $0.identifier?.rawValue == identifier }?
-            .toolTip
+        (collectButtons(in: contentView).first {
+            $0.identifier?.rawValue == identifier
+        } as? MainMenuToolbarButton)?.hoverTip?.accessibilityLabel
     }
 
     var mainMenuHeaderToolTipsForTesting: [String: String] {
@@ -3895,6 +4947,13 @@ extension MainMenuPanelController {
             .compactMap { $0 as? MainMenuEmbeddedHeaderView }
             .first?
             .toolTipsForTesting ?? [:]
+    }
+
+    var mainMenuNonNavigatingHintTitlesForTesting: [String] {
+        collectViews(in: contentView).compactMap { view in
+            (view as? MainMenuEmbeddedEmptyRowView)?.titleForTesting
+                ?? (view as? PasswordVaultQuickActionsCoachmarkView)?.titleForTesting
+        }
     }
 
     func mainMenuRowToolTipForTesting(title: String) -> String? {
@@ -3932,6 +4991,23 @@ extension MainMenuPanelController {
             .count
     }
 
+    var mainMenuEmbeddedChromeForTesting: [String: MainMenuChromeStyle] {
+        contentView.layoutSubtreeIfNeeded()
+        let identifiers = [
+            "header": "mainMenuHeaderBlock",
+            "content": "mainMenuContentBlock",
+            "footer": "mainMenuFooterDock"
+        ]
+        let views = collectViews(in: contentView)
+        return Dictionary(uniqueKeysWithValues: identifiers.compactMap { key, identifier in
+            guard let layer = views.first(where: { $0.identifier?.rawValue == identifier })?.layer else {
+                return nil
+            }
+            let alpha = layer.backgroundColor.map { NSColor(cgColor: $0)?.alphaComponent ?? 0 } ?? 0
+            return (key, MainMenuChromeStyle(backgroundAlpha: alpha, borderWidth: layer.borderWidth))
+        })
+    }
+
     var mainMenuSearchFieldFrameForTesting: NSRect? {
         contentView.layoutSubtreeIfNeeded()
         guard searchField.superview != nil else { return nil }
@@ -3963,6 +5039,14 @@ extension MainMenuPanelController {
         return headerView.framesForTesting.mapValues { headerView.convert($0, to: contentView) }
     }
 
+    var mainMenuTypeFilterItemFramesForTesting: [NSRect] {
+        contentView.subviews.compactMap { $0 as? MainMenuEmbeddedHeaderView }.first?.typeFilterItemFramesForTesting ?? []
+    }
+
+    var mainMenuSelectedTypeFilterTitlesForTesting: [String] {
+        contentView.subviews.compactMap { $0 as? MainMenuEmbeddedHeaderView }.first?.selectedTypeFilterTitlesForTesting ?? []
+    }
+
     var mainMenuEmbeddedHeaderCornerRadiiForTesting: [String: CGFloat]? {
         contentView.layoutSubtreeIfNeeded()
         guard let headerView = contentView.subviews.compactMap({ $0 as? MainMenuEmbeddedHeaderView }).first else {
@@ -3976,6 +5060,11 @@ extension MainMenuPanelController {
         return collectButtons(in: contentView).compactMap { $0.identifier?.rawValue }
     }
 
+    var mainMenuButtonTitlesForTesting: [String] {
+        contentView.layoutSubtreeIfNeeded()
+        return collectButtons(in: contentView).map(\.title).filter { !$0.isEmpty }
+    }
+
     var mainMenuButtonImageNamesForTesting: [String: String] {
         contentView.layoutSubtreeIfNeeded()
         return Dictionary(uniqueKeysWithValues: collectButtons(in: contentView).compactMap { button in
@@ -3983,6 +5072,20 @@ extension MainMenuPanelController {
                   let imageName = button.image?.name() else { return nil }
             return (identifier, imageName)
         })
+    }
+
+    func mainMenuButtonFrameForTesting(identifier: String) -> NSRect? {
+        contentView.layoutSubtreeIfNeeded()
+        guard let button = collectButtons(in: contentView).first(where: {
+            $0.identifier?.rawValue == identifier
+        }) else { return nil }
+        return button.superview?.convert(button.frame, to: contentView)
+    }
+
+    func performMainMenuButtonClickForTesting(identifier: String) {
+        collectButtons(in: contentView).first(where: {
+            $0.identifier?.rawValue == identifier
+        })?.performClick(nil)
     }
 
     func mainMenuActionRowFrameForTesting(title: String) -> NSRect? {
@@ -4063,22 +5166,143 @@ extension MainMenuPanelController {
             .buttonIdentifiersForTesting ?? []
     }
 
+    func mainMenuRowVisibleButtonIdentifiersForTesting(title: String) -> [String] {
+        rowViewsForTesting
+            .first { $0.rowTitleForTesting == title }?
+            .visibleButtonIdentifiersForTesting ?? []
+    }
+
+    func mainMenuRenderedRowCountForTesting(title: String) -> Int {
+        rowViewsForTesting.filter { $0.rowTitleForTesting == title }.count
+    }
+
     func mainMenuRowHasImageForTesting(title: String) -> Bool {
         rowViewsForTesting.first { $0.rowTitleForTesting == title }?.hasImageForTesting ?? false
+    }
+
+    func mainMenuRowImageFrameForTesting(title: String) -> NSRect? {
+        guard let row = rowViewsForTesting.first(where: { $0.rowTitleForTesting == title }) else { return nil }
+        row.layoutSubtreeIfNeeded()
+        return row.convert(row.imageFrameForTesting, to: contentView)
     }
 
     func performMainMenuRowDoubleClickForTesting(title: String) {
         rowViewsForTesting.first { $0.rowTitleForTesting == title }?.performDoubleClickForTesting()
     }
 
+    func performMainMenuRowDeleteForTesting(title: String) {
+        rowViewsForTesting.first { $0.rowTitleForTesting == title }?.performDeleteForTesting()
+    }
+
     var mainMenuPasswordEditorIsVisibleForTesting: Bool { passwordVaultEditorState != nil }
+    var passwordVaultFolderEditorIsVisibleForTesting: Bool { passwordVaultFolderEditorState != nil }
+
+    func beginCreatingPasswordVaultFolderForTesting() {
+        beginCreatingPasswordVaultFolder()
+    }
+
+    func discardPasswordVaultFolderEditorForTesting() {
+        passwordVaultFolderEditorState = nil
+        reloadContentKeepingTopLeft()
+    }
+
+    var passwordVaultAccessSecureFieldCountForTesting: Int {
+        passwordVaultAccessView?.secureFieldCountForTesting ?? 0
+    }
+
+    var passwordVaultAccessLayoutForTesting: PasswordVaultAccessLayoutSnapshot? {
+        passwordVaultAccessView?.layoutForTesting
+    }
+
+    var passwordVaultControlsFitVisibleContentForTesting: Bool {
+        contentView.layoutSubtreeIfNeeded()
+        let identifiers = Set([
+            "passwordVaultAccessPrimaryButton",
+            "passwordVaultMasterPasswordField",
+            "passwordVaultConfirmPasswordField",
+            "mainMenuContentCreatePasswordFolderButton",
+            "mainMenuContentCreatePasswordButton",
+        ])
+        return collectViews(in: contentView).filter {
+            guard let identifier = $0.identifier?.rawValue else { return false }
+            return identifiers.contains(identifier)
+        }.allSatisfy { view in
+            guard let superview = view.superview else { return false }
+            return view.frame.minX >= -0.5 && view.frame.maxX <= superview.bounds.maxX + 0.5
+        }
+    }
+
+    func setPasswordVaultAccessValuesForTesting(password: String, confirmation: String? = nil) {
+        passwordVaultAccessView?.setValuesForTesting(password: password, confirmation: confirmation)
+    }
+
+    func submitPasswordVaultAccessForTesting() {
+        passwordVaultAccessView?.submit()
+    }
+
+    @discardableResult
+    func submitPasswordVaultAccessUsingReturnForTesting(password: String, confirmation: String? = nil) -> Bool {
+        guard let panel, let passwordVaultAccessView else { return false }
+        passwordVaultAccessView.setValuesForTesting(password: password, confirmation: confirmation)
+        let fields = collectViews(in: passwordVaultAccessView).compactMap { $0 as? NSSecureTextField }
+        let targetField = confirmation == nil ? fields.first : fields.last
+        guard let targetField,
+              panel.makeFirstResponder(targetField),
+              let fieldEditor = panel.fieldEditor(true, for: targetField) as? NSTextView else { return false }
+        fieldEditor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        return true
+    }
+
+    @discardableResult
+    func submitVisiblePasswordVaultReturnFieldForTesting(_ value: String) -> Bool {
+        guard let panel else { return false }
+        let views = collectViews(in: contentView)
+        let field: NSTextField
+        if let textField = views.compactMap({ $0 as? PasswordVaultReturnTextField }).first(where: { !$0.isHidden }) {
+            field = textField
+        } else if let secureField = views.compactMap({ $0 as? PasswordVaultReturnSecureField }).first(where: { !$0.isHidden }) {
+            field = secureField
+        } else {
+            return false
+        }
+        field.stringValue = value
+        guard panel.makeFirstResponder(field),
+              let fieldEditor = panel.fieldEditor(true, for: field) as? NSTextView else { return false }
+        fieldEditor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        return true
+    }
+
+    func performMainMenuRowConfirmForTesting(title: String) {
+        keyboardEntries.first(where: { $0.title == title })?.confirm()
+    }
+
+    var passwordVaultEditorStepForTesting: String? {
+        switch passwordVaultEditorState {
+        case let .create(_, step, _), let .edit(_, _, step, _): return step.rawValue
+        case nil: return nil
+        }
+    }
+
+    var passwordVaultEditorHeightForTesting: CGFloat? { passwordVaultStepEditorView?.frame.height }
+
+    func beginCreatingPasswordVaultEntryForTesting(in folderID: PasswordVaultFolder.ID) {
+        beginCreatingPasswordVaultEntry(in: folderID)
+    }
+
+    func updatePasswordVaultStepValueForTesting(_ value: String) {
+        passwordVaultStepEditorView?.value = value
+    }
+
+    func commitPasswordVaultStepForTesting() {
+        passwordVaultStepEditorView?.commit()
+    }
 
     var mainMenuOneDriveStatusTintColorForTesting: NSColor? {
         mainMenuOneDriveStatusButtonsForTesting.first?.contentTintColor
     }
 
     var mainMenuOneDriveStatusToolTipForTesting: String? {
-        mainMenuOneDriveStatusButtonsForTesting.first?.toolTip
+        (mainMenuOneDriveStatusButtonsForTesting.first as? MainMenuOneDriveStatusButton)?.hoverTip?.title
     }
 
     func performMainMenuOneDriveStatusClickForTesting() {
@@ -4337,8 +5561,8 @@ private extension MainMenuEmbeddedHeaderView {
         var frames = [
             "title": titleLabel.frame
         ]
-        if typeButton.superview != nil {
-            frames["typeFilter"] = typeButton.frame
+        if let first = typeButtons.first, let last = typeButtons.last {
+            frames["typeFilter"] = first.frame.union(last.frame)
         }
         if previousButton.superview != nil {
             frames["previous"] = previousButton.frame
@@ -4359,7 +5583,7 @@ private extension MainMenuEmbeddedHeaderView {
 
     var cornerRadiiForTesting: [String: CGFloat] {
         [
-            "typeFilter": typeButton.layer?.cornerRadius ?? 0,
+            "typeFilter": typeButtons.first?.layer?.cornerRadius ?? 0,
             "previous": previousButton.layer?.cornerRadius ?? 0,
             "next": nextButton.layer?.cornerRadius ?? 0
         ]
@@ -4367,7 +5591,7 @@ private extension MainMenuEmbeddedHeaderView {
 
     var toolTipsForTesting: [String: String] {
         [
-            "typeFilter": typeButton.toolTip,
+            "typeFilter": typeButtons.first(where: \.isCurrent)?.toolTip,
             "previous": previousButton.toolTip,
             "next": nextButton.toolTip
         ].compactMapValues { $0 }
@@ -4396,12 +5620,16 @@ private extension MainMenuPanelRowView {
     }
 
     var hasImageForTesting: Bool { imageView.image != nil && imageView.superview != nil }
+    var imageFrameForTesting: NSRect { imageView.frame }
 
     func performDoubleClickForTesting() { onDoubleClick?() }
+    func performDeleteForTesting() { onDelete?() }
 
     var titleAvailableWidthForTesting: CGFloat {
         let trailingLimit: CGFloat
-        if shortcutPlacement == .trailingCommand, !shortcutBadge.isHidden {
+        if quickActionButtons.contains(where: { !$0.isHidden }) {
+            trailingLimit = quickActionStack.frame.minX - Metrics.titleAccessorySpacing
+        } else if shortcutPlacement == .trailingCommand, !shortcutBadge.isHidden {
             trailingLimit = shortcutBadge.frame.minX - Metrics.titleAccessorySpacing
         } else if !shortcutButton.isHidden {
             trailingLimit = shortcutButton.frame.minX - Metrics.titleAccessorySpacing

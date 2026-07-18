@@ -379,6 +379,7 @@ final class SyncCoordinator {
     private let providerFactory: (URL) -> OneDriveFolderSyncProvider
     private let historyRepository: PasteboardHistoryRepositoryProtocol
     private let snippetRepository: SnippetRepositoryProtocol
+    private let passwordVaultStoreProvider: () -> PasswordVaultStore
     private let queue: DispatchQueue
     private var timer: DispatchSourceTimer?
     private var cancellables = Set<AnyCancellable>()
@@ -409,12 +410,14 @@ final class SyncCoordinator {
         providerFactory: @escaping (URL) -> OneDriveFolderSyncProvider = { OneDriveFolderSyncProvider(rootURL: $0) },
         historyRepository: PasteboardHistoryRepositoryProtocol = PasteboardHistoryRepository(),
         snippetRepository: SnippetRepositoryProtocol = SnippetRepository(),
+        passwordVaultStoreProvider: @escaping () -> PasswordVaultStore = { AppEnvironment.current.passwordVaultStore },
         queue: DispatchQueue = DispatchQueue(label: "com.pastera.sync.coordinator", qos: .utility)
     ) {
         self.settingsProvider = settingsProvider
         self.providerFactory = providerFactory
         self.historyRepository = historyRepository
         self.snippetRepository = snippetRepository
+        self.passwordVaultStoreProvider = passwordVaultStoreProvider
         self.queue = queue
     }
 
@@ -485,7 +488,10 @@ final class SyncCoordinator {
             setSkipped(error: SyncCoordinatorError.folderUnavailable)
             return
         }
-        guard settings.hasEnabledWork else {
+        let vaultStore = passwordVaultStoreProvider()
+        let vaultCanSync = vaultStore.state == .unlocked
+            || { if case .readOnlyWarning = vaultStore.state { return true }; return false }()
+        guard settings.hasEnabledWork || vaultCanSync else {
             setSkipped(error: SyncCoordinatorError.noEnabledWork)
             return
         }
@@ -503,8 +509,16 @@ final class SyncCoordinator {
         }
 
         do {
-            let provider = providerFactory(rootURL)
-            let result = try sync(settings: settings, provider: provider, directionPlan: directionPlan)
+            if vaultCanSync {
+                try vaultStore.reloadAndMerge()
+            }
+            let result: SyncRunResult
+            if settings.hasEnabledWork {
+                let provider = providerFactory(rootURL)
+                result = try sync(settings: settings, provider: provider, directionPlan: directionPlan)
+            } else {
+                result = SyncRunResult()
+            }
             guard reason == .manual || !result.isNoOp else { return }
             setStatus(SyncStatus(
                 phase: .succeeded,

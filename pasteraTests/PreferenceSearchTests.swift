@@ -64,6 +64,7 @@ struct PreferenceSearchTests {
         #expect(pages.map(\.paneID) == [
             .general,
             .history,
+            .scripts,
             .shortcuts,
             .excludedApps,
             .sync,
@@ -74,23 +75,26 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
+            pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support")
         ])
         #expect(pages.map(\.title) == [
             pasteraPreferenceString("General"),
             pasteraPreferenceString("History & Preview"),
+            pasteraPreferenceString("Scripts"),
             pasteraPreferenceString("Shortcuts"),
             pasteraPreferenceString("Excluded Apps"),
             pasteraPreferenceString("Sync"),
             pasteraPreferenceString("About Pastera")
         ])
         #expect(pages.map(\.symbolName) == [
-            "switch.2",
+            "gearshape",
             "clock.arrow.circlepath",
-            "command",
-            "nosign",
-            "arrow.up.arrow.down.circle",
+            "curlybraces.square",
+            "keyboard",
+            "app.badge.checkmark",
+            "icloud",
             "info.circle"
         ])
 
@@ -132,11 +136,14 @@ struct PreferenceSearchTests {
     func searchGroupsMatchesByPageAndRanksItemsByRelevance() {
         let results = PasteraPreferenceSearch(catalog: catalog).search("shortcut")
 
-        #expect(results.map(\.paneID) == [.general, .shortcuts])
+        #expect(results.map(\.paneID) == [.general, .scripts, .shortcuts])
         #expect(results[0].searchItems.map(\.title) == [
             pasteraPreferenceString("Pause Shortcuts During Remote Control")
         ])
         #expect(results[1].searchItems.map(\.title) == [
+            pasteraPreferenceString("Manual Script Shortcut")
+        ])
+        #expect(results[2].searchItems.map(\.title) == [
             pasteraPreferenceString("History Panel Shortcuts"),
             pasteraPreferenceString("Menu Shortcuts")
         ])

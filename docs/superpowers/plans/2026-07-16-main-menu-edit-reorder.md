@@ -503,18 +503,18 @@ git commit -m "docs: record main menu reorder verification"
 
 ## Delivery Metadata
 
-- Plan status: confirmed; implementation has not started
+- Plan status: implemented; awaiting manual visual acceptance
 - Evidence profile: standard
 - Design source: `docs/superpowers/specs/2026-07-16-main-menu-edit-reorder-design.md`
 - ZenTao: not requested; no external write authorized
-- Implementation authorization: not yet granted; an explicit execution request is required
+- Implementation authorization: granted by user on 2026-07-16
 
 ## Delivery Record
 
-- Actual Implementation: no business code has been changed for this plan
-- Plan Deviations: none
-- Impact: specification and implementation plan only
-- Verification: plan self-review and `git diff --check` completed
-- Remaining Risks: see Risks, Rollback and Observation
-- Follow-ups: execute Tasks 1–6 after explicit authorization
+- Actual Implementation: 密码箱兼容 store、KDBX store 与片段仓库均新增完整顺序的原子重排；主菜单接入文件夹/条目拖拽、跨文件夹移动、收起目标悬停展开、默认浏览态和编辑态底部唯一“+ 新建文件夹”入口。
+- Plan Deviations: 为避免持久化失败后的可见闪动，控制器采用“持久化成功后刷新权威快照”，没有先做乐观 UI 更新；当前脏工作区包含用户既有改动，因此未创建会混入既有改动的实现提交。
+- Impact: 密码箱与片段模块改为显式持久顺序；浏览模式仍保留窗口拖动、复制/粘贴和片段执行路径。
+- Verification: 相关 5 个 suite 共 73 个测试通过；`git diff --check` 通过；默认全量回归执行 635 个测试，其中 22 个失败，失败集中于工作区既有偏好页/视觉尺寸改动、旧默认展开断言及一个同步测试超时；本计划相关旧断言已更新后聚焦回归通过。`./script/install_local.sh` 构建成功并安装到 `/Applications/Pastera.app`，进程已启动。
+- Remaining Risks: 真实鼠标拖拽的插入线视觉和不同速度下的悬停手感仍需用户人工验收；CoreSimulator 版本告警与 macOS 服务日志属于环境噪声。
+- Follow-ups: 人工验证文件夹首尾排序、条目跨文件夹中间插入及重启后顺序保持；验收后再决定是否拆分提交。
 - ZenTao Closeout: not applicable

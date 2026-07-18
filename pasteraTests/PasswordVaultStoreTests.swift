@@ -1,10 +1,132 @@
 import Foundation
+import LocalAuthentication
 import Security
 import Testing
 @testable import Pastera
 
 @Suite("Password vault store")
 struct PasswordVaultStoreTests {
+    @Test("KDBX vault lives under the configured Pastera sync root")
+    func kdbxVaultUsesDedicatedSyncLocation() {
+        let root = URL(fileURLWithPath: "/tmp/OneDrive", isDirectory: true)
+
+        #expect(VaultFileCoordinator.vaultURL(for: root).path == "/tmp/OneDrive/PasteraSync/vault/PasteraVault.kdbx")
+    }
+
+    @Test("password vault lifecycle exposes locked and recovery states")
+    func passwordVaultLifecycleStatesAreStable() {
+        let states: [PasswordVaultState] = [
+            .notConfigured,
+            .locked,
+            .unlocking,
+            .unlocked,
+            .readOnlyWarning("conflict"),
+            .failed("corrupted")
+        ]
+
+        #expect(states.count == 6)
+        #expect(states[3] == .unlocked)
+    }
+
+    @Test("KDBX vault creates, locks, unlocks, and persists credentials")
+    func kdbxVaultLifecycleRoundTrips() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+
+        try store.createDatabase(masterPassword: "correct horse battery staple", rememberQuickUnlock: false)
+        let folder = try store.createFolder(name: "Work")
+        let entry = try store.create(PasswordVaultDraft(
+            folderID: folder.id,
+            title: "Mail",
+            website: "https://mail.example.com",
+            username: "alice",
+            note: "Primary",
+            password: "secret-value"
+        ))
+        #expect(try store.revealPassword(id: entry.id, reason: "test") == "secret-value")
+
+        store.lock()
+        #expect(store.state == .locked)
+        #expect(throws: PasswordVaultError.vaultLocked) { try store.listEntries() }
+
+        try store.unlock(masterPassword: "correct horse battery staple", rememberQuickUnlock: false)
+        #expect(try store.listEntries().map(\.title) == ["Mail"])
+        #expect(try store.revealPassword(id: entry.id, reason: "test") == "secret-value")
+    }
+
+    @Test("quick unlock stores only the 32 byte KDBX pre-hash")
+    func quickUnlockStoresPreHash() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let keys = InMemoryVaultUnlockKeyStore()
+        let store = KDBXPasswordVaultStore(syncRootProvider: { root }, unlockKeyStore: keys)
+
+        try store.createDatabase(masterPassword: "correct horse battery staple", rememberQuickUnlock: true)
+        #expect(keys.data?.count == 32)
+        #expect(keys.data != Data("correct horse battery staple".utf8))
+
+        store.lock()
+        try store.unlockWithQuickKey(reason: "test")
+        #expect(store.state == .unlocked)
+    }
+
+    @Test("quick-unlock availability lookup cannot present authentication UI")
+    func quickUnlockAvailabilityQuerySuppressesAuthenticationUI() {
+        let query = VaultUnlockKeyStore.availabilityQuery
+
+        let context = query[kSecUseAuthenticationContext as String] as? LAContext
+        #expect(context?.interactionNotAllowed == true)
+        #expect(query[kSecReturnData as String] == nil)
+    }
+
+    @Test("a local quick-unlock Keychain failure does not block the KDBX database")
+    func quickUnlockFailureDoesNotBlockDatabase() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = KDBXPasswordVaultStore(
+            syncRootProvider: { root },
+            unlockKeyStore: FailingVaultUnlockKeyStore()
+        )
+
+        try store.createDatabase(masterPassword: "correct horse battery staple", rememberQuickUnlock: true)
+
+        #expect(store.state == .unlocked)
+        #expect(FileManager.default.fileExists(atPath: VaultFileCoordinator.vaultURL(for: root).path))
+        #expect(try store.listEntries().isEmpty)
+    }
+
+    @Test("concurrent KDBX writers merge entries instead of overwriting")
+    func concurrentVaultWritersMerge() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let first = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let second = KDBXPasswordVaultStore(syncRootProvider: { root })
+        try first.createDatabase(masterPassword: "shared password", rememberQuickUnlock: false)
+        try second.unlock(masterPassword: "shared password", rememberQuickUnlock: false)
+
+        let firstFolder = try first.createFolder(name: "First")
+        _ = try first.create(.init(
+            folderID: firstFolder.id, title: "First Entry", website: "", username: "", note: "", password: "one"
+        ))
+        let secondFolder = try second.createFolder(name: "Second")
+        _ = try second.create(.init(
+            folderID: secondFolder.id, title: "Second Entry", website: "", username: "", note: "", password: "two"
+        ))
+
+        try first.reloadAndMerge()
+        let titles = Set(try first.listEntries().map(\.title))
+        #expect(titles == ["First Entry", "Second Entry"], "Merged titles: \(titles)")
+    }
+
     @Test("legacy entries migrate into the unfiled folder")
     func legacyEntriesMigrateIntoUnfiledFolder() throws {
         let client = InMemoryPasswordVaultKeychainClient()
@@ -57,6 +179,52 @@ struct PasswordVaultStoreTests {
         try store.deleteFolder(id: folder.id)
 
         #expect(try store.listFolders().map(\.name) == ["Archive"])
+    }
+
+    @Test("manual folder and entry order persists in Keychain metadata")
+    func keychainStorePersistsManualOrder() throws {
+        let store = KeychainPasswordVaultStore(client: InMemoryPasswordVaultKeychainClient())
+        try assertManualOrderPersists(in: store)
+    }
+
+    @Test("manual folder and entry order persists in KDBX")
+    func kdbxStorePersistsManualOrder() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        try store.createDatabase(masterPassword: "shared password", rememberQuickUnlock: false)
+
+        try assertManualOrderPersists(in: store)
+    }
+
+    private func assertManualOrderPersists(in store: PasswordVaultStore) throws {
+        let work = try store.createFolder(name: "Work")
+        let archive = try store.createFolder(name: "Archive")
+        let first = try store.create(.init(
+            folderID: work.id, title: "First", website: "", username: "a", note: "", password: "1"
+        ))
+        let second = try store.create(.init(
+            folderID: work.id, title: "Second", website: "", username: "b", note: "", password: "2"
+        ))
+        let archived = try store.create(.init(
+            folderID: archive.id, title: "Archived", website: "", username: "c", note: "", password: "3"
+        ))
+
+        try store.reorderFolders([archive.id, work.id])
+        #expect(try store.listFolders().map(\.id) == [archive.id, work.id])
+
+        try store.moveEntry(
+            id: second.id,
+            to: archive.id,
+            orderedEntryIDsByFolder: [
+                work.id: [first.id],
+                archive.id: [second.id, archived.id]
+            ]
+        )
+        #expect(try store.listEntries().filter { $0.folderID == work.id }.map(\.id) == [first.id])
+        #expect(try store.listEntries().filter { $0.folderID == archive.id }.map(\.id) == [second.id, archived.id])
     }
 
     @Test("metadata search excludes secrets")
@@ -131,6 +299,23 @@ struct PasswordVaultStoreTests {
         }
         #expect(try store.listEntries().isEmpty)
     }
+}
+
+private final class InMemoryVaultUnlockKeyStore: VaultUnlockKeyStoring {
+    var data: Data?
+    var containsKey: Bool { data != nil }
+
+    func save(_ data: Data) throws { self.data = data }
+    func load(reason: String) throws -> Data { try #require(data) }
+    func delete() throws { data = nil }
+}
+
+private final class FailingVaultUnlockKeyStore: VaultUnlockKeyStoring {
+    var containsKey: Bool { false }
+
+    func save(_ data: Data) throws { throw PasswordVaultError.keychainUnavailable }
+    func load(reason: String) throws -> Data { throw PasswordVaultError.keychainUnavailable }
+    func delete() throws {}
 }
 
 private struct LegacyPasswordVaultEntryFixture: Codable {

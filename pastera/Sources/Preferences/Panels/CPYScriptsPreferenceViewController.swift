@@ -5,7 +5,7 @@ import Magnet
 @MainActor
 final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewController {
     private enum Metrics {
-        static let emptyStateHeight: CGFloat = 136
+        static let emptyStateHeight: CGFloat = 108
         static let initialLayoutHeight: CGFloat = 620
     }
 
@@ -13,6 +13,7 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
     private let executor: ScriptExecuting
     private let hotKeyService: HotKeyService
     private let listStack = NSStackView()
+    private let scriptSummaryLabel = NSTextField(labelWithString: "")
     private let shortcutRecordView = RecordView(frame: .zero)
     private lazy var testScriptButton = NSButton(
         title: pasteraScriptString("Test Script", "测试脚本"),
@@ -43,11 +44,8 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         let scriptsCard = makeScriptsCard()
         let shortcutCard = makeShortcutCard()
         self.shortcutCard = shortcutCard
-        contentStack.spacing = 18
-        contentStack.addArrangedSubview(scriptsCard)
-        contentStack.addArrangedSubview(shortcutCard)
-        scriptsCard.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-        shortcutCard.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        addAdaptiveContent(scriptsCard)
+        addAdaptiveContent(shortcutCard)
         reloadScripts()
         invalidateContentSize()
     }
@@ -87,7 +85,19 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         headerLabels.addArrangedSubview(subtitle)
         header.addArrangedSubview(icon)
         header.addArrangedSubview(headerLabels)
+        headerLabels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scriptSummaryLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        scriptSummaryLabel.textColor = .secondaryLabelColor
+        scriptSummaryLabel.alignment = .center
+        scriptSummaryLabel.wantsLayer = true
+        scriptSummaryLabel.layer?.cornerRadius = 8
+        scriptSummaryLabel.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
+        scriptSummaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        scriptSummaryLabel.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        scriptSummaryLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 70).isActive = true
+        header.addArrangedSubview(scriptSummaryLabel)
         card.addArrangedSubview(header)
+        header.widthAnchor.constraint(equalTo: card.widthAnchor, constant: -32).isActive = true
         listStack.orientation = .vertical
         listStack.alignment = .centerX
         listStack.spacing = 12
@@ -147,6 +157,7 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         templateButton.bezelStyle = .rounded
         testScriptButton.bezelStyle = .rounded
         testScriptButton.setAccessibilityLabel(pasteraScriptString("Open Script Test", "打开脚本测试"))
+        registerAnchor("scripts.test", view: testScriptButton)
         let actions = NSStackView(views: [newButton, templateButton, testScriptButton])
         actions.orientation = .horizontal
         actions.spacing = 10
@@ -162,14 +173,20 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         card.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         card.wantsLayer = true
         card.layer?.cornerRadius = 12
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.separatorColor.cgColor
+        card.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.34).cgColor
+        card.layer?.borderWidth = PasteraDesignTokens.Metrics.hairlineWidth
+        card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.65).cgColor
         return card
     }
 
     private func reloadScripts() {
         listStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let scripts = (try? repository.fetchAll()) ?? []
+        let enabledCount = scripts.filter(\.isEnabled).count
+        scriptSummaryLabel.stringValue = pasteraScriptString(
+            "\(enabledCount) of \(scripts.count) on",
+            "已启用 \(enabledCount)/\(scripts.count)"
+        )
         testScriptButton.isEnabled = !scripts.isEmpty
         guard !scripts.isEmpty else {
             let emptyState = NSStackView()
@@ -214,7 +231,7 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         row.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
         row.wantsLayer = true
         row.layer?.cornerRadius = 9
-        row.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        row.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.45).cgColor
         let labels = NSStackView()
         labels.orientation = .vertical
         labels.alignment = .leading
@@ -226,11 +243,14 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
             .compactMap { $0 }.joined(separator: " · ")
         let detail = NSTextField(labelWithString: triggers)
         detail.textColor = .secondaryLabelColor
+        detail.font = .systemFont(ofSize: 11)
         labels.addArrangedSubview(title)
         labels.addArrangedSubview(detail)
         let edit = NSButton(title: pasteraPreferenceString("Edit"), target: self, action: #selector(editScript(_:)))
         edit.identifier = NSUserInterfaceItemIdentifier(script.id.uuidString)
-        let enabled = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleScript(_:)))
+        let enabled = NSSwitch()
+        enabled.target = self
+        enabled.action = #selector(toggleScript(_:))
         enabled.state = script.isEnabled ? .on : .off
         enabled.identifier = edit.identifier
         enabled.setAccessibilityLabel(pasteraPreferenceString("Enable \(script.name)"))
@@ -242,7 +262,7 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         row.addArrangedSubview(edit)
         row.addArrangedSubview(enabled)
         row.addArrangedSubview(delete)
-        labels.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+        labels.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
         return row
     }
 
@@ -282,11 +302,12 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         presentAsSheet(editor)
     }
 
-    @objc private func toggleScript(_ sender: NSButton) {
+    @objc private func toggleScript(_ sender: NSSwitch) {
         guard var script = script(for: sender) else { return }
         script.isEnabled = sender.state == .on
         script.updatedAt = Int(Date().timeIntervalSince1970)
         try? repository.update(script)
+        reloadScripts()
     }
 
     @objc private func deleteScript(_ sender: NSButton) {
@@ -301,7 +322,7 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         reloadScripts()
     }
 
-    private func script(for sender: NSButton) -> ScriptTransform? {
+    private func script(for sender: NSControl) -> ScriptTransform? {
         guard let rawID = sender.identifier?.rawValue,
               let id = UUID(uuidString: rawID) else { return nil }
         return try? repository.fetchAll().first(where: { $0.id == id })

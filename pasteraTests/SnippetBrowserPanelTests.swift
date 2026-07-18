@@ -220,52 +220,60 @@ struct SnippetBrowserPanelTests {
     @Test
     func historyRowKeepsNumericBadgeWhenRetiredShortcutPreferenceWasDisabled() throws {
         try withNumericShortcutDefaults(enabled: false, startsAtZero: false) {
-            let defaults = AppEnvironment.current.defaults
-            let markKey = Constants.UserDefaults.menuItemsAreMarkedWithNumbers
-            let previousMarkValue = defaults.object(forKey: markKey)
-            defaults.set(true, forKey: markKey)
-            defer { restoreDefault(previousMarkValue, forKey: markKey) }
+            withDependencies {
+                $0.pasteboardHistoryRepository = EmptyHistoryRepository()
+            } operation: {
+                let defaults = AppEnvironment.current.defaults
+                let markKey = Constants.UserDefaults.menuItemsAreMarkedWithNumbers
+                let previousMarkValue = defaults.object(forKey: markKey)
+                defaults.set(true, forKey: markKey)
+                defer { restoreDefault(previousMarkValue, forKey: markKey) }
 
-            let manager = MenuManager()
-            let detail = PasteboardHistoryDetail(
-                history: PasteboardHistory(
-                    id: PasteboardHistory.ID("history-1"),
-                    title: "First History",
-                    pasteboardTypes: [.string],
-                    updateAt: 1,
-                    deviceID: CPYUtilities.deviceID
-                ),
-                thumbnailAsset: nil
-            )
+                let manager = MenuManager()
+                let detail = PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("history-1"),
+                        title: "First History",
+                        pasteboardTypes: [.string],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                )
 
-            let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
+                let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
 
-            #expect(row.textValuesForTesting.contains("First History"))
-            #expect(!row.textValuesForTesting.contains("1. First History"))
-            #expect(row.textValuesForTesting.contains("1"))
+                #expect(row.textValuesForTesting.contains("First History"))
+                #expect(!row.textValuesForTesting.contains("1. First History"))
+                #expect(row.textValuesForTesting.contains("1"))
+            }
         }
     }
 
     @Test
     func imageHistoryRowDoesNotShowLeadingNumberPrefix() throws {
         try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
-            let manager = MenuManager()
-            let detail = PasteboardHistoryDetail(
-                history: PasteboardHistory(
-                    id: PasteboardHistory.ID("history-image"),
-                    title: "Screenshot",
-                    pasteboardTypes: [.tiff],
-                    updateAt: 1,
-                    deviceID: CPYUtilities.deviceID
-                ),
-                thumbnailAsset: nil
-            )
+            withDependencies {
+                $0.pasteboardHistoryRepository = EmptyHistoryRepository()
+            } operation: {
+                let manager = MenuManager()
+                let detail = PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("history-image"),
+                        title: "Screenshot",
+                        pasteboardTypes: [.tiff],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                )
 
-            let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
+                let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
 
-            #expect(row.textValuesForTesting.contains("(Image)"))
-            #expect(row.textValuesForTesting.contains("1"))
-            #expect(!row.textValuesForTesting.contains("1. (Image)"))
+                #expect(row.textValuesForTesting.contains("(Image)"))
+                #expect(row.textValuesForTesting.contains("1"))
+                #expect(!row.textValuesForTesting.contains("1. (Image)"))
+            }
         }
     }
 
@@ -460,29 +468,33 @@ extension SnippetBrowserPanelTests {
     @Test
     func historyRowDisplaysNumericShortcutOnLeftWithoutTitlePrefix() throws {
         try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
-            let manager = MenuManager()
-            let detail = PasteboardHistoryDetail(
-                history: PasteboardHistory(
-                    id: PasteboardHistory.ID("history-1"),
-                    title: "First History",
-                    pasteboardTypes: [.string],
-                    updateAt: 1,
-                    deviceID: CPYUtilities.deviceID
-                ),
-                thumbnailAsset: nil
-            )
+            try withDependencies {
+                $0.pasteboardHistoryRepository = EmptyHistoryRepository()
+            } operation: {
+                let manager = MenuManager()
+                let detail = PasteboardHistoryDetail(
+                    history: PasteboardHistory(
+                        id: PasteboardHistory.ID("history-1"),
+                        title: "First History",
+                        pasteboardTypes: [.string],
+                        updateAt: 1,
+                        deviceID: CPYUtilities.deviceID
+                    ),
+                    thumbnailAsset: nil
+                )
 
-            let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
-            row.layoutSubtreeIfNeeded()
-            let titleLabel = try #require(row.subviews.compactMap { $0 as? NSTextField }
-                .first { $0.stringValue == "First History" })
-            let shortcutBadge = try #require(row.subviews.compactMap { $0 as? PasteraShortcutBadgeView }
-                .first { $0.shortcutTextForTesting == "1" })
+                let row = manager.makeHistoryRowViewForTesting(detail, index: 0)
+                row.layoutSubtreeIfNeeded()
+                let titleLabel = try #require(row.subviews.compactMap { $0 as? NSTextField }
+                    .first { $0.stringValue == "First History" })
+                let shortcutBadge = try #require(row.subviews.compactMap { $0 as? PasteraShortcutBadgeView }
+                    .first { $0.shortcutTextForTesting == "1" })
 
-            #expect(row.textValuesForTesting.contains("First History"))
-            #expect(row.textValuesForTesting.contains("1"))
-            #expect(!row.textValuesForTesting.contains("1. First History"))
-            #expect(shortcutBadge.frame.minX < titleLabel.frame.minX)
+                #expect(row.textValuesForTesting.contains("First History"))
+                #expect(row.textValuesForTesting.contains("1"))
+                #expect(!row.textValuesForTesting.contains("1. First History"))
+                #expect(shortcutBadge.frame.minX < titleLabel.frame.minX)
+            }
         }
     }
 
