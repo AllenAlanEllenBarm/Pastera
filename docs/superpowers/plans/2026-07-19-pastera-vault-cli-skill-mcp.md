@@ -1146,12 +1146,13 @@ git commit -m "feat(agent): 增加单次票据和脱敏审计"
 - Create: `pastera/Sources/Services/VaultAgentBroker.swift`
 - Create: `pasteraTests/VaultAgentPeerVerifierTests.swift`
 - Create: `pasteraTests/VaultAgentBrokerTests.swift`
+- Modify: `pastera-agent/Sources/PasteraAgentProtocol/VaultAgentProtocol.swift`
 - Modify: `pastera.xcodeproj/project.pbxproj`
 
 **Interfaces：**
 
 - Consumes: Task 1 帧 DTO、安装记录中的 Host 代码身份、当前 App Bundle Helper 路径。
-- Produces: `VaultAgentPeerVerifying`、`VaultAgentSecureChannel` 与事件驱动 `VaultAgentSocketServer`；验证结果使用 Task 2 已定义的 `VaultAgentPeerIdentity`。
+- Produces: `VaultAgentPeerVerifying`、`VaultAgentSecureChannel` 与事件驱动 `VaultAgentSocketServer`；验证结果使用 Task 2 已定义的 `VaultAgentPeerIdentity`，协议模块补充可区分重放、乱序、连接不匹配、认证失败与 sequence 耗尽的本地 transport error case。
 
 - [ ] **Step 1：写父进程借用与重放拒绝失败测试**
 
@@ -1199,19 +1200,35 @@ Expected：FAIL，缺失 `VaultAgentPeerVerifier` 或 `VaultAgentSecureChannel`�
 6. CLI 只匹配当前 App 内 `pastera` Helper，保持独立授权；
 7. 进程消失、PID 复用、路径变化、签名变化全部安全失败。
 
+Verifier 通过窄依赖注入 `VaultAgentSocketPeerCredentialReading`、`VaultAgentProcessInspecting`、`VaultAgentCodeSigningInspecting` 和 `VaultAgentHostIdentityProviding`。生产 peer PID 使用 `getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, ...)`；process snapshot 至少包含 pid、ppid、uid、`proc_pidpath` 真实路径和 `proc_bsdinfo` 的启动秒/微秒。Helper/Host 检查完成后必须重新读取 snapshot 并比较 pid、ppid、start time、规范路径和文件 device/inode，防止 PID 复用或路径替换；任一读取失败安全拒绝。
+
+三个 Helper 的文件名/签名 identifier 固定映射为 `PasteraCodexMCP` / `com.pastera-app.PasteraCodexMCP`、`PasteraClaudeMCP` / `com.pastera-app.PasteraClaudeMCP`、`pastera` / `com.pastera-app.pastera`，Task 11 的 Target 与签名配置必须沿用。Helper 路径必须等于当前 App `Contents/Helpers` 下该映射的精确规范路径，不只是同目录任意文件。生产签名检查使用 `SecStaticCodeCheckValidity` 的 strict/all-architectures/no-network flags，并提取 signing identifier、designated requirement、`kSecCodeInfoUnique` cdhash 和 `kSecCodeSignatureAdhoc`；不得根据请求中的 client 字段推导身份。
+
+`VaultAgentInstalledHostIdentity` 固定保存 client、规范 path、designated requirement、cdhash 和 ad-hoc 标志。Codex/Claude 从 Helper 的直接父进程开始最多检查 4 个 snapshot；每层都要求同 UID、普通非符号链接可执行文件和稳定 snapshot，命中记录时 requirement/path/ad-hoc 形态必须相同，ad-hoc 还要 cdhash 相同。链中进程消失或发生 snapshot 变化立即拒绝；遍历 4 层无匹配返回 `hostChainMismatch`。CLI 必须没有 Host record/Host identity。输出 `VaultAgentPeerIdentity` 的路径均为以上规范真实路径，字段完整性继续满足 Task 2。
+
 - [ ] **Step 4：实现认证加密 Channel**
 
-握手在 peer 验证成功后进行。双方使用 `Curve25519.KeyAgreement.PrivateKey`，以 client/server nonce 和 connection ID 作为 HKDF-SHA256 salt/info 派生每连接 `SymmetricKey`；所有请求与响应用 `ChaChaPoly`，AAD 固定包含协议版本、connection ID、方向和 sequence。入站 sequence 必须从 1 严格递增，断连后密钥释放。
+握手在 peer 验证成功后进行；Server 在 verifier 成功前不得解析 ClientHello 或创建密钥。双方使用 `Curve25519.KeyAgreement.PrivateKey`，Client/Server nonce 都由 `SecRandomCopyBytes` 生成恰好 32 bytes，connection ID 为随机 UUID。协议版本必须精确等于 1，公钥/nonce 长度必须精确匹配；任一失败直接断连且不得降级。
+
+HKDF-SHA256 的 input key material 为 X25519 shared secret，salt 精确为 `clientNonce(32) || serverNonce(32)`，info 精确为 UTF-8 `PasteraVaultAgent/v1`、一个 `0x00` 分隔字节和 connection UUID 的 RFC 4122 16 bytes，输出 32-byte `SymmetricKey`。所有请求与响应用 `ChaChaPoly`；frame 的 ciphertext 使用 `SealedBox.combined`。AAD 使用固定二进制布局：ASCII `PVA1`、UInt32 big-endian protocol version、connection UUID 16 bytes、方向 byte（client→server 为 1，server→client 为 2）和 UInt64 big-endian sequence。该 transcript 在 Task 7 Client 必须逐字节复用，禁止 JSON 字符串拼接或隐式本地字节序。
+
+每个方向独立 sequence，从 1 开始。`seal` 与 `open` 由锁保护；seal 成功后才递增出站 sequence，open 必须先校验 connection ID 和精确 expected sequence，低于 expected 返回 `replayedFrame`，高于 expected 返回 `outOfOrderFrame`，ChaCha 认证成功后才递增。UInt64.max 后返回 `sequenceExhausted`。Channel 不缓存明文；连接关闭后 Server 必须释放 Channel/私钥/nonce 引用。Task 1 的 `VaultAgentProtocolError` 增加 `replayedFrame`、`outOfOrderFrame`、`connectionMismatch`、`authenticationFailed`、`sequenceExhausted`、`protocolMismatch`，它们只用于本地 transport，不直接作为 wire `VaultAgentErrorCode` 泄漏。
 
 - [ ] **Step 5：实现私有 Socket 生命周期**
 
-Socket 路径固定为 `~/Library/Application Support/Pastera/Agent/v1/broker.sock`。目录 `0700`、socket `0600`；使用 `openat/fstatat` 风格检查或等价无跟随检查拒绝符号链接/非 socket 冲突。`DispatchSourceRead` 驱动 accept/read，无轮询；最多 8 个连接、每连接最多 1 个进行中请求、空闲 30 秒关闭、单帧 64 KiB。
+Socket 路径固定为 `~/Library/Application Support/Pastera/Agent/v1/broker.sock`。默认路径通过 FileManager 的 Application Support URL 构造，不信任 `$HOME` 文本；测试可注入完整 `v1` 目录。`Agent` 与 `v1` 必须是当前 UID 所有的真实目录并收紧为 `0700`；逐段使用 `openat/mkdirat/fstatat(AT_SYMLINK_NOFOLLOW)` 或等价 fd-relative no-follow 检查，拒绝符号链接和非目录。Socket 路径长度必须在 `sockaddr_un.sun_path` 上限内。
+
+现有 `broker.sock` 为 symlink/普通文件/非当前 UID socket 时返回冲突且不得删除；当前 UID 的旧 socket 只有在无活动 listener、再次 no-follow 核对 device/inode 未变后才允许 unlink。bind/listen 后立刻验证并设为 `0600`，listener/accepted fd 都设 nonblocking、close-on-exec 和 `SO_NOSIGPIPE`。Server `stop` 只删除自己本次 bind 且 device/inode 仍匹配的 socket。
+
+`DispatchSourceRead` 驱动 accept/read，写入使用有界 nonblocking output buffer 与 `DispatchSourceWrite` 或等价事件驱动 partial-write 处理，禁止在 main queue 阻塞；无轮询。最多 8 个连接，超额立即关闭。每连接 input/output buffer 各自不得超过 64 KiB；长度前缀声明、累计 buffer 或编码后完整帧超过 `VaultAgentLimits.maximumFrameBytes` 时关闭。握手与加密帧都使用 Task 1 长度前缀；partial read/write 必须正确。每连接最多 1 个进行中 request，完成前收到第二个请求立即关闭；request handler completion 只接受第一次，关闭后的晚回调不得写 fd。
+
+空闲 30 秒使用一次性、活动时重排的 deadline source/`asyncAfter` generation 实现，不做周期轮询；关闭连接必须取消 source、关闭 fd、清空 buffer/channel/handler 状态。EOF、解码/身份/握手/认证/sequence/写入失败都走同一个幂等清理路径。`VaultAgentSocketRequestHandling` 只接收已验证 identity 与解密后的有界 `Data`，异步返回已经编码的 response `Data` 或本地 transport failure；Task 5 测试用 echo handler，Task 6 在此接口上接业务 dispatcher，transport 不把 Swift/Security/POSIX 原始错误写给 peer。
 
 - [ ] **Step 6：运行真实权限、畸形帧、断连和并发测试**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentPeerVerifierTests -only-testing:pasteraTests/VaultAgentBrokerTests`。
 
-Expected：PASS；测试覆盖 `0700/0600`、既有普通文件、socket 符号链接、错误 UID、伪造 Helper 名、错误 Host 父链、超大长度、乱序/重复 sequence、EOF 清理。
+Expected：PASS；测试覆盖真实 `0700/0600`、已有活跃/陈旧 socket、既有普通文件、socket/目录符号链接、错误 UID、伪造 Helper 名/identifier、错误或超过 4 层 Host 父链、Host/Helper snapshot 中途变化、协议降级、HKDF/AAD 固定向量、ChaCha 篡改、超大长度、partial read/write、乱序/重复 sequence、并发连接/每连接第二请求、30 秒 idle generation、EOF/stop/晚回调幂等清理。真实代码签名与真实 Codex/Claude 父链留到 Task 11/12 已安装构建验证。
 
 - [ ] **Step 7：提交 IPC 边界**
 
@@ -1219,6 +1236,7 @@ Expected：PASS；测试覆盖 `0700/0600`、既有普通文件、socket 符号�
 git add pastera/Sources/Services/VaultAgentPeerVerifier.swift \
   pastera/Sources/Services/VaultAgentBroker.swift \
   pasteraTests/VaultAgentPeerVerifierTests.swift pasteraTests/VaultAgentBrokerTests.swift \
+  pastera-agent/Sources/PasteraAgentProtocol/VaultAgentProtocol.swift \
   pastera.xcodeproj/project.pbxproj
 git commit -m "feat(agent): 加固密码箱本地 broker"
 ~~~
@@ -2027,7 +2045,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付记录（Delivery Record）
 
 - Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer。Task 5–12 尚未实现。
-- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。Task 4 预检发现票据 command 生成、随机/碰撞失败、重放错误、容量边界、限流 retry-after 和审计密钥/记录 Schema 尚未固定；已明确 command builder 只生成响应且不落 Store、三类有界票据状态、严格滑动窗口、独立 Keychain HMAC key 和进程内 1,000 条 Ring Buffer，未改变 30 秒票据、5 秒 receipt 或外部操作范围。Task 4 首轮独立审查发现审计 key 读取未强制 ThisDeviceOnly，主流程复核同时发现票据/receipt 被其他访问惰性清理后会把 expired 漂移成 used；已把 accessibility 纳入全部 Keychain 匹配查询，并用单个 256 条 outcome tombstone 保持过期/重放语义。复审一度建议为成功 receipt 也保存 used tombstone；按原契约复核后撤回，因为未知与已完成 receipt 对外均为 used，额外状态不会改善安全行为且可能阻断秘密已写入后的 complete/续期。
+- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。Task 4 预检发现票据 command 生成、随机/碰撞失败、重放错误、容量边界、限流 retry-after 和审计密钥/记录 Schema 尚未固定；已明确 command builder 只生成响应且不落 Store、三类有界票据状态、严格滑动窗口、独立 Keychain HMAC key 和进程内 1,000 条 Ring Buffer，未改变 30 秒票据、5 秒 receipt 或外部操作范围。Task 4 首轮独立审查发现审计 key 读取未强制 ThisDeviceOnly，主流程复核同时发现票据/receipt 被其他访问惰性清理后会把 expired 漂移成 used；已把 accessibility 纳入全部 Keychain 匹配查询，并用单个 256 条 outcome tombstone 保持过期/重放语义。复审一度建议为成功 receipt 也保存 used tombstone；按原契约复核后撤回，因为未知与已完成 receipt 对外均为 used，额外状态不会改善安全行为且可能阻断秘密已写入后的 complete/续期。Task 5 预检发现原任务未固定 Helper identifier、进程 snapshot/PID 复用检查、HKDF/AAD 字节 transcript、socket stale/active 冲突处理、partial I/O 和异步 handler 生命周期，并且重放示例引用了尚不存在的协议错误 case；已补齐三个签名 identifier、双次 snapshot、固定加密向量、fd-relative no-follow 文件系统规则、事件驱动有界连接状态机和本地 transport errors，因此 Task 5 允许窄改协议错误枚举但不改变 wire error raw value 或业务操作。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
 - Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：无人值守解锁、Helper 身份、目标命令泄漏、IPC 正确性和 MCP SDK 1.0 前兼容性仍是实施风险，均已映射到验收与回滚。
