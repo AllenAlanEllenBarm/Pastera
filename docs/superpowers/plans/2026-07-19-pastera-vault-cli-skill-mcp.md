@@ -488,7 +488,7 @@ public enum VaultAgentProtocolError: Error, Equatable, Sendable {
     case invalidValue
 }
 
-public enum VaultAgentClientKind: String, Codable, CaseIterable, Sendable {
+public enum VaultAgentClientKind: String, Codable, CaseIterable, Hashable, Sendable {
     case codex
     case claude
     case cli
@@ -570,7 +570,7 @@ public enum VaultAgentOperation: Codable, Equatable, Sendable {
 错误与响应类型使用以下精确表面：
 
 ~~~swift
-public enum VaultAgentErrorCode: String, Codable, CaseIterable, Sendable {
+public enum VaultAgentErrorCode: String, Codable, CaseIterable, Error, Sendable {
     case authorizationRequired = "AUTHORIZATION_REQUIRED"
     case grantExpired = "GRANT_EXPIRED"
     case grantRevoked = "GRANT_REVOKED"
@@ -715,6 +715,7 @@ git commit -m "feat(agent): 建立密码箱共享协议"
 - Create: `pastera/Sources/Services/VaultAgentGrantStore.swift`
 - Create: `pastera/Sources/Services/VaultAgentAuthorizationCoordinator.swift`
 - Create: `pasteraTests/VaultAgentAuthorizationPolicyTests.swift`
+- Modify: `pastera-agent/Sources/PasteraAgentProtocol/VaultAgentProtocol.swift`
 - Modify: `pastera.xcodeproj/project.pbxproj`
 
 **Interfaces：**
@@ -729,7 +730,7 @@ git commit -m "feat(agent): 建立密码箱共享协议"
 func sensitiveSuccessSlidesIdleExpiry() throws {
     let start = Date(timeIntervalSince1970: 10_000)
     let store = InMemoryVaultAgentGrantStore()
-    let policy = VaultAgentAuthorizationPolicy(store: store)
+    let policy = try VaultAgentAuthorizationPolicy(store: store)
     let identity = VaultAgentPeerIdentity.testValue(client: .codex)
     try policy.authorize(identity: identity, authenticatedAt: start)
 
@@ -745,7 +746,7 @@ func sensitiveSuccessSlidesIdleExpiry() throws {
 func nonSensitiveActionsDoNotRenew() throws {
     let start = Date(timeIntervalSince1970: 20_000)
     let store = InMemoryVaultAgentGrantStore()
-    let policy = VaultAgentAuthorizationPolicy(store: store)
+    let policy = try VaultAgentAuthorizationPolicy(store: store)
     let identity = VaultAgentPeerIdentity.testValue(client: .claude)
     try policy.authorize(identity: identity, authenticatedAt: start)
     let original = try #require(store.grants[.claude])
@@ -785,6 +786,7 @@ struct VaultAgentGrant: Codable, Equatable {
     var idleExpiresAt: Date
     let hardExpiresAt: Date
     var lastSensitiveUseAt: Date?
+    var revokedAt: Date?
 }
 
 enum VaultAgentGrantDecision: Equatable {
@@ -805,24 +807,30 @@ final class VaultAgentAuthorizationPolicy {
     static let idleLifetime: TimeInterval = 7 * 24 * 60 * 60
     static let hardLifetime: TimeInterval = 30 * 24 * 60 * 60
 
-    func authorize(identity: VaultAgentPeerIdentity, authenticatedAt: Date) throws
+    init(store: VaultAgentGrantStoring) throws
+    @discardableResult
+    func authorize(identity: VaultAgentPeerIdentity, authenticatedAt: Date) throws -> VaultAgentGrant
     func decision(for identity: VaultAgentPeerIdentity, at: Date) -> VaultAgentGrantDecision
     func recordSensitiveSuccess(for identity: VaultAgentPeerIdentity, at: Date) throws
     func recordInteractiveSensitiveSuccess(at: Date) throws
     func recordFailure(for identity: VaultAgentPeerIdentity, at: Date)
-    func revoke(_ client: VaultAgentClientKind) throws
-    func revokeAll() throws
+    func revoke(_ client: VaultAgentClientKind, at: Date) throws
+    func revokeAll(at: Date) throws
     func validGrantCount(at: Date) -> Int
 }
 ~~~
 
 `recordSensitiveSuccess` 必须计算 `min(now + 7 days, hardExpiresAt)`；`recordInteractiveSensitiveSuccess` 只续期当前仍有效的授权；`decision` 遇到 identity 变化或到期时不自动创建新授权。
 
+Policy 初始化时只从 Store 加载一次到内存；加载失败直接抛出，不得静默当成空授权。所有变更先基于副本计算并成功 `save`，再替换内存状态，避免 Keychain 写失败后内存与持久化分叉。`revoke`/`revokeAll` 设置 `revokedAt` 而不是删除记录，因此后续 `decision` 可稳定返回 `revoked`；`validGrantCount` 排除撤销、闲置到期和硬到期授权。
+
 Identity 匹配不能直接使用结构体全量相等：正式签名 Helper/Host 比较 client、designated requirement 和规范真实路径，允许 cdhash 随普通升级变化；ad-hoc 一侧必须额外精确匹配 cdhash。任何一侧从正式签名变为 ad-hoc、requirement/path 变化或签名失效都返回 `identityChanged`。
 
 - [ ] **Step 4：实现 Keychain Grant Store 与首次请求去重**
 
-`VaultAgentGrantStore` 使用 service `com.pastera-app.Pastera.agent-grants.v1`、account `grants`、`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 和 `kSecAttrSynchronizable = false`。更新采用单个编码对象覆盖，Keychain 错误只映射为稳定错误，不输出原始查询。
+`VaultAgentGrantStore` 使用 service `com.pastera-app.Pastera.agent-grants.v1`、account `grants`、`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 和 `kSecAttrSynchronizable = false`。更新采用单个编码对象覆盖，Keychain 错误只映射为稳定错误，不输出原始查询。`errSecItemNotFound` 映射为空字典；其他 Security 状态、编码损坏和写失败统一抛出 `VaultAgentErrorCode.automationUnlockUnavailable`。Store 通过窄 `VaultAgentKeychainAccessing` 依赖调用 `SecItemCopyMatching`/`SecItemAdd`/`SecItemUpdate`，测试使用真实查询字典 Probe，不增加生产测试分支。
+
+Task 1 的 `VaultAgentErrorCode` 在本任务增加 `Error` conformance，`VaultAgentClientKind` 增加字典键所需的 `Hashable` conformance；wire raw value 与编码布局不变。这是 Swift `Result<VaultAgentGrant, VaultAgentErrorCode>` 与授权字典的编译前提。
 
 ~~~swift
 final class VaultAgentAuthorizationCoordinator {
@@ -839,7 +847,9 @@ final class VaultAgentAuthorizationCoordinator {
 }
 ~~~
 
-同一客户端的并发请求合并为一个 `LAContext` 流程；自动首次请求被取消后记录 24 小时自动提示冷却，只返回 `AUTHORIZATION_REQUIRED`，偏好页显式操作可立即重试。Codex、Claude、CLI 三者不得共用 pending 状态。
+Coordinator 注入 `VaultAgentAuthorizationPolicy`、`VaultAgentIdentityAuthenticating`、`UserDefaults` 和 `now: () -> Date`。生产 authenticator 每次流程创建新的 `LAContext` 并调用 `deviceOwnerAuthentication`；测试使用协议 Probe。回调统一回到 coordinator 的串行队列后再读写 pending/cooldown，completion 最终投递主队列，禁止跨线程并发修改字典。
+
+同一客户端且 identity 匹配的并发请求合并为一个 `LAContext` 流程并向所有等待者返回同一结果；同一客户端等待期间出现不同 identity 时立即返回 `AUTHORIZATION_REQUIRED`，不得加入旧流程。Codex、Claude、CLI 三者不得共用 pending 状态。自动首次请求被 `LAError.userCancel`、`systemCancel` 或 `appCancel` 取消后，把 24 小时冷却截止时间分别保存到 `UserDefaults` 键 `Pastera.Agent.AuthorizationCooldownUntil.v1.<client>`；该时间戳不是授权或秘密。冷却期内 automatic trigger 不创建 `LAContext`，只返回 `AUTHORIZATION_REQUIRED`；explicit preferences trigger 忽略冷却并可立即重试。授权成功先由 Policy 原子保存 Grant，再清除该客户端冷却；身份验证失败或持久化失败不得创建 Grant。
 
 - [ ] **Step 5：补 Keychain 属性、去重、撤销与硬上限测试并运行**
 
@@ -853,7 +863,9 @@ Expected：PASS，覆盖 7 天边界前后、30 天边界、取消冷却、Codex
 git add pastera/Sources/Services/VaultAgentAuthorizationPolicy.swift \
   pastera/Sources/Services/VaultAgentGrantStore.swift \
   pastera/Sources/Services/VaultAgentAuthorizationCoordinator.swift \
-  pasteraTests/VaultAgentAuthorizationPolicyTests.swift pastera.xcodeproj/project.pbxproj
+  pasteraTests/VaultAgentAuthorizationPolicyTests.swift \
+  pastera-agent/Sources/PasteraAgentProtocol/VaultAgentProtocol.swift \
+  pastera.xcodeproj/project.pbxproj
 git commit -m "feat(agent): 增加按应用滑动授权"
 ~~~
 
@@ -1981,7 +1993,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付记录（Delivery Record）
 
 - Actual Implementation：无；当前记录包含已确认设计和可执行 TDD 任务，尚未开始业务实现。
-- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。
+- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
 - Verification：计划阶段已经完成仓库/源码、Target/测试入口检查，以及 Codex、Claude Code、MCP Swift SDK `0.12.1` 官方文档与源码 API 核查；任务完整性、接口依赖和章节契约自检完成后提交，尚未开始实现验证。
 - Remaining Risks：无人值守解锁、Helper 身份、目标命令泄漏、IPC 正确性和 MCP SDK 1.0 前兼容性仍是实施风险，均已映射到验收与回滚。
