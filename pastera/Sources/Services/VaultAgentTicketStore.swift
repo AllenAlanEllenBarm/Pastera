@@ -39,12 +39,27 @@ final class VaultAgentTicketStore {
         let expiresAt: Date
     }
 
+    private enum TombstoneKey: Hashable {
+        case token(Data)
+        case receipt(UUID)
+    }
+
+    private enum TombstoneOutcome {
+        case used
+        case expired
+    }
+
+    private struct Tombstone {
+        let outcome: TombstoneOutcome
+        let expiresAt: Date
+    }
+
     private let lock = NSLock()
     private let randomBytes: () throws -> Data
     private let commandBuilder: (VaultAgentClientKind, VaultAgentInjectionMode, String) -> [String]
     private var pending = [Data: PendingTicket]()
     private var receipts = [UUID: Receipt]()
-    private var usedTombstones = [Data: Date]()
+    private var tombstones = [TombstoneKey: Tombstone]()
 
     init(
         randomBytes: @escaping () throws -> Data = VaultAgentTicketStore.secureRandomBytes,
@@ -100,7 +115,7 @@ final class VaultAgentTicketStore {
                 lock.unlock()
                 throw VaultAgentTicketError.capacityExceeded
             }
-            let collides = pending[tokenHash] != nil || usedTombstones[tokenHash] != nil
+            let collides = pending[tokenHash] != nil || tombstones[.token(tokenHash)] != nil
             if !collides {
                 let expiresAt = now.addingTimeInterval(Self.ticketLifetime)
                 pending[tokenHash] = PendingTicket(binding: binding, expiresAt: expiresAt)
@@ -123,28 +138,22 @@ final class VaultAgentTicketStore {
         lock.lock()
         defer { lock.unlock() }
 
-        if let tombstoneExpiry = usedTombstones[tokenHash] {
-            if now < tombstoneExpiry {
-                throw VaultAgentTicketError.used
-            }
-            usedTombstones.removeValue(forKey: tokenHash)
+        removeExpiredLocked(at: now)
+        if let tombstone = tombstones[.token(tokenHash)] {
+            throw Self.error(for: tombstone.outcome)
         }
         guard let ticket = pending[tokenHash] else {
-            removeExpiredLocked(at: now)
             throw VaultAgentTicketError.used
         }
         if now >= ticket.expiresAt {
-            pending.removeValue(forKey: tokenHash)
-            removeExpiredLocked(at: now)
             throw VaultAgentTicketError.expired
         }
-        removeExpiredLocked(at: now)
         guard ticket.binding.client == client, ticket.binding.mode == mode else {
             throw VaultAgentTicketError.bindingMismatch
         }
 
         guard receipts.count < Self.receiptCapacity,
-              usedTombstones.count < Self.tombstoneCapacity else {
+              tombstones.count < Self.tombstoneCapacity else {
             throw VaultAgentTicketError.capacityExceeded
         }
 
@@ -154,7 +163,10 @@ final class VaultAgentTicketStore {
             binding: ticket.binding,
             expiresAt: now.addingTimeInterval(Self.receiptLifetime)
         )
-        usedTombstones[tokenHash] = now.addingTimeInterval(Self.tombstoneLifetime)
+        tombstones[.token(tokenHash)] = Tombstone(
+            outcome: .used,
+            expiresAt: now.addingTimeInterval(Self.tombstoneLifetime)
+        )
         return (receiptID, ticket.binding)
     }
 
@@ -166,16 +178,16 @@ final class VaultAgentTicketStore {
         lock.lock()
         defer { lock.unlock() }
 
+        removeExpiredLocked(at: now)
+        if let tombstone = tombstones[.receipt(receiptID)] {
+            throw Self.error(for: tombstone.outcome)
+        }
         guard let receipt = receipts[receiptID] else {
-            removeExpiredLocked(at: now)
             throw VaultAgentTicketError.used
         }
         if now >= receipt.expiresAt {
-            receipts.removeValue(forKey: receiptID)
-            removeExpiredLocked(at: now)
             throw VaultAgentTicketError.expired
         }
-        removeExpiredLocked(at: now)
         guard receipt.binding.client == client else {
             throw VaultAgentTicketError.bindingMismatch
         }
@@ -188,14 +200,40 @@ final class VaultAgentTicketStore {
         lock.lock()
         pending.removeAll(keepingCapacity: false)
         receipts.removeAll(keepingCapacity: false)
-        usedTombstones.removeAll(keepingCapacity: false)
+        tombstones.removeAll(keepingCapacity: false)
         lock.unlock()
     }
 
     private func removeExpiredLocked(at now: Date) {
-        pending = pending.filter { now < $0.value.expiresAt }
-        receipts = receipts.filter { now < $0.value.expiresAt }
-        usedTombstones = usedTombstones.filter { now < $0.value }
+        tombstones = tombstones.filter { now < $0.value.expiresAt }
+        let expiredTokens = pending.compactMap { tokenHash, ticket in
+            now >= ticket.expiresAt ? tokenHash : nil
+        }
+        for tokenHash in expiredTokens where tombstones.count < Self.tombstoneCapacity {
+            pending.removeValue(forKey: tokenHash)
+            tombstones[.token(tokenHash)] = Tombstone(
+                outcome: .expired,
+                expiresAt: now.addingTimeInterval(Self.tombstoneLifetime)
+            )
+        }
+
+        let expiredReceipts = receipts.compactMap { receiptID, receipt in
+            now >= receipt.expiresAt ? receiptID : nil
+        }
+        for receiptID in expiredReceipts where tombstones.count < Self.tombstoneCapacity {
+            receipts.removeValue(forKey: receiptID)
+            tombstones[.receipt(receiptID)] = Tombstone(
+                outcome: .expired,
+                expiresAt: now.addingTimeInterval(Self.tombstoneLifetime)
+            )
+        }
+    }
+
+    private static func error(for outcome: TombstoneOutcome) -> VaultAgentTicketError {
+        switch outcome {
+        case .used: .used
+        case .expired: .expired
+        }
     }
 
     private static func isValid(command: [String]) -> Bool {

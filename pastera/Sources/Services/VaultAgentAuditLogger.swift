@@ -98,10 +98,7 @@ final class VaultAgentAuditKeyStore {
             throw VaultAgentAuditKeyStoreError.unavailable
         }
 
-        let secureAttributes: [String: Any] = [
-            kSecValueData as String: generated,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
+        let secureAttributes: [String: Any] = [kSecValueData as String: generated]
         switch keychain.update(Self.itemQuery, attributes: secureAttributes) {
         case errSecSuccess:
             return generated
@@ -130,7 +127,8 @@ final class VaultAgentAuditKeyStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrSynchronizable as String: false
+            kSecAttrSynchronizable as String: false,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
     }
 

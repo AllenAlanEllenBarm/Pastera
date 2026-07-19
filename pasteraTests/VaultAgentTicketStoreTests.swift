@@ -116,6 +116,40 @@ struct VaultAgentTicketStoreTests {
         }
     }
 
+    @Test("lazy cleanup preserves expired ticket and receipt outcomes")
+    func lazyCleanupPreservesExpiredOutcomes() throws {
+        let sequence = TicketRandomSequence()
+        let store = makeTicketStore(randomBytes: sequence.next)
+        let ticket = try issueOne(store, at: base)
+        let receiptTicket = try issueOne(store, at: base)
+        let receipt = try store.redeem(
+            token: receiptTicket.token,
+            client: .codex,
+            mode: .stdin,
+            now: base
+        )
+
+        _ = try issueOne(store, at: base.addingTimeInterval(31))
+
+        for _ in 0..<2 {
+            #expect(throws: VaultAgentTicketError.expired) {
+                try store.redeem(
+                    token: ticket.token,
+                    client: .codex,
+                    mode: .stdin,
+                    now: base.addingTimeInterval(31)
+                )
+            }
+            #expect(throws: VaultAgentTicketError.expired) {
+                try store.complete(
+                    receiptID: receipt.receiptID,
+                    client: .codex,
+                    now: base.addingTimeInterval(31)
+                )
+            }
+        }
+    }
+
     @Test("redeemed tickets and completed receipts are stable one-shot values")
     func replayAndCompleteAreOneShot() throws {
         let store = makeTicketStore(bytes: Data(repeating: 9, count: 32))
@@ -199,6 +233,9 @@ struct VaultAgentTicketStoreTests {
         }
         _ = try issueOne(validAfterFailure, at: base)
     }
+}
+
+extension VaultAgentTicketStoreTests {
 
     @Test("pending, receipt, and tombstone capacity are hard bounded")
     func capacitiesAreBounded() throws {
@@ -250,6 +287,38 @@ struct VaultAgentTicketStoreTests {
             )
         }
         _ = try issueOne(tombstoneStore, at: base.addingTimeInterval(31))
+    }
+
+    @Test("expired ticket and receipt markers share the tombstone hard limit")
+    func expiredMarkersShareTombstoneCapacity() throws {
+        let sequence = TicketRandomSequence()
+        let store = makeTicketStore(randomBytes: sequence.next)
+        for _ in 0..<128 {
+            let ticket = try issueOne(store, at: base)
+            _ = try store.redeem(token: ticket.token, client: .codex, mode: .stdin, now: base)
+        }
+        for _ in 0..<128 {
+            _ = try issueOne(store, at: base)
+        }
+
+        let blocked = try issueOne(store, at: base.addingTimeInterval(31))
+
+        #expect(throws: VaultAgentTicketError.capacityExceeded) {
+            try store.redeem(
+                token: blocked.token,
+                client: .codex,
+                mode: .stdin,
+                now: base.addingTimeInterval(31)
+            )
+        }
+        store.removeAll()
+        let recovered = try issueOne(store, at: base.addingTimeInterval(31))
+        _ = try store.redeem(
+            token: recovered.token,
+            client: .codex,
+            mode: .stdin,
+            now: base.addingTimeInterval(31)
+        )
     }
 
     @Test("removeAll atomically invalidates tickets and receipts")
@@ -362,6 +431,20 @@ extension VaultAgentTicketStoreTests {
         try limiter.check(client: .cli, category: .directSecret, at: base.addingTimeInterval(60))
     }
 
+    @Test("clock rollback fails closed without an oversized retry delay")
+    func clockRollbackFailsClosed() throws {
+        let limiter = VaultAgentRateLimiter()
+        for _ in 0..<10 {
+            try limiter.check(client: .codex, category: .ticket, at: base)
+        }
+        do {
+            try limiter.check(client: .codex, category: .ticket, at: base.addingTimeInterval(-120))
+            Issue.record("clock rollback must not reset the bucket")
+        } catch let error as VaultAgentRateLimitError {
+            #expect(error.retryAfterMilliseconds == 60_000)
+        }
+    }
+
     @Test("concurrent rate-limit checks admit only the bucket capacity")
     func concurrentRateLimitChecks() {
         let limiter = VaultAgentRateLimiter()
@@ -383,7 +466,7 @@ extension VaultAgentTicketStoreTests {
         assertAuditBaseQuery(query)
         #expect(Set(query.keys) == Set([
             kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable,
-            kSecReturnData, kSecMatchLimit
+            kSecAttrAccessible, kSecReturnData, kSecMatchLimit
         ].map { $0 as String }))
         #expect(query[kSecReturnData as String] as? Bool == true)
         #expect(query[kSecMatchLimit as String] as? String == kSecMatchLimitOne as String)
@@ -408,17 +491,15 @@ extension VaultAgentTicketStoreTests {
         assertAuditBaseQuery(update)
         assertAuditBaseQuery(add)
         #expect(Set(update.keys) == Set([
-            kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable
+            kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable,
+            kSecAttrAccessible
         ].map { $0 as String }))
-        #expect(Set(attributes.keys) == Set([
-            kSecValueData, kSecAttrAccessible
-        ].map { $0 as String }))
+        #expect(Set(attributes.keys) == Set([kSecValueData as String]))
         #expect(Set(add.keys) == Set([
             kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable,
             kSecValueData, kSecAttrAccessible
         ].map { $0 as String }))
         #expect(attributes[kSecValueData as String] as? Data == key)
-        #expect(attributes[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         #expect(add[kSecValueData as String] as? Data == key)
         #expect(add[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         #expect(add[kSecAttrAccessControl as String] == nil)
@@ -442,6 +523,24 @@ extension VaultAgentTicketStoreTests {
         )
         #expect(try VaultAgentAuditKeyStore(keychain: duplicate, randomBytes: { generated }).loadOrCreate() == established)
         #expect(duplicate.copyQueries.count == 2)
+    }
+
+    @Test("a weaker same-name audit item cannot be accepted or migrated")
+    func weakerAuditItemFailsClosed() {
+        let generated = Data(repeating: 0x46, count: 32)
+        let weakItem = AuditKeychainProbe(
+            copyResults: [(errSecItemNotFound, nil), (errSecItemNotFound, nil)],
+            updateStatuses: [errSecItemNotFound],
+            addStatuses: [errSecDuplicateItem]
+        )
+
+        #expect(throws: VaultAgentAuditKeyStoreError.unavailable) {
+            try VaultAgentAuditKeyStore(keychain: weakItem, randomBytes: { generated }).loadOrCreate()
+        }
+        #expect(weakItem.copyQueries.count == 2)
+        #expect(weakItem.copyQueries.allSatisfy(hasSecureAuditAccessibility))
+        #expect(weakItem.updateQueries.allSatisfy(hasSecureAuditAccessibility))
+        #expect(weakItem.addQueries.allSatisfy(hasSecureAuditAccessibility))
     }
 
     @Test("audit key failures never return weak or malformed keys")
@@ -590,6 +689,11 @@ private func assertAuditBaseQuery(_ query: [String: Any]) {
     #expect(query[kSecAttrService as String] as? String == "com.pastera-app.Pastera.password-vault.agent-audit.v1")
     #expect(query[kSecAttrAccount as String] as? String == "PasteraVaultAgentAuditKey")
     #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
+    #expect(hasSecureAuditAccessibility(query))
+}
+
+private func hasSecureAuditAccessibility(_ query: [String: Any]) -> Bool {
+    query[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
 }
 
 private enum TicketProbeError: Error {
