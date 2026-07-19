@@ -264,6 +264,13 @@ private final class MainMenuPanel: NSPanel {
         }
         onCancel?()
     }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onKeyDown?(event) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
@@ -684,7 +691,9 @@ extension MainMenuPanelController {
         contentView.wantsLayer = true
         contentView.layer?.cornerRadius = MainMenuPanelLayout.cornerRadius
         contentView.layer?.masksToBounds = true
-        contentView.layer?.backgroundColor = MainMenuVisualColors.panelBackground.cgColor
+        contentView.layer?.backgroundColor = MainMenuVisualColors.panelBackground
+            .withAlphaComponent(CPYWindowAppearance.opacity())
+            .cgColor
         contentView.layer?.borderColor = MainMenuVisualColors.panelBorder.cgColor
         contentView.layer?.borderWidth = 1
     }
@@ -1856,7 +1865,7 @@ extension MainMenuPanelController {
         )
         passwordVaultAccessView = view
         let title = mode == .create
-            ? String(localized: "Create Password Vault") : String(localized: "Unlock Password Vault")
+            ? String(localized: "Set Master Password") : String(localized: "Unlock Vault")
         return EmbeddedContent(
             headerTitle: String(localized: "Password Vault"), headerSubtitle: nil,
             showsBackButton: false, canGoToPreviousPage: false, canGoToNextPage: false,
@@ -2979,6 +2988,10 @@ extension MainMenuPanelController {
         if handleSearchEscape(event) {
             return true
         }
+        if isPreferencesShortcut(event) {
+            onOpenPreferences()
+            return true
+        }
         if isSearchShortcut(event) {
             showSearchField()
             return true
@@ -3118,6 +3131,13 @@ extension MainMenuPanelController {
     private func isSearchShortcut(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         return event.keyCode == 3 && flags.contains(.command)
+    }
+
+    private func isPreferencesShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
+        return event.type == .keyDown
+            && flags == .command
+            && event.charactersIgnoringModifiers == ","
     }
 
     private func handleSearchEscape(_ event: NSEvent) -> Bool {
@@ -4056,14 +4076,18 @@ struct PasswordVaultAccessLayoutSnapshot {
 }
 #endif
 
-private final class PasswordVaultAccessView: NSView {
+private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
     enum Mode: Equatable { case create, unlock }
 
     private let mode: Mode
     private let passwordField = NSSecureTextField()
     private let confirmationField = NSSecureTextField()
+    private let visiblePasswordField = NSTextField()
+    private let visibleConfirmationField = NSTextField()
+    private let passwordVisibilityButton = NSButton()
+    private let confirmationVisibilityButton = NSButton()
     private let passwordLabel = NSTextField(labelWithString: String(localized: "Master Password"))
-    private let confirmationLabel = NSTextField(labelWithString: String(localized: "Confirm Master Password"))
+    private let confirmationLabel = NSTextField(labelWithString: String(localized: "Enter Again"))
     private let errorLabel = NSTextField(labelWithString: "")
     private let titleLabel: NSTextField
     private let explanationLabel: NSTextField
@@ -4084,15 +4108,15 @@ private final class PasswordVaultAccessView: NSView {
         self.onSubmit = onSubmit
         self.onQuickUnlock = onQuickUnlock
         titleLabel = NSTextField(labelWithString: mode == .create
-            ? String(localized: "Create Password Vault") : String(localized: "Unlock Password Vault"))
+            ? String(localized: "Set Master Password") : String(localized: "Unlock Vault"))
         explanationLabel = NSTextField(labelWithString: mode == .create
-            ? String(localized: "Set a master password to protect your vault.")
-            : String(localized: "Enter your master password to continue."))
+            ? String(localized: "Your master password encrypts the vault and cannot be recovered if forgotten.")
+            : String(localized: "Enter your master password to view and use saved passwords."))
         primaryButton = NSButton(title: isBusy
-            ? String(localized: "Unlocking…")
-            : (mode == .create ? String(localized: "Create") : String(localized: "Unlock")),
+            ? (mode == .create ? String(localized: "Creating…") : String(localized: "Unlocking…"))
+            : (mode == .create ? String(localized: "Create Vault") : String(localized: "Unlock Vault")),
             target: nil, action: nil)
-        let height: CGFloat = mode == .create ? 230 : 174
+        let height: CGFloat = mode == .create ? 260 : 198
         super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: height))
 
         titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
@@ -4108,12 +4132,20 @@ private final class PasswordVaultAccessView: NSView {
         addSubview(passwordLabel)
         configureSecureField(passwordField, identifier: "passwordVaultMasterPasswordField")
         addSubview(passwordField)
+        configureVisibleField(visiblePasswordField)
+        addSubview(visiblePasswordField)
+        configureVisibilityButton(passwordVisibilityButton, action: #selector(togglePasswordVisibility(_:)))
+        addSubview(passwordVisibilityButton)
 
         if mode == .create {
             configureFieldLabel(confirmationLabel)
             addSubview(confirmationLabel)
             configureSecureField(confirmationField, identifier: "passwordVaultConfirmPasswordField")
             addSubview(confirmationField)
+            configureVisibleField(visibleConfirmationField)
+            addSubview(visibleConfirmationField)
+            configureVisibilityButton(confirmationVisibilityButton, action: #selector(toggleConfirmationVisibility(_:)))
+            addSubview(confirmationVisibilityButton)
         }
 
         errorLabel.font = .systemFont(ofSize: 11)
@@ -4129,7 +4161,12 @@ private final class PasswordVaultAccessView: NSView {
         primaryButton.bezelStyle = .rounded
         primaryButton.controlSize = .large
         primaryButton.keyEquivalent = "\r"
-        primaryButton.isEnabled = !isBusy
+        [passwordField, confirmationField, visiblePasswordField, visibleConfirmationField].forEach {
+            $0.isEnabled = !isBusy
+        }
+        passwordVisibilityButton.isEnabled = !isBusy
+        confirmationVisibilityButton.isEnabled = !isBusy
+        primaryButton.isEnabled = false
         addSubview(primaryButton)
 
         if mode == .unlock && canQuickUnlock {
@@ -4142,6 +4179,7 @@ private final class PasswordVaultAccessView: NSView {
             quickUnlockButton = quick
             addSubview(quick)
         }
+        updateSubmitState()
         layoutControls()
     }
 
@@ -4168,25 +4206,27 @@ private final class PasswordVaultAccessView: NSView {
         explanationLabel.frame = NSRect(x: inset, y: bounds.height - 53, width: availableWidth, height: 16)
         passwordLabel.frame = NSRect(x: inset, y: bounds.height - 78, width: availableWidth, height: 16)
         passwordField.frame = NSRect(x: inset, y: bounds.height - 112, width: availableWidth, height: 30)
+        visiblePasswordField.frame = passwordField.frame
+        passwordVisibilityButton.frame = NSRect(x: passwordField.frame.maxX - 30, y: passwordField.frame.minY + 1, width: 28, height: 28)
         if mode == .create {
             confirmationLabel.frame = NSRect(x: inset, y: bounds.height - 137, width: availableWidth, height: 16)
             confirmationField.frame = NSRect(x: inset, y: bounds.height - 171, width: availableWidth, height: 30)
+            visibleConfirmationField.frame = confirmationField.frame
+            confirmationVisibilityButton.frame = NSRect(x: confirmationField.frame.maxX - 30, y: confirmationField.frame.minY + 1, width: 28, height: 28)
         }
-        errorLabel.frame = NSRect(x: inset, y: 39, width: availableWidth, height: 15)
-        let buttonWidth = min(96, availableWidth)
-        primaryButton.frame = NSRect(x: bounds.width - inset - buttonWidth, y: 6, width: buttonWidth, height: 32)
-        quickUnlockButton?.frame = NSRect(x: inset, y: 6, width: max(0, availableWidth - buttonWidth - 8), height: 32)
+        errorLabel.frame = NSRect(x: inset, y: 70, width: availableWidth, height: 15)
+        primaryButton.frame = NSRect(x: inset, y: 34, width: availableWidth, height: 32)
+        quickUnlockButton?.frame = NSRect(x: inset, y: 6, width: availableWidth, height: 24)
     }
 
     func submit() {
-        let password = passwordField.stringValue
+        let password = currentPassword
         guard !password.isEmpty else {
             errorLabel.stringValue = String(localized: "Enter a password.")
             return
         }
-        if mode == .create, confirmationField.stringValue != password {
-            errorLabel.stringValue = String(localized: "The passwords do not match.")
-            confirmationField.stringValue = ""
+        if mode == .create, currentConfirmation != password {
+            errorLabel.stringValue = String(localized: "The master passwords do not match.")
             return
         }
         onSubmit(password)
@@ -4195,6 +4235,8 @@ private final class PasswordVaultAccessView: NSView {
     func clearSecrets() {
         passwordField.stringValue = ""
         confirmationField.stringValue = ""
+        visiblePasswordField.stringValue = ""
+        visibleConfirmationField.stringValue = ""
     }
 
     private func configureFieldLabel(_ label: NSTextField) {
@@ -4208,6 +4250,50 @@ private final class PasswordVaultAccessView: NSView {
         field.bezelStyle = .roundedBezel
         field.target = self
         field.action = #selector(primaryClicked(_:))
+        field.delegate = self
+    }
+
+    private func configureVisibleField(_ field: NSTextField) {
+        field.font = .systemFont(ofSize: 13)
+        field.bezelStyle = .roundedBezel
+        field.isHidden = true
+        field.delegate = self
+    }
+
+    private func configureVisibilityButton(_ button: NSButton, action: Selector) {
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.image = NSImage(systemSymbolName: "eye", accessibilityDescription: nil)
+        button.target = self
+        button.action = action
+        button.setAccessibilityLabel(String(localized: "Show Password"))
+    }
+
+    private var currentPassword: String { passwordField.isHidden ? visiblePasswordField.stringValue : passwordField.stringValue }
+    private var currentConfirmation: String { confirmationField.isHidden ? visibleConfirmationField.stringValue : confirmationField.stringValue }
+
+    func controlTextDidChange(_ obj: Notification) { updateSubmitState() }
+
+    private func updateSubmitState() {
+        primaryButton.isEnabled = !currentPassword.isEmpty && (mode == .unlock || currentPassword == currentConfirmation)
+    }
+
+    @objc private func togglePasswordVisibility(_ sender: NSButton) {
+        visiblePasswordField.stringValue = currentPassword
+        passwordField.stringValue = currentPassword
+        passwordField.isHidden.toggle()
+        visiblePasswordField.isHidden.toggle()
+        sender.image = NSImage(systemSymbolName: passwordField.isHidden ? "eye.slash" : "eye", accessibilityDescription: nil)
+        sender.setAccessibilityLabel(String(localized: passwordField.isHidden ? "Hide Password" : "Show Password"))
+    }
+
+    @objc private func toggleConfirmationVisibility(_ sender: NSButton) {
+        visibleConfirmationField.stringValue = currentConfirmation
+        confirmationField.stringValue = currentConfirmation
+        confirmationField.isHidden.toggle()
+        visibleConfirmationField.isHidden.toggle()
+        sender.image = NSImage(systemSymbolName: confirmationField.isHidden ? "eye.slash" : "eye", accessibilityDescription: nil)
+        sender.setAccessibilityLabel(String(localized: confirmationField.isHidden ? "Hide Password" : "Show Password"))
     }
 
     @objc private func primaryClicked(_ sender: Any?) { submit() }
@@ -4232,7 +4318,13 @@ private final class PasswordVaultAccessView: NSView {
     func setValuesForTesting(password: String, confirmation: String?) {
         passwordField.stringValue = password
         confirmationField.stringValue = confirmation ?? ""
+        visiblePasswordField.stringValue = password
+        visibleConfirmationField.stringValue = confirmation ?? ""
+        updateSubmitState()
     }
+    var passwordIsVisibleForTesting: Bool { passwordField.isHidden }
+    var passwordValueForTesting: String { currentPassword }
+    func togglePasswordVisibilityForTesting() { togglePasswordVisibility(passwordVisibilityButton) }
 #endif
 }
 
@@ -4904,6 +4996,10 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
 
 #if DEBUG
 extension MainMenuPanelController {
+    func performMainMenuKeyEquivalentForTesting(_ event: NSEvent) -> Bool {
+        panel?.performKeyEquivalent(with: event) ?? false
+    }
+
     var mainMenuPanelContentSizeForTesting: NSSize {
         contentView.layoutSubtreeIfNeeded()
         return contentView.bounds.size
@@ -5234,6 +5330,18 @@ extension MainMenuPanelController {
 
     func setPasswordVaultAccessValuesForTesting(password: String, confirmation: String? = nil) {
         passwordVaultAccessView?.setValuesForTesting(password: password, confirmation: confirmation)
+    }
+
+    var passwordVaultAccessPasswordIsVisibleForTesting: Bool {
+        passwordVaultAccessView?.passwordIsVisibleForTesting ?? false
+    }
+
+    var passwordVaultAccessPasswordValueForTesting: String? {
+        passwordVaultAccessView?.passwordValueForTesting
+    }
+
+    func togglePasswordVaultAccessPasswordVisibilityForTesting() {
+        passwordVaultAccessView?.togglePasswordVisibilityForTesting()
     }
 
     func submitPasswordVaultAccessForTesting() {

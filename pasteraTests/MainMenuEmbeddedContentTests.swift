@@ -145,6 +145,29 @@ struct MainMenuEmbeddedContentTests {
     }
 
     @Test
+    func commandCommaOpensPreferencesFromEmbeddedMainMenu() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-preferences"), title: "Preferences target",
+                pasteboardTypes: [.string], updateAt: 1, deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var openCount = 0
+        let controller = MainMenuPanelController(
+            historyTitle: "History", historyImage: nil, snippetTitle: "Snippet", snippetImage: nil,
+            itemsProvider: { [] }, onOpenHistory: {}, onOpenSnippets: {},
+            historyDataSource: makeHistoryDataSource(detail: detail),
+            onOpenPreferences: { openCount += 1 }
+        )
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+
+        #expect(controller.performMainMenuKeyEquivalentForTesting(try makeCommandCommaEvent()))
+        #expect(openCount == 1)
+    }
+
+    @Test
     func escapeClosesEmptyEmbeddedSearchDrawerAndRestoresFrame() throws {
         let detail = PasteboardHistoryDetail(
             history: PasteboardHistory(
@@ -455,6 +478,38 @@ struct MainMenuEmbeddedContentTests {
             #expect(selectedSnippetID == secondSnippetID)
             #expect(selectedSnippetID != firstSnippetID)
         }
+    }
+
+    @Test
+    func historyNumberKeyEquivalentUsesTheSameSelectionPathAsTheRow() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-number"), title: "Number target",
+                pasteboardTypes: [.string], updateAt: 1, deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var selectedID: PasteboardHistory.ID?
+        let controller = MainMenuPanelController(
+            historyTitle: "History", historyImage: nil, snippetTitle: "Snippet", snippetImage: nil,
+            itemsProvider: { [] }, onOpenHistory: {}, onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { HistoryMenuPaginationState() }, updateState: { _ in },
+                fetchPage: { HistoryMenuPage.result([detail], pageSize: 10) },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { id, _ in selectedID = id }
+            )
+        )
+
+        let numberEvent = try makeTextEvent("1", keyCode: 18)
+        withMenuTitlesStartingAtOne {
+            controller.show(at: NSPoint(x: 100, y: 100))
+            #expect(controller.performMainMenuKeyEquivalentForTesting(numberEvent))
+        }
+
+        #expect(selectedID == detail.history.id)
     }
 
     @Test
@@ -1087,6 +1142,21 @@ struct MainMenuEmbeddedContentTests {
             charactersIgnoringModifiers: "f",
             isARepeat: false,
             keyCode: 3
+        ))
+    }
+
+    private func makeCommandCommaEvent() throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: ",",
+            charactersIgnoringModifiers: ",",
+            isARepeat: false,
+            keyCode: 43
         ))
     }
 

@@ -997,7 +997,7 @@ extension MenuManager {
         let isShowColorCode = AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.showColorPreviewInTheMenu)
         let primaryPboardType = history.primaryType
         let clipString = history.title
-        let displayTitle = trimTitle(clipString, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength)
+        let displayTitle = trimTitle(clipString)
         var previewText = textPreviewText(
             originalTitle: clipString,
             displayedTitle: displayTitle,
@@ -1021,7 +1021,7 @@ extension MenuManager {
             let filePresentation = fileURLPresentation(from: clipString)
             let fileTitle = filePresentation?.title ?? "其他文件"
             title = menuItemTitle(
-                trimTitle(fileTitle, minimumMaxLength: HistoryBrowserLayout.minimumTitlePreviewLength),
+                trimTitle(fileTitle),
                 listNumber: listNumber,
                 isMarkWithNumber: isMarkWithNumber
             )

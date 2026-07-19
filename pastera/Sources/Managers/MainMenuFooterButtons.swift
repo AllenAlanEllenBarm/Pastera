@@ -90,6 +90,11 @@ private final class MainMenuHoverTipController {
 
     private var panel: NSPanel?
     private var pendingShow: DispatchWorkItem?
+    private var pendingClose: DispatchWorkItem?
+
+    deinit {
+        close()
+    }
 
     func scheduleShow(content: MainMenuHoverTipContent, relativeTo anchor: NSButton) {
         close()
@@ -104,6 +109,8 @@ private final class MainMenuHoverTipController {
     func close() {
         pendingShow?.cancel()
         pendingShow = nil
+        pendingClose?.cancel()
+        pendingClose = nil
         if let panel {
             panel.parent?.removeChildWindow(panel)
             panel.orderOut(nil)
@@ -199,7 +206,36 @@ private final class MainMenuHoverTipController {
         parentWindow.addChildWindow(tipPanel, ordered: .above)
         tipPanel.orderFront(nil)
         panel = tipPanel
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.closeVisibleTip()
+        }
+        pendingClose = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: workItem)
     }
+
+    private func closeVisibleTip() {
+        pendingClose = nil
+        guard let panel else { return }
+        guard !PasteraMotion.shouldReduceMotion else {
+            close()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self, weak panel] in
+            guard self?.panel === panel else { return }
+            self?.close()
+        }
+    }
+
+    #if DEBUG
+    func showNowForTesting(content: MainMenuHoverTipContent, relativeTo anchor: NSButton) {
+        close()
+        show(content: content, relativeTo: anchor)
+    }
+    #endif
 }
 
 class MainMenuToolbarButton: NSButton {
@@ -300,6 +336,13 @@ final class MainMenuToolbarView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            hoverTipController.close()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
 
     private func setup() {
         identifier = NSUserInterfaceItemIdentifier("mainMenuFooterDock")
@@ -522,6 +565,13 @@ final class MainMenuToolbarView: NSView {
     }
 
     #if DEBUG
+    func showHoverTipForTesting(identifier: String) {
+        guard let button = subviews.compactMap({ $0 as? MainMenuToolbarButton }).first(where: {
+            $0.identifier?.rawValue == identifier
+        }), let hoverTip = button.hoverTip else { return }
+        hoverTipController.showNowForTesting(content: hoverTip, relativeTo: button)
+    }
+
     func buttonVisualStateForTesting(identifier: String) -> MainMenuToolbarButtonVisualState? {
         guard let button = subviews.compactMap({ $0 as? MainMenuToolbarButton }).first(where: {
             $0.identifier?.rawValue == identifier

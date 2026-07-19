@@ -6709,6 +6709,56 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网站" } }
       }
     },
+    "Create Vault" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建密码箱" } }
+      }
+    },
+    "Creating…" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在创建…" } }
+      }
+    },
+    "Enter Again" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "再次输入" } }
+      }
+    },
+    "Enter your master password to view and use saved passwords." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入主密码以查看和使用已保存的密码。" } }
+      }
+    },
+    "Hide Password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐藏密码" } }
+      }
+    },
+    "Set Master Password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置主密码" } }
+      }
+    },
+    "Show Password" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示密码" } }
+      }
+    },
+    "The master passwords do not match." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "两次输入的主密码不一致。" } }
+      }
+    },
+    "Unlock Vault" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁密码箱" } }
+      }
+    },
+    "Your master password encrypts the vault and cannot be recovered if forgotten." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主密码用于加密密码箱，忘记后无法恢复。" } }
+      }
+    },
     "items" : {
       "localizations" : {
         "en" : {

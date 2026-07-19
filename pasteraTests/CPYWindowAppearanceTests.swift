@@ -411,6 +411,26 @@ struct CPYWindowAppearanceTests {
     }
 
     @Test @MainActor
+    func mainMenuHoverTipClosesWhenToolbarLeavesWindow() {
+        let toolbar = MainMenuToolbarView(
+            frame: NSRect(x: 0, y: 0, width: 284, height: 40),
+            configuration: MainMenuToolbarViewConfiguration(selectedMode: .history, oneDriveStatus: .notInstalled),
+            actions: MainMenuToolbarActions(
+                onSearch: {}, onHistory: {}, onSnippets: {}, onPasswordVault: {}, onOneDrive: {}, onPreferences: {}
+            )
+        )
+        let window = NSWindow(contentRect: toolbar.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = toolbar
+
+        toolbar.showHoverTipForTesting(identifier: "mainMenuPasswordVaultModeButton")
+        #expect(window.childWindows?.count == 1)
+
+        window.contentView = NSView()
+
+        #expect(window.childWindows?.isEmpty == true)
+    }
+
+    @Test @MainActor
     func snippetEditorOutlineDisplaysFolderAndNumericShortcutBadges() throws {
         try withSnippetEditorNumericShortcutDefaults(enabled: true, startsAtZero: false) {
             let folderID = SnippetFolder.ID(rawValue: UUID())

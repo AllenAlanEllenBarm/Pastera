@@ -67,12 +67,28 @@ struct PasswordVaultMenuTests {
         defer { _ = controller.close() }
 
         let layout = controller.passwordVaultAccessLayoutForTesting
-        #expect(layout?.title == String(localized: "Unlock Password Vault"))
+        #expect(layout?.title == String(localized: "Unlock Vault"))
         #expect(layout?.fieldLabel == String(localized: "Master Password"))
         #expect(layout?.titleFontSize == 15)
         #expect(layout?.verticalGapFromFieldToButton ?? .greatestFiniteMagnitude <= 24)
-        #expect(layout?.primaryButtonWidth ?? .greatestFiniteMagnitude <= 96)
+        #expect(layout?.primaryButtonWidth ?? 0 >= 250)
         #expect(layout?.controlsFitBounds == true)
+    }
+
+    @Test("master password visibility toggle preserves the entered value")
+    func accessPasswordVisibilityTogglePreservesValue() {
+        let controller = makeVaultController(state: { .locked }, folders: { [] })
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        controller.setPasswordVaultAccessValuesForTesting(password: "visibility-value")
+        #expect(!controller.passwordVaultAccessPasswordIsVisibleForTesting)
+
+        controller.togglePasswordVaultAccessPasswordVisibilityForTesting()
+
+        #expect(controller.passwordVaultAccessPasswordIsVisibleForTesting)
+        #expect(controller.passwordVaultAccessPasswordValueForTesting == "visibility-value")
     }
 
     @Test("Return in the confirmation field creates the database inline")
@@ -632,7 +648,7 @@ struct PasswordVaultMenuTests {
         )
 
         #expect(!editor.isPasswordVisibleForTesting)
-        #expect(editor.passwordVisibilityButtonForTesting?.accessibilityLabel() == "Show Password")
+        #expect(editor.passwordVisibilityButtonForTesting?.accessibilityLabel() == String(localized: "Show Password"))
 
         editor.togglePasswordVisibilityForTesting()
 

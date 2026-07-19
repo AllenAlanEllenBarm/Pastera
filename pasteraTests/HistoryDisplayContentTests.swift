@@ -14,8 +14,9 @@ import Testing
 @Suite(.serialized)
 struct HistoryDisplayContentTests {
     @Test
-    func historyPanelRowsUseLongerReadableTitlesThanLegacyMenuDefault() throws {
-        try withRegisteredDefaultEnvironment { _ in
+    func historyPanelRowsHonorConfiguredMenuTitleLength() throws {
+        try withRegisteredDefaultEnvironment { defaults in
+            defaults.set(20, forKey: Constants.UserDefaults.maxMenuItemTitleLength)
             let longCommand = "curl --request 'GET' https://example.com/api/v1/clipboard/history/search"
             let detail = PasteboardHistoryDetail(
                 history: PasteboardHistory(
@@ -30,8 +31,8 @@ struct HistoryDisplayContentTests {
 
             let row = MenuManager().makeHistoryRowViewForTesting(detail, index: 0)
 
-            #expect(row.textValuesForTesting.contains("curl --request 'GET' https://example.com/api/v1/clipboard..."))
-            #expect(!row.textValuesForTesting.contains("curl --request 'G..."))
+            #expect(row.textValuesForTesting.contains("curl --request 'G..."))
+            #expect(!row.textValuesForTesting.contains("curl --request 'GET' https://example.com/api/v1/clipboard..."))
         }
     }
 

@@ -12,7 +12,7 @@ import Testing
 @Suite(.serialized)
 struct MainMenuVisualPolishTests {
     @Test
-    func mainMenuKeepsOpaqueDarkFoundationIndependentOfGlobalOpacity() throws {
+    func mainMenuFoundationUsesConfiguredOpacity() throws {
         let suiteName = "MainMenuVisualPolishTests.opacity.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -24,7 +24,7 @@ struct MainMenuVisualPolishTests {
         controller.show(at: NSPoint(x: 160, y: 640), pinned: false)
         defer { controller.close() }
 
-        #expect(controller.contentBackgroundAlphaForTesting >= 0.98)
+        #expect(abs(controller.contentBackgroundAlphaForTesting - 0.35) < 0.001)
         #expect(controller.contentBackgroundLuminanceForTesting < 0.16)
     }
 

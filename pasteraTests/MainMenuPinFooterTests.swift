@@ -99,7 +99,7 @@ struct MainMenuOneDriveFooterTests {
     }
 
     @Test
-    func visibleMainMenuPanelBackgroundProtectsReadabilityFromOpacityChange() throws {
+    func visibleMainMenuPanelBackgroundTracksOpacityChange() throws {
         let suiteName = "MainMenuOneDriveFooterTests.opacity.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -120,11 +120,11 @@ struct MainMenuOneDriveFooterTests {
                 manager.removeStatusItemForTesting()
             }
 
-            #expect((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) >= 0.98)
+            #expect(abs((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) - 0.94) < 0.001)
 
             CPYWindowAppearance.setOpacity(0.82, defaults: defaults)
 
-            #expect((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) >= 0.98)
+            #expect(abs((manager.mainMenuPanelBackgroundAlphaForTesting ?? 0) - 0.82) < 0.001)
         }
     }
 
