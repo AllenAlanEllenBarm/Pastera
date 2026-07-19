@@ -723,14 +723,17 @@ git commit -m "feat(agent): 建立密码箱共享协议"
 - Consumes: `VaultAgentClientKind`。
 - Produces: `VaultAgentPeerIdentity`、`VaultAgentGrant`、`VaultAgentGrantDecision`、`VaultAgentGrantStoring`、`VaultAgentAuthorizationPolicy` 与首次授权协调器；Task 5 负责从真实进程生成这里定义的 identity。
 
-- [ ] **Step 1：写确定性时间与客户端隔离失败测试**
+- [x] **Step 1：写确定性时间与客户端隔离失败测试**
 
 ~~~swift
 @Test("sensitive success slides idle expiry but never crosses hard expiry")
 func sensitiveSuccessSlidesIdleExpiry() throws {
     let start = Date(timeIntervalSince1970: 10_000)
     let store = InMemoryVaultAgentGrantStore()
-    let policy = try VaultAgentAuthorizationPolicy(store: store)
+    let executor = VaultAgentSerialExecutor(
+        queue: DispatchQueue(label: "test.pastera.password-vault.store")
+    )
+    let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
     let identity = VaultAgentPeerIdentity.testValue(client: .codex)
     try policy.authorize(identity: identity, authenticatedAt: start)
 
@@ -746,7 +749,10 @@ func sensitiveSuccessSlidesIdleExpiry() throws {
 func nonSensitiveActionsDoNotRenew() throws {
     let start = Date(timeIntervalSince1970: 20_000)
     let store = InMemoryVaultAgentGrantStore()
-    let policy = try VaultAgentAuthorizationPolicy(store: store)
+    let executor = VaultAgentSerialExecutor(
+        queue: DispatchQueue(label: "test.pastera.password-vault.store")
+    )
+    let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
     let identity = VaultAgentPeerIdentity.testValue(client: .claude)
     try policy.authorize(identity: identity, authenticatedAt: start)
     let original = try #require(store.grants[.claude])
@@ -759,13 +765,13 @@ func nonSensitiveActionsDoNotRenew() throws {
 }
 ~~~
 
-- [ ] **Step 2：运行并确认授权类型缺失**
+- [x] **Step 2：运行并确认授权类型缺失**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentAuthorizationPolicyTests`。
 
 Expected：FAIL，首个错误为 `cannot find 'VaultAgentAuthorizationPolicy' in scope`。
 
-- [ ] **Step 3：实现授权模型和唯一续期入口**
+- [x] **Step 3：实现授权模型和唯一续期入口**
 
 ~~~swift
 struct VaultAgentPeerIdentity: Codable, Equatable {
@@ -803,11 +809,17 @@ protocol VaultAgentGrantStoring {
     func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) throws
 }
 
+final class VaultAgentSerialExecutor {
+    init(queue: DispatchQueue)
+    func sync<T>(_ work: () throws -> T) rethrows -> T
+    func async(_ work: @escaping () -> Void)
+}
+
 final class VaultAgentAuthorizationPolicy {
     static let idleLifetime: TimeInterval = 7 * 24 * 60 * 60
     static let hardLifetime: TimeInterval = 30 * 24 * 60 * 60
 
-    init(store: VaultAgentGrantStoring) throws
+    init(store: VaultAgentGrantStoring, executor: VaultAgentSerialExecutor) throws
     @discardableResult
     func authorize(identity: VaultAgentPeerIdentity, authenticatedAt: Date) throws -> VaultAgentGrant
     func decision(for identity: VaultAgentPeerIdentity, at: Date) -> VaultAgentGrantDecision
@@ -822,11 +834,13 @@ final class VaultAgentAuthorizationPolicy {
 
 `recordSensitiveSuccess` 必须计算 `min(now + 7 days, hardExpiresAt)`；`recordInteractiveSensitiveSuccess` 只续期当前仍有效的授权；`decision` 遇到 identity 变化或到期时不自动创建新授权。
 
-Policy 初始化时只从 Store 加载一次到内存；加载失败直接抛出，不得静默当成空授权。所有变更先基于副本计算并成功 `save`，再替换内存状态，避免 Keychain 写失败后内存与持久化分叉。`revoke`/`revokeAll` 设置 `revokedAt` 而不是删除记录，因此后续 `decision` 可稳定返回 `revoked`；`validGrantCount` 排除撤销、闲置到期和硬到期授权。
+`VaultAgentSerialExecutor` 必须包装外部传入的 `DispatchQueue`，通过 queue-specific 标记支持同队列重入；它不能自行创建第二条授权队列。Policy 初始化时通过该 executor 只从 Store 加载一次到内存；即使调用方在主线程调用 Policy，所有 Store `load`/`save` 也必须在 executor 对应的密码箱串行队列执行。加载失败直接抛出，不得静默当成空授权。所有变更先基于副本计算并成功 `save`，再替换内存状态，避免 Keychain 写失败后内存与持久化分叉。`revoke`/`revokeAll` 设置 `revokedAt` 而不是删除记录，因此后续 `decision` 可稳定返回 `revoked`；`validGrantCount` 排除撤销、闲置到期和硬到期授权。Task 3 将把现有 `PasswordVaultUIController.storeQueue` 包装为唯一 executor，并同时注入 Policy、Coordinator 与 Broker。
 
 Identity 匹配不能直接使用结构体全量相等：正式签名 Helper/Host 比较 client、designated requirement 和规范真实路径，允许 cdhash 随普通升级变化；ad-hoc 一侧必须额外精确匹配 cdhash。任何一侧从正式签名变为 ad-hoc、requirement/path 变化或签名失效都返回 `identityChanged`。
 
-- [ ] **Step 4：实现 Keychain Grant Store 与首次请求去重**
+进入授权前还必须校验身份元组完整性：所有客户端都要求 Helper requirement/path 非空，ad-hoc Helper 还要求 cdhash；Codex 与 Claude 必须同时提供非空 Host requirement/path 和 `hostIsAdHoc`，ad-hoc Host 还要求 cdhash；独立 CLI 必须完全不带 Host 字段。缺失、部分存在或混合的 Host 元组不得创建 Grant，`authorize` 稳定抛出 `AUTHORIZATION_REQUIRED`，`identitiesMatch` 返回 `false`。
+
+- [x] **Step 4：实现 Keychain Grant Store 与首次请求去重**
 
 `VaultAgentGrantStore` 使用 service `com.pastera-app.Pastera.agent-grants.v1`、account `grants`、`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 和 `kSecAttrSynchronizable = false`。更新采用单个编码对象覆盖，Keychain 错误只映射为稳定错误，不输出原始查询。`errSecItemNotFound` 映射为空字典；其他 Security 状态、编码损坏和写失败统一抛出 `VaultAgentErrorCode.automationUnlockUnavailable`。Store 通过窄 `VaultAgentKeychainAccessing` 依赖调用 `SecItemCopyMatching`/`SecItemAdd`/`SecItemUpdate`，测试使用真实查询字典 Probe，不增加生产测试分支。
 
@@ -847,17 +861,17 @@ final class VaultAgentAuthorizationCoordinator {
 }
 ~~~
 
-Coordinator 注入 `VaultAgentAuthorizationPolicy`、`VaultAgentIdentityAuthenticating`、`UserDefaults` 和 `now: () -> Date`。生产 authenticator 每次流程创建新的 `LAContext` 并调用 `deviceOwnerAuthentication`；测试使用协议 Probe。回调统一回到 coordinator 的串行队列后再读写 pending/cooldown，completion 最终投递主队列，禁止跨线程并发修改字典。
+Coordinator 注入与 Policy 相同的 `VaultAgentSerialExecutor`、`VaultAgentAuthorizationPolicy`、`VaultAgentIdentityAuthenticating`、`UserDefaults` 和 `now: () -> Date`，不得在内部新建独立队列。生产 authenticator 每次流程创建新的 `LAContext` 并调用 `deviceOwnerAuthentication`；测试使用协议 Probe。回调统一回到共享 executor 后再读写 pending/cooldown，completion 最终投递主队列，禁止跨线程并发修改字典。身份验证开始后 Coordinator 必须被该次 in-flight 流程强持有到回调完成，调用方释放外部引用也不得吞掉 pending completion；每个 completion 仍只能调用一次。
 
 同一客户端且 identity 匹配的并发请求合并为一个 `LAContext` 流程并向所有等待者返回同一结果；同一客户端等待期间出现不同 identity 时立即返回 `AUTHORIZATION_REQUIRED`，不得加入旧流程。Codex、Claude、CLI 三者不得共用 pending 状态。自动首次请求被 `LAError.userCancel`、`systemCancel` 或 `appCancel` 取消后，把 24 小时冷却截止时间分别保存到 `UserDefaults` 键 `Pastera.Agent.AuthorizationCooldownUntil.v1.<client>`；该时间戳不是授权或秘密。冷却期内 automatic trigger 不创建 `LAContext`，只返回 `AUTHORIZATION_REQUIRED`；explicit preferences trigger 忽略冷却并可立即重试。授权成功先由 Policy 原子保存 Grant，再清除该客户端冷却；身份验证失败或持久化失败不得创建 Grant。
 
-- [ ] **Step 5：补 Keychain 属性、去重、撤销与硬上限测试并运行**
+- [x] **Step 5：补 Keychain 属性、去重、撤销与硬上限测试并运行**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentAuthorizationPolicyTests`。
 
-Expected：PASS，覆盖 7 天边界前后、30 天边界、取消冷却、Codex/Claude 隔离、交互式动作续期全部有效 Grant。
+Expected：PASS，覆盖 7 天边界前后、30 天边界、取消冷却、Codex/Claude 隔离、交互式动作续期全部有效 Grant；还要覆盖 Codex/Claude 缺失或部分 Host 元组被拒绝、Host requirement/path/ad-hoc/cdhash 变化被拒绝、CLI 无 Host 可授权、Coordinator 外部引用释放后 completion 仍恰好一次返回，以及 Policy 的 Keychain Probe `load`/`save` 全部运行在注入的非主线程串行 executor。
 
-- [ ] **Step 6：提交授权闭环**
+- [x] **Step 6：提交授权闭环**
 
 ~~~bash
 git add pastera/Sources/Services/VaultAgentAuthorizationPolicy.swift \
@@ -1979,7 +1993,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付元数据（Delivery Metadata）
 
 - Plan Path：`docs/superpowers/plans/2026-07-19-pastera-vault-cli-skill-mcp.md`
-- Plan Status：`implementation-plan-ready-pending-execution-choice`
+- Plan Status：`implementation-in-progress-task-2-complete`
 - Evidence Profile：`standard`
 - Story ID：未请求、未分配
 - Task IDs：未请求、未分配
@@ -1992,10 +2006,10 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 
 ## 交付记录（Delivery Record）
 
-- Actual Implementation：无；当前记录包含已确认设计和可执行 TDD 任务，尚未开始业务实现。
-- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。
+- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor。Task 3–12 尚未实现。
+- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
-- Verification：计划阶段已经完成仓库/源码、Target/测试入口检查，以及 Codex、Claude Code、MCP Swift SDK `0.12.1` 官方文档与源码 API 核查；任务完整性、接口依赖和章节契约自检完成后提交，尚未开始实现验证。
+- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0。CoreSimulator、pkg-config/zlib、linkd 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：无人值守解锁、Helper 身份、目标命令泄漏、IPC 正确性和 MCP SDK 1.0 前兼容性仍是实施风险，均已映射到验收与回滚。
-- Follow-ups：用户选择 Subagent-Driven 或 Inline Execution 后，按 Task 1–12 顺序实施，并持续更新本文件复选框与 Delivery Record。
+- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 3–12，并持续更新本文件复选框与 Delivery Record；Task 3 必须把现有 `PasswordVaultUIController.storeQueue` 接入 Task 2 的共享 executor。
 - ZenTao Closeout：不适用；用户未要求禅道操作。
