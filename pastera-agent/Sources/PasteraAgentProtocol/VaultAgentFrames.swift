@@ -72,7 +72,8 @@ public struct VaultAgentEncryptedFrame: Codable, Equatable, Sendable {
 
 public enum VaultAgentFrameCodec {
     public static func frame(payload: Data) throws -> Data {
-        guard payload.count <= VaultAgentLimits.maximumFrameBytes else {
+        let maximumPayloadBytes = VaultAgentLimits.maximumFrameBytes - MemoryLayout<UInt32>.size
+        guard payload.count <= maximumPayloadBytes else {
             throw VaultAgentProtocolError.frameTooLarge
         }
         var length = UInt32(payload.count).bigEndian
@@ -83,9 +84,15 @@ public enum VaultAgentFrameCodec {
         guard frame.count >= MemoryLayout<UInt32>.size else {
             throw VaultAgentProtocolError.malformedFrame
         }
+        guard frame.count <= VaultAgentLimits.maximumFrameBytes else {
+            throw VaultAgentProtocolError.frameTooLarge
+        }
         let declared = frame.prefix(4).reduce(UInt32.zero) { ($0 << 8) | UInt32($1) }
-        guard declared <= VaultAgentLimits.maximumFrameBytes,
-              frame.count == Int(declared) + 4 else {
+        let maximumPayloadBytes = VaultAgentLimits.maximumFrameBytes - MemoryLayout<UInt32>.size
+        guard Int(declared) <= maximumPayloadBytes else {
+            throw VaultAgentProtocolError.frameTooLarge
+        }
+        guard frame.count == Int(declared) + 4 else {
             throw VaultAgentProtocolError.malformedFrame
         }
         return frame.dropFirst(4)

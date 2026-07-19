@@ -28,6 +28,26 @@ struct VaultAgentProtocolTests {
         }
     }
 
+    @Test("frame codec caps the complete length-prefixed frame")
+    func frameCodecCapsCompleteFrameLength() throws {
+        let maximumPayloadBytes = VaultAgentLimits.maximumFrameBytes - MemoryLayout<UInt32>.size
+        let maximumPayload = Data(repeating: 0x41, count: maximumPayloadBytes)
+        let frame = try VaultAgentFrameCodec.frame(payload: maximumPayload)
+        #expect(frame.count == VaultAgentLimits.maximumFrameBytes)
+        #expect(try VaultAgentFrameCodec.payload(from: frame) == maximumPayload)
+
+        let oversizedPayload = Data(repeating: 0x41, count: maximumPayloadBytes + 1)
+        #expect(throws: VaultAgentProtocolError.frameTooLarge) {
+            try VaultAgentFrameCodec.frame(payload: oversizedPayload)
+        }
+
+        var length = UInt32(oversizedPayload.count).bigEndian
+        let oversizedFrame = withUnsafeBytes(of: &length) { Data($0) } + oversizedPayload
+        #expect(throws: VaultAgentProtocolError.frameTooLarge) {
+            try VaultAgentFrameCodec.payload(from: oversizedFrame)
+        }
+    }
+
     @Test("operation uses stable type and payload keys")
     func operationUsesStableWireKeys() throws {
         let operation = VaultAgentOperation.prepareExec(
