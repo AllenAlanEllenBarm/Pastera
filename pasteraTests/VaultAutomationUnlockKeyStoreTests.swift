@@ -385,6 +385,82 @@ struct PasswordVaultAgentAccessTests {
         #expect(store.state == .locked)
     }
 
+    @Test("mandatory system lock survives metadata queued ahead of it")
+    func mandatorySystemLockSurvivesQueuedMetadataTouch() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let sessionNotificationCenter = NotificationCenter()
+        let store = KDBXPasswordVaultStore(
+            syncRootProvider: { root },
+            sessionNotificationCenter: sessionNotificationCenter
+        )
+        try store.createDatabase(masterPassword: "session-password", rememberQuickUnlock: false)
+        let storeQueue = DispatchQueue(label: "PasswordVaultAgentAccessTests.mandatory-lock.store")
+        let controller = PasswordVaultUIController(store: store, storeQueue: storeQueue)
+        let blockerEntered = DispatchSemaphore(value: 0)
+        let releaseBlocker = DispatchSemaphore(value: 0)
+        defer { releaseBlocker.signal() }
+        storeQueue.async {
+            blockerEntered.signal()
+            releaseBlocker.wait()
+        }
+        #expect(blockerEntered.wait(timeout: .now() + 1) == .success)
+
+        controller.agentMetadata { _ in }
+        sessionNotificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+        releaseBlocker.signal()
+        controller.vaultAgentExecutor.sync {}
+
+        #expect(store.state == .locked)
+    }
+
+    @Test("controller state reads only its snapshot")
+    func controllerStateReadsOnlySnapshot() {
+        let store = AgentStateCountingStore(state: .locked)
+        let controller = PasswordVaultUIController(
+            store: store,
+            storeQueue: DispatchQueue(label: "PasswordVaultAgentAccessTests.snapshot.store")
+        )
+        store.resetStateReadCount()
+
+        #expect(controller.state == .locked)
+        #expect(store.stateReadCount == 0)
+    }
+
+    @Test("session lock refreshes controller snapshot and notifies on main")
+    func sessionLockRefreshesControllerSnapshot() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let sessionNotificationCenter = NotificationCenter()
+        let store = KDBXPasswordVaultStore(
+            syncRootProvider: { root },
+            sessionNotificationCenter: sessionNotificationCenter
+        )
+        try store.createDatabase(masterPassword: "session-password", rememberQuickUnlock: false)
+        let controller = PasswordVaultUIController(
+            store: store,
+            storeQueue: DispatchQueue(label: "PasswordVaultAgentAccessTests.snapshot-lock.store")
+        )
+        var changeCount = 0
+        var changeWasOffMain = false
+        controller.onChange = {
+            changeCount += 1
+            changeWasOffMain = changeWasOffMain || !Thread.isMainThread
+        }
+
+        sessionNotificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+        controller.vaultAgentExecutor.sync {}
+        await waitForAgentCondition("session lock snapshot refresh", timeout: 1) {
+            controller.viewState.state == .locked && changeCount == 1
+        }
+
+        #expect(controller.state == .locked)
+        #expect(changeCount == 1)
+        #expect(!changeWasOffMain)
+    }
+
     @Test("an unbound store still handles session auto-lock")
     func unboundStoreSessionAutoLock() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -486,6 +562,38 @@ private final class AgentClipboardProbe: SecureClipboardWriting {
     var value: String?
 
     func copySecret(_ secret: String, clearAfter: Duration) { value = secret }
+}
+
+private final class AgentStateCountingStore: PasswordVaultStore {
+    private let storedState: PasswordVaultState
+    private(set) var stateReadCount = 0
+
+    init(state: PasswordVaultState) {
+        storedState = state
+    }
+
+    var state: PasswordVaultState {
+        stateReadCount += 1
+        return storedState
+    }
+
+    func resetStateReadCount() { stateReadCount = 0 }
+    func listFolders() throws -> [PasswordVaultFolder] { [] }
+    func listEntries() throws -> [PasswordVaultEntry] { [] }
+    func createFolder(name: String) throws -> PasswordVaultFolder { throw PasswordVaultError.unsupportedFormat }
+    func renameFolder(id: UUID, name: String) throws -> PasswordVaultFolder { throw PasswordVaultError.unsupportedFormat }
+    func deleteFolder(id: UUID) throws { throw PasswordVaultError.unsupportedFormat }
+    func reorderFolders(_ folderIDs: [UUID]) throws { throw PasswordVaultError.unsupportedFormat }
+    func moveEntry(id: UUID, to folderID: UUID) throws { throw PasswordVaultError.unsupportedFormat }
+    func moveEntry(id: UUID, to folderID: UUID, orderedEntryIDsByFolder: [UUID: [UUID]]) throws {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func create(_ draft: PasswordVaultDraft) throws -> PasswordVaultEntry { throw PasswordVaultError.unsupportedFormat }
+    func update(id: UUID, draft: PasswordVaultDraft) throws -> PasswordVaultEntry {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func revealPassword(id: UUID, reason: String) throws -> String { throw PasswordVaultError.unsupportedFormat }
+    func delete(id: UUID, reason: String) throws { throw PasswordVaultError.unsupportedFormat }
 }
 
 @MainActor

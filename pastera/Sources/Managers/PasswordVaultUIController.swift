@@ -75,13 +75,16 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         self.pasteService = pasteService
         self.storeQueue = storeQueue
         vaultAgentExecutor = VaultAgentSerialExecutor(queue: storeQueue)
-        store.bindSessionExecutor(vaultAgentExecutor)
-        snapshot = PasswordVaultViewState(state: store.state)
+        snapshot = PasswordVaultViewState(state: .locked)
+        store.bindSessionExecutor(vaultAgentExecutor) { [weak self] in
+            self?.storeStateDidChange()
+        }
         vaultAgentExecutor.sync { refreshSnapshotFromStore() }
     }
 
     var state: PasswordVaultState {
-        currentSnapshot.isBusy ? .unlocking : store.state
+        let snapshot = currentSnapshot
+        return snapshot.isBusy ? .unlocking : snapshot.state
     }
     var viewState: PasswordVaultViewState { currentSnapshot }
 
@@ -417,6 +420,11 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         let folders = (state == .unlocked || state.isReadableWarning) ? (try? store.listFolders()) ?? [] : []
         let entries = (state == .unlocked || state.isReadableWarning) ? (try? store.listEntries()) ?? [] : []
         setSnapshot(.init(state: state, folders: folders, entries: entries, isBusy: false, error: error))
+    }
+
+    private func storeStateDidChange() {
+        refreshSnapshotFromStore()
+        DispatchQueue.main.async { [weak self] in self?.onChange?() }
     }
 
     private func setSnapshot(_ value: PasswordVaultViewState) {

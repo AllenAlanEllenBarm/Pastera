@@ -2,6 +2,66 @@ import CryptoKit
 import Foundation
 import KDBXKit
 
+final class VaultFileCoordinator {
+    static func vaultURL(for syncRootURL: URL) -> URL {
+        syncRootURL
+            .appendingPathComponent("PasteraSync", isDirectory: true)
+            .appendingPathComponent("vault", isDirectory: true)
+            .appendingPathComponent("PasteraVault.kdbx", isDirectory: false)
+    }
+
+    private let fileManager: FileManager
+
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+    }
+
+    func read(from url: URL) throws -> Data {
+        guard fileManager.fileExists(atPath: url.path) else { throw PasswordVaultError.databaseNotConfigured }
+        return try Data(contentsOf: url)
+    }
+
+    func revision(of data: Data) -> Data {
+        Data(SHA256.hash(data: data))
+    }
+
+    func write(_ data: Data, to url: URL) throws {
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: url.path) {
+            let backupURL = url.appendingPathExtension("bak")
+            if fileManager.fileExists(atPath: backupURL.path) {
+                try fileManager.removeItem(at: backupURL)
+            }
+            try fileManager.copyItem(at: url, to: backupURL)
+        }
+        try data.write(to: url, options: .atomic)
+    }
+
+    func conflictFiles(alongside url: URL) throws -> [URL] {
+        let directory = url.deletingLastPathComponent()
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        return try fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ).filter {
+            $0 != url && $0.pathExtension.lowercased() == "kdbx"
+        }
+    }
+
+    func archiveResolvedConflict(_ conflictURL: URL, alongside vaultURL: URL) throws {
+        let resolved = vaultURL.deletingLastPathComponent()
+            .appendingPathComponent("conflicts", isDirectory: true)
+            .appendingPathComponent("resolved", isDirectory: true)
+        try fileManager.createDirectory(at: resolved, withIntermediateDirectories: true)
+        var destination = resolved.appendingPathComponent(conflictURL.lastPathComponent)
+        if fileManager.fileExists(atPath: destination.path) {
+            destination = resolved.appendingPathComponent("\(UUID().uuidString)-\(conflictURL.lastPathComponent)")
+        }
+        try fileManager.moveItem(at: conflictURL, to: destination)
+    }
+}
+
 final class KDBXPasswordVaultStore: PasswordVaultStore {
     private let syncRootProvider: () -> URL?
     private let coordinator: VaultFileCoordinator
@@ -14,6 +74,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     private var lastRevision: Data?
     private let sessionExecutorLock = NSLock()
     private var sessionExecutor: VaultAgentSerialExecutor?
+    private var sessionStateChange: (() -> Void)?
     private let sessionNotificationCenter: NotificationCenter?
     private(set) var state: PasswordVaultState
     var canQuickUnlock: Bool { unlockKeyStore.containsKey }
@@ -113,12 +174,22 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     }
 
     func lock() {
+        let binding = sessionBinding()
+        guard let executor = binding.executor else {
+            performLock(onStateChange: nil)
+            return
+        }
+        executor.sync { performLock(onStateChange: binding.onStateChange) }
+    }
+
+    private func performLock(onStateChange: (() -> Void)?) {
         sessionController.cancel()
         content = nil
         unlockData = nil
         lastRevision = nil
         state = syncRootProvider().map { FileManager.default.fileExists(atPath: VaultFileCoordinator.vaultURL(for: $0).path) } == true
             ? .locked : .notConfigured
+        onStateChange?()
     }
 
     func reloadAndMerge() throws {
@@ -280,18 +351,22 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     }
 
     private func enqueueSessionLock(_ request: VaultSessionLockRequest) {
-        sessionExecutorLock.lock()
-        let executor = sessionExecutor
-        sessionExecutorLock.unlock()
-        guard let executor else {
+        let binding = sessionBinding()
+        guard let executor = binding.executor else {
             guard request.consume() else { return }
-            lock()
+            performLock(onStateChange: nil)
             return
         }
         executor.async { [weak self] in
             guard request.consume() else { return }
-            self?.lock()
+            self?.performLock(onStateChange: binding.onStateChange)
         }
+    }
+
+    private func sessionBinding() -> (executor: VaultAgentSerialExecutor?, onStateChange: (() -> Void)?) {
+        sessionExecutorLock.lock()
+        defer { sessionExecutorLock.unlock() }
+        return (sessionExecutor, sessionStateChange)
     }
 
     private func requiredUnlockData() throws -> UnlockData {
@@ -472,9 +547,10 @@ extension KDBXPasswordVaultStore {
         try automationUnlockKeyStore.delete()
     }
 
-    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor) {
+    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor, onStateChange: @escaping () -> Void) {
         sessionExecutorLock.lock()
         sessionExecutor = executor
+        sessionStateChange = onStateChange
         sessionExecutorLock.unlock()
     }
 

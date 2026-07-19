@@ -1,4 +1,3 @@
-import CryptoKit
 import AppKit
 import Foundation
 import KDBXKit
@@ -14,15 +13,32 @@ enum PasswordVaultState: Equatable {
     case failed(String)
 }
 
+private enum VaultSessionLockRequestKind {
+    case timer(UInt64)
+    case mandatory
+}
+
 final class VaultSessionLockRequest {
     private weak var controller: VaultSessionController?
-    private let generation: UInt64
+    private let kind: VaultSessionLockRequestKind
+    private let stateLock = NSLock()
+    private var wasConsumed = false
 
-    fileprivate init(controller: VaultSessionController, generation: UInt64) {
+    fileprivate init(controller: VaultSessionController, kind: VaultSessionLockRequestKind) {
         self.controller = controller
-        self.generation = generation
+        self.kind = kind
     }
-    func consume() -> Bool { controller?.consumeLockRequest(generation: generation) == true }
+
+    func consume() -> Bool {
+        stateLock.lock()
+        guard !wasConsumed else {
+            stateLock.unlock()
+            return false
+        }
+        wasConsumed = true
+        stateLock.unlock()
+        return controller?.consumeLockRequest(kind) == true
+    }
 }
 final class VaultSessionController {
     typealias TimerScheduler = (TimeInterval, @escaping () -> Void) -> (() -> Void)
@@ -89,7 +105,7 @@ final class VaultSessionController {
         stateLock.unlock()
         previousCancellation?()
         let cancellation = timerScheduler(timeoutProvider()) { [weak self] in
-            self?.emitLockRequest(generation: token)
+            self?.emitTimerLockRequest(generation: token)
         }
         stateLock.lock()
         let shouldKeepTimer = generation == token && pendingLockGeneration == nil
@@ -108,12 +124,17 @@ final class VaultSessionController {
         cancellation?()
     }
     func lockNow() {
+        let cancellation: (() -> Void)?
         stateLock.lock()
-        let currentGeneration = generation
+        generation &+= 1
+        pendingLockGeneration = nil
+        cancellation = cancelScheduledTimer
+        cancelScheduledTimer = nil
         stateLock.unlock()
-        emitLockRequest(generation: currentGeneration)
+        cancellation?()
+        lockRequestAction(VaultSessionLockRequest(controller: self, kind: .mandatory))
     }
-    private func emitLockRequest(generation requestedGeneration: UInt64) {
+    private func emitTimerLockRequest(generation requestedGeneration: UInt64) {
         let cancellation: (() -> Void)?
         stateLock.lock()
         guard generation == requestedGeneration, pendingLockGeneration == nil else {
@@ -125,9 +146,10 @@ final class VaultSessionController {
         cancelScheduledTimer = nil
         stateLock.unlock()
         cancellation?()
-        lockRequestAction(VaultSessionLockRequest(controller: self, generation: requestedGeneration))
+        lockRequestAction(VaultSessionLockRequest(controller: self, kind: .timer(requestedGeneration)))
     }
-    fileprivate func consumeLockRequest(generation requestedGeneration: UInt64) -> Bool {
+    fileprivate func consumeLockRequest(_ kind: VaultSessionLockRequestKind) -> Bool {
+        guard case let .timer(requestedGeneration) = kind else { return true }
         let cancellation: (() -> Void)?
         stateLock.lock()
         guard generation == requestedGeneration, pendingLockGeneration == requestedGeneration else {
@@ -172,66 +194,6 @@ struct PasswordVaultViewState: Equatable {
         self.entries = entries
         self.isBusy = isBusy
         self.error = error
-    }
-}
-
-final class VaultFileCoordinator {
-    static func vaultURL(for syncRootURL: URL) -> URL {
-        syncRootURL
-            .appendingPathComponent("PasteraSync", isDirectory: true)
-            .appendingPathComponent("vault", isDirectory: true)
-            .appendingPathComponent("PasteraVault.kdbx", isDirectory: false)
-    }
-
-    private let fileManager: FileManager
-
-    init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-    }
-
-    func read(from url: URL) throws -> Data {
-        guard fileManager.fileExists(atPath: url.path) else { throw PasswordVaultError.databaseNotConfigured }
-        return try Data(contentsOf: url)
-    }
-
-    func revision(of data: Data) -> Data {
-        Data(SHA256.hash(data: data))
-    }
-
-    func write(_ data: Data, to url: URL) throws {
-        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: url.path) {
-            let backupURL = url.appendingPathExtension("bak")
-            if fileManager.fileExists(atPath: backupURL.path) {
-                try fileManager.removeItem(at: backupURL)
-            }
-            try fileManager.copyItem(at: url, to: backupURL)
-        }
-        try data.write(to: url, options: .atomic)
-    }
-
-    func conflictFiles(alongside url: URL) throws -> [URL] {
-        let directory = url.deletingLastPathComponent()
-        guard fileManager.fileExists(atPath: directory.path) else { return [] }
-        return try fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ).filter {
-            $0 != url && $0.pathExtension.lowercased() == "kdbx"
-        }
-    }
-
-    func archiveResolvedConflict(_ conflictURL: URL, alongside vaultURL: URL) throws {
-        let resolved = vaultURL.deletingLastPathComponent()
-            .appendingPathComponent("conflicts", isDirectory: true)
-            .appendingPathComponent("resolved", isDirectory: true)
-        try fileManager.createDirectory(at: resolved, withIntermediateDirectories: true)
-        var destination = resolved.appendingPathComponent(conflictURL.lastPathComponent)
-        if fileManager.fileExists(atPath: destination.path) {
-            destination = resolved.appendingPathComponent("\(UUID().uuidString)-\(conflictURL.lastPathComponent)")
-        }
-        try fileManager.moveItem(at: conflictURL, to: destination)
     }
 }
 
@@ -448,7 +410,7 @@ protocol PasswordVaultStore {
     func enableAutomationUnlock() throws
     func unlockForAutomation() throws
     func disableAutomationUnlock() throws
-    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor)
+    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor, onStateChange: @escaping () -> Void)
     func lock()
     func reloadAndMerge() throws
     func listFolders() throws -> [PasswordVaultFolder]
@@ -475,7 +437,7 @@ extension PasswordVaultStore {
     func enableAutomationUnlock() throws { throw PasswordVaultError.keychainUnavailable }
     func unlockForAutomation() throws { throw PasswordVaultError.keychainUnavailable }
     func disableAutomationUnlock() throws {}
-    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor) {}
+    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor, onStateChange: @escaping () -> Void) {}
     func lock() {}
     func reloadAndMerge() throws {}
 }
