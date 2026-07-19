@@ -3246,9 +3246,7 @@ extension MainMenuPanelController {
               !AppEnvironment.current.defaults.bool(
                 forKey: Constants.UserDefaults.passwordVaultQuickActionsCoachmarkShown
               ),
-              let surface = collectViews(in: contentView).first(where: {
-                $0.identifier?.rawValue == "mainMenuContentBlock"
-              }) else { return }
+              let surface = firstSubview(identifier: "mainMenuContentBlock", in: contentView) else { return }
 
         AppEnvironment.current.defaults.set(
             true,
