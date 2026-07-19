@@ -59,8 +59,8 @@ final class MenuManager: NSObject {
     var historyPanelController: HistoryBrowserPanelController?
     var snippetPanelController: SnippetBrowserPanelController?
     var mainMenuPanelController: MainMenuPanelController?
-    private lazy var passwordVaultUIController: PasswordVaultUIController = {
-        let controller = PasswordVaultUIController()
+    private(set) lazy var passwordVaultUIController: PasswordVaultUIController = {
+        let controller = AppEnvironment.current.passwordVaultUIController
         controller.onChange = { [weak self] in
             self?.mainMenuPanelController?.reloadContentIfVisible()
         }

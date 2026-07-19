@@ -356,9 +356,14 @@ enum PasswordVaultError: Error, Equatable {
 protocol PasswordVaultStore {
     var state: PasswordVaultState { get }
     var canQuickUnlock: Bool { get }
+    var canAutomationUnlock: Bool { get }
+
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws
     func unlockWithQuickKey(reason: String) throws
+    func enableAutomationUnlock() throws
+    func unlockForAutomation() throws
+    func disableAutomationUnlock() throws
     func lock()
     func reloadAndMerge() throws
     func listFolders() throws -> [PasswordVaultFolder]
@@ -378,9 +383,13 @@ protocol PasswordVaultStore {
 extension PasswordVaultStore {
     var state: PasswordVaultState { .unlocked }
     var canQuickUnlock: Bool { false }
+    var canAutomationUnlock: Bool { false }
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlockWithQuickKey(reason: String) throws { throw PasswordVaultError.keychainUnavailable }
+    func enableAutomationUnlock() throws { throw PasswordVaultError.keychainUnavailable }
+    func unlockForAutomation() throws { throw PasswordVaultError.keychainUnavailable }
+    func disableAutomationUnlock() throws {}
     func lock() {}
     func reloadAndMerge() throws {}
 }

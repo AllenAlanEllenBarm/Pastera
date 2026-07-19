@@ -44,6 +44,7 @@ struct AppEnvironment {
                      oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                      passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
                      secureClipboard: SecureClipboardWriting = current.secureClipboard,
+                     passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
                      clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
                      menuManager: MenuManager = current.menuManager,
                      defaults: UserDefaults = current.defaults) {
@@ -55,6 +56,7 @@ struct AppEnvironment {
                                       oneDriveProcessStatusService: oneDriveProcessStatusService,
                                       passwordVaultStore: passwordVaultStore,
                                       secureClipboard: secureClipboard,
+                                      passwordVaultUIController: passwordVaultUIController,
                                       clipboardScriptCoordinator: clipboardScriptCoordinator,
                                       menuManager: menuManager,
                                       defaults: defaults))
@@ -68,6 +70,7 @@ struct AppEnvironment {
                                oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                                passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
                                secureClipboard: SecureClipboardWriting = current.secureClipboard,
+                               passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
                                clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
                                menuManager: MenuManager = current.menuManager,
                                defaults: UserDefaults = current.defaults) {
@@ -79,6 +82,7 @@ struct AppEnvironment {
                                                 oneDriveProcessStatusService: oneDriveProcessStatusService,
                                                 passwordVaultStore: passwordVaultStore,
                                                 secureClipboard: secureClipboard,
+                                                passwordVaultUIController: passwordVaultUIController,
                                                 clipboardScriptCoordinator: clipboardScriptCoordinator,
                                                 menuManager: menuManager,
                                                 defaults: defaults))

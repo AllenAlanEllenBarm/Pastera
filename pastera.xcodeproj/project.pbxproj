@@ -16,6 +16,8 @@
 		A62000000000000000000005 /* libPasteraAgentProtocol.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A61000000000000000000019 /* libPasteraAgentProtocol.a */; };
 		A62000000000000000000008 /* VaultAgentGrantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000000000000000000009 /* VaultAgentGrantStore.swift */; };
 		A6200000000000000000000A /* VaultAgentAuthorizationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */; };
+		A63000000000000000000001 /* VaultAutomationUnlockKeyStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63000000000000000000002 /* VaultAutomationUnlockKeyStoreTests.swift */; };
+		A63000000000000000000003 /* VaultAutomationUnlockKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63000000000000000000004 /* VaultAutomationUnlockKeyStore.swift */; };
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
@@ -370,6 +372,8 @@
 		A61000000000000000000019 /* libPasteraAgentProtocol.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libPasteraAgentProtocol.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		A62000000000000000000002 /* VaultAgentAuthorizationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationPolicyTests.swift; sourceTree = "<group>"; };
 		A62000000000000000000004 /* VaultAgentAuthorizationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationPolicy.swift; sourceTree = "<group>"; };
+		A63000000000000000000002 /* VaultAutomationUnlockKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAutomationUnlockKeyStoreTests.swift; sourceTree = "<group>"; };
+		A63000000000000000000004 /* VaultAutomationUnlockKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAutomationUnlockKeyStore.swift; sourceTree = "<group>"; };
 		A62000000000000000000009 /* VaultAgentGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGrantStore.swift; sourceTree = "<group>"; };
 		A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationCoordinator.swift; sourceTree = "<group>"; };
 		FAC43DDD1B35D8B100C06102 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -504,6 +508,7 @@
 		FA0D5CE61DDCC5D000AC9052 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A63000000000000000000004 /* VaultAutomationUnlockKeyStore.swift */,
 				A62000000000000000000004 /* VaultAgentAuthorizationPolicy.swift */,
 				A62000000000000000000009 /* VaultAgentGrantStore.swift */,
 				A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */,
@@ -777,6 +782,7 @@
 			isa = PBXGroup;
 			children = (
 				A62000000000000000000002 /* VaultAgentAuthorizationPolicyTests.swift */,
+				A63000000000000000000002 /* VaultAutomationUnlockKeyStoreTests.swift */,
 				C5700B472FC5C0DB00C8F965 /* Database */,
 				C571000C2FCEB03000C8F965 /* Models */,
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
@@ -1054,6 +1060,7 @@
 		FAC43DC21B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A63000000000000000000003 /* VaultAutomationUnlockKeyStore.swift in Sources */,
 				A62000000000000000000003 /* VaultAgentAuthorizationPolicy.swift in Sources */,
 				A62000000000000000000008 /* VaultAgentGrantStore.swift in Sources */,
 				A6200000000000000000000A /* VaultAgentAuthorizationCoordinator.swift in Sources */,
@@ -1157,6 +1164,7 @@
 			isa = PBXSourcesBuildPhase;
 			files = (
 				A62000000000000000000001 /* VaultAgentAuthorizationPolicyTests.swift in Sources */,
+				A63000000000000000000001 /* VaultAutomationUnlockKeyStoreTests.swift in Sources */,
 				C5700B492FC5C0E500C8F965 /* SQLiteDataMigratorTests.swift in Sources */,
 				FA08EDF81D1FED7D000D1D13 /* HotKeyServiceTests.swift in Sources */,
 				FA6167941D3ACCB90049FA14 /* DraggedDataTests.swift in Sources */,

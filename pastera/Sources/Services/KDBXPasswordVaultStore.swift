@@ -6,6 +6,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     private let syncRootProvider: () -> URL?
     private let coordinator: VaultFileCoordinator
     private let unlockKeyStore: VaultUnlockKeyStoring
+    private let automationUnlockKeyStore: VaultAutomationUnlockKeyStoring
     private let merger = KDBXVaultMerger()
     private let now: () -> Date
     private var content: KDBXContent?
@@ -13,6 +14,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     private var lastRevision: Data?
     private(set) var state: PasswordVaultState
     var canQuickUnlock: Bool { unlockKeyStore.containsKey }
+    var canAutomationUnlock: Bool { automationUnlockKeyStore.containsKey }
     private lazy var sessionController = VaultSessionController { [weak self] in self?.lock() }
 
     init(
@@ -21,11 +23,13 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         },
         fileManager: FileManager = .default,
         unlockKeyStore: VaultUnlockKeyStoring = VaultUnlockKeyStore(),
+        automationUnlockKeyStore: VaultAutomationUnlockKeyStoring = VaultAutomationUnlockKeyStore(),
         now: @escaping () -> Date = Date.init
     ) {
         self.syncRootProvider = syncRootProvider
         coordinator = VaultFileCoordinator(fileManager: fileManager)
         self.unlockKeyStore = unlockKeyStore
+        self.automationUnlockKeyStore = automationUnlockKeyStore
         self.now = now
         if let root = syncRootProvider(), fileManager.fileExists(atPath: VaultFileCoordinator.vaultURL(for: root).path) {
             state = .locked
@@ -98,6 +102,45 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
             state = .locked
             throw PasswordVaultError.wrongMasterPassword
         }
+    }
+
+    func enableAutomationUnlock() throws {
+        let unlock = try requiredUnlockData()
+        let data = unlock.keyDataBytes.withUnsafeBytes { Data($0) }
+        guard data.count == 32 else { throw PasswordVaultError.keychainUnavailable }
+        try automationUnlockKeyStore.save(data)
+    }
+
+    func unlockForAutomation() throws {
+        state = .unlocking
+        do {
+            let key = try automationUnlockKeyStore.load()
+            guard key.count == 32 else { throw PasswordVaultError.keychainUnavailable }
+            let unlock = UnlockData(rawKeyData: key)
+            let data = try coordinator.read(from: try vaultURL())
+            content = try KDBXReader.parse(data, unlockData: unlock)
+            lastRevision = coordinator.revision(of: data)
+            unlockData = unlock
+            state = .unlocked
+            sessionController.touch()
+        } catch KDBXReader.Error.wrongCredentials {
+            state = .locked
+            throw PasswordVaultError.keychainUnavailable
+        } catch let error as PasswordVaultError {
+            if error == .keychainUnavailable {
+                state = .locked
+            } else {
+                state = error == .databaseNotConfigured ? .notConfigured : .failed("read")
+            }
+            throw error
+        } catch {
+            state = .failed("corrupted")
+            throw PasswordVaultError.corruptedData
+        }
+    }
+
+    func disableAutomationUnlock() throws {
+        try automationUnlockKeyStore.delete()
     }
 
     func lock() {

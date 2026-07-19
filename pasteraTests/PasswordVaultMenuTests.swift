@@ -192,6 +192,31 @@ struct PasswordVaultMenuTests {
         #expect(vaultController.state == .unlocked)
     }
 
+    @Test("environment and MenuManager share one password vault controller")
+    func environmentAndMenuShareController() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let controller = PasswordVaultUIController(
+            store: store,
+            clipboard: PasswordVaultClipboardProbe(),
+            pasteService: PasteService()
+        )
+        let menuManager = MenuManager()
+        let environment = Environment(
+            passwordVaultStore: store,
+            passwordVaultUIController: controller,
+            menuManager: menuManager
+        )
+        AppEnvironment.push(environment: environment)
+        defer { AppEnvironment.popLast() }
+
+        #expect(environment.passwordVaultUIController === controller)
+        #expect(menuManager.passwordVaultUIController === controller)
+        #expect(AppEnvironment.current.passwordVaultUIController === controller)
+    }
+
     @Test("an unlocked empty vault exposes folder creation in edit mode")
     func emptyVaultShowsFolderCreation() {
         let controller = makeVaultController(folders: [], entries: [])
@@ -964,5 +989,6 @@ private final class AllowPasswordVaultAuthorizer: PasswordVaultAuthorizing {
 
 private final class PasswordVaultClipboardProbe: SecureClipboardWriting {
     var value: String?
+
     func copySecret(_ secret: String, clearAfter: Duration) { value = secret }
 }
