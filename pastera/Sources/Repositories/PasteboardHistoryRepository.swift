@@ -150,11 +150,6 @@ struct PasteboardHistorySearchCandidate: Equatable {
     }
 }
 
-struct PasteboardHistoryOCRIndexingCandidate: Equatable {
-    let historyID: PasteboardHistory.ID
-    let content: PasteboardContent
-}
-
 @Selection
 struct PasteboardHistoryChangeToken: Equatable {
     let id: PasteboardHistory.ID
@@ -202,7 +197,11 @@ protocol PasteboardHistoryRepositoryProtocol {
     func deleteOCRText(historyID: PasteboardHistory.ID)
     func fetchOCRText(historyID: PasteboardHistory.ID) -> PasteboardHistoryOCRText?
     func fetchOCRText(sourceHash: String) -> PasteboardHistoryOCRText?
-    func fetchOCRIndexingCandidates(limit: Int) -> [PasteboardHistoryOCRIndexingCandidate]
+    func fetchOCRIndexingCandidateIDs(limit: Int) -> [PasteboardHistory.ID]
+    func enqueueOCRJob(historyID: PasteboardHistory.ID, priority: Int, enqueuedAt: Int)
+    func fetchNextOCRJobID() -> PasteboardHistory.ID?
+    func deleteOCRJob(historyID: PasteboardHistory.ID)
+    func countOCRJobs() -> Int
     func deleteHistory(id: PasteboardHistory.ID)
     func deleteAll()
     func deleteOverflowingHistories(maxHistorySize: Int)
@@ -302,7 +301,15 @@ extension PasteboardHistoryRepositoryProtocol {
 
     func fetchOCRText(sourceHash _: String) -> PasteboardHistoryOCRText? { nil }
 
-    func fetchOCRIndexingCandidates(limit _: Int) -> [PasteboardHistoryOCRIndexingCandidate] { [] }
+    func fetchOCRIndexingCandidateIDs(limit _: Int) -> [PasteboardHistory.ID] { [] }
+
+    func enqueueOCRJob(historyID _: PasteboardHistory.ID, priority _: Int, enqueuedAt _: Int) {}
+
+    func fetchNextOCRJobID() -> PasteboardHistory.ID? { nil }
+
+    func deleteOCRJob(historyID _: PasteboardHistory.ID) {}
+
+    func countOCRJobs() -> Int { 0 }
 
     func shouldImportFileSyncHistory(historyID: String, updatedAt: Int) -> Bool { true }
 
@@ -360,16 +367,15 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
             PasteboardHistory
                 .all
                 .where { $0.deviceID.eq(currentDeviceID) }
+                .where { $0.isTextSyncCandidate }
                 .order { $0.updateAt.desc() }
+                .select {
+                    PasteboardHistoryChangeToken.Columns(id: $0.id, updateAt: $0.updateAt)
+                }
         )
-        var histories
+        var tokens
 
-        return $histories.publisher
-            .map { histories in
-                histories
-                    .filter { Self.isTextSyncPasteboardTypes($0.pasteboardTypes) }
-                    .map { PasteboardHistoryChangeToken(id: $0.id, updateAt: $0.updateAt) }
-            }
+        return $tokens.publisher
             .removeDuplicates()
             .map { _ in () }
             .eraseToAnyPublisher()
@@ -539,12 +545,16 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     }
 
     func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {
+        let facets = Self.contentFacets(pasteboardTypes: content.types)
         let history = PasteboardHistory(
             id: id,
             title: content.historyTitle[0...10000],
             pasteboardTypes: content.types,
             updateAt: updateAt,
-            deviceID: CPYUtilities.deviceID
+            deviceID: CPYUtilities.deviceID,
+            containsImage: facets.containsImage,
+            containsFile: facets.containsFile,
+            isTextSyncCandidate: facets.isTextSyncCandidate
         )
         withErrorReporting {
             try database.write { database in
@@ -598,7 +608,10 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
             title: content.historyTitle[0...10000],
             pasteboardTypes: content.types,
             updateAt: updateAt,
-            deviceID: CPYUtilities.deviceID
+            deviceID: CPYUtilities.deviceID,
+            containsImage: false,
+            containsFile: false,
+            isTextSyncCandidate: true
         )
 
         return withErrorReporting {
@@ -692,23 +705,23 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
         }
     }
 
-    func fetchOCRIndexingCandidates(limit: Int) -> [PasteboardHistoryOCRIndexingCandidate] {
+    func fetchOCRIndexingCandidateIDs(limit: Int) -> [PasteboardHistory.ID] {
         guard limit > 0 else { return [] }
         return withErrorReporting {
             try database.read { database in
-                var candidates = [PasteboardHistoryOCRIndexingCandidate]()
+                var candidateIDs = [PasteboardHistory.ID]()
                 var offset = 0
                 let batchSize = max(limit * 4, 50)
 
-                while candidates.count < limit {
+                while candidateIDs.count < limit {
                     let rawHistories = try PasteboardHistory
                         .all
+                        .where { $0.containsImage || $0.containsFile }
                         .order { $0.updateAt.desc() }
                         .limit(batchSize, offset: offset)
                         .fetchAll(database)
                     guard !rawHistories.isEmpty else { break }
                     let histories = rawHistories
-                        .filter { Self.canHaveOCRImageSource(pasteboardTypes: $0.pasteboardTypes) }
                     if !histories.isEmpty {
                         let historyIDs = histories.map(\.id)
                         let indexedIDs = try PasteboardHistoryOCRText
@@ -717,25 +730,64 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                             .fetchAll(database)
                         let indexedIDSet = Set(indexedIDs)
 
-                        for history in histories where candidates.count < limit && !indexedIDSet.contains(history.id) {
-                            let assets = try PasteboardHistoryAsset
-                                .where { $0.pasteboardHistoryID.eq(history.id) }
-                                .fetchAll(database)
-                            let content = PasteboardContent(
-                                assets: assets.map {
-                                    PasteboardContent.Asset(type: $0.pasteboardType, data: $0.data)
-                                }
-                            )
-                            guard Self.canHaveOCRImageSource(content: content) else { continue }
-                            candidates.append(PasteboardHistoryOCRIndexingCandidate(historyID: history.id, content: content))
+                        for history in histories where candidateIDs.count < limit && !indexedIDSet.contains(history.id) {
+                            candidateIDs.append(history.id)
                         }
                     }
 
                     offset += batchSize
                 }
-                return candidates
+                return candidateIDs
             }
         } ?? []
+    }
+
+    func enqueueOCRJob(historyID: PasteboardHistory.ID, priority: Int, enqueuedAt: Int) {
+        withErrorReporting {
+            try database.write { database in
+                guard try PasteboardHistory.find(historyID).fetchOne(database) != nil else { return }
+                try PasteboardHistoryOCRJob.upsert {
+                    PasteboardHistoryOCRJob(
+                        pasteboardHistoryID: historyID,
+                        priority: priority,
+                        enqueuedAt: enqueuedAt
+                    )
+                }
+                .execute(database)
+            }
+        }
+    }
+
+    func fetchNextOCRJobID() -> PasteboardHistory.ID? {
+        withErrorReporting {
+            try database.read { database in
+                try PasteboardHistoryOCRJob
+                    .all
+                    .order { ($0.priority.desc(), $0.enqueuedAt.desc()) }
+                    .select { $0.pasteboardHistoryID }
+                    .limit(1)
+                    .fetchOne(database)
+            }
+        } ?? nil
+    }
+
+    func deleteOCRJob(historyID: PasteboardHistory.ID) {
+        withErrorReporting {
+            try database.write { database in
+                try PasteboardHistoryOCRJob
+                    .delete()
+                    .where { $0.pasteboardHistoryID.eq(historyID) }
+                    .execute(database)
+            }
+        }
+    }
+
+    func countOCRJobs() -> Int {
+        withErrorReporting {
+            try database.read { database in
+                try PasteboardHistoryOCRJob.all.fetchCount(database)
+            }
+        } ?? 0
     }
 
     func deleteHistory(id: PasteboardHistory.ID) {
@@ -793,43 +845,19 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     }
 
     private func deleteOverflowingMediaHistories(settings: HistoryRetentionSettings, database: Database) throws {
-        let decoder = JSONDecoder()
-        let candidates = try Row.fetchCursor(
-            database,
-            sql: """
-            SELECT "id", "pasteboardTypes"
-            FROM "pasteboardHistories"
-            ORDER BY "updateAt" DESC
-            """
-        )
-        let imageTypes = NSPasteboard.PasteboardType.clipyImageTypes
-        var imageHistoryCount = 0
-        var fileHistoryCount = 0
-        var deletingIDs = [PasteboardHistory.ID]()
-
-        while let candidate = try candidates.next() {
-            let id: String = candidate["id"]
-            let pasteboardTypesJSON: String = candidate["pasteboardTypes"]
-            let pasteboardTypes = Set(try decoder.decode(
-                [NSPasteboard.PasteboardType].self,
-                from: Data(pasteboardTypesJSON.utf8)
-            ))
-            var shouldDelete = false
-
-            if !pasteboardTypes.isDisjoint(with: imageTypes) {
-                imageHistoryCount += 1
-                shouldDelete = imageHistoryCount > settings.maxImageHistorySize
-            }
-
-            if pasteboardTypes.contains(.fileURL) {
-                fileHistoryCount += 1
-                shouldDelete = shouldDelete || fileHistoryCount > settings.maxFileHistorySize
-            }
-
-            if shouldDelete {
-                deletingIDs.append(PasteboardHistory.ID(rawValue: id))
-            }
-        }
+        let imageIDs = try PasteboardHistory
+            .where { $0.containsImage }
+            .order { $0.updateAt.desc() }
+            .limit(-1, offset: settings.maxImageHistorySize)
+            .select { $0.id }
+            .fetchAll(database)
+        let fileIDs = try PasteboardHistory
+            .where { $0.containsFile }
+            .order { $0.updateAt.desc() }
+            .limit(-1, offset: settings.maxFileHistorySize)
+            .select { $0.id }
+            .fetchAll(database)
+        let deletingIDs = Array(Set(imageIDs).union(fileIDs))
 
         guard !deletingIDs.isEmpty else { return }
         try PasteboardHistory
@@ -1147,7 +1175,10 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                                 title: payload.text[0...10000],
                                 pasteboardTypes: [.string],
                                 updateAt: payload.updateAt,
-                                deviceID: payload.deviceID
+                                deviceID: payload.deviceID,
+                                containsImage: false,
+                                containsFile: false,
+                                isTextSyncCandidate: true
                             )
                     }
                     .execute(database)
@@ -1193,6 +1224,7 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                 let assets = try Self.assets(from: payload)
                 guard !assets.isEmpty else { return false }
                 let content = PasteboardContent(assets: assets)
+                let facets = Self.contentFacets(pasteboardTypes: content.types)
                 try PasteboardHistory
                     .upsert {
                         PasteboardHistory(
@@ -1200,7 +1232,10 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
                             title: content.historyTitle[0...10000],
                             pasteboardTypes: content.types,
                             updateAt: payload.updatedAt,
-                            deviceID: payload.deviceID
+                            deviceID: payload.deviceID,
+                            containsImage: facets.containsImage,
+                            containsFile: facets.containsFile,
+                            isTextSyncCandidate: facets.isTextSyncCandidate
                         )
                     }
                     .execute(database)
@@ -1270,6 +1305,16 @@ final class PasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
         let plainTextTypes: Set<NSPasteboard.PasteboardType> = [.string, .deprecatedString]
         let urlTypes: Set<NSPasteboard.PasteboardType> = [.URL, .deprecatedURL]
         return typeSet.isSubset(of: plainTextTypes) || typeSet.isSubset(of: urlTypes)
+    }
+
+    private static func contentFacets(
+        pasteboardTypes: [NSPasteboard.PasteboardType]
+    ) -> (containsImage: Bool, containsFile: Bool, isTextSyncCandidate: Bool) {
+        (
+            pasteboardTypes.contains(where: \.isClipyImageType),
+            pasteboardTypes.contains(.fileURL),
+            isTextSyncPasteboardTypes(pasteboardTypes)
+        )
     }
 
     private static func isEditablePlainTextHistoryTypes(_ types: [NSPasteboard.PasteboardType]) -> Bool {

@@ -6759,6 +6759,48 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主密码用于加密密码箱，忘记后无法恢复。" } }
       }
     },
+    "%lld items recognized" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld items recognized" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "%lld Einträge erkannt" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld elementi riconosciuti" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "%lld項目を認識" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已识别 %lld 项" } }
+    } },
+    "%lld items remaining" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld items remaining" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "%lld Einträge verbleiben" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld elementi rimanenti" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "残り%lld項目" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "剩余 %lld 项" } }
+    } },
+    "%lld items skipped" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld items skipped" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "%lld Einträge übersprungen" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld elementi ignorati" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "%lld項目をスキップ" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 项已跳过" } }
+    } },
+    "Image text updated" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Image text updated" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Bildtext aktualisiert" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Testo immagine aggiornato" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "画像テキストを更新しました" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图片文字已更新" } }
+    } },
+    "Recognizing image text" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Recognizing image text" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Bildtext wird erkannt" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Riconoscimento del testo" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "画像テキストを認識中" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在识别图片文字" } }
+    } },
+    "Some images could not be recognized" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Some images could not be recognized" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Einige Bilder konnten nicht erkannt werden" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Alcune immagini non sono state riconosciute" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "一部の画像を認識できませんでした" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "部分图片无法识别" } }
+    } },
     "items" : {
       "localizations" : {
         "en" : {

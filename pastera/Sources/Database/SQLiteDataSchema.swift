@@ -25,10 +25,44 @@ struct PasteboardHistory: Identifiable, Equatable {
     let pasteboardTypes: [NSPasteboard.PasteboardType]
     let updateAt: Int
     let deviceID: String?
+    let containsImage: Bool
+    let containsFile: Bool
+    let isTextSyncCandidate: Bool
+
+    init(
+        id: ID,
+        title: String,
+        pasteboardTypes: [NSPasteboard.PasteboardType],
+        updateAt: Int,
+        deviceID: String?,
+        containsImage: Bool? = nil,
+        containsFile: Bool? = nil,
+        isTextSyncCandidate: Bool? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.pasteboardTypes = pasteboardTypes
+        self.updateAt = updateAt
+        self.deviceID = deviceID
+        self.containsImage = containsImage ?? pasteboardTypes.contains(where: \.isClipyImageType)
+        self.containsFile = containsFile ?? pasteboardTypes.contains(.fileURL)
+        let textTypes: Set<NSPasteboard.PasteboardType> = [.string, .deprecatedString, .URL, .deprecatedURL]
+        self.isTextSyncCandidate = isTextSyncCandidate
+            ?? (!pasteboardTypes.isEmpty && Set(pasteboardTypes).isSubset(of: textTypes))
+    }
 
     var primaryType: NSPasteboard.PasteboardType? {
         pasteboardTypes.first
     }
+}
+
+@Table
+struct PasteboardHistoryOCRJob: Identifiable, Equatable {
+    @Column(primaryKey: true)
+    let pasteboardHistoryID: PasteboardHistory.ID
+    let priority: Int
+    let enqueuedAt: Int
+    var id: PasteboardHistory.ID { pasteboardHistoryID }
 }
 
 @Table

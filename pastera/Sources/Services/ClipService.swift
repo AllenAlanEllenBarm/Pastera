@@ -193,7 +193,7 @@ extension ClipService {
         let savedID = PasteboardHistory.ID(rawValue: savedHash)
         pasteboardHistoryRepository.save(id: savedID, content: content, updateAt: unixTime)
         pasteboardHistoryRepository.pruneHistories(settings: HistoryRetentionSettings.current())
-        pasteboardHistoryOCRIndexer.enqueueIndexing(historyID: savedID, content: content)
+        pasteboardHistoryOCRIndexer.enqueueIndexing(historyID: savedID)
         return true
     }
 }

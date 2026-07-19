@@ -11,6 +11,7 @@
 //
 
 import AppKit
+import Combine
 import CryptoKit
 import Dependencies
 import ImageIO
@@ -21,7 +22,7 @@ protocol PasteboardImageTextRecognizing {
 }
 
 protocol PasteboardHistoryOCRIndexing {
-    func enqueueIndexing(historyID: PasteboardHistory.ID, content: PasteboardContent)
+    func enqueueIndexing(historyID: PasteboardHistory.ID)
     func backfillMissingImageOCR(limit: Int)
     func recognizeText(
         historyID: PasteboardHistory.ID,
@@ -53,6 +54,12 @@ enum PasteboardHistoryOCRTextLimits {
     }
 }
 
+enum PasteboardHistoryOCRActivity: Equatable {
+    case idle
+    case indexing(remaining: Int)
+    case completed(processed: Int, skipped: Int)
+}
+
 struct PasteboardHistoryOCRImageSource: Equatable {
     let data: Data
     let sourceHash: String
@@ -63,6 +70,7 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
 
     static let shared = PasteboardHistoryOCRIndexer()
     static let maxSourceImageBytes = 12 * 1024 * 1024
+    static let activityDidChangeNotification = Notification.Name("PasteraOCRActivityDidChange")
 
     private static let queue = DispatchQueue(label: "com.pastera-app.Pastera.ocr-indexer", qos: .utility)
 
@@ -70,6 +78,10 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
     private let recognizer: any PasteboardImageTextRecognizing
     private let scheduler: Scheduler
     private let now: () -> Int
+    private var isPumpScheduled = false
+    private var processedCount = 0
+    private var skippedCount = 0
+    private var activityGeneration = 0
 
     init(
         repository: any PasteboardHistoryRepositoryProtocol = PasteboardHistoryRepository(),
@@ -83,24 +95,71 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
         self.now = now
     }
 
-    func enqueueIndexing(historyID: PasteboardHistory.ID, content: PasteboardContent) {
-        scheduler { [repository, recognizer, now] in
-            Self.index(historyID: historyID, content: content, repository: repository, recognizer: recognizer, now: now)
+    func enqueueIndexing(historyID: PasteboardHistory.ID) {
+        scheduler { [weak self] in
+            guard let self else { return }
+            repository.enqueueOCRJob(historyID: historyID, priority: 1, enqueuedAt: now())
+            schedulePumpIfNeeded()
         }
     }
 
     func backfillMissingImageOCR(limit: Int) {
         guard limit > 0 else { return }
-        scheduler { [repository, recognizer, now] in
-            repository.fetchOCRIndexingCandidates(limit: limit).forEach { candidate in
-                Self.index(
-                    historyID: candidate.historyID,
-                    content: candidate.content,
+        scheduler { [weak self] in
+            self?.startBackfill(limit: limit)
+        }
+    }
+
+    private func startBackfill(limit: Int) {
+        guard !isPumpScheduled else { return }
+        let candidateIDs = repository.fetchOCRIndexingCandidateIDs(limit: limit)
+        guard !candidateIDs.isEmpty else { return }
+        for (offset, historyID) in candidateIDs.enumerated() {
+            repository.enqueueOCRJob(historyID: historyID, priority: 0, enqueuedAt: now() - offset)
+        }
+        schedulePumpIfNeeded()
+    }
+
+    private func schedulePumpIfNeeded() {
+        guard !isPumpScheduled else { return }
+        isPumpScheduled = true
+        publish(.indexing(remaining: repository.countOCRJobs()))
+        processNextJob()
+    }
+
+    private func processNextJob() {
+        guard let historyID = repository.fetchNextOCRJobID() else {
+            isPumpScheduled = false
+            let completed = PasteboardHistoryOCRActivity.completed(
+                processed: processedCount,
+                skipped: skippedCount
+            )
+            processedCount = 0
+            skippedCount = 0
+            publish(completed)
+            return
+        }
+
+        var succeeded = false
+        autoreleasepool {
+            if let content = repository.fetchContent(id: historyID) {
+                succeeded = Self.index(
+                    historyID: historyID,
+                    content: content,
                     repository: repository,
                     recognizer: recognizer,
                     now: now
                 )
+            } else {
+                succeeded = true
             }
+            repository.deleteOCRJob(historyID: historyID)
+        }
+        if succeeded { processedCount += 1 } else { skippedCount += 1 }
+        publish(.indexing(remaining: repository.countOCRJobs()))
+
+        scheduler { [weak self] in
+            self?.processNextJob()
         }
     }
 
@@ -170,16 +229,17 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
         )
     }
 
+    @discardableResult
     private static func index(
         historyID: PasteboardHistory.ID,
         content: PasteboardContent,
         repository: any PasteboardHistoryRepositoryProtocol,
         recognizer: any PasteboardImageTextRecognizing,
         now: () -> Int
-    ) {
+    ) -> Bool {
         guard let source = imageSource(from: content) else {
             repository.deleteOCRText(historyID: historyID)
-            return
+            return false
         }
 
         if let existingText = repository.fetchOCRText(sourceHash: source.sourceHash) {
@@ -189,12 +249,12 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
                 recognizedText: existingText.recognizedText,
                 updatedAt: now()
             )
-            return
+            return true
         }
 
         guard let recognizedText = try? recognizer.recognizeText(in: source.data) else {
             repository.deleteOCRText(historyID: historyID)
-            return
+            return false
         }
 
         _ = repository.upsertOCRText(
@@ -203,6 +263,23 @@ final class PasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
             recognizedText: PasteboardHistoryOCRTextLimits.normalized(recognizedText),
             updatedAt: now()
         )
+        return true
+    }
+
+    private func publish(_ activity: PasteboardHistoryOCRActivity) {
+        activityGeneration += 1
+        let generation = activityGeneration
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: Self.activityDidChangeNotification,
+                object: activity
+            )
+        }
+        guard case .completed = activity else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, generation == activityGeneration else { return }
+            NotificationCenter.default.post(name: Self.activityDidChangeNotification, object: PasteboardHistoryOCRActivity.idle)
+        }
     }
 
     private static func isFileSizeWithinSourceLimit(_ url: URL) -> Bool {
@@ -272,7 +349,7 @@ extension DependencyValues {
 }
 
 private struct NoopPasteboardHistoryOCRIndexer: PasteboardHistoryOCRIndexing {
-    func enqueueIndexing(historyID _: PasteboardHistory.ID, content _: PasteboardContent) {}
+    func enqueueIndexing(historyID _: PasteboardHistory.ID) {}
     func backfillMissingImageOCR(limit _: Int) {}
     func recognizeText(
         historyID _: PasteboardHistory.ID,

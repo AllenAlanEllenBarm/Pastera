@@ -10,6 +10,8 @@
 //  Copyright © 2015-2026 Clipy Project.
 //
 
+import AppKit
+import GRDB
 import SQLiteData
 
 extension DatabaseMigrator {
@@ -19,6 +21,7 @@ extension DatabaseMigrator {
         registerMigrationV3()
         registerMigrationV4()
         registerMigrationV5()
+        registerMigrationV6()
     }
 
     // swiftlint:disable:next function_body_length
@@ -299,6 +302,62 @@ extension DatabaseMigrator {
                 """
             )
             .execute(database)
+        }
+    }
+
+    mutating func registerMigrationV6() {
+        registerMigration("Add indexed history facets and OCR jobs") { database in
+            for column in ["containsImage", "containsFile", "isTextSyncCandidate"] {
+                try database.execute(sql: """
+                    ALTER TABLE pasteboardHistories
+                    ADD COLUMN \(column) INTEGER NOT NULL DEFAULT 0
+                    """)
+            }
+
+            let rows = try Row.fetchCursor(
+                database,
+                sql: "SELECT id, pasteboardTypes FROM pasteboardHistories"
+            )
+            let decoder = JSONDecoder()
+            while let row = try rows.next() {
+                let id: String = row["id"]
+                let json: String = row["pasteboardTypes"]
+                let types = try decoder.decode([NSPasteboard.PasteboardType].self, from: Data(json.utf8))
+                let typeSet = Set(types)
+                let textTypes: Set<NSPasteboard.PasteboardType> = [
+                    .string, .deprecatedString, .URL, .deprecatedURL
+                ]
+                try database.execute(
+                    sql: """
+                    UPDATE pasteboardHistories
+                    SET containsImage = ?, containsFile = ?, isTextSyncCandidate = ?
+                    WHERE id = ?
+                    """,
+                    arguments: [
+                        types.contains(where: \.isClipyImageType),
+                        types.contains(.fileURL),
+                        !types.isEmpty && typeSet.isSubset(of: textTypes),
+                        id
+                    ]
+                )
+            }
+
+            try database.execute(sql: """
+                CREATE INDEX index_pasteboardHistories_on_images_updateAt
+                ON pasteboardHistories (updateAt DESC) WHERE containsImage = 1;
+                CREATE INDEX index_pasteboardHistories_on_files_updateAt
+                ON pasteboardHistories (updateAt DESC) WHERE containsFile = 1;
+                CREATE INDEX index_pasteboardHistories_on_textSync_updateAt
+                ON pasteboardHistories (deviceID, updateAt DESC) WHERE isTextSyncCandidate = 1;
+                CREATE TABLE pasteboardHistoryOCRJobs (
+                  pasteboardHistoryID TEXT PRIMARY KEY NOT NULL,
+                  priority INTEGER NOT NULL DEFAULT 0,
+                  enqueuedAt INTEGER NOT NULL DEFAULT 0,
+                  FOREIGN KEY (pasteboardHistoryID) REFERENCES pasteboardHistories (id) ON DELETE CASCADE
+                ) STRICT;
+                CREATE INDEX index_pasteboardHistoryOCRJobs_on_priority_enqueuedAt
+                ON pasteboardHistoryOCRJobs (priority DESC, enqueuedAt DESC);
+                """)
         }
     }
 }

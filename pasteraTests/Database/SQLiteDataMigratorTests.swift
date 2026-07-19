@@ -10,6 +10,7 @@
 //  Copyright © 2015-2026 Clipy Project.
 //
 
+import GRDB
 import SQLiteData
 import Testing
 @testable import Pastera
@@ -17,6 +18,70 @@ import Testing
 @MainActor
 @Suite
 struct SQLiteDataMigratorTests {
+    @Test
+    func migrationV6AddsHistoryFacetsAndDurableOCRJobs() throws {
+        let database = try DatabaseQueue()
+        var baselineMigrator = DatabaseMigrator()
+        baselineMigrator.registerMigrationV1()
+        baselineMigrator.registerMigrationV2()
+        baselineMigrator.registerMigrationV3()
+        baselineMigrator.registerMigrationV4()
+        baselineMigrator.registerMigrationV5()
+        try baselineMigrator.migrate(database)
+
+        try database.write { database in
+            try database.execute(
+                sql: """
+                INSERT INTO pasteboardHistories (id, title, pasteboardTypes, updateAt)
+                VALUES (?, '', ?, 1), (?, '', ?, 2), (?, '', ?, 3)
+                """,
+                arguments: [
+                    "image", "[\"public.tiff\"]",
+                    "file", "[\"public.file-url\"]",
+                    "text", "[\"public.utf8-plain-text\"]"
+                ]
+            )
+        }
+
+        var migrator = DatabaseMigrator()
+        migrator.registerMigrationV6()
+        try migrator.migrate(database)
+
+        try database.read { database in
+            let facets = try Row.fetchAll(
+                database,
+                sql: """
+                SELECT id, containsImage, containsFile, isTextSyncCandidate
+                FROM pasteboardHistories ORDER BY id
+                """
+            )
+            #expect(facets.count == 3)
+            #expect(facets[0]["id"] as String == "file")
+            #expect(facets[0]["containsFile"] as Bool)
+            #expect(facets[1]["id"] as String == "image")
+            #expect(facets[1]["containsImage"] as Bool)
+            #expect(facets[2]["id"] as String == "text")
+            #expect(facets[2]["isTextSyncCandidate"] as Bool)
+
+            let indexes = try String.fetchAll(
+                database,
+                sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'index_pasteboardHistories_on_%'"
+            )
+            #expect(indexes.contains("index_pasteboardHistories_on_images_updateAt"))
+            #expect(indexes.contains("index_pasteboardHistories_on_files_updateAt"))
+            #expect(indexes.contains("index_pasteboardHistories_on_textSync_updateAt"))
+        }
+
+        try database.write { database in
+            try database.execute(
+                sql: "INSERT INTO pasteboardHistoryOCRJobs (pasteboardHistoryID, priority, enqueuedAt) VALUES ('image', 0, 1)"
+            )
+            try database.execute(sql: "DELETE FROM pasteboardHistories WHERE id = 'image'")
+            let jobCount = try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM pasteboardHistoryOCRJobs")
+            #expect(jobCount == 0)
+        }
+    }
+
     @Test
     func registeredMigrationsAddSyncMetadata() throws {
         let database = try DatabaseQueue()

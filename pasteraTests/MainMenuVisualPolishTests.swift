@@ -12,6 +12,22 @@ import Testing
 @Suite(.serialized)
 struct MainMenuVisualPolishTests {
     @Test
+    func ocrActivityRailUsesFixedHeightAndRealQueueStates() {
+        let view = MainMenuOCRActivityView(frame: NSRect(x: 0, y: 0, width: 280, height: 32))
+        #expect(MainMenuOCRActivityView.height == 32)
+
+        view.render(.indexing(remaining: 12))
+        #expect(!view.isHidden)
+        #expect(view.accessibilityLabel() == String(localized: "Recognizing image text"))
+        #expect(view.accessibilityValue() as? String == String.localizedStringWithFormat(
+            String(localized: "%lld items remaining"), 12
+        ))
+
+        view.render(.idle)
+        #expect(view.isHidden)
+    }
+
+    @Test
     func mainMenuFoundationUsesConfiguredOpacity() throws {
         let suiteName = "MainMenuVisualPolishTests.opacity.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

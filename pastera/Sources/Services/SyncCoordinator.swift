@@ -121,6 +121,7 @@ enum SyncCoordinatorError: LocalizedError {
 }
 
 final class UserDefaultsSyncSettingsStore {
+    static let didChangeNotification = Notification.Name("PasteraSyncSettingsDidChange")
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = AppEnvironment.current.defaults) {
@@ -156,32 +157,39 @@ final class UserDefaultsSyncSettingsStore {
         } else {
             defaults.removeObject(forKey: Constants.UserDefaults.syncRootPath)
         }
+        notifyChange()
     }
 
     func setHistoryUploadEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncHistoryUploadEnabled)
         updateDerivedFileScopes()
+        notifyChange()
     }
 
     func setSnippetUploadEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncSnippetUploadEnabled)
+        notifyChange()
     }
 
     func setFileUploadEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncFileUploadEnabled)
+        notifyChange()
     }
 
     func setHistoryImportEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncHistoryImportEnabled)
         updateDerivedFileScopes()
+        notifyChange()
     }
 
     func setSnippetImportEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncSnippetImportEnabled)
+        notifyChange()
     }
 
     func setFileImportEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Constants.UserDefaults.syncFileImportEnabled)
+        notifyChange()
     }
 
     func setFileTypeEnabled(_ type: PasteboardAvailableType, enabled: Bool) {
@@ -189,6 +197,7 @@ final class UserDefaultsSyncSettingsStore {
         states[type.rawValue] = NSNumber(value: enabled)
         defaults.set(states, forKey: Constants.UserDefaults.syncFileTypes)
         updateDerivedFileScopes()
+        notifyChange()
     }
 
     private func maxSyncedFileBytes() -> Int {
@@ -200,6 +209,10 @@ final class UserDefaultsSyncSettingsStore {
     private func syncedFileLimitPerDevice() -> Int {
         let value = defaults.integer(forKey: Constants.UserDefaults.syncedFileLimitPerDevice)
         return value > 0 ? min(value, 10) : 10
+    }
+
+    private func notifyChange() {
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: defaults)
     }
 
     private func fileAssetTypes() -> Set<PasteboardAvailableType> {
@@ -363,6 +376,15 @@ struct SyncDefaultFolderResolver {
 }
 
 final class SyncCoordinator {
+    private struct ActivationSignature: Equatable {
+        let rootPath: String?
+        let rootAvailable: Bool
+        let pollInterval: TimeInterval
+        let historyObservationEnabled: Bool
+        let snippetObservationEnabled: Bool
+        let hasEnabledWork: Bool
+        let vaultCanSync: Bool
+    }
     enum Reason {
         case startup
         case timer
@@ -382,7 +404,10 @@ final class SyncCoordinator {
     private let passwordVaultStoreProvider: () -> PasswordVaultStore
     private let queue: DispatchQueue
     private var timer: DispatchSourceTimer?
-    private var cancellables = Set<AnyCancellable>()
+    private var historyObservation: AnyCancellable?
+    private var snippetObservation: AnyCancellable?
+    private var configurationObservation: AnyCancellable?
+    private var activationSignature: ActivationSignature?
     private var lastHistoryExportSignature: HistoryWindowSignature?
     private var importedHistorySnapshotStates = [String: HistoryRemoteSnapshotState]()
 
@@ -422,15 +447,53 @@ final class SyncCoordinator {
     }
 
     func start() {
+        configurationObservation = NotificationCenter.default.publisher(
+            for: UserDefaultsSyncSettingsStore.didChangeNotification
+        )
+        .sink { [weak self] _ in self?.reloadConfiguration() }
+        reloadConfiguration()
         syncNow(reason: .startup)
-        installTimer()
-        observeLocalChanges()
     }
 
     func stop() {
         timer?.cancel()
         timer = nil
-        cancellables.removeAll()
+        historyObservation = nil
+        snippetObservation = nil
+        configurationObservation = nil
+        activationSignature = nil
+    }
+
+    func reloadConfiguration() {
+        queue.async { [weak self] in self?.applyConfiguration() }
+    }
+
+    private func applyConfiguration() {
+        let settings = settingsProvider()
+        let rootAvailable = settings.rootURL.map { FileManager.default.fileExists(atPath: $0.path) } == true
+        let vaultStore = passwordVaultStoreProvider()
+        let vaultCanSync = vaultStore.state == .unlocked
+            || { if case .readOnlyWarning = vaultStore.state { return true }; return false }()
+        let signature = ActivationSignature(
+            rootPath: settings.rootURL?.standardizedFileURL.path,
+            rootAvailable: rootAvailable,
+            pollInterval: settings.pollInterval,
+            historyObservationEnabled: settings.historyUploadEnabled || settings.fileUploadEnabled,
+            snippetObservationEnabled: settings.snippetUploadEnabled,
+            hasEnabledWork: settings.hasEnabledWork,
+            vaultCanSync: vaultCanSync
+        )
+        guard signature != activationSignature else { return }
+        activationSignature = signature
+        guard rootAvailable, settings.hasEnabledWork || vaultCanSync else {
+            timer?.cancel()
+            timer = nil
+            historyObservation = nil
+            snippetObservation = nil
+            return
+        }
+        installTimer()
+        observeLocalChanges(settings: settings)
     }
 
     func syncNow(reason: Reason, wait: Bool = false) {
@@ -460,22 +523,25 @@ final class SyncCoordinator {
         self.timer = timer
     }
 
-    private func observeLocalChanges() {
-        historyRepository.observeTextSyncCandidateChanges(currentDeviceID: currentDeviceID)
-            .dropFirst()
-            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.syncNow(reason: .localChange)
-            }
-            .store(in: &cancellables)
+    private func observeLocalChanges(settings: SyncSettings) {
+        historyObservation = nil
+        if settings.historyUploadEnabled || settings.fileUploadEnabled {
+            let publisher = settings.fileUploadEnabled
+                ? historyRepository.observeHistoryChanges()
+                : historyRepository.observeTextSyncCandidateChanges(currentDeviceID: currentDeviceID)
+            historyObservation = publisher
+                .dropFirst()
+                .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+                .sink { [weak self] _ in self?.syncNow(reason: .localChange) }
+        }
 
-        snippetRepository.observeFolderDetails()
-            .dropFirst()
-            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.syncNow(reason: .localChange)
-            }
-            .store(in: &cancellables)
+        snippetObservation = nil
+        if settings.snippetUploadEnabled {
+            snippetObservation = snippetRepository.observeFolderDetails()
+                .dropFirst()
+                .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+                .sink { [weak self] _ in self?.syncNow(reason: .localChange) }
+        }
     }
 
     private func performSync(reason: Reason) {

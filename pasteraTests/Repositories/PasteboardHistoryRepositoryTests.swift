@@ -204,7 +204,6 @@ struct ClipServiceCaptureTests {
 
         #expect(repository.savedContents.count == 1)
         #expect(ocrIndexer.enqueuedHistoryIDs == repository.savedIDs)
-        #expect(ocrIndexer.enqueuedContents == repository.savedContents)
     }
 }
 
@@ -761,6 +760,35 @@ struct PasteboardHistoryOCRSearchTests {
     let repository = PasteboardHistoryRepository()
 
     @Test
+    func ocrCandidateIDsAreMissingImagesNewestFirstAndLimited() throws {
+        let olderContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .red, size: NSSize(width: 8, height: 8)))
+        )
+        let indexedContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .green, size: NSSize(width: 8, height: 8)))
+        )
+        let newerContent = try #require(
+            PasteboardContent(image: NSImage.create(with: .blue, size: NSSize(width: 8, height: 8)))
+        )
+        let olderID = PasteboardHistory.ID(rawValue: "older-image")
+        let indexedID = PasteboardHistory.ID(rawValue: "indexed-image")
+        let newerID = PasteboardHistory.ID(rawValue: "newer-image")
+        repository.save(id: olderID, content: olderContent, updateAt: 1)
+        repository.save(id: indexedID, content: indexedContent, updateAt: 2)
+        repository.save(id: newerID, content: newerContent, updateAt: 3)
+        #expect(repository.upsertOCRText(
+            historyID: indexedID,
+            sourceHash: "indexed-source",
+            recognizedText: "indexed",
+            updatedAt: 4
+        ))
+
+        #expect(repository.fetchOCRIndexingCandidateIDs(limit: 1) == [newerID])
+        #expect(repository.fetchOCRIndexingCandidateIDs(limit: 10) == [newerID, olderID])
+        #expect(repository.fetchOCRIndexingCandidateIDs(limit: 0).isEmpty)
+    }
+
+    @Test
     func imageOCRTextParticipatesInPlainSearchAndImageTypeFiltering() throws {
         let imageContent = try #require(
             PasteboardContent(image: NSImage.create(with: .blue, size: NSSize(width: 24, height: 16)))
@@ -882,7 +910,7 @@ struct PasteboardHistoryOCRSearchTests {
         )
         repository.save(id: imageID, content: imageContent, updateAt: 1)
 
-        indexer.enqueueIndexing(historyID: imageID, content: imageContent)
+        indexer.enqueueIndexing(historyID: imageID)
 
         let matches = try repository.searchHistoryDetails(
             query: HistorySearchQuery(text: "通过", mode: .plain),
@@ -958,8 +986,8 @@ struct PasteboardHistoryOCRSearchTests {
         repository.save(id: firstID, content: imageContent, updateAt: 1)
         repository.save(id: secondID, content: imageContent, updateAt: 2)
 
-        indexer.enqueueIndexing(historyID: firstID, content: imageContent)
-        indexer.enqueueIndexing(historyID: secondID, content: imageContent)
+        indexer.enqueueIndexing(historyID: firstID)
+        indexer.enqueueIndexing(historyID: secondID)
 
         #expect(repository.fetchOCRText(historyID: firstID)?.recognizedText == "reused recognized text")
         #expect(repository.fetchOCRText(historyID: secondID)?.recognizedText == "reused recognized text")
@@ -984,7 +1012,7 @@ struct PasteboardHistoryOCRSearchTests {
         )
         repository.save(id: imageID, content: imageContent, updateAt: 1)
 
-        indexer.enqueueIndexing(historyID: imageID, content: imageContent)
+        indexer.enqueueIndexing(historyID: imageID)
 
         let ocrText = try #require(repository.fetchOCRText(historyID: imageID))
         #expect(ocrText.recognizedText.utf16.count == PasteboardHistoryOCRTextLimits.maxRecognizedTextLength)
@@ -1019,6 +1047,57 @@ struct PasteboardHistoryOCRSearchTests {
     }
 
     @Test
+    func ocrBackfillMaterializesOneHistoryPerSchedulerTurn() throws {
+        let content = try #require(
+            PasteboardContent(image: NSImage.create(with: .cyan, size: NSSize(width: 24, height: 16)))
+        )
+        let ids = (1...3).map { PasteboardHistory.ID(rawValue: "backfill-\($0)") }
+        let repository = RecordingPasteboardHistoryRepository()
+        repository.ocrCandidateIDs = ids
+        repository.contentsByID = Dictionary(uniqueKeysWithValues: ids.map { ($0, content) })
+        let scheduler = ControlledOCRScheduler()
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: FakeImageTextRecognizer(result: "indexed"),
+            scheduler: scheduler.schedule
+        )
+
+        indexer.backfillMissingImageOCR(limit: 200)
+
+        #expect(repository.fetchedContentIDs.isEmpty)
+        scheduler.runNext()
+        #expect(repository.fetchedContentIDs == [ids[0]])
+        scheduler.runNext()
+        #expect(repository.fetchedContentIDs == Array(ids.prefix(2)))
+        scheduler.runNext()
+        #expect(repository.fetchedContentIDs == ids)
+    }
+
+    @Test
+    func repeatedOCRBackfillCallsShareOneConsumer() throws {
+        let content = try #require(
+            PasteboardContent(image: NSImage.create(with: .purple, size: NSSize(width: 24, height: 16)))
+        )
+        let id = PasteboardHistory.ID(rawValue: "single-backfill")
+        let repository = RecordingPasteboardHistoryRepository()
+        repository.ocrCandidateIDs = [id]
+        repository.contentsByID = [id: content]
+        let scheduler = ControlledOCRScheduler()
+        let indexer = PasteboardHistoryOCRIndexer(
+            repository: repository,
+            recognizer: FakeImageTextRecognizer(result: "indexed"),
+            scheduler: scheduler.schedule
+        )
+
+        indexer.backfillMissingImageOCR(limit: 200)
+        indexer.backfillMissingImageOCR(limit: 200)
+        scheduler.runAll()
+
+        #expect(repository.ocrCandidateQueryCount == 1)
+        #expect(repository.fetchedContentIDs == [id])
+    }
+
+    @Test
     func ocrIndexerDeletesOCRTextForNonImageContentAndIgnoresRecognizerFailure() throws {
         let textContent = PasteboardContent("not image")
         let textID = PasteboardHistory.ID(rawValue: textContent.hash)
@@ -1041,8 +1120,8 @@ struct PasteboardHistoryOCRSearchTests {
         )
         repository.save(id: failingImageID, content: failingImageContent, updateAt: 2)
 
-        indexer.enqueueIndexing(historyID: textID, content: textContent)
-        indexer.enqueueIndexing(historyID: failingImageID, content: failingImageContent)
+        indexer.enqueueIndexing(historyID: textID)
+        indexer.enqueueIndexing(historyID: failingImageID)
 
         #expect(repository.fetchOCRText(historyID: textID) == nil)
         #expect(repository.fetchOCRText(historyID: failingImageID) == nil)
@@ -1069,7 +1148,7 @@ struct PasteboardHistoryOCRSearchTests {
         )
         repository.save(id: imageID, content: imageContent, updateAt: 1)
 
-        indexer.enqueueIndexing(historyID: imageID, content: imageContent)
+        indexer.enqueueIndexing(historyID: imageID)
 
         #expect(repository.fetchOCRText(historyID: imageID) == nil)
         #expect(recognizer.recognizedImageDataCount == 0)
@@ -1804,6 +1883,11 @@ struct PasteboardHistoryFilePreviewTests {
 private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepositoryProtocol {
     private(set) var savedContents = [PasteboardContent]()
     private(set) var savedIDs = [PasteboardHistory.ID]()
+    var ocrCandidateIDs = [PasteboardHistory.ID]()
+    var contentsByID = [PasteboardHistory.ID: PasteboardContent]()
+    private(set) var fetchedContentIDs = [PasteboardHistory.ID]()
+    private(set) var ocrCandidateQueryCount = 0
+    private var ocrJobs = [(id: PasteboardHistory.ID, priority: Int, enqueuedAt: Int)]()
 
     func observeHistories() -> AnyPublisher<[PasteboardHistory], Never> {
         Just([]).eraseToAnyPublisher()
@@ -1830,7 +1914,33 @@ private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepos
     }
 
     func fetchHistory(id: PasteboardHistory.ID) -> PasteboardHistory? { nil }
-    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? { nil }
+
+    func fetchContent(id: PasteboardHistory.ID) -> PasteboardContent? {
+        fetchedContentIDs.append(id)
+        return contentsByID[id]
+    }
+
+    func fetchOCRIndexingCandidateIDs(limit: Int) -> [PasteboardHistory.ID] {
+        ocrCandidateQueryCount += 1
+        return Array(ocrCandidateIDs.prefix(max(0, limit)))
+    }
+
+    func enqueueOCRJob(historyID: PasteboardHistory.ID, priority: Int, enqueuedAt: Int) {
+        ocrJobs.removeAll { $0.id == historyID }
+        ocrJobs.append((historyID, priority, enqueuedAt))
+    }
+
+    func fetchNextOCRJobID() -> PasteboardHistory.ID? {
+        ocrJobs.sorted {
+            $0.priority == $1.priority ? $0.enqueuedAt > $1.enqueuedAt : $0.priority > $1.priority
+        }.first?.id
+    }
+
+    func deleteOCRJob(historyID: PasteboardHistory.ID) {
+        ocrJobs.removeAll { $0.id == historyID }
+    }
+
+    func countOCRJobs() -> Int { ocrJobs.count }
 
     func save(id: PasteboardHistory.ID, content: PasteboardContent, updateAt: Int) {
         savedIDs.append(id)
@@ -1843,14 +1953,31 @@ private final class RecordingPasteboardHistoryRepository: PasteboardHistoryRepos
     func pruneHistories(settings: HistoryRetentionSettings) {}
 }
 
+private final class ControlledOCRScheduler {
+    private(set) var pending = [() -> Void]()
+
+    func schedule(_ work: @escaping () -> Void) {
+        pending.append(work)
+    }
+
+    func runNext() {
+        guard !pending.isEmpty else { return }
+        pending.removeFirst()()
+    }
+
+    func runAll() {
+        while !pending.isEmpty {
+            runNext()
+        }
+    }
+}
+
 private final class RecordingOCRIndexer: PasteboardHistoryOCRIndexing {
     private(set) var enqueuedHistoryIDs = [PasteboardHistory.ID]()
-    private(set) var enqueuedContents = [PasteboardContent]()
     private(set) var backfillLimits = [Int]()
 
-    func enqueueIndexing(historyID: PasteboardHistory.ID, content: PasteboardContent) {
+    func enqueueIndexing(historyID: PasteboardHistory.ID) {
         enqueuedHistoryIDs.append(historyID)
-        enqueuedContents.append(content)
     }
 
     func backfillMissingImageOCR(limit: Int) {

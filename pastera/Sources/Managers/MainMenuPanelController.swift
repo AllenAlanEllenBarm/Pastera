@@ -424,6 +424,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var keepsVisibleWhileChildPanelOpen = false
     private var pasteTargetContext: PasteTargetContext?
     private weak var oneDriveStatusButton: MainMenuOneDriveStatusButton?
+    private var ocrActivity: PasteboardHistoryOCRActivity = .idle
+    private var ocrActivityObserver: NSObjectProtocol?
 
     private var usesEmbeddedContent: Bool {
         historyDataSource != nil || snippetDataSource != nil || passwordVaultDataSource != nil
@@ -462,6 +464,19 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         self.onOpenPreferences = onOpenPreferences
         self.onCloseChildPanels = onCloseChildPanels
         super.init()
+        ocrActivityObserver = NotificationCenter.default.addObserver(
+            forName: PasteboardHistoryOCRIndexer.activityDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let activity = notification.object as? PasteboardHistoryOCRActivity else { return }
+            self?.ocrActivity = activity
+            self?.reloadContentIfVisible()
+        }
+    }
+
+    deinit {
+        if let ocrActivityObserver { NotificationCenter.default.removeObserver(ocrActivityObserver) }
     }
 
     func show(at screenPoint: NSPoint, pinned: Bool = false, pasteTargetContext: PasteTargetContext? = nil) {
@@ -841,6 +856,7 @@ extension MainMenuPanelController {
             addSearchField(frame: searchFieldFrame)
         }
         addToolbar(frame: footerDockFrame)
+        addOCRActivityViewIfNeeded()
     }
 
     private var fixedToolbarY: CGFloat {
@@ -902,13 +918,35 @@ extension MainMenuPanelController {
 
     private var contentBlockFrame: NSRect {
         let top = headerBlockFrame.minY - MainMenuPanelLayout.sectionGap
-        let bottom = footerDockFrame.maxY + MainMenuPanelLayout.sectionGap
+        let bottom = footerDockFrame.maxY + MainMenuPanelLayout.sectionGap + ocrActivityHeight
         return NSRect(
             x: MainMenuPanelLayout.sectionInset,
             y: bottom,
             width: MainMenuPanelLayout.width - MainMenuPanelLayout.sectionInset * 2,
             height: max(0, top - bottom)
         )
+    }
+
+    private var ocrActivityHeight: CGFloat {
+        ocrActivity == .idle ? 0 : MainMenuOCRActivityView.height + MainMenuPanelLayout.sectionGap
+    }
+
+    private func addOCRActivityViewIfNeeded() {
+        guard ocrActivity != .idle else { return }
+        let view = MainMenuOCRActivityView(frame: NSRect(
+            x: MainMenuPanelLayout.sectionInset,
+            y: footerDockFrame.maxY + MainMenuPanelLayout.sectionGap,
+            width: MainMenuPanelLayout.width - MainMenuPanelLayout.sectionInset * 2,
+            height: MainMenuOCRActivityView.height
+        ))
+        view.render(ocrActivity)
+        contentView.addSubview(view)
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        view.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            view.animator().alphaValue = 1
+        }
     }
 
     private func applyCurrentContentSize() {
