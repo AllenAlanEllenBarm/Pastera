@@ -36,114 +36,138 @@ protocol VaultAgentGrantStoring {
     func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) throws
 }
 
+final class VaultAgentSerialExecutor {
+    private let queue: DispatchQueue
+    private let key = DispatchSpecificKey<UUID>()
+    private let value = UUID()
+
+    init(queue: DispatchQueue) {
+        self.queue = queue
+        queue.setSpecific(key: key, value: value)
+    }
+
+    func sync<T>(_ work: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: key) == value {
+            return try work()
+        }
+        return try queue.sync(execute: work)
+    }
+
+    func async(_ work: @escaping () -> Void) {
+        queue.async(execute: work)
+    }
+}
+
 final class VaultAgentAuthorizationPolicy {
     static let idleLifetime: TimeInterval = 7 * 24 * 60 * 60
     static let hardLifetime: TimeInterval = 30 * 24 * 60 * 60
 
     private let store: VaultAgentGrantStoring
-    private let lock = NSLock()
+    private let executor: VaultAgentSerialExecutor
     private var grants: [VaultAgentClientKind: VaultAgentGrant]
 
-    init(store: VaultAgentGrantStoring) throws {
+    init(store: VaultAgentGrantStoring, executor: VaultAgentSerialExecutor) throws {
         self.store = store
-        grants = try store.load()
+        self.executor = executor
+        grants = try executor.sync { try store.load() }
     }
 
     @discardableResult
     func authorize(identity: VaultAgentPeerIdentity, authenticatedAt: Date) throws -> VaultAgentGrant {
-        lock.lock()
-        defer { lock.unlock() }
-        let grant = VaultAgentGrant(
-            identity: identity,
-            authenticatedAt: authenticatedAt,
-            idleExpiresAt: authenticatedAt.addingTimeInterval(Self.idleLifetime),
-            hardExpiresAt: authenticatedAt.addingTimeInterval(Self.hardLifetime),
-            lastSensitiveUseAt: nil,
-            revokedAt: nil
-        )
-        var updated = grants
-        updated[identity.client] = grant
-        try store.save(updated)
-        grants = updated
-        return grant
+        try executor.sync {
+            guard Self.isValid(identity) else {
+                throw VaultAgentErrorCode.authorizationRequired
+            }
+            let grant = VaultAgentGrant(
+                identity: identity,
+                authenticatedAt: authenticatedAt,
+                idleExpiresAt: authenticatedAt.addingTimeInterval(Self.idleLifetime),
+                hardExpiresAt: authenticatedAt.addingTimeInterval(Self.hardLifetime),
+                lastSensitiveUseAt: nil,
+                revokedAt: nil
+            )
+            var updated = grants
+            updated[identity.client] = grant
+            try store.save(updated)
+            grants = updated
+            return grant
+        }
     }
 
     func decision(for identity: VaultAgentPeerIdentity, at date: Date) -> VaultAgentGrantDecision {
-        lock.lock()
-        defer { lock.unlock() }
-        return decision(for: identity, at: date, in: grants)
+        executor.sync { decision(for: identity, at: date, in: grants) }
     }
 
     func recordSensitiveSuccess(for identity: VaultAgentPeerIdentity, at date: Date) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard case .allowed(var grant) = decision(for: identity, at: date, in: grants) else { return }
-        grant.lastSensitiveUseAt = date
-        grant.idleExpiresAt = min(
-            date.addingTimeInterval(Self.idleLifetime),
-            grant.hardExpiresAt
-        )
-        var updated = grants
-        updated[identity.client] = grant
-        try store.save(updated)
-        grants = updated
-    }
-
-    func recordInteractiveSensitiveSuccess(at date: Date) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        var updated = grants
-        var changed = false
-        for (client, existingGrant) in grants {
-            guard case .allowed(var grant) = decision(
-                for: existingGrant.identity,
-                at: date,
-                in: grants
-            ) else { continue }
+        try executor.sync {
+            guard case .allowed(var grant) = decision(for: identity, at: date, in: grants) else { return }
             grant.lastSensitiveUseAt = date
             grant.idleExpiresAt = min(
                 date.addingTimeInterval(Self.idleLifetime),
                 grant.hardExpiresAt
             )
-            updated[client] = grant
-            changed = true
+            var updated = grants
+            updated[identity.client] = grant
+            try store.save(updated)
+            grants = updated
         }
-        guard changed else { return }
-        try store.save(updated)
-        grants = updated
+    }
+
+    func recordInteractiveSensitiveSuccess(at date: Date) throws {
+        try executor.sync {
+            var updated = grants
+            var changed = false
+            for (client, existingGrant) in grants {
+                guard case .allowed(var grant) = decision(
+                    for: existingGrant.identity,
+                    at: date,
+                    in: grants
+                ) else { continue }
+                grant.lastSensitiveUseAt = date
+                grant.idleExpiresAt = min(
+                    date.addingTimeInterval(Self.idleLifetime),
+                    grant.hardExpiresAt
+                )
+                updated[client] = grant
+                changed = true
+            }
+            guard changed else { return }
+            try store.save(updated)
+            grants = updated
+        }
     }
 
     func recordFailure(for _: VaultAgentPeerIdentity, at _: Date) {}
 
     func revoke(_ client: VaultAgentClientKind, at date: Date) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard var grant = grants[client] else { return }
-        grant.revokedAt = date
-        var updated = grants
-        updated[client] = grant
-        try store.save(updated)
-        grants = updated
+        try executor.sync {
+            guard var grant = grants[client] else { return }
+            grant.revokedAt = date
+            var updated = grants
+            updated[client] = grant
+            try store.save(updated)
+            grants = updated
+        }
     }
 
     func revokeAll(at date: Date) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !grants.isEmpty else { return }
-        var updated = grants
-        for client in updated.keys {
-            updated[client]?.revokedAt = date
+        try executor.sync {
+            guard !grants.isEmpty else { return }
+            var updated = grants
+            for client in updated.keys {
+                updated[client]?.revokedAt = date
+            }
+            try store.save(updated)
+            grants = updated
         }
-        try store.save(updated)
-        grants = updated
     }
 
     func validGrantCount(at date: Date) -> Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return grants.values.reduce(into: 0) { count, grant in
-            if case .allowed = decision(for: grant.identity, at: date, in: grants) {
-                count += 1
+        executor.sync {
+            grants.values.reduce(into: 0) { count, grant in
+                if case .allowed = decision(for: grant.identity, at: date, in: grants) {
+                    count += 1
+                }
             }
         }
     }
@@ -165,9 +189,31 @@ final class VaultAgentAuthorizationPolicy {
         _ stored: VaultAgentPeerIdentity,
         _ current: VaultAgentPeerIdentity
     ) -> Bool {
-        guard stored.client == current.client,
+        guard isValid(stored),
+              isValid(current),
+              stored.client == current.client,
               signaturesMatch(stored, current, useHost: false) else { return false }
         return hostsMatch(stored, current)
+    }
+
+    static func isValid(_ identity: VaultAgentPeerIdentity) -> Bool {
+        guard !identity.helperRequirement.isEmpty,
+              !identity.helperPath.isEmpty,
+              !identity.helperIsAdHoc || identity.helperCDHash != nil else { return false }
+        switch identity.client {
+        case .codex, .claude:
+            guard let hostRequirement = identity.hostRequirement,
+                  !hostRequirement.isEmpty,
+                  let hostIsAdHoc = identity.hostIsAdHoc,
+                  let hostPath = identity.hostPath,
+                  !hostPath.isEmpty else { return false }
+            return !hostIsAdHoc || identity.hostCDHash != nil
+        case .cli:
+            return identity.hostRequirement == nil &&
+                identity.hostCDHash == nil &&
+                identity.hostIsAdHoc == nil &&
+                identity.hostPath == nil
+        }
     }
 
     private static func hostsMatch(

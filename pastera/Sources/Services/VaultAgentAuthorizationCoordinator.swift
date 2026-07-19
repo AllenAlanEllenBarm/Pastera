@@ -41,22 +41,32 @@ final class VaultAgentAuthorizationCoordinator {
         var completions: [Completion]
     }
 
+    private final class InFlightLifetime {
+        var coordinator: VaultAgentAuthorizationCoordinator?
+
+        init(_ coordinator: VaultAgentAuthorizationCoordinator) {
+            self.coordinator = coordinator
+        }
+    }
+
     private static let cooldownLifetime: TimeInterval = 24 * 60 * 60
     private static let cooldownKeyPrefix = "Pastera.Agent.AuthorizationCooldownUntil.v1."
 
+    private let executor: VaultAgentSerialExecutor
     private let policy: VaultAgentAuthorizationPolicy
     private let authenticator: VaultAgentIdentityAuthenticating
     private let defaults: UserDefaults
     private let now: () -> Date
-    private let queue = DispatchQueue(label: "com.pastera-app.Pastera.vault-agent.authorization")
     private var pending: [VaultAgentClientKind: PendingAuthorization] = [:]
 
     init(
+        executor: VaultAgentSerialExecutor,
         policy: VaultAgentAuthorizationPolicy,
         authenticator: VaultAgentIdentityAuthenticating = SystemVaultAgentIdentityAuthenticator(),
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
+        self.executor = executor
         self.policy = policy
         self.authenticator = authenticator
         self.defaults = defaults
@@ -68,7 +78,11 @@ final class VaultAgentAuthorizationCoordinator {
         trigger: Trigger,
         completion: @escaping (Result<VaultAgentGrant, VaultAgentErrorCode>) -> Void
     ) {
-        queue.async { [self] in
+        executor.async { [self] in
+            guard VaultAgentAuthorizationPolicy.isValid(identity) else {
+                deliver(.failure(.authorizationRequired), to: [completion])
+                return
+            }
             if trigger == .automaticFirstRequest,
                let cooldownUntil = defaults.object(forKey: cooldownKey(identity.client)) as? Date,
                now() < cooldownUntil {
@@ -90,9 +104,12 @@ final class VaultAgentAuthorizationCoordinator {
                 trigger: trigger,
                 completions: [completion]
             )
-            authenticator.authenticate { [weak self] result in
-                self?.queue.async {
-                    self?.finishAuthentication(for: identity.client, result: result)
+            let lifetime = InFlightLifetime(self)
+            authenticator.authenticate { [executor] result in
+                executor.async {
+                    guard let coordinator = lifetime.coordinator else { return }
+                    coordinator.finishAuthentication(for: identity.client, result: result)
+                    lifetime.coordinator = nil
                 }
             }
         }

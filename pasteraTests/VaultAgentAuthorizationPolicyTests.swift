@@ -11,7 +11,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func sensitiveSuccessSlidesIdleExpiry() throws {
         let start = Date(timeIntervalSince1970: 10_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let identity = VaultAgentPeerIdentity.testValue(client: .codex)
         try policy.authorize(identity: identity, authenticatedAt: start)
 
@@ -27,7 +27,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func nonSensitiveActionsDoNotRenew() throws {
         let start = Date(timeIntervalSince1970: 20_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let identity = VaultAgentPeerIdentity.testValue(client: .claude)
         try policy.authorize(identity: identity, authenticatedAt: start)
         let original = try #require(store.grants[.claude])
@@ -43,7 +43,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func expiryBoundaries() throws {
         let start = Date(timeIntervalSince1970: 30_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let identity = VaultAgentPeerIdentity.testValue(client: .cli)
         let grant = try policy.authorize(identity: identity, authenticatedAt: start)
 
@@ -66,7 +66,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func formalIdentityMatching() throws {
         let start = Date(timeIntervalSince1970: 40_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let original = VaultAgentPeerIdentity.testValue(client: .codex, helperCDHash: Data([0x01]))
         let grant = try policy.authorize(identity: original, authenticatedAt: start)
 
@@ -90,7 +90,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func adHocIdentityMatching() throws {
         let start = Date(timeIntervalSince1970: 50_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let original = VaultAgentPeerIdentity.adHocWithHost(client: .claude, hash: Data([0x11]))
         let grant = try policy.authorize(identity: original, authenticatedAt: start)
 
@@ -109,7 +109,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func revocationAndValidCount() throws {
         let start = Date(timeIntervalSince1970: 60_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let codex = VaultAgentPeerIdentity.testValue(client: .codex)
         let claude = VaultAgentPeerIdentity.testValue(client: .claude)
         try policy.authorize(identity: codex, authenticatedAt: start)
@@ -129,7 +129,7 @@ struct VaultAgentAuthorizationPolicyTests {
     func interactiveSensitiveSuccess() throws {
         let start = Date(timeIntervalSince1970: 70_000)
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         try policy.authorize(identity: .testValue(client: .codex), authenticatedAt: start)
         try policy.authorize(identity: .testValue(client: .claude), authenticatedAt: start)
         try policy.authorize(identity: .testValue(client: .cli), authenticatedAt: start.addingTimeInterval(-8 * 24 * 60 * 60))
@@ -146,7 +146,7 @@ struct VaultAgentAuthorizationPolicyTests {
     @Test("failed persistence never advances in-memory authorization")
     func persistenceFailureIsAtomic() throws {
         let store = InMemoryVaultAgentGrantStore()
-        let policy = try VaultAgentAuthorizationPolicy(store: store)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         let identity = VaultAgentPeerIdentity.testValue(client: .codex)
         store.saveError = VaultAgentErrorCode.automationUnlockUnavailable
 
@@ -169,8 +169,65 @@ struct VaultAgentAuthorizationPolicyTests {
         store.loadError = VaultAgentErrorCode.automationUnlockUnavailable
 
         #expect(throws: VaultAgentErrorCode.automationUnlockUnavailable) {
-            try VaultAgentAuthorizationPolicy(store: store)
+            try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
         }
+    }
+
+    @Test("invalid identity tuples never create grants")
+    func invalidIdentityTuplesAreRejected() throws {
+        let invalidIdentities = [
+            VaultAgentPeerIdentity.withHost(client: .codex, helperRequirement: ""),
+            VaultAgentPeerIdentity.withHost(client: .codex, helperPath: ""),
+            VaultAgentPeerIdentity.withHost(client: .codex, helperCDHash: nil, helperIsAdHoc: true),
+            VaultAgentPeerIdentity.withoutHost(client: .codex),
+            VaultAgentPeerIdentity.withHost(client: .codex, hostRequirement: nil),
+            VaultAgentPeerIdentity.withHost(client: .codex, hostRequirement: ""),
+            VaultAgentPeerIdentity.withHost(client: .claude, hostPath: nil),
+            VaultAgentPeerIdentity.withHost(client: .claude, hostPath: ""),
+            VaultAgentPeerIdentity.withHost(client: .claude, hostIsAdHoc: nil),
+            VaultAgentPeerIdentity.withHost(client: .claude, hostCDHash: nil, hostIsAdHoc: true),
+            VaultAgentPeerIdentity.withHost(client: .cli),
+            VaultAgentPeerIdentity.withHost(client: .cli, hostRequirement: nil)
+        ]
+
+        for identity in invalidIdentities {
+            let store = InMemoryVaultAgentGrantStore()
+            let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
+            #expect(throws: VaultAgentErrorCode.authorizationRequired) {
+                try policy.authorize(identity: identity, authenticatedAt: Date(timeIntervalSince1970: 80_000))
+            }
+            #expect(store.grants.isEmpty)
+            #expect(!VaultAgentAuthorizationPolicy.identitiesMatch(identity, identity))
+        }
+    }
+
+    @Test("host identity changes are rejected while CLI without host is legal")
+    func hostIdentityIntegrity() throws {
+        let start = Date(timeIntervalSince1970: 81_000)
+        let store = InMemoryVaultAgentGrantStore()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
+        let formal = VaultAgentPeerIdentity.withHost(client: .codex)
+        let grant = try policy.authorize(identity: formal, authenticatedAt: start)
+
+        #expect(policy.decision(for: .withHost(client: .codex, hostRequirement: "identifier changed"), at: start) == .identityChanged)
+        #expect(policy.decision(for: .withHost(client: .codex, hostPath: "/tmp/Host"), at: start) == .identityChanged)
+        #expect(policy.decision(for: .withHost(client: .codex, hostIsAdHoc: true), at: start) == .identityChanged)
+        #expect(policy.decision(for: .withHost(client: .codex, hostCDHash: Data([0x99])), at: start) == .allowed(grant))
+
+        let adHoc = VaultAgentPeerIdentity.withHost(
+            client: .claude,
+            hostCDHash: Data([0x20]),
+            hostIsAdHoc: true
+        )
+        try policy.authorize(identity: adHoc, authenticatedAt: start)
+        #expect(policy.decision(for: .withHost(
+            client: .claude,
+            hostCDHash: Data([0x21]),
+            hostIsAdHoc: true
+        ), at: start) == .identityChanged)
+
+        let cli = VaultAgentPeerIdentity.testValue(client: .cli)
+        #expect(try policy.authorize(identity: cli, authenticatedAt: start).identity == cli)
     }
 }
 
@@ -318,6 +375,71 @@ extension VaultAgentAuthorizationPolicyTests {
         }
         #expect(isMain)
     }
+
+    @Test("invalid identity is rejected before authentication")
+    func invalidIdentitySkipsAuthentication() async throws {
+        let harness = try CoordinatorHarness()
+        harness.authenticator.automaticResult = .success(())
+
+        #expect(await harness.request(.withoutHost(client: .codex)) == .failure(.authorizationRequired))
+        #expect(harness.authenticator.callCount == 0)
+        #expect(harness.policy.validGrantCount(at: harness.now()) == 0)
+    }
+
+    @Test("in-flight authentication retains coordinator and completes exactly once")
+    func inFlightAuthenticationRetainsCoordinator() async throws {
+        let store = InMemoryVaultAgentGrantStore()
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let authenticator = VaultAgentAuthenticatorProbe()
+        let suiteName = "VaultAgentAuthorizationLifecycleTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let identity = VaultAgentPeerIdentity.testValue(client: .codex)
+        let results = AuthorizationResultProbe()
+        var coordinator: VaultAgentAuthorizationCoordinator? = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            authenticator: authenticator,
+            defaults: defaults,
+            now: { Date(timeIntervalSince1970: 100_000) }
+        )
+
+        coordinator?.authorize(identity: identity, trigger: .automaticFirstRequest) {
+            results.append($0, isMainThread: Thread.isMainThread)
+        }
+        try await waitUntil { authenticator.callCount == 1 }
+        coordinator = nil
+        authenticator.completeAll(.success(()))
+        try await waitUntil { results.count == 1 }
+        authenticator.completeAll(.success(()))
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(results.count == 1)
+        #expect(results.allOnMainThread)
+        #expect(results.first?.isSuccess == true)
+        #expect(store.grants[.codex]?.identity == identity)
+    }
+
+    @Test("policy store access uses injected serial executor and supports reentry")
+    func policyUsesInjectedExecutor() throws {
+        let queue = DispatchQueue(label: "test.pastera.password-vault.store.probe")
+        let key = DispatchSpecificKey<String>()
+        queue.setSpecific(key: key, value: "vault-store")
+        let executor = VaultAgentSerialExecutor(queue: queue)
+        let store = ExecutorProbeGrantStore(key: key)
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let identity = VaultAgentPeerIdentity.testValue(client: .cli)
+
+        try executor.sync {
+            try policy.authorize(identity: identity, authenticatedAt: Date(timeIntervalSince1970: 101_000))
+        }
+
+        #expect(store.events == [
+            .init(operation: "load", queueValue: "vault-store", isMainThread: false),
+            .init(operation: "save", queueValue: "vault-store", isMainThread: false)
+        ])
+    }
 }
 
 private final class InMemoryVaultAgentGrantStore: VaultAgentGrantStoring {
@@ -336,6 +458,40 @@ private final class InMemoryVaultAgentGrantStore: VaultAgentGrantStoring {
     }
 }
 
+private final class ExecutorProbeGrantStore: VaultAgentGrantStoring {
+    struct Event: Equatable {
+        let operation: String
+        let queueValue: String?
+        let isMainThread: Bool
+    }
+
+    private let key: DispatchSpecificKey<String>
+    private(set) var events: [Event] = []
+    private var grants: [VaultAgentClientKind: VaultAgentGrant] = [:]
+
+    init(key: DispatchSpecificKey<String>) {
+        self.key = key
+    }
+
+    func load() -> [VaultAgentClientKind: VaultAgentGrant] {
+        record("load")
+        return grants
+    }
+
+    func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) {
+        record("save")
+        self.grants = grants
+    }
+
+    private func record(_ operation: String) {
+        events.append(.init(
+            operation: operation,
+            queueValue: DispatchQueue.getSpecific(key: key),
+            isMainThread: Thread.isMainThread
+        ))
+    }
+}
+
 private extension VaultAgentPeerIdentity {
     static func testValue(
         client: VaultAgentClientKind,
@@ -343,9 +499,32 @@ private extension VaultAgentPeerIdentity {
         helperIsAdHoc: Bool = false,
         helperPath: String = "/Applications/Pastera.app/Contents/MacOS/pastera-agent-helper"
     ) -> VaultAgentPeerIdentity {
+        if client != .cli {
+            return withHost(
+                client: client,
+                helperCDHash: helperCDHash,
+                helperIsAdHoc: helperIsAdHoc,
+                helperPath: helperPath
+            )
+        }
+        return withoutHost(
+            client: client,
+            helperCDHash: helperCDHash,
+            helperIsAdHoc: helperIsAdHoc,
+            helperPath: helperPath
+        )
+    }
+
+    static func withoutHost(
+        client: VaultAgentClientKind,
+        helperRequirement: String = "identifier com.pastera.agent-helper",
+        helperCDHash: Data? = Data([0x01]),
+        helperIsAdHoc: Bool = false,
+        helperPath: String = "/Applications/Pastera.app/Contents/MacOS/pastera-agent-helper"
+    ) -> VaultAgentPeerIdentity {
         VaultAgentPeerIdentity(
             client: client,
-            helperRequirement: "identifier com.pastera.agent-helper",
+            helperRequirement: helperRequirement,
             helperCDHash: helperCDHash,
             helperIsAdHoc: helperIsAdHoc,
             helperPath: helperPath,
@@ -353,6 +532,30 @@ private extension VaultAgentPeerIdentity {
             hostCDHash: nil,
             hostIsAdHoc: nil,
             hostPath: nil
+        )
+    }
+
+    static func withHost(
+        client: VaultAgentClientKind,
+        helperRequirement: String = "identifier com.pastera.agent-helper",
+        helperCDHash: Data? = Data([0x01]),
+        helperIsAdHoc: Bool = false,
+        helperPath: String = "/Applications/Pastera.app/Contents/MacOS/pastera-agent-helper",
+        hostRequirement: String? = "identifier com.example.host",
+        hostCDHash: Data? = Data([0x10]),
+        hostIsAdHoc: Bool? = false,
+        hostPath: String? = "/Applications/Host.app/Contents/MacOS/Host"
+    ) -> VaultAgentPeerIdentity {
+        VaultAgentPeerIdentity(
+            client: client,
+            helperRequirement: helperRequirement,
+            helperCDHash: helperCDHash,
+            helperIsAdHoc: helperIsAdHoc,
+            helperPath: helperPath,
+            hostRequirement: hostRequirement,
+            hostCDHash: hostCDHash,
+            hostIsAdHoc: hostIsAdHoc,
+            hostPath: hostPath
         )
     }
 
@@ -447,12 +650,14 @@ private final class CoordinatorHarness {
     let defaultsSuiteName: String
     let now = { Date(timeIntervalSince1970: 100_000) }
     let coordinator: VaultAgentAuthorizationCoordinator
+    let executor = VaultAgentSerialExecutor.testValue()
 
     init() throws {
-        policy = try VaultAgentAuthorizationPolicy(store: store)
+        policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
         defaultsSuiteName = "VaultAgentAuthorizationTests.\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: defaultsSuiteName))
         coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
             policy: policy,
             authenticator: authenticator,
             defaults: defaults,
@@ -478,6 +683,37 @@ private final class CoordinatorHarness {
     }
 }
 
+private extension VaultAgentSerialExecutor {
+    static func testValue() -> VaultAgentSerialExecutor {
+        VaultAgentSerialExecutor(queue: DispatchQueue(label: "test.pastera.password-vault.store"))
+    }
+}
+
+private final class AuthorizationResultProbe {
+    private let lock = NSLock()
+    private var values: [Result<VaultAgentGrant, VaultAgentErrorCode>] = []
+    private var mainThreadValues: [Bool] = []
+
+    var count: Int {
+        lock.withLock { values.count }
+    }
+
+    var first: Result<VaultAgentGrant, VaultAgentErrorCode>? {
+        lock.withLock { values.first }
+    }
+
+    var allOnMainThread: Bool {
+        lock.withLock { mainThreadValues.allSatisfy { $0 } }
+    }
+
+    func append(_ value: Result<VaultAgentGrant, VaultAgentErrorCode>, isMainThread: Bool) {
+        lock.withLock {
+            values.append(value)
+            mainThreadValues.append(isMainThread)
+        }
+    }
+}
+
 private extension Result where Success == VaultAgentGrant, Failure == VaultAgentErrorCode {
     var isSuccess: Bool {
         if case .success = self { return true }
@@ -494,3 +730,4 @@ private func waitUntil(
     }
     throw VaultAgentErrorCode.brokerUnavailable
 }
+// swiftlint:disable:this file_length
