@@ -469,6 +469,23 @@ public enum VaultAgentLimits {
     public static let maximumPageSize = 50
     public static let defaultPageSize = 20
     public static let maximumResponseBytes = 32 * 1_024
+    public static let maximumMetadataFieldBytes = 2_048
+    public static let maximumCursorBytes = 2_048
+    public static let maximumTokenBytes = 1_024
+    public static let maximumPathBytes = 4_096
+    public static let maximumCommandArguments = 64
+    public static let maximumCommandArgumentBytes = 4_096
+    public static let maximumErrorMessageBytes = 1_024
+    public static let maximumSecretBytes = 16 * 1_024
+    public static let publicKeyBytes = 32
+    public static let nonceBytes = 32
+}
+
+public enum VaultAgentProtocolError: Error, Equatable, Sendable {
+    case frameTooLarge
+    case malformedFrame
+    case limitExceeded
+    case invalidValue
 }
 
 public enum VaultAgentClientKind: String, Codable, CaseIterable, Sendable {
@@ -550,7 +567,70 @@ public enum VaultAgentOperation: Codable, Equatable, Sendable {
 }
 ~~~
 
-`VaultAgentErrorCode` 必须完整包含外部契约列出的 14 个稳定错误码；`VaultAgentResponseBody` 只能是 `success(VaultAgentResponsePayload)` 或 `failure(VaultAgentFailure)`，禁止同时出现 data 和 error。`VaultAgentResponsePayload` 只允许 `empty`、`status`、`search`、`entry`、`ticket`、`secretDelivery` 与 `integrationStatus`。
+错误与响应类型使用以下精确表面：
+
+~~~swift
+public enum VaultAgentErrorCode: String, Codable, CaseIterable, Sendable {
+    case authorizationRequired = "AUTHORIZATION_REQUIRED"
+    case grantExpired = "GRANT_EXPIRED"
+    case grantRevoked = "GRANT_REVOKED"
+    case vaultNotConfigured = "VAULT_NOT_CONFIGURED"
+    case automationUnlockUnavailable = "AUTOMATION_UNLOCK_UNAVAILABLE"
+    case brokerUnavailable = "BROKER_UNAVAILABLE"
+    case vaultBusy = "VAULT_BUSY"
+    case rateLimited = "RATE_LIMITED"
+    case entryNotFound = "ENTRY_NOT_FOUND"
+    case targetUnavailable = "TARGET_UNAVAILABLE"
+    case ticketExpired = "TICKET_EXPIRED"
+    case ticketUsed = "TICKET_USED"
+    case protocolMismatch = "PROTOCOL_MISMATCH"
+    case invalidRequest = "INVALID_REQUEST"
+}
+
+public struct VaultAgentFailure: Codable, Equatable, Sendable {
+    public let code: VaultAgentErrorCode
+    public let message: String
+    public let retryable: Bool
+    public let retryAfterMilliseconds: Int?
+}
+
+public struct VaultAgentHostIntegrationStatus: Codable, Equatable, Sendable {
+    public let host: VaultAgentHostKind
+    public let hostDetected: Bool
+    public let hostExecutablePath: String?
+    public let mcpInstalled: Bool
+    public let skillInstalled: Bool
+    public let installedVersion: String?
+    public let authorized: Bool
+    public let idleExpiresAt: Date?
+    public let hardExpiresAt: Date?
+}
+
+public struct VaultAgentIntegrationStatus: Codable, Equatable, Sendable {
+    public let hosts: [VaultAgentHostIntegrationStatus]
+}
+
+public enum VaultAgentResponsePayload: Codable, Equatable, Sendable {
+    case empty
+    case status(VaultAgentStatus)
+    case search(VaultAgentSearchPage)
+    case entry(VaultAgentEntryMetadata)
+    case ticket(VaultAgentPreparedTicket)
+    case secretDelivery(VaultAgentSecretDelivery)
+    case integrationStatus(VaultAgentIntegrationStatus)
+}
+
+public enum VaultAgentResponseBody: Codable, Equatable, Sendable {
+    case success(VaultAgentResponsePayload)
+    case failure(VaultAgentFailure)
+}
+~~~
+
+`VaultAgentFailure.retryAfterMilliseconds` 编码键固定为 `retry_after_ms`。`VaultAgentResponseBody` 只能是上述互斥的 `success` 或 `failure`，禁止同时出现 data 和 error。
+
+所有带关联值的 wire enum 禁止依赖 Swift 自动合成的关联值布局，必须手写稳定 `Codable`：顶层使用字符串 `type` 鉴别器，可选关联对象使用 `payload`。`VaultAgentOperation` 的 type 固定为 `status`、`search`、`get`、`paste`、`copy`、`prepare_exec`、`redeem_ticket`、`complete_ticket`、`integration_status`、`integration_install`、`integration_uninstall`；`VaultAgentResponseBody` 固定为 `success`/`failure`；`VaultAgentResponsePayload` 固定为 `empty`、`status`、`search`、`entry`、`ticket`、`secret_delivery`、`integration_status`。未知 type 必须抛出 `VaultAgentProtocolError.invalidValue`。
+
+外部解码后执行以下边界：query ≤ 512 UTF-8 bytes；limit 为 1...50；每页 entries ≤ 50；metadata 每个字符串 ≤ 2,048 bytes；cursor ≤ 2,048 bytes；ticket token ≤ 1,024 bytes；Host 路径与每个命令参数 ≤ 4,096 bytes；命令参数 ≤ 64 个；错误消息 ≤ 1,024 bytes；秘密 bytes ≤ 16 KiB；集成 Host 行 ≤ 2；握手 public key 与 nonce 分别严格为 32 bytes；ciphertext 与任何完整 frame ≤ 65,536 bytes。响应编码结果还必须 ≤ 32 KiB。越界统一抛出 `VaultAgentProtocolError.limitExceeded`；结构/枚举无效抛出 `invalidValue`，长度前缀不一致抛出 `malformedFrame`。
 
 - [ ] **Step 4：实现长度前缀、握手与加密帧 DTO**
 
@@ -580,6 +660,14 @@ public struct VaultAgentRequestEnvelope: Codable, Equatable, Sendable {
     public let sequence: UInt64
     public let requestID: UUID
     public let operation: VaultAgentOperation
+}
+
+public struct VaultAgentResponseEnvelope: Codable, Equatable, Sendable {
+    public let protocolVersion: Int
+    public let connectionID: UUID
+    public let sequence: UInt64
+    public let requestID: UUID
+    public let body: VaultAgentResponseBody
 }
 
 public enum VaultAgentFrameCodec {
@@ -1893,7 +1981,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付记录（Delivery Record）
 
 - Actual Implementation：无；当前记录包含已确认设计和可执行 TDD 任务，尚未开始业务实现。
-- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。
+- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
 - Verification：计划阶段已经完成仓库/源码、Target/测试入口检查，以及 Codex、Claude Code、MCP Swift SDK `0.12.1` 官方文档与源码 API 核查；任务完整性、接口依赖和章节契约自检完成后提交，尚未开始实现验证。
 - Remaining Risks：无人值守解锁、Helper 身份、目标命令泄漏、IPC 正确性和 MCP SDK 1.0 前兼容性仍是实施风险，均已映射到验收与回滚。
