@@ -1015,14 +1015,17 @@ git commit -m "feat(agent): 增加密码箱无人值守恢复"
 **Interfaces：**
 
 - Consumes: `VaultAgentClientKind`、`VaultAgentSecretField`、`VaultAgentInjectionMode`。
-- Produces: `VaultAgentTicketStore.issue/redeem/complete`、`VaultAgentRateLimiter.check` 和只能接收结构化低敏字段的 `VaultAgentAuditLogger.record`。
+- Produces: `VaultAgentTicketStore.issue/redeem/complete/removeAll`、`VaultAgentRateLimiter.check` 和只能接收结构化低敏字段的 `VaultAgentAuditLogger.record/records`。
 
 - [ ] **Step 1：写票据原子兑换和限流恢复失败测试**
 
 ~~~swift
 @Test("only one concurrent redeemer receives a receipt")
 func ticketCanBeRedeemedOnce() async throws {
-    let store = VaultAgentTicketStore(randomBytes: { Data(repeating: 7, count: 32) })
+    let store = VaultAgentTicketStore(
+        randomBytes: { Data(repeating: 7, count: 32) },
+        commandBuilder: { _, _, token in ["adapter", "exec", "--ticket", token] }
+    )
     let issued = try store.issue(
         client: .codex,
         entryID: UUID(),
@@ -1086,14 +1089,21 @@ final class VaultAgentTicketStore {
     ) throws -> (receiptID: UUID, binding: VaultAgentTicketBinding)
 
     func complete(receiptID: UUID, client: VaultAgentClientKind, now: Date) throws -> VaultAgentTicketBinding
+    func removeAll()
 }
 ~~~
 
-内存中只保存 token 的 SHA-256、binding 和时间，不保存密码。`redeem` 原子删除 pending token 并创建 5 秒 receipt；只有适配器成功写入子进程 pipe 后调用 `complete`，授权续期发生在 `complete` 成功之后。
+构造器注入 `randomBytes` 和 `commandBuilder(client, mode, token)`；生产随机源必须用 `SecRandomCopyBytes` 一次生成恰好 32 bytes，token 使用无 padding 的 base64url。随机源失败、长度不符、连续 3 次 hash 碰撞或 command 超过 Task 1 的参数/UTF-8 上限时，必须安全失败且不插入 pending 状态。`commandBuilder` 只负责生成返回给调用方的 Host 专属适配器模板，command 不进入 Store；Task 6 Runtime 负责提供真实构造器。
+
+内存中只保存 token 的 SHA-256、binding 和时间，不保存 token 明文、command 或密码。全部状态由一把锁保护；`redeem` 在同一临界区校验 token hash、client、mode 和 `now < expiresAt`，随后原子删除 pending token并创建 5 秒 receipt。binding 不匹配不得消费正确客户端的票据；已成功兑换的 token hash 保留最多 30 秒的有界 used tombstone，使重放稳定返回 `used`。`complete` 同样绑定 receipt/client，并在同一临界区删除 receipt；只有适配器成功写入子进程 pipe 后调用 `complete`，授权续期发生在 `complete` 成功之后。过期判断统一使用 `now >= expiresAt`；访问时惰性清理，不启动 Timer。pending、receipt 和 tombstone 分别硬限制为 128、128、256，达到上限先惰性清理，仍满则安全失败；`removeAll` 原子清空三类状态，供 Task 6 撤销生命周期调用。
+
+`VaultAgentTicketError` 使用可比较的 `expired`、`used`、`bindingMismatch`、`capacityExceeded`、`randomnessUnavailable`、`invalidCommand`；receipt 不存在、重复 complete 和已兑换 token 都返回 `used`，已知 pending/receipt 到期返回 `expired`。后续 Broker 只把 expired/used 映射到同名稳定 wire error，其他内部错误不得原样外泄。
 
 - [ ] **Step 4：实现无轮询限流与审计 Ring Buffer**
 
-`VaultAgentRateLimiter` 使用按客户端/类别的时间戳 deque，访问时清理；metadata 60/minute，paste/copy 10/minute，ticket 10/minute。`VaultAgentAuditLogger` API 固定为：
+`VaultAgentRateLimiter` 使用按客户端/类别的时间戳 deque，访问时清理；`VaultAgentRateLimitCategory` 固定为 `metadata`、`directSecret`、`ticket`，对应 metadata 60/minute，paste/copy 10/minute，ticket 10/minute。窗口为半开区间 `(at - 60s, at]`，因此恰好 60 秒前的记录先清除；拒绝不追加时间戳。`VaultAgentRateLimitError` 携带向上取整且限制在 `1...60_000` 的 `retryAfterMilliseconds`，供 Broker 映射 `RATE_LIMITED`。全部 bucket 由一把锁保护，bucket 总数固定为 3 clients × 3 categories；不启动 Timer，调用时惰性清理。
+
+`VaultAgentAuditAction` 固定覆盖 `status/search/get/paste/copy/prepareExec/redeemTicket/completeTicket/integrationStatus/integrationInstall/integrationUninstall`；`VaultAgentLatencyBucket` 固定为 `under10ms/under50ms/under200ms/under1s/atLeast1s`。`VaultAgentAuditLogger` API 固定为：
 
 ~~~swift
 func record(
@@ -1104,15 +1114,19 @@ func record(
     latencyBucket: VaultAgentLatencyBucket,
     at: Date
 )
+
+func records(at now: Date) -> [VaultAgentAuditRecord]
 ~~~
 
-条目 ID 使用本机 Keychain 审计密钥做 HMAC-SHA256；API 不接受 title、folder、website、username、query、ticket、command 或 path。Ring Buffer 最多 1,000 条并在写入/读取时清理 30 天前记录，不启动 Timer。
+`VaultAgentAuditKeyStore` 使用独立 Keychain service `com.pastera-app.Pastera.password-vault.agent-audit.v1`、account `PasteraVaultAgentAuditKey`、32-byte 随机值、`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 和 `kSecAttrSynchronizable = false`；update/read/add 的并发与错误语义复用 Task 3 已确认模式，但不得读取其他密码箱 Keychain 条目。Logger 初始化时加载或创建一次密钥；失败则初始化失败，禁止改用固定 key 或保存原始 UUID。
+
+条目 ID 使用该密钥对 UUID 规范字符串做 HMAC-SHA256，并编码为无 padding base64url；`VaultAgentAuditRecord` 只包含 client、action、可选 `entryDigest`、可选稳定 result code、latency bucket 和 timestamp。API 不接受 title、folder、website、username、query、ticket、command、参数、原始错误或 path。Ring Buffer 是进程内存结构，最多 1,000 条；写入/读取时过滤 `timestamp <= now - 30 days`，再只保留最新 1,000 条，不持久化、不启动 Timer。Logger 的记录和读取由锁保护；返回值为副本，编码键集合必须只能来自上述低敏字段。
 
 - [ ] **Step 5：补审计编码哨兵测试并运行**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentTicketStoreTests`。
 
-Expected：PASS；序列化审计记录不包含哨兵标题、查询、用户名、票据或命令。
+Expected：PASS；覆盖并发原子兑换、client/mode/receipt 绑定、30 秒与 5 秒边界、重放 tombstone、容量上限、随机/command 安全失败、`removeAll`、每客户端/类别限流隔离、窗口边界和 retry-after；审计覆盖精确 Keychain 属性、UUID HMAC 不可逆表示、1,000/30 天边界、并发记录以及编码键白名单。序列化审计记录不得包含原始 UUID，也不得存在可承载哨兵标题、查询、用户名、票据或命令的字段。
 
 - [ ] **Step 6：提交安全基础能力**
 
@@ -2013,7 +2027,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付记录（Delivery Record）
 
 - Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知。Task 4–12 尚未实现。
-- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。
+- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。Task 4 预检发现票据 command 生成、随机/碰撞失败、重放错误、容量边界、限流 retry-after 和审计密钥/记录 Schema 尚未固定；已明确 command builder 只生成响应且不落 Store、三类有界票据状态、严格滑动窗口、独立 Keychain HMAC key 和进程内 1,000 条 Ring Buffer，未改变 30 秒票据、5 秒 receipt 或外部操作范围。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
 - Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：无人值守解锁、Helper 身份、目标命令泄漏、IPC 正确性和 MCP SDK 1.0 前兼容性仍是实施风险，均已映射到验收与回滚。
