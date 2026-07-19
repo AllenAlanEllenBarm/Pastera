@@ -14,6 +14,145 @@ enum PasswordVaultState: Equatable {
     case failed(String)
 }
 
+final class VaultSessionLockRequest {
+    private weak var controller: VaultSessionController?
+    private let generation: UInt64
+
+    fileprivate init(controller: VaultSessionController, generation: UInt64) {
+        self.controller = controller
+        self.generation = generation
+    }
+    func consume() -> Bool { controller?.consumeLockRequest(generation: generation) == true }
+}
+final class VaultSessionController {
+    typealias TimerScheduler = (TimeInterval, @escaping () -> Void) -> (() -> Void)
+
+    static let allowedTimeouts: [TimeInterval] = [60, 300, 900, 1_800]
+
+    private let timeoutProvider: () -> TimeInterval
+    private let timerScheduler: TimerScheduler
+    private let lockRequestAction: (VaultSessionLockRequest) -> Void
+    private let stateLock = NSLock()
+    private var generation: UInt64 = 0
+    private var pendingLockGeneration: UInt64?
+    private var cancelScheduledTimer: (() -> Void)?
+    private var observers = [(NotificationCenter, NSObjectProtocol)]()
+
+    convenience init(
+        timeoutProvider: @escaping () -> TimeInterval = VaultSessionController.defaultTimeout,
+        notificationCenter: NotificationCenter? = nil,
+        timerScheduler: @escaping TimerScheduler = VaultSessionController.scheduleOnMain,
+        lockAction: @escaping () -> Void
+    ) {
+        self.init(
+            timeoutProvider: timeoutProvider,
+            notificationCenter: notificationCenter,
+            timerScheduler: timerScheduler,
+            lockRequestAction: { request in
+                guard request.consume() else { return }
+                lockAction()
+            }
+        )
+    }
+    init(
+        timeoutProvider: @escaping () -> TimeInterval = VaultSessionController.defaultTimeout,
+        notificationCenter: NotificationCenter? = nil,
+        timerScheduler: @escaping TimerScheduler = VaultSessionController.scheduleOnMain,
+        lockRequestAction: @escaping (VaultSessionLockRequest) -> Void
+    ) {
+        self.timeoutProvider = timeoutProvider
+        self.timerScheduler = timerScheduler
+        self.lockRequestAction = lockRequestAction
+        let workspaceCenter = notificationCenter ?? NSWorkspace.shared.notificationCenter
+        func observe(_ center: NotificationCenter, _ name: Notification.Name) -> (NotificationCenter, NSObjectProtocol) {
+            (center, center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.lockNow() })
+        }
+        observers = [
+            observe(workspaceCenter, NSWorkspace.willSleepNotification),
+            observe(workspaceCenter, NSWorkspace.sessionDidResignActiveNotification),
+            observe(NotificationCenter.default, NSApplication.willTerminateNotification)
+        ]
+    }
+    deinit {
+        cancel()
+        observers.forEach { center, observer in center.removeObserver(observer) }
+    }
+    func touch() {
+        let token: UInt64
+        let previousCancellation: (() -> Void)?
+        stateLock.lock()
+        generation &+= 1
+        token = generation
+        pendingLockGeneration = nil
+        previousCancellation = cancelScheduledTimer
+        cancelScheduledTimer = nil
+        stateLock.unlock()
+        previousCancellation?()
+        let cancellation = timerScheduler(timeoutProvider()) { [weak self] in
+            self?.emitLockRequest(generation: token)
+        }
+        stateLock.lock()
+        let shouldKeepTimer = generation == token && pendingLockGeneration == nil
+        if shouldKeepTimer { cancelScheduledTimer = cancellation }
+        stateLock.unlock()
+        if !shouldKeepTimer { cancellation() }
+    }
+    func cancel() {
+        let cancellation: (() -> Void)?
+        stateLock.lock()
+        generation &+= 1
+        pendingLockGeneration = nil
+        cancellation = cancelScheduledTimer
+        cancelScheduledTimer = nil
+        stateLock.unlock()
+        cancellation?()
+    }
+    func lockNow() {
+        stateLock.lock()
+        let currentGeneration = generation
+        stateLock.unlock()
+        emitLockRequest(generation: currentGeneration)
+    }
+    private func emitLockRequest(generation requestedGeneration: UInt64) {
+        let cancellation: (() -> Void)?
+        stateLock.lock()
+        guard generation == requestedGeneration, pendingLockGeneration == nil else {
+            stateLock.unlock()
+            return
+        }
+        pendingLockGeneration = requestedGeneration
+        cancellation = cancelScheduledTimer
+        cancelScheduledTimer = nil
+        stateLock.unlock()
+        cancellation?()
+        lockRequestAction(VaultSessionLockRequest(controller: self, generation: requestedGeneration))
+    }
+    fileprivate func consumeLockRequest(generation requestedGeneration: UInt64) -> Bool {
+        let cancellation: (() -> Void)?
+        stateLock.lock()
+        guard generation == requestedGeneration, pendingLockGeneration == requestedGeneration else {
+            stateLock.unlock()
+            return false
+        }
+        generation &+= 1
+        pendingLockGeneration = nil
+        cancellation = cancelScheduledTimer
+        cancelScheduledTimer = nil
+        stateLock.unlock()
+        cancellation?()
+        return true
+    }
+    private static func defaultTimeout() -> TimeInterval {
+        let value = UserDefaults.standard.double(forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
+        return allowedTimeouts.contains(value) ? value : 300
+    }
+    private static func scheduleOnMain(timeout: TimeInterval, action: @escaping () -> Void) -> () -> Void {
+        let item = DispatchWorkItem(block: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: item)
+        return { item.cancel() }
+    }
+}
+
 struct PasswordVaultViewState: Equatable {
     var state: PasswordVaultState
     var folders: [PasswordVaultFolder]
@@ -33,61 +172,6 @@ struct PasswordVaultViewState: Equatable {
         self.entries = entries
         self.isBusy = isBusy
         self.error = error
-    }
-}
-
-final class VaultSessionController {
-    static let allowedTimeouts: [TimeInterval] = [60, 300, 900, 1_800]
-
-    private let timeoutProvider: () -> TimeInterval
-    private let lockAction: () -> Void
-    private var lockWorkItem: DispatchWorkItem?
-    private var observers = [NSObjectProtocol]()
-
-    init(
-        timeoutProvider: @escaping () -> TimeInterval = {
-            let value = UserDefaults.standard.double(forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
-            return VaultSessionController.allowedTimeouts.contains(value) ? value : 300
-        },
-        notificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
-        lockAction: @escaping () -> Void
-    ) {
-        self.timeoutProvider = timeoutProvider
-        self.lockAction = lockAction
-        observers = [
-            notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.lockNow()
-            },
-            notificationCenter.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.lockNow()
-            },
-            NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.lockNow()
-            }
-        ]
-    }
-
-    deinit {
-        lockWorkItem?.cancel()
-        observers.forEach { NotificationCenter.default.removeObserver($0) }
-        observers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
-    }
-
-    func touch() {
-        lockWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.lockNow() }
-        lockWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeoutProvider(), execute: item)
-    }
-
-    func cancel() {
-        lockWorkItem?.cancel()
-        lockWorkItem = nil
-    }
-
-    func lockNow() {
-        cancel()
-        lockAction()
     }
 }
 
@@ -364,6 +448,7 @@ protocol PasswordVaultStore {
     func enableAutomationUnlock() throws
     func unlockForAutomation() throws
     func disableAutomationUnlock() throws
+    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor)
     func lock()
     func reloadAndMerge() throws
     func listFolders() throws -> [PasswordVaultFolder]
@@ -390,6 +475,7 @@ extension PasswordVaultStore {
     func enableAutomationUnlock() throws { throw PasswordVaultError.keychainUnavailable }
     func unlockForAutomation() throws { throw PasswordVaultError.keychainUnavailable }
     func disableAutomationUnlock() throws {}
+    func bindSessionExecutor(_ executor: VaultAgentSerialExecutor) {}
     func lock() {}
     func reloadAndMerge() throws {}
 }

@@ -75,6 +75,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         self.pasteService = pasteService
         self.storeQueue = storeQueue
         vaultAgentExecutor = VaultAgentSerialExecutor(queue: storeQueue)
+        store.bindSessionExecutor(vaultAgentExecutor)
         snapshot = PasswordVaultViewState(state: store.state)
         vaultAgentExecutor.sync { refreshSnapshotFromStore() }
     }
@@ -384,7 +385,12 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
                 if case let .failure(value) = result { error = value } else { error = nil }
                 self.refreshSnapshotFromStore(error: error)
             }
-            DispatchQueue.main.async { completion(result) }
+            DispatchQueue.main.async { [weak self] in
+                if refreshSnapshot {
+                    self?.onChange?()
+                }
+                completion(result)
+            }
         }
     }
 

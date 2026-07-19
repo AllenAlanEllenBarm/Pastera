@@ -59,13 +59,21 @@ final class MenuManager: NSObject {
     var historyPanelController: HistoryBrowserPanelController?
     var snippetPanelController: SnippetBrowserPanelController?
     var mainMenuPanelController: MainMenuPanelController?
-    private(set) lazy var passwordVaultUIController: PasswordVaultUIController = {
-        let controller = AppEnvironment.current.passwordVaultUIController
-        controller.onChange = { [weak self] in
-            self?.mainMenuPanelController?.reloadContentIfVisible()
+    private let passwordVaultUIControllerProvider: () -> PasswordVaultUIController = {
+        AppEnvironment.current.passwordVaultUIController
+    }
+    private weak var installedPasswordVaultUIController: PasswordVaultUIController?
+    var passwordVaultUIController: PasswordVaultUIController {
+        let controller = passwordVaultUIControllerProvider()
+        if installedPasswordVaultUIController !== controller {
+            installedPasswordVaultUIController?.onChange = nil
+            installedPasswordVaultUIController = controller
+            controller.onChange = { [weak self] in
+                self?.mainMenuPanelController?.reloadContentIfVisible()
+            }
         }
         return controller
-    }()
+    }
     private lazy var historyEditorWindowController = HistoryEditorWindowController(
         repository: pasteboardHistoryRepository,
         ocrIndexer: pasteboardHistoryOCRIndexer,
