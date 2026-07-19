@@ -416,7 +416,7 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 - Consumes: 无；这是 App、Broker、CLI 与 MCP Helper 的协议根。
 - Produces: `VaultAgentClientKind`、`VaultAgentOperation`、`VaultAgentResponseBody`、`VaultAgentErrorCode`、`VaultAgentRequestEnvelope`、`VaultAgentResponseEnvelope`、握手/加密帧 DTO 和固定资源上限。
 
-- [ ] **Step 1：先写协议表面失败测试**
+- [x] **Step 1：先写协议表面失败测试**
 
 ~~~swift
 import Foundation
@@ -451,13 +451,13 @@ struct VaultAgentProtocolTests {
 }
 ~~~
 
-- [ ] **Step 2：运行测试并确认因模块和类型尚不存在而失败**
+- [x] **Step 2：运行测试并确认因模块和类型尚不存在而失败**
 
 Run：在统一命令末尾追加 `-only-testing:pasteraAgentTests/VaultAgentProtocolTests`。
 
 Expected：FAIL，错误明确指向 `no such module 'PasteraAgentProtocol'` 或首个缺失类型。
 
-- [ ] **Step 3：增加静态库 Target 并实现精确协议类型**
+- [x] **Step 3：增加静态库 Target 并实现精确协议类型**
 
 `PasteraAgentProtocol` 与 `pasteraAgentTests` 使用 `SWIFT_VERSION = 6.0`；现有 `pastera` 与 `pasteraTests` 保持 `5.0`。公开类型按以下表面实现，所有集合和字符串在解码后再次做上限校验：
 
@@ -632,7 +632,7 @@ public enum VaultAgentResponseBody: Codable, Equatable, Sendable {
 
 外部解码后执行以下边界：query ≤ 512 UTF-8 bytes；limit 为 1...50；每页 entries ≤ 50；metadata 每个字符串 ≤ 2,048 bytes；cursor ≤ 2,048 bytes；ticket token ≤ 1,024 bytes；Host 路径与每个命令参数 ≤ 4,096 bytes；命令参数 ≤ 64 个；错误消息 ≤ 1,024 bytes；秘密 bytes ≤ 16 KiB；集成 Host 行 ≤ 2；握手 public key 与 nonce 分别严格为 32 bytes；ciphertext 与任何完整 frame ≤ 65,536 bytes。响应编码结果还必须 ≤ 32 KiB。越界统一抛出 `VaultAgentProtocolError.limitExceeded`；结构/枚举无效抛出 `invalidValue`，长度前缀不一致抛出 `malformedFrame`。
 
-- [ ] **Step 4：实现长度前缀、握手与加密帧 DTO**
+- [x] **Step 4：实现长度前缀、握手与加密帧 DTO**
 
 ~~~swift
 public struct VaultAgentClientHello: Codable, Equatable, Sendable {
@@ -693,13 +693,13 @@ public enum VaultAgentFrameCodec {
 }
 ~~~
 
-- [ ] **Step 5：运行协议测试并验证 App Target 仍可构建**
+- [x] **Step 5：运行协议测试并验证 App Target 仍可构建**
 
 Run：统一命令追加 `-only-testing:pasteraAgentTests/VaultAgentProtocolTests -only-testing:pasteraTests/PasswordVaultStoreTests`。
 
 Expected：PASS，且 `pastera.xcodeproj` 中现有 App Target 的 Swift/部署目标未改变。
 
-- [ ] **Step 6：提交协议闭环**
+- [x] **Step 6：提交协议闭环**
 
 ~~~bash
 git add pastera-agent/Sources/PasteraAgentProtocol pasteraAgentTests/VaultAgentProtocolTests.swift \
