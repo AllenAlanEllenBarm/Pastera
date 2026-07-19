@@ -904,7 +904,7 @@ git commit -m "feat(agent): 增加按应用滑动授权"
 - Consumes: 当前 KDBX `UnlockData.keyDataBytes`、现有交互式 `VaultUnlockKeyStore`、Task 2 的 `VaultAgentSerialExecutor`；有效 Grant 数在 Task 6 Runtime 接线时消费。
 - Produces: `VaultAutomationUnlockKeyStoring`、`PasswordVaultStore.enableAutomationUnlock()`、`unlockForAutomation()`、`disableAutomationUnlock()`、复用现有 store queue 的共享 executor 与单一共享 `PasswordVaultUIController`。
 
-- [ ] **Step 1：写交互式密钥与自动化密钥隔离失败测试**
+- [x] **Step 1：写交互式密钥与自动化密钥隔离失败测试**
 
 ~~~swift
 @Test("automation key restores a locked KDBX without reading the interactive key")
@@ -928,13 +928,13 @@ func automationKeyRestoresLockedStore() throws {
 }
 ~~~
 
-- [ ] **Step 2：运行并确认新协议方法缺失**
+- [x] **Step 2：运行并确认新协议方法缺失**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAutomationUnlockKeyStoreTests -only-testing:pasteraTests/PasswordVaultStoreTests`。
 
 Expected：FAIL，指向 `extra argument 'automationUnlockKeyStore'` 或缺失方法。
 
-- [ ] **Step 3：实现独立 Keychain 条目和 Store 生命周期**
+- [x] **Step 3：实现独立 Keychain 条目和 Store 生命周期**
 
 ~~~swift
 protocol VaultAutomationUnlockKeyStoring {
@@ -954,9 +954,9 @@ extension PasswordVaultStore {
 
 `VaultAutomationUnlockKeyStore` 使用 service `com.pastera-app.Pastera.password-vault.agent-unlock.v1`、account `PasteraVaultAgentUnlock`、32 字节值、`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 与 `kSecAttrSynchronizable = false`；不得使用 `SecAccessControl` 或 `userPresence`。通过独立窄 `VaultAutomationKeychainAccessing` 依赖封装 copy/update/add/delete，生产实现才调用 Security，测试检查真实查询字典。`save` 先 update、仅 `errSecItemNotFound` 时 add，不得先 delete 造成失败窗口；`delete` 接受 success/item-not-found；`containsKey` 不读取数据、不触发 UI。
 
-`KDBXPasswordVaultStore.enableAutomationUnlock` 只能在已解锁且持有 `unlockData` 时将 `keyDataBytes` 的 32 字节局部副本保存，不能读取或覆盖交互式 `VaultUnlockKeyStore`。`unlockForAutomation` 必须先由自动化 Store 校验恰好 32 字节，再构造 `UnlockData(rawKeyData:)`，避免不可信 Keychain 数据触发 precondition；之后复用当前 read/parse/revision/session touch 流程。自动化条目缺失、长度损坏或凭据错误统一保持 `.locked` 并抛 `PasswordVaultError.keychainUnavailable`，后续 Broker 将其稳定映射为 `AUTOMATION_UNLOCK_UNAVAILABLE`；数据库未配置、云目录不可用或数据库本身损坏仍保留现有错误语义。`disableAutomationUnlock` 只删除自动化条目，不删除交互式快速解锁条目，也不主动锁定已解锁数据库。
+`KDBXPasswordVaultStore.enableAutomationUnlock` 只能在 `.unlocked` 或仍持有可读内容的 `.readOnlyWarning` 且确实持有 `unlockData` 时，将 `keyDataBytes` 的 32 字节局部副本保存；仅有残留 `unlockData` 不能通过。它不能读取或覆盖交互式 `VaultUnlockKeyStore`。`unlockForAutomation` 开始时先取消旧 session timer，并清空旧 `content`、`unlockData`、`lastRevision`，再由自动化 Store 校验恰好 32 字节后构造 `UnlockData(rawKeyData:)`，避免不可信 Keychain 数据触发 precondition，也避免失败后出现“state 已 locked 但旧秘密仍可读”。之后复用当前 read/parse/revision/session touch 流程。自动化条目缺失、长度损坏或凭据错误统一保持 `.locked` 并抛 `PasswordVaultError.keychainUnavailable`，后续 Broker 将其稳定映射为 `AUTOMATION_UNLOCK_UNAVAILABLE`；数据库未配置、云目录不可用或数据库本身损坏仍保留现有错误语义。`disableAutomationUnlock` 只删除自动化条目，不删除交互式快速解锁条目，也不主动锁定已解锁数据库。
 
-- [ ] **Step 4：让 UI 与 Broker 共用同一个 Controller/Queue**
+- [x] **Step 4：让 UI 与 Broker 共用同一个 Controller/Queue**
 
 `Environment` 创建一次 `PasswordVaultUIController`，`MenuManager` 改为读取 `AppEnvironment.current.passwordVaultUIController`。在 Controller 上增加窄接口：
 
@@ -978,19 +978,19 @@ protocol PasswordVaultAgentAccess: AnyObject {
 }
 ~~~
 
-Controller 初始化器增加可注入的 `storeQueue`，并在同一实例上创建公开给 App 内部组装使用的 `VaultAgentSerialExecutor`；两者必须包装同一个 queue，不能另建 Broker/授权队列。现有 UI store 操作和以上 Agent 方法都进入该 queue/executor。`ensureReadyForAgent` 只接受当前可读状态或执行 `unlockForAutomation`，不得回退到交互式 quick unlock、主密码 UI 或 `PasswordVaultAuthorizing`。`agentMetadata` 只返回 Store 的 folder/entry 元数据；`agentSecret` 将 username/password 转成局部 UTF-8 `Data` 后立即结束 String 作用域，不缓存、不写 snapshot；`agentPaste` 使用指定 `PasteTargetContext` 调度现有 username/password 粘贴路径，但不得触发交互授权。
+Controller 初始化器增加可注入的 `storeQueue`，并在同一实例上创建公开给 App 内部组装使用的 `VaultAgentSerialExecutor`；两者必须包装同一个 queue，不能另建 Broker/授权队列。Controller 构造时通过新增的窄 `PasswordVaultStore.bindSessionExecutor(_:onStateChange:)` 把同一 executor 和状态变化回调绑定给 KDBX Store；默认协议实现 no-op。`VaultSessionController` 的 timer/通知只产生“请求锁定”事件，KDBX 必须把实际 `lock()` 提交到绑定的 executor，不能在 main queue 直接改 `content/unlockData/state`。Timer 到期请求携带 generation，可由后续成功活动取消；睡眠、session resign 和 terminate 请求属于不可取消系统锁，不得因队列中排在它前面的 metadata/secret 操作调用 `touch()` 而失效。Session timer 自身的 work item/token 状态必须加锁或固定在单一调度边界，取消后的旧 timer 不得晚到锁定新 session。KDBX session lock 或直接 `lock()` 完成后在同一 executor 调用状态变化回调；Controller 在回调中刷新受 `snapshotLock` 保护的 snapshot 并在主队列通知 `onChange`。Controller 公开 `state` 只能读取 snapshot，禁止从主线程直接读正在 store queue 写入的 `store.state`，也禁止为读取状态同步阻塞主线程等待 KDBX queue。现有 UI store 操作和以上 Agent 方法都进入该 queue/executor。`ensureReadyForAgent` 只接受当前可读状态或执行 `unlockForAutomation`，不得回退到交互式 quick unlock、主密码 UI 或 `PasswordVaultAuthorizing`。`agentMetadata` 只返回 Store 的 folder/entry 元数据；`agentSecret` 将 username/password 转成局部 UTF-8 `Data` 后立即结束 String 作用域，不缓存、不写 snapshot；`agentPaste` 使用指定 `PasteTargetContext` 调度现有 username/password 粘贴路径，但不得触发交互授权。`ensureReadyForAgent` 刷新 snapshot 后必须在主队列调用 `onChange`，让已显示的密码箱菜单同步就绪状态。
 
 增加 `onInteractiveSensitiveUse`，只在现有 UI 的 entry 创建、更新、删除、复制密码、粘贴用户名或密码成功后在 store queue 调用一次；失败、Agent 方法、文件夹操作、解锁、搜索/元数据读取都不触发。Task 6 将该回调连接到 Policy 的 `recordInteractiveSensitiveSuccess`。
 
-`Environment` 增加 `passwordVaultUIController`，每个 Environment 只创建一次。默认构造时必须把已经解析出的 `passwordVaultStore`、`secureClipboard` 与 `pasteService` 显式传入 Controller，禁止 Controller 初始化期间递归读取正在构造的 `AppEnvironment.current`。`AppEnvironment.push/replaceCurrent` 允许显式注入 Controller；沿用当前依赖时默认沿用当前 Controller，替换 Store 的测试必须同时显式提供匹配 Controller。`MenuManager` 的 lazy 引用改为取得 `AppEnvironment.current.passwordVaultUIController` 并只安装 `onChange`，不得再调用 `PasswordVaultUIController()` 创建第二实例。
+`Environment` 增加 `passwordVaultUIController`，每个 Environment 只创建一次。默认构造时必须把已经解析出的 `passwordVaultStore`、`secureClipboard` 与 `pasteService` 显式传入 Controller，禁止 Controller 初始化期间递归读取正在构造的 `AppEnvironment.current`。`AppEnvironment.push/replaceCurrent` 允许显式注入 Controller；沿用当前依赖时默认沿用当前 Controller，替换 Store 的测试必须同时显式提供匹配 Controller。`MenuManager` 不得一次性 lazy 缓存某个 Environment 的 Controller；它必须通过当前 Environment provider 取得 `AppEnvironment.current.passwordVaultUIController` 并为当前实例安装 `onChange`，因此已初始化的旧 Manager 经 push/replace/pop 后也始终指向当前 Controller。不得再调用 `PasswordVaultUIController()` 创建第二实例。
 
-- [ ] **Step 5：验证自动锁后恢复、环境注入和旧 UI 行为**
+- [x] **Step 5：验证自动锁后恢复、环境注入和旧 UI 行为**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAutomationUnlockKeyStoreTests -only-testing:pasteraTests/PasswordVaultStoreTests -only-testing:pasteraTests/PasswordVaultMenuTests`。
 
-Expected：PASS；覆盖自动化条目的精确 Keychain 属性、update/add/delete 状态映射、非 32 字节和错误凭据安全失败、禁用不影响交互 key、Controller/Environment/MenuManager 共享实例与 queue、Agent 方法不触发交互认证或交互续期；原有快速解锁仍调用 user-presence Keychain。自动化条目随有效外部授权数量删除的最终生命周期由 Task 6 Runtime 测试完成。
+Expected：PASS；覆盖自动化条目的精确 Keychain 属性、update/add/delete 状态映射、非 32 字节和错误凭据安全失败、禁用不影响交互 key、Controller/Environment/MenuManager 共享实例与 queue、Agent 方法不触发交互认证或交互续期；还必须覆盖从已解锁状态使用错误 automation key 后旧秘密不可读且不能重新 enable、阻塞共享 executor 时 session auto-lock 只能排队、取消 timer 不锁定新 session、系统锁请求不会被其前方已排队 metadata 的 `touch()` 取消、未绑定 Store 保留自动锁、旧 Manager 已初始化后的 push/replace/pop 始终取得当前 Controller、Controller `state` 不再读取 Store，以及 session/Agent ready 刷新后主队列 `onChange`。原有快速解锁仍调用 user-presence Keychain。自动化条目随有效外部授权数量删除的最终生命周期由 Task 6 Runtime 测试完成。
 
-- [ ] **Step 6：提交自动化解锁闭环**
+- [x] **Step 6：提交自动化解锁闭环**
 
 ~~~bash
 git add pastera/Sources/Services/VaultAutomationUnlockKeyStore.swift \
@@ -1999,7 +1999,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付元数据（Delivery Metadata）
 
 - Plan Path：`docs/superpowers/plans/2026-07-19-pastera-vault-cli-skill-mcp.md`
-- Plan Status：`implementation-in-progress-task-2-complete`
+- Plan Status：`implementation-in-progress-task-3-complete`
 - Evidence Profile：`standard`
 - Story ID：未请求、未分配
 - Task IDs：未请求、未分配
@@ -2012,10 +2012,10 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 
 ## 交付记录（Delivery Record）
 
-- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor。Task 3–12 尚未实现。
-- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。
+- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知。Task 4–12 尚未实现。
+- Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
-- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0。CoreSimulator、pkg-config/zlib、linkd 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
+- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：无人值守解锁、Helper 身份、目标命令泄漏、IPC 正确性和 MCP SDK 1.0 前兼容性仍是实施风险，均已映射到验收与回滚。
-- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 3–12，并持续更新本文件复选框与 Delivery Record；Task 3 必须把现有 `PasswordVaultUIController.storeQueue` 接入 Task 2 的共享 executor。
+- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 4–12，并持续更新本文件复选框与 Delivery Record；Task 4 在共享 executor 和已确认授权边界之上实现单次票据、限流与脱敏审计。
 - ZenTao Closeout：不适用；用户未要求禅道操作。
