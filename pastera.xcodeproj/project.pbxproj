@@ -22,6 +22,10 @@
 		A64000000000000000000003 /* VaultAgentTicketStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64000000000000000000004 /* VaultAgentTicketStore.swift */; };
 		A64000000000000000000005 /* VaultAgentRateLimiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64000000000000000000006 /* VaultAgentRateLimiter.swift */; };
 		A64000000000000000000007 /* VaultAgentAuditLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64000000000000000000008 /* VaultAgentAuditLogger.swift */; };
+		A65000000000000000000001 /* VaultAgentPeerVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65000000000000000000002 /* VaultAgentPeerVerifierTests.swift */; };
+		A65000000000000000000003 /* VaultAgentPeerVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65000000000000000000004 /* VaultAgentPeerVerifier.swift */; };
+		A65000000000000000000005 /* VaultAgentBrokerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65000000000000000000006 /* VaultAgentBrokerTests.swift */; };
+		A65000000000000000000007 /* VaultAgentBroker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65000000000000000000008 /* VaultAgentBroker.swift */; };
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
@@ -382,6 +386,10 @@
 		A64000000000000000000004 /* VaultAgentTicketStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentTicketStore.swift; sourceTree = "<group>"; };
 		A64000000000000000000006 /* VaultAgentRateLimiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentRateLimiter.swift; sourceTree = "<group>"; };
 		A64000000000000000000008 /* VaultAgentAuditLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuditLogger.swift; sourceTree = "<group>"; };
+		A65000000000000000000002 /* VaultAgentPeerVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentPeerVerifierTests.swift; sourceTree = "<group>"; };
+		A65000000000000000000004 /* VaultAgentPeerVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentPeerVerifier.swift; sourceTree = "<group>"; };
+		A65000000000000000000006 /* VaultAgentBrokerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentBrokerTests.swift; sourceTree = "<group>"; };
+		A65000000000000000000008 /* VaultAgentBroker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentBroker.swift; sourceTree = "<group>"; };
 		A62000000000000000000009 /* VaultAgentGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGrantStore.swift; sourceTree = "<group>"; };
 		A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationCoordinator.swift; sourceTree = "<group>"; };
 		FAC43DDD1B35D8B100C06102 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -516,6 +524,8 @@
 		FA0D5CE61DDCC5D000AC9052 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A65000000000000000000004 /* VaultAgentPeerVerifier.swift */,
+				A65000000000000000000008 /* VaultAgentBroker.swift */,
 				A64000000000000000000004 /* VaultAgentTicketStore.swift */,
 				A64000000000000000000006 /* VaultAgentRateLimiter.swift */,
 				A64000000000000000000008 /* VaultAgentAuditLogger.swift */,
@@ -792,6 +802,8 @@
 		FAC43DDB1B35D8B100C06102 /* pasteraTests */ = {
 			isa = PBXGroup;
 			children = (
+				A65000000000000000000002 /* VaultAgentPeerVerifierTests.swift */,
+				A65000000000000000000006 /* VaultAgentBrokerTests.swift */,
 				A62000000000000000000002 /* VaultAgentAuthorizationPolicyTests.swift */,
 				A63000000000000000000002 /* VaultAutomationUnlockKeyStoreTests.swift */,
 				A64000000000000000000002 /* VaultAgentTicketStoreTests.swift */,
@@ -1072,6 +1084,8 @@
 		FAC43DC21B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A65000000000000000000003 /* VaultAgentPeerVerifier.swift in Sources */,
+				A65000000000000000000007 /* VaultAgentBroker.swift in Sources */,
 				A64000000000000000000003 /* VaultAgentTicketStore.swift in Sources */,
 				A64000000000000000000005 /* VaultAgentRateLimiter.swift in Sources */,
 				A64000000000000000000007 /* VaultAgentAuditLogger.swift in Sources */,
@@ -1178,6 +1192,8 @@
 		FAC43DD41B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A65000000000000000000001 /* VaultAgentPeerVerifierTests.swift in Sources */,
+				A65000000000000000000005 /* VaultAgentBrokerTests.swift in Sources */,
 				A62000000000000000000001 /* VaultAgentAuthorizationPolicyTests.swift in Sources */,
 				A63000000000000000000001 /* VaultAutomationUnlockKeyStoreTests.swift in Sources */,
 				A64000000000000000000001 /* VaultAgentTicketStoreTests.swift in Sources */,

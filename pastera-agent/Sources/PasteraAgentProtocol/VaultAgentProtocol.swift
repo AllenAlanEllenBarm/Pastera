@@ -24,6 +24,12 @@ public enum VaultAgentProtocolError: Error, Equatable, Sendable {
     case malformedFrame
     case limitExceeded
     case invalidValue
+    case replayedFrame
+    case outOfOrderFrame
+    case connectionMismatch
+    case authenticationFailed
+    case sequenceExhausted
+    case protocolMismatch
 }
 
 public enum VaultAgentClientKind: String, Codable, CaseIterable, Hashable, Sendable {
