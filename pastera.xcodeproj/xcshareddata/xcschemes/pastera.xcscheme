@@ -22,6 +22,20 @@
          </BuildActionEntry>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A61000000000000000000006"
+               BuildableName = "pasteraAgentTests.xctest"
+               BlueprintName = "pasteraAgentTests"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "NO"
             buildForArchiving = "NO"
@@ -51,6 +65,16 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A61000000000000000000006"
+               BuildableName = "pasteraAgentTests.xctest"
+               BlueprintName = "pasteraAgentTests"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
          <TestableReference
             skipped = "NO">
             <BuildableReference

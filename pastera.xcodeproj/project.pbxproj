@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A61000000000000000000001 /* VaultAgentProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000002 /* VaultAgentProtocolTests.swift */; };
+		A61000000000000000000012 /* VaultAgentProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000010 /* VaultAgentProtocol.swift */; };
+		A61000000000000000000013 /* VaultAgentFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000011 /* VaultAgentFrames.swift */; };
+		A6100000000000000000001A /* libPasteraAgentProtocol.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A61000000000000000000019 /* libPasteraAgentProtocol.a */; };
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
@@ -354,6 +358,11 @@
 		FAC0DCF01DE576F300309C49 /* PasteService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PasteService.swift; sourceTree = "<group>"; };
 		FAC43DC61B35D8B100C06102 /* Pastera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pastera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAC43DD81B35D8B100C06102 /* pasteraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = pasteraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A61000000000000000000003 /* pasteraAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = pasteraAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A61000000000000000000002 /* VaultAgentProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentProtocolTests.swift; sourceTree = "<group>"; };
+		A61000000000000000000010 /* VaultAgentProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentProtocol.swift; sourceTree = "<group>"; };
+		A61000000000000000000011 /* VaultAgentFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentFrames.swift; sourceTree = "<group>"; };
+		A61000000000000000000019 /* libPasteraAgentProtocol.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libPasteraAgentProtocol.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAC43DDD1B35D8B100C06102 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FAC43E221B35DFC800C06102 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		FAC43E241B35DFD000C06102 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
@@ -365,6 +374,12 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A61000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				A6100000000000000000001A /* libPasteraAgentProtocol.a in Frameworks */,
+			);
+		};
 		FAC43DC31B35D8B100C06102 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
@@ -716,6 +731,8 @@
 				C5208B822FC6E74B00BC4568 /* Configurations */,
 				FAC43DC81B35D8B100C06102 /* pastera */,
 				FAC43DDB1B35D8B100C06102 /* pasteraTests */,
+				A61000000000000000000005 /* pasteraAgentTests */,
+				A61000000000000000000015 /* pastera-agent */,
 				FAC43DC71B35D8B100C06102 /* Products */,
 				2CB0F71AAC48A392535FD3B0 /* Frameworks */,
 			);
@@ -726,6 +743,8 @@
 			children = (
 				FAC43DC61B35D8B100C06102 /* Pastera.app */,
 				FAC43DD81B35D8B100C06102 /* pasteraTests.xctest */,
+				A61000000000000000000003 /* pasteraAgentTests.xctest */,
+				A61000000000000000000019 /* libPasteraAgentProtocol.a */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -799,6 +818,31 @@
 			path = pasteraTests;
 			sourceTree = "<group>";
 		};
+		A61000000000000000000005 /* pasteraAgentTests */ = {
+			isa = PBXGroup;
+			children = (
+				A61000000000000000000002 /* VaultAgentProtocolTests.swift */,
+			);
+			path = pasteraAgentTests;
+			sourceTree = "<group>";
+		};
+		A61000000000000000000014 /* PasteraAgentProtocol */ = {
+			isa = PBXGroup;
+			children = (
+				A61000000000000000000010 /* VaultAgentProtocol.swift */,
+				A61000000000000000000011 /* VaultAgentFrames.swift */,
+			);
+			path = PasteraAgentProtocol;
+			sourceTree = "<group>";
+		};
+		A61000000000000000000015 /* pastera-agent */ = {
+			isa = PBXGroup;
+			children = (
+				A61000000000000000000014 /* PasteraAgentProtocol */,
+			);
+			path = "pastera-agent/Sources";
+			sourceTree = "<group>";
+		};
 		FAC43DDC1B35D8B100C06102 /* Supporting Files */ = {
 			isa = PBXGroup;
 			children = (
@@ -810,6 +854,38 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A61000000000000000000016 /* PasteraAgentProtocol */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A61000000000000000000017 /* Build configuration list for PBXNativeTarget "PasteraAgentProtocol" */;
+			buildPhases = (
+				A61000000000000000000018 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PasteraAgentProtocol;
+			productName = PasteraAgentProtocol;
+			productReference = A61000000000000000000019 /* libPasteraAgentProtocol.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+		A61000000000000000000006 /* pasteraAgentTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A61000000000000000000007 /* Build configuration list for PBXNativeTarget "pasteraAgentTests" */;
+			buildPhases = (
+				A61000000000000000000008 /* Sources */,
+				A61000000000000000000004 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A6100000000000000000001C /* PBXTargetDependency */,
+			);
+			name = pasteraAgentTests;
+			productName = pasteraAgentTests;
+			productReference = A61000000000000000000003 /* pasteraAgentTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		FAC43DC51B35D8B100C06102 /* pastera */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = FAC43DE21B35D8B100C06102 /* Build configuration list for PBXNativeTarget "pastera" */;
@@ -867,6 +943,12 @@
 				LastUpgradeCheck = 2650;
 				ORGANIZATIONNAME = "Pastera Group";
 				TargetAttributes = {
+					A61000000000000000000006 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					A61000000000000000000016 = {
+						CreatedOnToolsVersion = 26.5;
+					};
 					FAC43DC51B35D8B100C06102 = {
 						CreatedOnToolsVersion = 6.3.2;
 						DevelopmentTeam = BBCHAJ584H;
@@ -914,6 +996,8 @@
 			targets = (
 				FAC43DC51B35D8B100C06102 /* pastera */,
 				FAC43DD71B35D8B100C06102 /* pasteraTests */,
+				A61000000000000000000006 /* pasteraAgentTests */,
+				A61000000000000000000016 /* PasteraAgentProtocol */,
 			);
 		};
 /* End PBXProject section */
@@ -939,6 +1023,19 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A61000000000000000000018 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				A61000000000000000000012 /* VaultAgentProtocol.swift in Sources */,
+				A61000000000000000000013 /* VaultAgentFrames.swift in Sources */,
+			);
+		};
+		A61000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				A61000000000000000000001 /* VaultAgentProtocolTests.swift in Sources */,
+			);
+		};
 		FAC43DC21B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
@@ -1100,6 +1197,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A6100000000000000000001C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A61000000000000000000016 /* PasteraAgentProtocol */;
+			targetProxy = A6100000000000000000001B /* PBXContainerItemProxy */;
+		};
 		C5A4B2022FC9D76000B71510 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			productRef = C5A4B2012FC9D76000B71510 /* SwiftLintBuildToolPlugin */;
@@ -1114,6 +1216,16 @@
 			targetProxy = FAC43DD91B35D8B100C06102 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		A6100000000000000000001B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FAC43DBE1B35D8B100C06102 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A61000000000000000000016;
+			remoteInfo = PasteraAgentProtocol;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXVariantGroup section */
 		FA1DB50F1DDCB4C0007F95C8 /* CPYSnippetsEditorWindowController.xib */ = {
@@ -1131,6 +1243,48 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		A6100000000000000000001D /* Debug configuration for PBXNativeTarget "PasteraAgentProtocol" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_MODULE_NAME = PasteraAgentProtocol;
+				PRODUCT_NAME = PasteraAgentProtocol;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A6100000000000000000001E /* Release configuration for PBXNativeTarget "PasteraAgentProtocol" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_MODULE_NAME = PasteraAgentProtocol;
+				PRODUCT_NAME = PasteraAgentProtocol;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A61000000000000000000009 /* Debug configuration for PBXNativeTarget "pasteraAgentTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.pasteraAgentTests";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A6100000000000000000000A /* Release configuration for PBXNativeTarget "pasteraAgentTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.pasteraAgentTests";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 		FAC43DE01B35D8B100C06102 /* Debug configuration for PBXProject "pastera" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1321,6 +1475,22 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A61000000000000000000017 /* Build configuration list for PBXNativeTarget "PasteraAgentProtocol" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A6100000000000000000001D /* Debug configuration for PBXNativeTarget "PasteraAgentProtocol" */,
+				A6100000000000000000001E /* Release configuration for PBXNativeTarget "PasteraAgentProtocol" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		A61000000000000000000007 /* Build configuration list for PBXNativeTarget "pasteraAgentTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A61000000000000000000009 /* Debug configuration for PBXNativeTarget "pasteraAgentTests" */,
+				A6100000000000000000000A /* Release configuration for PBXNativeTarget "pasteraAgentTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
 		FAC43DC11B35D8B100C06102 /* Build configuration list for PBXProject "pastera" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
