@@ -26,7 +26,7 @@ public enum VaultAgentProtocolError: Error, Equatable, Sendable {
     case invalidValue
 }
 
-public enum VaultAgentClientKind: String, Codable, CaseIterable, Sendable {
+public enum VaultAgentClientKind: String, Codable, CaseIterable, Hashable, Sendable {
     case codex
     case claude
     case cli
@@ -279,7 +279,7 @@ public enum VaultAgentOperation: Codable, Equatable, Sendable {
     }
 }
 
-public enum VaultAgentErrorCode: String, Codable, CaseIterable, Sendable {
+public enum VaultAgentErrorCode: String, Codable, CaseIterable, Error, Sendable {
     case authorizationRequired = "AUTHORIZATION_REQUIRED"
     case grantExpired = "GRANT_EXPIRED"
     case grantRevoked = "GRANT_REVOKED"

@@ -11,6 +11,11 @@
 		A61000000000000000000012 /* VaultAgentProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000010 /* VaultAgentProtocol.swift */; };
 		A61000000000000000000013 /* VaultAgentFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000011 /* VaultAgentFrames.swift */; };
 		A6100000000000000000001A /* libPasteraAgentProtocol.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A61000000000000000000019 /* libPasteraAgentProtocol.a */; };
+		A62000000000000000000001 /* VaultAgentAuthorizationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000000000000000000002 /* VaultAgentAuthorizationPolicyTests.swift */; };
+		A62000000000000000000003 /* VaultAgentAuthorizationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000000000000000000004 /* VaultAgentAuthorizationPolicy.swift */; };
+		A62000000000000000000005 /* libPasteraAgentProtocol.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A61000000000000000000019 /* libPasteraAgentProtocol.a */; };
+		A62000000000000000000008 /* VaultAgentGrantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000000000000000000009 /* VaultAgentGrantStore.swift */; };
+		A6200000000000000000000A /* VaultAgentAuthorizationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */; };
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
@@ -363,6 +368,10 @@
 		A61000000000000000000010 /* VaultAgentProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentProtocol.swift; sourceTree = "<group>"; };
 		A61000000000000000000011 /* VaultAgentFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentFrames.swift; sourceTree = "<group>"; };
 		A61000000000000000000019 /* libPasteraAgentProtocol.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libPasteraAgentProtocol.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		A62000000000000000000002 /* VaultAgentAuthorizationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationPolicyTests.swift; sourceTree = "<group>"; };
+		A62000000000000000000004 /* VaultAgentAuthorizationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationPolicy.swift; sourceTree = "<group>"; };
+		A62000000000000000000009 /* VaultAgentGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGrantStore.swift; sourceTree = "<group>"; };
+		A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationCoordinator.swift; sourceTree = "<group>"; };
 		FAC43DDD1B35D8B100C06102 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FAC43E221B35DFC800C06102 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		FAC43E241B35DFD000C06102 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
@@ -383,6 +392,7 @@
 		FAC43DC31B35D8B100C06102 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				A62000000000000000000005 /* libPasteraAgentProtocol.a in Frameworks */,
 				C5F600002FF6000000B7C0DE /* KDBXKit in Frameworks */,
 				C587AF512FBF4E040043D5E7 /* SQLiteData in Frameworks */,
 				C53FC6C02FCCA1C400219A25 /* Collections in Frameworks */,
@@ -494,6 +504,9 @@
 		FA0D5CE61DDCC5D000AC9052 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A62000000000000000000004 /* VaultAgentAuthorizationPolicy.swift */,
+				A62000000000000000000009 /* VaultAgentGrantStore.swift */,
+				A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */,
 				FA0D5CE71DDCC61600AC9052 /* ClipService.swift */,
 				FAE911B81DE045E2008A4BEC /* HotKeyService.swift */,
 				FAC0DCF01DE576F300309C49 /* PasteService.swift */,
@@ -763,6 +776,7 @@
 		FAC43DDB1B35D8B100C06102 /* pasteraTests */ = {
 			isa = PBXGroup;
 			children = (
+				A62000000000000000000002 /* VaultAgentAuthorizationPolicyTests.swift */,
 				C5700B472FC5C0DB00C8F965 /* Database */,
 				C571000C2FCEB03000C8F965 /* Models */,
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
@@ -897,6 +911,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				A62000000000000000000007 /* PBXTargetDependency */,
 				C5A4B2022FC9D76000B71510 /* PBXTargetDependency */,
 			);
 			name = pastera;
@@ -1039,6 +1054,9 @@
 		FAC43DC21B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A62000000000000000000003 /* VaultAgentAuthorizationPolicy.swift in Sources */,
+				A62000000000000000000008 /* VaultAgentGrantStore.swift in Sources */,
+				A6200000000000000000000A /* VaultAgentAuthorizationCoordinator.swift in Sources */,
 				FAC0DCEF1DE3255E00309C49 /* NSImage+NSColor.swift in Sources */,
 				FA1DB4A61DDCB443007F95C8 /* MenuType.swift in Sources */,
 				C54C29D52FC3E20000EF30FB /* SQLiteDataDatabase.swift in Sources */,
@@ -1138,6 +1156,7 @@
 		FAC43DD41B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A62000000000000000000001 /* VaultAgentAuthorizationPolicyTests.swift in Sources */,
 				C5700B492FC5C0E500C8F965 /* SQLiteDataMigratorTests.swift in Sources */,
 				FA08EDF81D1FED7D000D1D13 /* HotKeyServiceTests.swift in Sources */,
 				FA6167941D3ACCB90049FA14 /* DraggedDataTests.swift in Sources */,
@@ -1202,6 +1221,11 @@
 			target = A61000000000000000000016 /* PasteraAgentProtocol */;
 			targetProxy = A6100000000000000000001B /* PBXContainerItemProxy */;
 		};
+		A62000000000000000000007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A61000000000000000000016 /* PasteraAgentProtocol */;
+			targetProxy = A62000000000000000000006 /* PBXContainerItemProxy */;
+		};
 		C5A4B2022FC9D76000B71510 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			productRef = C5A4B2012FC9D76000B71510 /* SwiftLintBuildToolPlugin */;
@@ -1219,6 +1243,13 @@
 
 /* Begin PBXContainerItemProxy section */
 		A6100000000000000000001B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FAC43DBE1B35D8B100C06102 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A61000000000000000000016;
+			remoteInfo = PasteraAgentProtocol;
+		};
+		A62000000000000000000006 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = FAC43DBE1B35D8B100C06102 /* Project object */;
 			proxyType = 1;
