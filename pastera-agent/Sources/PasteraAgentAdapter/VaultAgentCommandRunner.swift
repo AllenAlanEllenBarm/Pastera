@@ -31,7 +31,11 @@ public struct VaultAgentCommandRunner: Sendable {
         var makePipe: @Sendable () throws -> PipeEndpoints
         var spawn: @Sendable ([String], VaultAgentCommandInput, PipeEndpoints, [String: String]) throws -> pid_t
         var writeChunk: @Sendable (Int32, Data, Int) throws -> Int
-        var makeWaiter: @Sendable (pid_t) -> any VaultAgentProcessWaiting
+        var makeWaiter: @Sendable (
+            pid_t,
+            @escaping @Sendable () -> Void,
+            @escaping @Sendable () -> Void
+        ) -> any VaultAgentProcessWaiting
         var close: @Sendable (Int32) -> Void
         var terminate: @Sendable (pid_t) -> Void
         var kill: @Sendable (pid_t) -> Void
@@ -42,7 +46,13 @@ public struct VaultAgentCommandRunner: Sendable {
             makePipe: VaultAgentCommandRunner.makePipe,
             spawn: VaultAgentCommandRunner.spawn,
             writeChunk: VaultAgentCommandRunner.writeChunk,
-            makeWaiter: { VaultAgentProcessWaiter(processID: $0) },
+            makeWaiter: {
+                VaultAgentProcessWaiter(
+                    processID: $0,
+                    onExitObserved: $1,
+                    onReaped: $2
+                )
+            },
             close: { _ = Darwin.close($0) },
             terminate: { _ = Darwin.kill($0, SIGTERM) },
             kill: { _ = Darwin.kill($0, SIGKILL) },
@@ -77,7 +87,10 @@ public struct VaultAgentCommandRunner: Sendable {
         guard Self.isValid(ticket: ticket, input: input, command: command) else {
             throw VaultAgentCommandRunnerError.invalidResponse
         }
-        let state = VaultAgentCommandState(dependencies: dependencies)
+        let state = VaultAgentCommandState(
+            dependencies: dependencies,
+            operationQueue: Self.workQueue
+        )
         return try await withTaskCancellationHandler {
             do {
                 try Task.checkCancellation()
@@ -168,7 +181,11 @@ public struct VaultAgentCommandRunner: Sendable {
                     }
                     dependencies.close(pipe.read)
                     state.adoptProcess(processID)
-                    let waiter = dependencies.makeWaiter(processID)
+                    let waiter = dependencies.makeWaiter(
+                        processID,
+                        state.markExitObserved,
+                        state.markReaped
+                    )
                     dependencies.onEvent(.spawned(processID))
                     continuation.resume(returning: waiter)
                 } catch {
@@ -184,10 +201,8 @@ public struct VaultAgentCommandRunner: Sendable {
     ) async -> Result<Int, VaultAgentCommandRunnerError> {
         do {
             let status = try await waiter.wait()
-            state.markReaped()
             return .success(status)
         } catch {
-            state.markReaped()
             return .failure(normalized(error))
         }
     }
@@ -330,14 +345,34 @@ protocol VaultAgentProcessWaiting: Sendable {
     func wait() async throws -> Int
 }
 
-private final class VaultAgentProcessWaiter: VaultAgentProcessWaiting, @unchecked Sendable {
-    private static let waitQueue = DispatchQueue(label: "com.pastera-app.agent.command-wait")
+typealias VaultAgentWaitProcess = @Sendable (
+    pid_t,
+    UnsafeMutablePointer<Int32>?,
+    Int32
+) -> pid_t
+
+final class VaultAgentProcessWaiter: VaultAgentProcessWaiting, @unchecked Sendable {
+    private static let waitQueue = DispatchQueue(
+        label: "com.pastera-app.agent.command-wait",
+        qos: .userInitiated
+    )
     private let lock = NSLock()
     private let source: DispatchSourceProcess
+    private let onExitObserved: @Sendable () -> Void
+    private let onReaped: @Sendable () -> Void
+    private let waitProcess: VaultAgentWaitProcess
     private var result: Result<Int, VaultAgentCommandRunnerError>?
     private var continuation: CheckedContinuation<Int, Error>?
 
-    init(processID: pid_t) {
+    init(
+        processID: pid_t,
+        onExitObserved: @escaping @Sendable () -> Void,
+        onReaped: @escaping @Sendable () -> Void,
+        waitProcess: @escaping VaultAgentWaitProcess = { Darwin.waitpid($0, $1, $2) }
+    ) {
+        self.onExitObserved = onExitObserved
+        self.onReaped = onReaped
+        self.waitProcess = waitProcess
         source = DispatchSource.makeProcessSource(
             identifier: processID,
             eventMask: .exit,
@@ -359,14 +394,24 @@ private final class VaultAgentProcessWaiter: VaultAgentProcessWaiting, @unchecke
     }
 
     private func processExited(_ processID: pid_t) {
+        onExitObserved()
         var rawStatus: Int32 = 0
-        let waited = Darwin.waitpid(processID, &rawStatus, 0)
+        var waited: pid_t
+        var waitError: Int32
+        repeat {
+            waited = waitProcess(processID, &rawStatus, 0)
+            waitError = errno
+        } while waited == -1 && waitError == EINTR
         let outcome: Result<Int, VaultAgentCommandRunnerError>
         if waited == processID {
+            onReaped()
             let signal = Int(rawStatus & 0x7f)
             outcome = signal == 0
                 ? .success(Int((rawStatus >> 8) & 0xff))
                 : .success(128 + signal)
+        } else if waited == -1, waitError == ECHILD {
+            onReaped()
+            outcome = .failure(.waitFailed)
         } else {
             outcome = .failure(.waitFailed)
         }
@@ -387,6 +432,7 @@ private final class VaultAgentPipeWriter: @unchecked Sendable {
     private let data: Data
     private let state: VaultAgentCommandState
     private let dependencies: VaultAgentCommandRunner.Dependencies
+    private let queue: DispatchQueue
     private let source: DispatchSourceWrite
     private var offset = 0
     private var finished = false
@@ -404,19 +450,19 @@ private final class VaultAgentPipeWriter: @unchecked Sendable {
         self.data = data
         self.state = state
         self.dependencies = dependencies
+        self.queue = queue
         source = DispatchSource.makeWriteSource(fileDescriptor: fileDescriptor, queue: queue)
         source.setEventHandler { [weak self] in self?.writeAvailable() }
     }
 
     func write() async throws {
-        try state.checkCancellation()
         try await withCheckedThrowingContinuation { newContinuation in
             continuation = newContinuation
-            source.resume()
-            guard state.registerWriterCancellation({ [weak self] in self?.cancel() }) else {
-                finish(.failure(.cancelled))
-                return
+            let registered = state.registerWriterCancellation { [weak self] in
+                self?.cancel()
             }
+            source.resume()
+            if !registered { queue.async { [weak self] in self?.cancel() } }
         }
     }
 
@@ -474,14 +520,22 @@ private final class VaultAgentCommandState: @unchecked Sendable {
     private static let escalationQueue = DispatchQueue(label: "com.pastera-app.agent.command-kill")
     private let lock = NSLock()
     private let dependencies: VaultAgentCommandRunner.Dependencies
+    private let operationQueue: DispatchQueue
     private var writeFD: Int32?
     private var processID: pid_t?
     private var cancelled = false
+    private var cancellationScheduled = false
+    private var terminationRequested = false
+    private var exitObserved = false
     private var reaped = false
     private var writerCancellation: (@Sendable () -> Void)?
 
-    init(dependencies: VaultAgentCommandRunner.Dependencies) {
+    init(
+        dependencies: VaultAgentCommandRunner.Dependencies,
+        operationQueue: DispatchQueue
+    ) {
         self.dependencies = dependencies
+        self.operationQueue = operationQueue
     }
 
     var writeFileDescriptor: Int32? { lock.withLock { writeFD } }
@@ -502,11 +556,7 @@ private final class VaultAgentCommandState: @unchecked Sendable {
     }
 
     func adoptProcess(_ processID: pid_t) {
-        let shouldTerminate = lock.withLock {
-            self.processID = processID
-            return cancelled
-        }
-        if shouldTerminate { dependencies.terminate(processID) }
+        lock.withLock { self.processID = processID }
     }
 
     func closeWrite() {
@@ -530,15 +580,33 @@ private final class VaultAgentCommandState: @unchecked Sendable {
     }
 
     func cancelProcess() {
-        let values = lock.withLock { () -> CancellationValues in
+        let shouldSchedule = lock.withLock { () -> Bool in
             cancelled = true
+            guard !cancellationScheduled else { return false }
+            cancellationScheduled = true
+            return true
+        }
+        if shouldSchedule {
+            operationQueue.async { [weak self] in self?.performCancellation() }
+        }
+    }
+
+    private func performCancellation() {
+        let values = lock.withLock { () -> CancellationValues in
             let cancellation = writerCancellation
             writerCancellation = nil
             let fileDescriptor = cancellation == nil ? writeFD : nil
             if cancellation == nil { writeFD = nil }
+            let cancellableProcessID: pid_t?
+            if !reaped, !terminationRequested, let processID {
+                terminationRequested = true
+                cancellableProcessID = processID
+            } else {
+                cancellableProcessID = nil
+            }
             return CancellationValues(
                 fileDescriptor: fileDescriptor,
-                processID: reaped ? nil : processID,
+                processID: cancellableProcessID,
                 writerCancellation: cancellation
             )
         }
@@ -559,8 +627,14 @@ private final class VaultAgentCommandState: @unchecked Sendable {
         }
     }
 
+    func markExitObserved() {
+        lock.withLock { exitObserved = true }
+    }
+
     private func escalateIfNeeded(_ expectedProcessID: pid_t) {
-        let shouldKill = lock.withLock { !reaped && processID == expectedProcessID }
+        let shouldKill = lock.withLock {
+            !exitObserved && !reaped && processID == expectedProcessID
+        }
         if shouldKill { dependencies.kill(expectedProcessID) }
     }
 }

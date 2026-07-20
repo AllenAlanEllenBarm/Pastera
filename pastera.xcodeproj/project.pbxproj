@@ -1802,6 +1802,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_CODE_SIGN_FLAGS = "--identifier $(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.pastera";
 				PRODUCT_MODULE_NAME = PasteraCLI;
 				PRODUCT_NAME = pastera;
@@ -1813,6 +1814,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_CODE_SIGN_FLAGS = "--identifier $(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.pastera";
 				PRODUCT_MODULE_NAME = PasteraCLI;
 				PRODUCT_NAME = pastera;

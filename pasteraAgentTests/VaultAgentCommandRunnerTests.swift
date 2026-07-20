@@ -5,7 +5,11 @@ import Testing
 
 @testable import PasteraAgentAdapter
 
+// The serialized suite keeps its real-process race probes in one file so their cleanup is auditable.
+// swiftlint:disable file_length
+
 @Suite("Vault agent command runner", .serialized)
+// swiftlint:disable:next type_body_length
 struct VaultAgentCommandRunnerTests {
     private let sentinel = Data("PASTERA_TASK8_SECRET_SENTINEL".utf8)
 
@@ -78,6 +82,38 @@ struct VaultAgentCommandRunnerTests {
         #expect(await client.completeCount == 1)
     }
 
+    @Test("cancellation never closes the write descriptor while a write owns it")
+    func cancellationSerializesWriteDescriptorClose() async throws {
+        let probe = VaultRunnerWriteCloseRaceProbe()
+        let childProbe = VaultRunnerPIDProbe()
+        var dependencies = VaultAgentCommandRunner.Dependencies.live
+        dependencies.writeChunk = { try probe.write(fileDescriptor: $0, data: $1, offset: $2) }
+        dependencies.close = { probe.close(fileDescriptor: $0) }
+        dependencies.onEvent = { if case let .spawned(pid) = $0 { childProbe.set(pid) } }
+        let runner = VaultAgentCommandRunner(
+            client: VaultRunnerClientProbe(secret: sentinel),
+            dependencies: dependencies
+        )
+        let task = Task {
+            try await runner.run(
+                ticket: "ticket",
+                input: .standardInput,
+                command: [fixturePath, "--stdin", "--sleep-ms", "60000", "--ignore-term"]
+            )
+        }
+
+        try await probe.waitUntilWriting()
+        task.cancel()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!probe.closeOverlappedWrite)
+        probe.releaseWrite()
+
+        await #expect(throws: VaultAgentCommandRunnerError.cancelled) { try await task.value }
+        #expect(probe.writeDescriptorCloseCount == 1)
+        #expect(probe.bytesWrittenToReusedDescriptor.isEmpty)
+        #expect(childProbe.wasReaped)
+    }
+
     @Test("spawn and write failures never complete and leave no child")
     func spawnAndWriteFailuresDoNotComplete() async {
         let spawnClient = VaultRunnerClientProbe(secret: sentinel)
@@ -140,6 +176,54 @@ struct VaultAgentCommandRunnerTests {
         #expect(signaled == 143)
     }
 
+    @Test("waitpid retries EINTR and records reaping before returning")
+    func waitRetriesInterruptionBeforeReturning() async throws {
+        let waitProbe = VaultRunnerWaitProcessProbe(mode: .interruptOnce)
+        var dependencies = VaultAgentCommandRunner.Dependencies.live
+        dependencies.makeWaiter = { processID, onExitObserved, onReaped in
+            VaultAgentProcessWaiter(
+                processID: processID,
+                onExitObserved: onExitObserved,
+                onReaped: onReaped,
+                waitProcess: waitProbe.wait
+            )
+        }
+
+        let status = try await VaultAgentCommandRunner(
+            client: VaultRunnerClientProbe(secret: sentinel),
+            dependencies: dependencies
+        ).run(ticket: "ticket", input: .standardInput, command: [fixturePath, "--stdin"])
+
+        #expect(status == 0)
+        #expect(waitProbe.callCount == 2)
+    }
+
+    @Test("ECHILD confirms reaping but still returns a stable wait failure")
+    func confirmedExternalReapReturnsWaitFailure() async {
+        let childProbe = VaultRunnerPIDProbe()
+        let waitProbe = VaultRunnerWaitProcessProbe(mode: .reapThenReportNoChild)
+        var dependencies = VaultAgentCommandRunner.Dependencies.live
+        dependencies.makeWaiter = { processID, onExitObserved, onReaped in
+            VaultAgentProcessWaiter(
+                processID: processID,
+                onExitObserved: onExitObserved,
+                onReaped: onReaped,
+                waitProcess: waitProbe.wait
+            )
+        }
+        dependencies.onEvent = { if case let .spawned(pid) = $0 { childProbe.set(pid) } }
+
+        await #expect(throws: VaultAgentCommandRunnerError.waitFailed) {
+            try await VaultAgentCommandRunner(
+                client: VaultRunnerClientProbe(secret: sentinel),
+                dependencies: dependencies
+            ).run(ticket: "ticket", input: .standardInput, command: [fixturePath, "--stdin"])
+        }
+
+        #expect(waitProbe.callCount == 1)
+        #expect(childProbe.wasReaped)
+    }
+
     @Test("cancellation terminates and reaps the child")
     func cancellationReapsChild() async throws {
         let childProbe = VaultRunnerPIDProbe()
@@ -157,6 +241,79 @@ struct VaultAgentCommandRunnerTests {
         }
         try await childProbe.waitUntilSpawned()
         task.cancel()
+
+        await #expect(throws: VaultAgentCommandRunnerError.cancelled) { try await task.value }
+        #expect(childProbe.wasReaped)
+    }
+
+    @Test("cancellation in the post-spawn window still escalates and reaps")
+    func cancellationBeforeProcessAdoptionStillEscalates() async throws {
+        let spawn = VaultAgentCommandRunner.Dependencies.live.spawn
+        let spawnProbe = VaultRunnerSpawnWindowProbe()
+        var dependencies = VaultAgentCommandRunner.Dependencies.live
+        dependencies.spawn = { command, input, pipe, environment in
+            let processID = try spawn(command, input, pipe, environment)
+            usleep(100_000)
+            spawnProbe.hold(processID: processID)
+            return processID
+        }
+        dependencies.kill = { processID in
+            spawnProbe.recordKill()
+            _ = Darwin.kill(processID, SIGKILL)
+        }
+        let task = Task {
+            try await VaultAgentCommandRunner(
+                client: VaultRunnerClientProbe(secret: sentinel),
+                dependencies: dependencies
+            ).run(
+                ticket: "ticket",
+                input: .standardInput,
+                command: [fixturePath, "--stdin", "--sleep-ms", "60000", "--ignore-term"]
+            )
+        }
+
+        try await spawnProbe.waitUntilSpawned()
+        task.cancel()
+        spawnProbe.releaseSpawn()
+
+        await #expect(throws: VaultAgentCommandRunnerError.cancelled) { try await task.value }
+        #expect(spawnProbe.killCount == 1)
+        #expect(spawnProbe.wasReaped)
+    }
+
+    @Test("reaping blocks escalation before a pid can be reused")
+    func reapingWinsEscalationRace() async throws {
+        let childProbe = VaultRunnerPIDProbe()
+        let waitProbe = VaultRunnerWaitProcessProbe(mode: .reapAndBlock)
+        let killProbe = VaultRunnerSignalProbe()
+        var dependencies = VaultAgentCommandRunner.Dependencies.live
+        dependencies.makeWaiter = { processID, onExitObserved, onReaped in
+            VaultAgentProcessWaiter(
+                processID: processID,
+                onExitObserved: onExitObserved,
+                onReaped: onReaped,
+                waitProcess: waitProbe.wait
+            )
+        }
+        dependencies.kill = { _ in killProbe.record() }
+        dependencies.onEvent = { if case let .spawned(pid) = $0 { childProbe.set(pid) } }
+        let task = Task {
+            try await VaultAgentCommandRunner(
+                client: VaultRunnerClientProbe(secret: sentinel),
+                dependencies: dependencies
+            ).run(
+                ticket: "ticket",
+                input: .standardInput,
+                command: [fixturePath, "--stdin", "--sleep-ms", "60000"]
+            )
+        }
+
+        try await childProbe.waitUntilSpawned()
+        task.cancel()
+        try await waitProbe.waitUntilReaped()
+        try await Task.sleep(for: .milliseconds(1_100))
+        #expect(killProbe.callCount == 0)
+        waitProbe.releaseWait()
 
         await #expect(throws: VaultAgentCommandRunnerError.cancelled) { try await task.value }
         #expect(childProbe.wasReaped)
@@ -322,6 +479,220 @@ private final class VaultRunnerWriteProbe: @unchecked Sendable {
     }
 
     var callCount: Int { lock.withLock { calls } }
+}
+
+private final class VaultRunnerWriteCloseRaceProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let writeStarted = DispatchSemaphore(value: 0)
+    private let writeRelease = DispatchSemaphore(value: 0)
+    private var writeFD: Int32?
+    private var activeWriteFD: Int32?
+    private var reusedReadFD: Int32?
+    private var reusedWriteFD: Int32?
+    private var overlap = false
+    private var closeCount = 0
+
+    func write(fileDescriptor: Int32, data: Data, offset: Int) throws -> Int {
+        lock.withLock {
+            writeFD = fileDescriptor
+            activeWriteFD = fileDescriptor
+        }
+        writeStarted.signal()
+        writeRelease.wait()
+        defer { lock.withLock { activeWriteFD = nil } }
+        return try data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return 0 }
+            let result = Darwin.write(
+                fileDescriptor,
+                baseAddress.advanced(by: offset),
+                data.count - offset
+            )
+            guard result >= 0 else { throw VaultAgentCommandRunnerError.writeFailed }
+            return result
+        }
+    }
+
+    func close(fileDescriptor: Int32) {
+        let shouldReuse = lock.withLock { () -> Bool in
+            if writeFD == fileDescriptor { closeCount += 1 }
+            guard activeWriteFD == fileDescriptor else { return false }
+            overlap = true
+            return true
+        }
+        _ = Darwin.close(fileDescriptor)
+        if shouldReuse { installReusePipe(at: fileDescriptor) }
+    }
+
+    func waitUntilWriting() async throws {
+        try await wait(for: writeStarted)
+    }
+
+    func releaseWrite() { writeRelease.signal() }
+
+    var closeOverlappedWrite: Bool { lock.withLock { overlap } }
+
+    var writeDescriptorCloseCount: Int { lock.withLock { closeCount } }
+
+    var bytesWrittenToReusedDescriptor: Data {
+        let descriptors = lock.withLock { () -> (Int32, Int32)? in
+            guard let read = reusedReadFD, let write = reusedWriteFD else { return nil }
+            reusedReadFD = nil
+            reusedWriteFD = nil
+            return (read, write)
+        }
+        guard let descriptors else { return Data() }
+        _ = Darwin.close(descriptors.1)
+        var buffer = [UInt8](repeating: 0, count: VaultAgentLimits.maximumSecretBytes + 1)
+        let count = Darwin.read(descriptors.0, &buffer, buffer.count)
+        _ = Darwin.close(descriptors.0)
+        return count > 0 ? Data(buffer.prefix(count)) : Data()
+    }
+
+    private func installReusePipe(at fileDescriptor: Int32) {
+        var pipeFDs = [Int32](repeating: -1, count: 2)
+        guard Darwin.pipe(&pipeFDs) == 0 else { return }
+        let readFD: Int32
+        if pipeFDs[0] == fileDescriptor {
+            readFD = Darwin.fcntl(pipeFDs[0], F_DUPFD_CLOEXEC, 256)
+        } else {
+            readFD = pipeFDs[0]
+        }
+        guard readFD >= 0, Darwin.dup2(pipeFDs[1], fileDescriptor) == fileDescriptor else {
+            if readFD >= 0 { _ = Darwin.close(readFD) }
+            if pipeFDs[0] != readFD { _ = Darwin.close(pipeFDs[0]) }
+            _ = Darwin.close(pipeFDs[1])
+            return
+        }
+        if pipeFDs[0] != readFD, pipeFDs[0] != fileDescriptor {
+            _ = Darwin.close(pipeFDs[0])
+        }
+        if pipeFDs[1] != fileDescriptor { _ = Darwin.close(pipeFDs[1]) }
+        let flags = Darwin.fcntl(readFD, F_GETFL)
+        if flags >= 0 { _ = Darwin.fcntl(readFD, F_SETFL, flags | O_NONBLOCK) }
+        lock.withLock {
+            reusedReadFD = readFD
+            reusedWriteFD = fileDescriptor
+        }
+    }
+
+    private func wait(for semaphore: DispatchSemaphore) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                if semaphore.wait(timeout: .now() + .seconds(2)) == .success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: VaultAgentCommandRunnerError.waitFailed)
+                }
+            }
+        }
+    }
+}
+
+private final class VaultRunnerWaitProcessProbe: @unchecked Sendable {
+    enum Mode {
+        case interruptOnce
+        case reapThenReportNoChild
+        case reapAndBlock
+    }
+
+    private let lock = NSLock()
+    private let mode: Mode
+    private let reaped = DispatchSemaphore(value: 0)
+    private let waitRelease = DispatchSemaphore(value: 0)
+    private var calls = 0
+
+    init(mode: Mode) { self.mode = mode }
+
+    func wait(
+        processID: pid_t,
+        status: UnsafeMutablePointer<Int32>?,
+        options: Int32
+    ) -> pid_t {
+        let invocation = lock.withLock { () -> Int in
+            calls += 1
+            return calls
+        }
+        switch mode {
+        case .interruptOnce where invocation == 1:
+            errno = EINTR
+            return -1
+        case .reapThenReportNoChild:
+            _ = Darwin.waitpid(processID, status, options)
+            errno = ECHILD
+            return -1
+        case .reapAndBlock:
+            let result = Darwin.waitpid(processID, status, options)
+            reaped.signal()
+            waitRelease.wait()
+            return result
+        default:
+            return Darwin.waitpid(processID, status, options)
+        }
+    }
+
+    var callCount: Int { lock.withLock { calls } }
+
+    func waitUntilReaped() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                if self.reaped.wait(timeout: .now() + .seconds(2)) == .success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: VaultAgentCommandRunnerError.waitFailed)
+                }
+            }
+        }
+    }
+
+    func releaseWait() { waitRelease.signal() }
+}
+
+private final class VaultRunnerSignalProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+
+    func record() { lock.withLock { calls += 1 } }
+
+    var callCount: Int { lock.withLock { calls } }
+}
+
+private final class VaultRunnerSpawnWindowProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let spawned = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+    private var processID: pid_t?
+    private var kills = 0
+
+    func hold(processID: pid_t) {
+        lock.withLock { self.processID = processID }
+        spawned.signal()
+        release.wait()
+    }
+
+    func waitUntilSpawned() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                if self.spawned.wait(timeout: .now() + .seconds(2)) == .success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: VaultAgentCommandRunnerError.spawnFailed)
+                }
+            }
+        }
+    }
+
+    func releaseSpawn() { release.signal() }
+
+    func recordKill() { lock.withLock { kills += 1 } }
+
+    var killCount: Int { lock.withLock { kills } }
+
+    var wasReaped: Bool {
+        guard let processID = lock.withLock({ processID }) else { return false }
+        errno = 0
+        let result = Darwin.waitpid(processID, nil, WNOHANG)
+        return result == -1 && errno == ECHILD
+    }
 }
 
 private final class VaultRunnerPIDProbe: @unchecked Sendable {
