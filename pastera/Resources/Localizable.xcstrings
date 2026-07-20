@@ -6942,6 +6942,27 @@
     "Last sensitive use: %@" : { "localizations" : {
       "en" : { "stringUnit" : { "state" : "translated", "value" : "Last sensitive use: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Letzte vertrauliche Nutzung: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Ultimo uso sensibile: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "最後の機密操作: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近敏感操作：%@" } }
     } },
+    "Preview Read-only" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview Read-only" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nur-Lesen prüfen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Anteprima sola lettura" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "読み取り専用を確認" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预览只读权限" } }
+    } },
+    "7 idle days · 30 days total" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "7 idle days · 30 days total" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "7 Leerlauftage · insgesamt 30 Tage" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "7 giorni inattivi · 30 giorni totali" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アイドル 7 日 · 合計 30 日" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "闲置 7 天 · 最长 30 天" } }
+    } },
+    "Unattended automation can expose secrets to client commands." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Unattended automation can expose secrets to client commands." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Unbeaufsichtigte Automatisierung kann Geheimnisse an Client-Befehle weitergeben." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "L'automazione non presidiata può esporre segreti ai comandi del client." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "無人実行ではクライアントのコマンドに機密情報が渡る可能性があります。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无人值守自动化可能向客户端命令暴露密码。" } }
+    } },
+    "PATH: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PATH：%@" } }
+    } },
+    "Unable to refresh: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to refresh: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Aktualisierung nicht möglich: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile aggiornare: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "更新できません: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法刷新：%@" } }
+    } },
+    "Metadata, paste, and controlled injection" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata, paste, and controlled injection" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Metadaten, Einfügen und kontrollierte Eingabe" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Metadati, incolla e inserimento controllato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "メタデータ、ペースト、制御された入力" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据、粘贴和受控注入" } }
+    } },
+    "Metadata, paste, copy, and controlled injection" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata, paste, copy, and controlled injection" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Metadaten, Einfügen, Kopieren und kontrollierte Eingabe" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Metadati, incolla, copia e inserimento controllato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "メタデータ、ペースト、コピー、制御された入力" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据、粘贴、复制和受控注入" } }
+    } },
     "items" : {
       "localizations" : {
         "en" : {
