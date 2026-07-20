@@ -1259,7 +1259,7 @@ git commit -m "feat(agent): 加固密码箱本地 broker"
 - Consumes: Tasks 2–5 的授权、自动恢复、票据、限流、审计、peer identity 与共享 Controller。
 - Produces: 全部 Broker operation 行为、`VaultAgentRuntime`、认证 cursor、安全粘贴目标选择，以及供 Task 9 安装器实现的窄 `VaultAgentIntegrationServicing` 接口。
 
-- [ ] **Step 1：写“只有成功敏感动作续期”失败测试**
+- [x] **Step 1：写“只有成功敏感动作续期”失败测试**
 
 ~~~swift
 @Test("search get failure and ticket creation do not renew; paste and ticket completion do")
@@ -1284,13 +1284,13 @@ func renewalMatrixMatchesContract() async throws {
 }
 ~~~
 
-- [ ] **Step 2：运行并确认 dispatcher 尚未覆盖操作**
+- [x] **Step 2：运行并确认 dispatcher 尚未覆盖操作**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentBrokerTests`。
 
 Expected：FAIL，Broker fixture 收到 unsupported operation 或类型缺失。
 
-- [ ] **Step 3：实现状态、搜索、元数据与认证 cursor**
+- [x] **Step 3：实现状态、搜索、元数据与认证 cursor**
 
 `vault_status` 无授权也可调用，但只返回当前客户端安装/授权/到期/就绪状态。其余密码箱操作先检查身份匹配、到期、限流，再调用 `ensureReadyForAgent`。搜索规则固定：
 
@@ -1307,7 +1307,7 @@ Dispatcher 必须先把解密后的有界 `Data` 解码为 `VaultAgentRequestEnv
 
 Cursor key 是 Runtime 初始化时用 `SecRandomCopyBytes` 生成一次的 32-byte 进程内密钥，测试可注入；不落盘、不进 Keychain，App 重启后旧 cursor 安全变为 `INVALID_REQUEST`。Cursor 使用无 padding base64url 包装版本、原始 query 的 SHA-256、folder ID、非负 offset、metadata snapshot revision 与 HMAC-SHA256。revision 对排序后的 folder ID/name/updatedAt 和 entry ID/folder ID/title/website/username/updatedAt 做确定性 SHA-256，不读取 note/password。校验 HMAC、query/folder 绑定和当前 revision 后才使用 offset；任何篡改、负数、旧 snapshot 或解码失败都是 `INVALID_REQUEST`。分页从实际返回条目数推进 offset；若完整 response 超过 32 KiB，逐条缩短当前页并重算 next cursor，至少一条仍无法编码则安全失败。
 
-- [ ] **Step 4：实现最近非 Agent 粘贴目标**
+- [x] **Step 4：实现最近非 Agent 粘贴目标**
 
 `VaultAgentPasteTargetTracker` 订阅 `NSWorkspace.didActivateApplicationNotification`，只保存最近一个非 Pastera、非当前 Codex/Claude Host、非三个 Helper 的 `PasteTargetContext`，不使用 Timer 或轮询。目标进程已退出、Bundle/代码身份变化、无 Accessibility focus 且无法恢复时返回 `TARGET_UNAVAILABLE`，禁止回退为 stdout/clipboard 明文。
 
@@ -1317,7 +1317,7 @@ Tracker 在 application activation 时保存 PID、bundle ID、process snapshot�
 
 `PasswordVaultAgentAccess` 增加不触发交互认证/交互续期的 Agent copy 与同步自动化 key 清理入口；paste/copy completion 只表示既有服务已经成功调度/写入，随后 Runtime 才调用 `recordSensitiveSuccess`。失败、search/get、prepare/redeem、status 和 integration 永不续期。
 
-- [ ] **Step 5：实现 prepare/redeem/complete 和 Runtime 清理**
+- [x] **Step 5：实现 prepare/redeem/complete 和 Runtime 清理**
 
 `prepareExec` 只创建 binding，不读取秘密；`redeemTicket` 原子兑换后才通过共享 store queue 读取一个字段并放入加密响应；`completeTicket` 成功才续期。`VaultAgentRuntime` 在有效 Grant 数变为 0、全部过期或撤销后删除自动化 Keychain 条目并清空票据；应用锁定不删除仍有效授权的自动化条目。
 
@@ -1329,13 +1329,13 @@ Runtime 每个已解码请求前和授权/撤销状态变化后，在共享 `Vau
 
 Task 6 只定义并注入 `VaultAgentIntegrationServicing`；缺省实现可报告未安装状态并让 install/uninstall 返回稳定 `BROKER_UNAVAILABLE`，不得在本任务猜写 Host 配置。Task 9 的安装器实现该接口后替换缺省服务。非 CLI 请求 integration operation 必须在调用 service 前返回 `INVALID_REQUEST`。
 
-- [ ] **Step 6：运行 Broker、Store 和菜单续期测试**
+- [x] **Step 6：运行 Broker、Store 和菜单续期测试**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentBrokerTests -only-testing:pasteraTests/PasswordVaultStoreTests -only-testing:pasteraTests/PasswordVaultMenuTests`。
 
 Expected：PASS；覆盖 envelope/version 与稳定错误映射、授权检查先于限流/解锁、cursor HMAC/query/folder/revision/重启失效、32 KiB 动态缩页、目标进程/签名/focus 变化、CLI-only copy/integration、prepare 不读秘密、redeem 后才读一个字段、complete/paste/copy 唯一续期点、零 Grant 原子清 key/票据、审计白名单；并发 Codex/Claude 搜索仍串行进入同一个 store queue，交互式 Pastera 成功复制/粘贴/编辑续期全部有效 Grant。
 
-- [ ] **Step 7：提交 Broker 业务闭环**
+- [x] **Step 7：提交 Broker 业务闭环**
 
 ~~~bash
 git add pastera/Sources/Services/VaultAgentPasteTargetTracker.swift \
@@ -2051,7 +2051,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付元数据（Delivery Metadata）
 
 - Plan Path：`docs/superpowers/plans/2026-07-19-pastera-vault-cli-skill-mcp.md`
-- Plan Status：`implementation-in-progress-task-5-complete`
+- Plan Status：`implementation-in-progress-task-6-complete`
 - Evidence Profile：`standard`
 - Story ID：未请求、未分配
 - Task IDs：未请求、未分配
@@ -2064,11 +2064,12 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 
 ## 交付记录（Delivery Record）
 
-- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer；Task 5 已完成 Helper/Host 双重进程身份、X25519/HKDF/ChaChaPoly 认证通道、fd-relative 私有 Unix Socket，以及 active + closing 合计最多 8 个连接、每连接单 timer/单 in-flight 和有界 partial I/O 的事件驱动生命周期。Task 6–12 尚未实现。
+- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer；Task 5 已完成 Helper/Host 双重进程身份、X25519/HKDF/ChaChaPoly 认证通道、fd-relative 私有 Unix Socket，以及 active + closing 合计最多 8 个连接、每连接单 timer/单 in-flight 和有界 partial I/O 的事件驱动生命周期；Task 6 已完成 Broker 全部密码箱 operation、有界 HMAC cursor、稳定出站错误折叠、最近非 Agent 粘贴目标复核、固定 Helper 票据命令、仅成功敏感动作续期、零 Grant 清理，以及容量 8 的 integration running + queued 共用 gate。Task 7–12 尚未实现。
 - Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。Task 4 预检发现票据 command 生成、随机/碰撞失败、重放错误、容量边界、限流 retry-after 和审计密钥/记录 Schema 尚未固定；已明确 command builder 只生成响应且不落 Store、三类有界票据状态、严格滑动窗口、独立 Keychain HMAC key 和进程内 1,000 条 Ring Buffer，未改变 30 秒票据、5 秒 receipt 或外部操作范围。Task 4 首轮独立审查发现审计 key 读取未强制 ThisDeviceOnly，主流程复核同时发现票据/receipt 被其他访问惰性清理后会把 expired 漂移成 used；已把 accessibility 纳入全部 Keychain 匹配查询，并用单个 256 条 outcome tombstone 保持过期/重放语义。复审一度建议为成功 receipt 也保存 used tombstone；按原契约复核后撤回，因为未知与已完成 receipt 对外均为 used，额外状态不会改善安全行为且可能阻断秘密已写入后的 complete/续期。Task 5 预检发现原任务未固定 Helper identifier、进程 snapshot/PID 复用检查、HKDF/AAD 字节 transcript、socket stale/active 冲突处理、partial I/O 和异步 handler 生命周期，并且重放示例引用了尚不存在的协议错误 case；已补齐三个签名 identifier、双次 snapshot、固定加密向量、fd-relative no-follow 文件系统规则、事件驱动有界连接状态机和本地 transport errors，因此 Task 5 允许窄改协议错误枚举但不改变 wire error raw value 或业务操作。Task 5 首轮独立审查发现 source cancel 前关闭 fd、idle 闭包无界累积、默认目录临时回退、目录 TOCTOU、响应在加密后限长，以及最终进程/签名窗口不完整；已改为 cancel handler 完成后释放、每连接单 timer、默认路径 fail closed、生命周期持有 dirfd、seal 前限长和最终完整复读。第二轮复审发现 closing 连接未计入容量，已补 active + closing 合计上限和确定性峰值测试；不改变 wire 或授权语义。
 - Task 6 Preflight：原任务未固定 status 的 Grant 快照来源、cursor 密钥与 snapshot revision、完整 error/rate/audit 映射、目标代码身份复核、Helper 命令模板、零 Grant 清理的串行原子性，以及 Task 9 安装器尚不存在时的 integration 边界；已明确进程内随机 HMAC cursor、确定性 metadata revision、稳定错误折叠、activation/paste 双次进程与签名验证、固定 stdin/fd3 模板、共享 executor 清理和窄 integration service 注入，不扩大 V1 操作集合或秘密返回面。
+- Task 6 Review：实现提交为 `2a949b1`，首轮复审修复提交为 `4091c1f`，容量 gate 修复提交为 `f1f2c2d`；两轮复审依次补齐统一出站 wire 上限、paste target generation/fail-closed、integration worker 非阻塞、完整负向策略矩阵、canonical cursor，以及断连后仍限制 running + queued 的固定容量 gate。其间 `4299f86` 等 README/社区文档提交属于独立需求，不计入 Task 6 实现范围。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
-- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder、Thread Performance Checker 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
+- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites，strict SwiftLint、范围化 `git diff --check` 与 `plutil` 均通过。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder、Thread Performance Checker 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：真实 Developer ID/ad-hoc Helper 身份、Host 父进程链、安装态默认 socket 路径、目标命令泄漏和 MCP SDK 1.0 前兼容性仍待 Task 11/12 实机验收，均已映射到验收与回滚。
-- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 6–12，并持续更新本文件复选框与 Delivery Record；Task 6 在已验证 transport 上完成 Broker 业务操作、粘贴目标和仅成功敏感动作续期的 Runtime 闭环。
+- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 7–12，并持续更新本文件复选框与 Delivery Record；Task 7 在已验证 Broker 上实现 Codex/Claude MCP Adapter 与固定五工具边界。
 - ZenTao Closeout：不适用；用户未要求禅道操作。
