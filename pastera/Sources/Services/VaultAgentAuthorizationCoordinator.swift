@@ -34,10 +34,13 @@ final class VaultAgentAuthorizationCoordinator {
     }
 
     private typealias Completion = (Result<VaultAgentGrant, VaultAgentErrorCode>) -> Void
+    typealias AuthenticationAction = (@escaping (Result<Void, Error>) -> Void) -> Void
+    typealias PrepareAction = () throws -> Void
 
     private struct PendingAuthorization {
         let identity: VaultAgentPeerIdentity
         let trigger: Trigger
+        let prepare: PrepareAction?
         var completions: [Completion]
     }
 
@@ -76,6 +79,8 @@ final class VaultAgentAuthorizationCoordinator {
     func authorize(
         identity: VaultAgentPeerIdentity,
         trigger: Trigger,
+        authentication: AuthenticationAction? = nil,
+        prepare: PrepareAction? = nil,
         completion: @escaping (Result<VaultAgentGrant, VaultAgentErrorCode>) -> Void
     ) {
         executor.async { [self] in
@@ -102,10 +107,12 @@ final class VaultAgentAuthorizationCoordinator {
             pending[identity.client] = PendingAuthorization(
                 identity: identity,
                 trigger: trigger,
+                prepare: prepare,
                 completions: [completion]
             )
             let lifetime = InFlightLifetime(self)
-            authenticator.authenticate { [executor] result in
+            let authenticate = authentication ?? authenticator.authenticate
+            authenticate { [executor] result in
                 executor.async {
                     guard let coordinator = lifetime.coordinator else { return }
                     coordinator.finishAuthentication(for: identity.client, result: result)
@@ -124,6 +131,7 @@ final class VaultAgentAuthorizationCoordinator {
         switch result {
         case .success:
             do {
+                try current.prepare?()
                 let grant = try policy.authorize(identity: current.identity, authenticatedAt: now())
                 defaults.removeObject(forKey: cooldownKey(client))
                 authorizationResult = .success(grant)

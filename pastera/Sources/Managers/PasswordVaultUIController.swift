@@ -412,6 +412,10 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         }
     }
 
+    func enableAutomationUnlockForAgent() throws {
+        try vaultAgentExecutor.sync { try store.enableAutomationUnlock() }
+    }
+
     func disableAutomationUnlockForAgent() throws {
         try vaultAgentExecutor.sync { try store.disableAutomationUnlock() }
     }

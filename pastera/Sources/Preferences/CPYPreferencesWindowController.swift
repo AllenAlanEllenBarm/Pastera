@@ -229,6 +229,8 @@ private extension CPYPreferencesWindowController {
             return CPYShortcutsPreferenceViewController()
         case .excludedApps:
             return CPYExcludeAppPreferenceViewController()
+        case .agentIntegrations:
+            return CPYAgentIntegrationPreferenceViewController()
         case .sync:
             return CPYSyncPreferenceViewController()
         case .about:
@@ -1141,6 +1143,8 @@ extension CPYPreferencesWindowController {
             return .scripts
         case "excluded apps", "exclude":
             return .excludedApps
+        case "agent integrations", "agents", "codex", "claude":
+            return .agentIntegrations
         case "sync":
             return .sync
         case "about pastera", "about", "update":
@@ -1157,6 +1161,7 @@ extension CPYPreferencesWindowController {
         case .scripts: return "Scripts"
         case .shortcuts: return "Shortcuts"
         case .excludedApps: return "Excluded Apps"
+        case .agentIntegrations: return "Agent Integrations"
         case .sync: return "Sync"
         case .about: return "About Pastera"
         }

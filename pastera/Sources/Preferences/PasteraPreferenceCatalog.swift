@@ -12,6 +12,7 @@ enum PasteraPreferencePaneID: String, CaseIterable {
     case scripts
     case shortcuts
     case excludedApps
+    case agentIntegrations
     case sync
     case about
 }
@@ -275,6 +276,50 @@ struct PasteraPreferenceCatalog: Equatable {
                             "Disable clipboard recording for selected applications."
                         ),
                         keywords: ["exclude", "ignored apps", "blacklist"]
+                    )
+                ]
+            ),
+            PasteraPreferenceCatalogPage(
+                paneID: .agentIntegrations,
+                groupTitle: pasteraPreferenceString("Services & Support"),
+                title: pasteraPreferenceString("Agent Integrations"),
+                symbolName: "terminal",
+                searchItems: [
+                    PasteraPreferenceSearchItem(
+                        id: "agents.codex",
+                        paneID: .agentIntegrations,
+                        sectionID: "agents.clients",
+                        anchorID: "agents.codex",
+                        title: pasteraPreferenceString("Codex Integration"),
+                        subtitle: pasteraPreferenceString("Install and authorize the password vault tools for Codex."),
+                        keywords: ["codex", "mcp", "agent"]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "agents.claude",
+                        paneID: .agentIntegrations,
+                        sectionID: "agents.clients",
+                        anchorID: "agents.claude",
+                        title: pasteraPreferenceString("Claude Code Integration"),
+                        subtitle: pasteraPreferenceString("Install and authorize the password vault tools for Claude Code."),
+                        keywords: ["claude", "mcp", "agent"]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "agents.cli",
+                        paneID: .agentIntegrations,
+                        sectionID: "agents.clients",
+                        anchorID: "agents.cli",
+                        title: pasteraPreferenceString("Pastera CLI"),
+                        subtitle: pasteraPreferenceString("Install and authorize the local password vault command line tool."),
+                        keywords: ["cli", "terminal", "command line"]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "agents.authorization",
+                        paneID: .agentIntegrations,
+                        sectionID: "agents.authorization",
+                        anchorID: "agents.authorization",
+                        title: pasteraPreferenceString("Agent Authorization"),
+                        subtitle: pasteraPreferenceString("Review the idle and hard expiration boundaries for each client."),
+                        keywords: ["authorization", "expiry", "grant"]
                     )
                 ]
             ),

@@ -8,6 +8,8 @@ import Foundation
 import Testing
 @testable import Pastera
 
+// The fixed preference catalog assertions intentionally remain together.
+// swiftlint:disable:next type_body_length
 struct PreferenceSearchTests {
     private let catalog = PasteraPreferenceCatalog.default
 
@@ -33,6 +35,7 @@ struct PreferenceSearchTests {
             .scripts,
             .shortcuts,
             .excludedApps,
+            .agentIntegrations,
             .sync,
             .about
         ])
@@ -42,6 +45,7 @@ struct PreferenceSearchTests {
             "scripts",
             "shortcuts",
             "excludedApps",
+            "agentIntegrations",
             "sync",
             "about"
         ])
@@ -67,6 +71,7 @@ struct PreferenceSearchTests {
             .scripts,
             .shortcuts,
             .excludedApps,
+            .agentIntegrations,
             .sync,
             .about
         ])
@@ -77,6 +82,7 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Services & Support"),
+            pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support")
         ])
         #expect(pages.map(\.title) == [
@@ -85,6 +91,7 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("Scripts"),
             pasteraPreferenceString("Shortcuts"),
             pasteraPreferenceString("Excluded Apps"),
+            pasteraPreferenceString("Agent Integrations"),
             pasteraPreferenceString("Sync"),
             pasteraPreferenceString("About Pastera")
         ])
@@ -94,6 +101,7 @@ struct PreferenceSearchTests {
             "curlybraces.square",
             "keyboard",
             "app.badge.checkmark",
+            "terminal",
             "icloud",
             "info.circle"
         ])
@@ -417,6 +425,7 @@ struct PreferenceSearchTests {
             "pastera/Sources/Preferences/Panels/CPYHistoryPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYShortcutsPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYExcludeAppPreferenceViewController.swift",
+            "pastera/Sources/Preferences/Panels/CPYAgentIntegrationPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYAboutPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/PasteraOneDriveStatusBadge.swift"
