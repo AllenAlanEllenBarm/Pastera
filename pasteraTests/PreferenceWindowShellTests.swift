@@ -39,6 +39,7 @@ struct PreferenceWindowShellTests {
             "脚本",
             "快捷键",
             "忽略应用",
+            "Agent 集成",
             "云同步",
             "关于"
         ])
@@ -48,6 +49,7 @@ struct PreferenceWindowShellTests {
             "curlybraces.square",
             "keyboard",
             "app.badge.checkmark",
+            "terminal",
             "icloud",
             "info.circle"
         ])
@@ -60,10 +62,9 @@ struct PreferenceWindowShellTests {
         #expect(controller.preferenceSidebarIconSlotWidthForTesting == 26)
         #expect(controller.preferenceSidebarIconPointSizeForTesting == 20)
         let iconDrawRects = controller.preferenceSidebarIconDrawRectsForTesting
-        #expect(iconDrawRects.count == 7)
+        #expect(iconDrawRects.count == PasteraPreferencePaneID.allCases.count)
+        #expect(iconDrawRects.allSatisfy { $0.width > 0 && $0.height > 0 })
         #expect(iconDrawRects.allSatisfy { $0.width <= 20 && $0.height <= 20 })
-        #expect(iconDrawRects[2].width > iconDrawRects[2].height)
-        #expect(iconDrawRects[4].width > iconDrawRects[4].height)
         #expect(controller.preferenceSidebarButtonHeightsForTesting.allSatisfy { 40...44 ~= $0 })
         #expect(controller.preferenceSelectedSidebarIconTintForTesting == .labelColor)
         #expect(controller.preferenceSelectedSidebarTitleColorForTesting == .labelColor)
@@ -84,14 +85,18 @@ struct PreferenceWindowShellTests {
         let syncFrame = try #require(
             controller.preferenceSidebarButtonFrameForTesting(paneID: .sync)
         )
+        let agentIntegrationsFrame = try #require(
+            controller.preferenceSidebarButtonFrameForTesting(paneID: .agentIntegrations)
+        )
         let aboutFrame = try #require(
             controller.preferenceSidebarButtonFrameForTesting(paneID: .about)
         )
 
         #expect(aboutFrame.minY > 16)
         #expect(syncFrame.minY > aboutFrame.maxY)
-        #expect(excludedAppsFrame.minY - syncFrame.maxY >= 8)
-        #expect(excludedAppsFrame.minY - syncFrame.maxY <= 14)
+        #expect(agentIntegrationsFrame.minY > syncFrame.maxY)
+        #expect(excludedAppsFrame.minY - agentIntegrationsFrame.maxY >= 8)
+        #expect(excludedAppsFrame.minY - agentIntegrationsFrame.maxY <= 14)
     }
 
     @Test
@@ -151,7 +156,7 @@ struct PreferenceWindowShellTests {
         for paneID in PasteraPreferencePaneID.allCases {
             controller.showPreferencePaneForTesting(paneID: paneID)
         }
-        #expect(controller.cachedPreferencePageCountForTesting == 7)
+        #expect(controller.cachedPreferencePageCountForTesting == PasteraPreferencePaneID.allCases.count)
 
         controller.showPreferencePaneForTesting(paneID: .general)
         #expect(controller.cachedPreferencePageForTesting(paneID: .general) === firstGeneralController)
@@ -188,6 +193,7 @@ struct PreferenceWindowShellTests {
             #expect(controller.cachedPreferencePageForTesting(paneID: .scripts) is CPYScriptsPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .shortcuts) is CPYShortcutsPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .excludedApps) is CPYExcludeAppPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .agentIntegrations) is CPYAgentIntegrationPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .sync) is CPYSyncPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .about) is CPYAboutPreferenceViewController)
         }
