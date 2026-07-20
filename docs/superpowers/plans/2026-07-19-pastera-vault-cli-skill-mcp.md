@@ -1707,6 +1707,8 @@ git commit -m "feat(agent): 增加密码箱 skill 安装流程"
 - Modify: `pastera/Sources/Preferences/PasteraPreferenceCatalog.swift`
 - Modify: `pastera/Sources/Preferences/CPYPreferencesWindowController.swift`
 - Modify: `pastera/Sources/Services/VaultAgentRuntime.swift`
+- Modify: `pastera/Sources/Services/VaultAgentAuthorizationCoordinator.swift`
+- Modify: `pastera/Sources/Managers/PasswordVaultUIController.swift`
 - Modify: `pastera/Resources/Localizable.xcstrings`
 - Modify: `pasteraTests/PreferenceSearchTests.swift`
 - Modify: `pastera.xcodeproj/project.pbxproj`
@@ -1715,6 +1717,8 @@ git commit -m "feat(agent): 增加密码箱 skill 安装流程"
 
 - Consumes: Runtime 的 install/status/authorize/revoke/uninstall。
 - Produces: `PasteraPreferencePaneID.agentIntegrations`、可搜索偏好页和无重复授权的状态 UI。
+
+Task 10 的偏好页通过窄 `VaultAgentPreferenceRuntimeServicing` 异步接口读取三类客户端状态并发起动作；不得从主线程直接调用 Host CLI、Keychain、签名或 KDBX。`VaultAgentAuthorizationCoordinator` 继续作为同一客户端重复授权的唯一合并点，但允许注入一次性的认证动作与认证成功后的 Grant 准备动作：已解锁时使用一次 `LAContext`，锁定且 quick key 可用时把 `unlockWithQuickKey` 的 user-presence 结果作为同一次认证；两条路径都必须在写 Grant 前创建自动化 unlock key，失败时不产生 Grant。`PasswordVaultUIController` 只新增共用 store executor 的窄 `enableAutomationUnlockForAgent()`，不暴露 Store 或原始 key。
 
 - [ ] **Step 1：写偏好目录、状态行和按钮状态失败测试**
 
@@ -2082,6 +2086,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 - Task 8 Review：初始实现提交 `ecf7c3f`，生命周期加固提交 `b499c74`。独立审查发现写入期间取消关闭的 stale-fd 竞态、spawn/adopt 窗口缺少确定性保障、`waitpid` 对 EINTR/ECHILD 与 PID 复用边界不严谨，以及 ad-hoc CLI identifier 漂移；修复后写入/关闭/取消统一串行，退出事件在 wait/reap 前阻止升级信号，仅真实回收或 ECHILD 标记 reaped，并固定 `com.pastera-app.pastera` identifier。最终复审 Approved，Critical/Important/Minor 均为 0。
 - Task 9 Preflight：安装器复用 Task 5 的 Host/Helper 签名身份和 Task 6 的窄 integration service，不扩展 Broker operation；Skill 无加载基线能保持不索取明文，但会编造命令绑定字段和契约外消歧信息，因此加入精确工具与命令注入 references。Claude 受管策略存在远程/MDM 状态无法由本机完整观测，自动应用规则对未知状态 fail closed，但移除 Pastera 已拥有规则始终允许，以保证可以缩权。
 - Task 9 Review：初始实现提交 `10d05d5`，所有权事务加固提交 `92d7692`，并发补偿提交 `9685fdf`。三轮独立审查补齐同名 MCP 注册的完整 canonicalization、官方命令提交语义、无覆盖 CAS rollback、rename 后 verify/fsync 回滚、Claude 权限失败的语义差量补偿、统一 4 MiB 设置边界及临时资源失败上报；最终为 Critical 0 / Important 0 / Minor 2。剩余两项均是已提交事务或真实晚到写入后的私有 quarantine/rollback 文件缺少持久恢复记录和有界清理，当前优先保全用户数据并显式报错。
+- Task 10 Preflight：原文件清单只允许修改 Runtime，但一次授权必须在同一认证结果下先创建自动化 unlock key、再提交 Grant，并且锁定态 quick key 的 user-presence 不能追加第二次 `LAContext`；因此补充修改 `VaultAgentAuthorizationCoordinator.swift` 与 `PasswordVaultUIController.swift`。Coordinator 仍负责 pending 去重和取消冷却，只增加可注入认证/Grant 准备边界；Controller 只增加共用 Store executor 的窄 enable 方法。偏好页与 Host/Keychain/KDBX 的交互全部通过异步 Runtime facade，避免主线程阻塞，也不扩大 Broker wire operation 或秘密返回面。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
 - Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites；Task 7 经三轮加固与最终独立复审批准，focused 为 36 tests / 2 suites，Agent/协议为 45 tests / 3 suites，Broker 为 51 tests / 1 suite，Client suite 连续 10 轮共 250 tests 全通过，两个 Helper 均 `BUILD SUCCEEDED`，Codex/Claude initialize/list/call/EOF/SIGTERM smoke 均 exit 0、stderr 0；Task 8 最终 focused 为 60 tests / 4 suites，Agent 71 tests / 5 suites、Broker 51 tests / 1 suite，Runner 15 tests 连续 5 轮通过，四个 executable 均构建成功，CLI identifier 精确回读，真实 MCP/CLI/exec smoke、strict SwiftLint、范围化 `git diff --check`、`plutil` 与 `xmllint` 均通过；Task 9 最终 installer 32 tests / 1 suite、Installer + PeerVerifier + Broker 90 tests / 3 suites、Protocol 9 tests / 1 suite，共 99 tests 通过，Skill quick validation、strict SwiftLint、范围化 `git diff --check` 与 `plutil` 均通过；`install_local.sh` 构建、ad-hoc 签名、安装并启动 `/Applications/Pastera.app` 成功。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：真实 Developer ID/ad-hoc Helper 身份、Host 父进程链、安装态默认 socket 路径、目标命令泄漏和 MCP SDK 1.0 前兼容性仍待 Task 11/12 实机验收。官方 Codex/Claude CLI 没有 conditional add/remove，同 UID 外部进程在 preflight 与 mutation 的窄窗口内并发写同名 MCP 项无法实现 CAS；安装器静态冲突与后续状态变化均 fail closed，继续使用官方 CLI 比直接改写 Host 配置风险更低。极端原子回滚竞态会为避免数据丢失保留每次最多约 4 MiB 的私有 rollback/write 文件，后续需补可发现恢复记录和有界清理。
