@@ -214,6 +214,32 @@ struct VaultAgentClientTests {
         #expect(probe.delays.isEmpty)
     }
 
+    @Test("cancelling a blocked connect prevents launch and every retry side effect")
+    func cancelledBlockedConnectHasNoSideEffects() async throws {
+        let probe = try VaultAgentBlockingUnavailableProbe()
+        let task = Task {
+            try await VaultAgentConnectionRetrier.connect(
+                connect: { try probe.connect() },
+                launch: { probe.launch() },
+                sleep: { probe.sleepIgnoringCancellation(milliseconds: $0) }
+            ) as Int
+        }
+        await probe.waitUntilConnectEntered()
+
+        task.cancel()
+        probe.releaseConnect()
+
+        await #expect(throws: VaultAgentClientError.cancelled) {
+            try await task.value
+        }
+        let snapshot = probe.snapshot()
+        #expect(snapshot.connectCount == 1)
+        #expect(snapshot.launchCount == 0)
+        #expect(snapshot.delays.isEmpty)
+        #expect(fcntl(snapshot.descriptor, F_GETFD) == -1)
+        #expect(errno == EBADF)
+    }
+
     @Test("client launches only its containing Pastera app and keeps retries bounded")
     func clientLaunchesContainingApplicationOnce() async {
         let probe = VaultAgentLaunchProbe()
@@ -531,6 +557,90 @@ struct VaultAgentClientTests {
         #expect(fcntl(clientDescriptor, F_GETFD) == -1)
     }
 
+    @Test("connection waiter capacity is 32 and every continuation is released", .timeLimit(.minutes(1)))
+    func connectionWaiterCapacityIsBoundedAndReusable() async throws {
+        let probe = VaultAgentCapacityConnectProbe()
+        let client = VaultAgentClient(
+            client: .codex,
+            dependencies: socketDependencies(
+                sleep: { probe.didSleep($0) },
+                connect: { try probe.connect() },
+                launch: { probe.didLaunch() }
+            )
+        )
+        let outcomes = VaultAgentWaiterOutcomeQueue()
+        let requests = (0..<33).map { _ in
+            Task {
+                let outcome: VaultAgentWaiterOutcome
+                do {
+                    _ = try await client.request(.status)
+                    outcome = .success
+                } catch let error as VaultAgentClientError {
+                    outcome = .failure(error)
+                } catch {
+                    outcome = .failure(.protocolFailure)
+                }
+                await outcomes.record(outcome)
+                return outcome
+            }
+        }
+        await probe.waitUntilFirstConnectEntered()
+
+        #expect(await outcomes.next() == .failure(.unavailable))
+        for request in requests { request.cancel() }
+        var cancelledOutcomes: [VaultAgentWaiterOutcome] = []
+        for request in requests { cancelledOutcomes.append(await request.value) }
+
+        #expect(cancelledOutcomes.filter { $0 == .failure(.cancelled) }.count == 32)
+        #expect(cancelledOutcomes.filter { $0 == .failure(.unavailable) }.count == 1)
+        probe.releaseFirstConnect()
+        await probe.waitUntilFirstConnectFinished()
+
+        let socket = try VaultAgentSocketPair()
+        let clientDescriptor = socket.takeClientDescriptor()
+        let serverDescriptor = socket.takeServerDescriptor()
+        let fixture = try VaultAgentClientCryptoFixture()
+        probe.enableSuccess(descriptor: clientDescriptor)
+        let serverTask = Task.detached { () throws in
+            defer { Darwin.close(serverDescriptor) }
+            _ = try readTask7Frame(fileDescriptor: serverDescriptor)
+            try writeTask7Frame(
+                JSONEncoder().encode(fixture.serverHello),
+                fileDescriptor: serverDescriptor
+            )
+            let frameData = try readTask7Frame(fileDescriptor: serverDescriptor)
+            let frame = try JSONDecoder().decode(VaultAgentEncryptedFrame.self, from: frameData)
+            let request = try JSONDecoder().decode(
+                VaultAgentRequestEnvelope.self,
+                from: fixture.openClientFrame(frame)
+            )
+            let response = VaultAgentResponseEnvelope(
+                protocolVersion: request.protocolVersion,
+                connectionID: request.connectionID,
+                sequence: request.sequence,
+                requestID: request.requestID,
+                body: .success(.status(Self.readyStatus))
+            )
+            try writeTask7Frame(
+                JSONEncoder().encode(try fixture.serverFrame(
+                    JSONEncoder().encode(response),
+                    sequence: request.sequence
+                )),
+                fileDescriptor: serverDescriptor
+            )
+        }
+
+        #expect(try await client.request(.status) == .success(.status(Self.readyStatus)))
+        try await serverTask.value
+        let snapshot = probe.snapshot()
+        #expect(snapshot.connectCount == 2)
+        #expect(snapshot.launchCount == 0)
+        #expect(snapshot.delays.isEmpty)
+        await client.close()
+        #expect(fcntl(clientDescriptor, F_GETFD) == -1)
+        #expect(errno == EBADF)
+    }
+
     @Test("a failed shared attempt is released so a later request can reconnect")
     func failedSharedAttemptCanReconnect() async throws {
         let socket = try VaultAgentSocketPair()
@@ -790,6 +900,82 @@ private final class VaultAgentCancellationProbe: @unchecked Sendable {
     }
 }
 
+private final class VaultAgentBlockingUnavailableProbe: @unchecked Sendable {
+    struct Snapshot {
+        let connectCount: Int
+        let launchCount: Int
+        let delays: [Int]
+        let descriptor: Int32
+    }
+
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private var entered = false
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var connectCount = 0
+    private var launchCount = 0
+    private var delays: [Int] = []
+    private let descriptor: Int32
+    private var descriptorClosed = false
+
+    init() throws {
+        descriptor = Darwin.open("/dev/null", O_RDONLY)
+        guard descriptor >= 0 else { throw POSIXError(.EMFILE) }
+    }
+
+    deinit {
+        let shouldClose = lock.withLock { !descriptorClosed }
+        if shouldClose { Darwin.close(descriptor) }
+    }
+
+    func connect() throws -> Int {
+        let state = lock.withLock { () -> (Bool, [CheckedContinuation<Void, Never>]) in
+            connectCount += 1
+            guard connectCount == 1 else { return (false, []) }
+            entered = true
+            defer { enteredWaiters.removeAll() }
+            return (true, enteredWaiters)
+        }
+        for waiter in state.1 { waiter.resume() }
+        if state.0 {
+            releaseSemaphore.wait()
+            Darwin.close(descriptor)
+            lock.withLock { descriptorClosed = true }
+        }
+        throw VaultAgentClientError.unavailable
+    }
+
+    func waitUntilConnectEntered() async {
+        if lock.withLock({ entered }) { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock { () -> Bool in
+                if entered { return true }
+                enteredWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func releaseConnect() { releaseSemaphore.signal() }
+    func launch() { lock.withLock { launchCount += 1 } }
+
+    func sleepIgnoringCancellation(milliseconds: Int) {
+        lock.withLock { delays.append(milliseconds) }
+    }
+
+    func snapshot() -> Snapshot {
+        lock.withLock {
+            Snapshot(
+                connectCount: connectCount,
+                launchCount: launchCount,
+                delays: delays,
+                descriptor: descriptor
+            )
+        }
+    }
+}
+
 private final class VaultAgentScriptedClock: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [UInt64]
@@ -954,6 +1140,112 @@ private final class VaultAgentRecoveryConnectProbe: @unchecked Sendable {
     }
 
     func snapshot() -> Int { lock.withLock { connectCount } }
+}
+
+private enum VaultAgentWaiterOutcome: Sendable, Equatable {
+    case success
+    case failure(VaultAgentClientError)
+}
+
+private actor VaultAgentWaiterOutcomeQueue {
+    private var outcomes: [VaultAgentWaiterOutcome] = []
+    private var waiter: CheckedContinuation<VaultAgentWaiterOutcome, Never>?
+
+    func record(_ outcome: VaultAgentWaiterOutcome) {
+        if let waiter {
+            self.waiter = nil
+            waiter.resume(returning: outcome)
+        } else {
+            outcomes.append(outcome)
+        }
+    }
+
+    func next() async -> VaultAgentWaiterOutcome {
+        if !outcomes.isEmpty { return outcomes.removeFirst() }
+        return await withCheckedContinuation { waiter = $0 }
+    }
+}
+
+private final class VaultAgentCapacityConnectProbe: @unchecked Sendable {
+    struct Snapshot {
+        let connectCount: Int
+        let launchCount: Int
+        let delays: [Int]
+    }
+
+    private let lock = NSLock()
+    private let firstRelease = DispatchSemaphore(value: 0)
+    private var firstEntered = false
+    private var firstFinished = false
+    private var firstEnteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstFinishedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var successDescriptor: Int32?
+    private var connectCount = 0
+    private var launchCount = 0
+    private var delays: [Int] = []
+
+    func connect() throws -> Int32 {
+        let state = lock.withLock { () -> (Int, [CheckedContinuation<Void, Never>]) in
+            connectCount += 1
+            guard connectCount == 1 else { return (connectCount, []) }
+            firstEntered = true
+            defer { firstEnteredWaiters.removeAll() }
+            return (connectCount, firstEnteredWaiters)
+        }
+        for waiter in state.1 { waiter.resume() }
+        if state.0 == 1 {
+            firstRelease.wait()
+            let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                firstFinished = true
+                defer { firstFinishedWaiters.removeAll() }
+                return firstFinishedWaiters
+            }
+            for waiter in waiters { waiter.resume() }
+            throw VaultAgentClientError.unavailable
+        }
+        return try lock.withLock {
+            guard let descriptor = successDescriptor else {
+                throw VaultAgentClientError.unavailable
+            }
+            successDescriptor = nil
+            return descriptor
+        }
+    }
+
+    func waitUntilFirstConnectEntered() async {
+        if lock.withLock({ firstEntered }) { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock { () -> Bool in
+                if firstEntered { return true }
+                firstEnteredWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func waitUntilFirstConnectFinished() async {
+        if lock.withLock({ firstFinished }) { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock { () -> Bool in
+                if firstFinished { return true }
+                firstFinishedWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func releaseFirstConnect() { firstRelease.signal() }
+    func enableSuccess(descriptor: Int32) { lock.withLock { successDescriptor = descriptor } }
+    func didLaunch() { lock.withLock { launchCount += 1 } }
+    func didSleep(_ milliseconds: Int) { lock.withLock { delays.append(milliseconds) } }
+
+    func snapshot() -> Snapshot {
+        lock.withLock {
+            Snapshot(connectCount: connectCount, launchCount: launchCount, delays: delays)
+        }
+    }
 }
 
 private final class VaultAgentAdvancingClock: @unchecked Sendable {

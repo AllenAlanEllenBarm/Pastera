@@ -49,35 +49,64 @@ enum VaultAgentConnectionRetrier {
         now: @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         connect: @Sendable () throws -> Value,
         launch: @Sendable () throws -> Void,
-        sleep: @Sendable (Int) async throws -> Void
+        sleep: @Sendable (Int) async throws -> Void,
+        discard: @Sendable (Value) -> Void = { _ in }
     ) async throws -> Value {
+        try checkCancellation()
         do {
-            return try connect()
+            return try checkedConnect(connect: connect, discard: discard)
         } catch {
             guard isUnavailable(error) else { throw normalized(error) }
+            try checkCancellation()
             try checkDeadline(deadline, now: now)
+            try checkCancellation()
             do {
                 try launch()
             } catch {
                 throw normalized(error)
             }
+            try checkCancellation()
         }
 
         for delay in delays {
+            try checkCancellation()
             try checkSleepBudget(delay, deadline: deadline, now: now)
+            try checkCancellation()
             do {
                 try await sleep(delay)
             } catch {
                 throw normalized(error)
             }
+            try checkCancellation()
             try checkDeadline(deadline, now: now)
+            try checkCancellation()
             do {
-                return try connect()
+                return try checkedConnect(connect: connect, discard: discard)
             } catch {
                 guard isUnavailable(error) else { throw normalized(error) }
+                try checkCancellation()
             }
         }
+        try checkCancellation()
         throw VaultAgentClientError.unavailable
+    }
+
+    private static func checkedConnect<Value: Sendable>(
+        connect: @Sendable () throws -> Value,
+        discard: @Sendable (Value) -> Void
+    ) throws -> Value {
+        let value = try connect()
+        do {
+            try checkCancellation()
+            return value
+        } catch {
+            discard(value)
+            throw error
+        }
+    }
+
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw VaultAgentClientError.cancelled }
     }
 
     private static func isUnavailable(_ error: Error) -> Bool {
@@ -85,7 +114,7 @@ enum VaultAgentConnectionRetrier {
     }
 
     private static func normalized(_ error: Error) -> VaultAgentClientError {
-        if error is CancellationError { return .cancelled }
+        if Task.isCancelled || error is CancellationError { return .cancelled }
         return (error as? VaultAgentClientError) ?? .unavailable
     }
 
@@ -378,7 +407,8 @@ extension VaultAgentClient {
                 }
                 try dependencies.launch(appURL)
             },
-            sleep: dependencies.sleep
+            sleep: dependencies.sleep,
+            discard: { Darwin.close($0) }
         )
         do {
             return try handshake(
