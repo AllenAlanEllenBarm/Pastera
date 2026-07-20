@@ -98,7 +98,7 @@
 - Consumes: 现有 `1280 x 520` SVG 画布、Pastera 品牌图形、深色中性基调和蓝绿单一强调色。
 - Produces: README 可直接引用、无 beta 版本依赖、XML 合法且带中文无障碍描述的 Hero。
 
-- [ ] **Step 1: 记录当前 Hero 的过期文案证据**
+- [x] **Step 1: 记录当前 Hero 的过期文案证据**
 
 Run:
 
@@ -108,7 +108,7 @@ rg -n '1\.2\.2beta|Searchable history|Keyboard-first workflow|Keyword' docs/asse
 
 Expected: 返回版本号和英文可见文案，证明当前资产需要更新。
 
-- [ ] **Step 2: 更新 Hero 可见文案与无障碍描述**
+- [x] **Step 2: 更新 Hero 可见文案与无障碍描述**
 
 保持现有几何结构、圆角体系、背景和蓝绿强调色，只做以下内容修改：
 
@@ -121,7 +121,7 @@ Expected: 返回版本号和英文可见文案，证明当前资产需要更新�
 - `Keyword`、`All`、`Text` 改为 `关键词`、`全部`、`文本`。
 - `AI Prompt`、`Screenshot.png` 改为 `AI 提示词`、`截图.png`。
 
-- [ ] **Step 3: 验证 SVG 结构和版本独立性**
+- [x] **Step 3: 验证 SVG 结构和版本独立性**
 
 Run:
 
@@ -136,8 +136,8 @@ Expected: `xmllint` 退出码为 0，第二条命令无匹配且退出码为 0�
 
 **Files:**
 - Modify: `README.md`
-- Read: `docs/windows-reference/main-panel/01-history-synthetic-dark.jpg`
-- Read: `docs/windows-reference/main-panel/02-search-open-dark.jpg`
+- Read: `docs/windows-reference/main-panel/03-snippets-empty-dark.jpg`
+- Read: `docs/windows-reference/main-panel/04-vault-locked-dark.jpg`
 - Read: `docs/windows-reference/preferences/01-general-dark.jpg`
 - Read: `docs/funding/OPEN_COLLECTIVE.md`
 - Read: `Casks/pastera.rb`
@@ -146,7 +146,7 @@ Expected: `xmllint` 退出码为 0，第二条命令无匹配且退出码为 0�
 - Consumes: Task 1 的 Hero、`v3.0.0-beta` Release 事实、现有脱敏 macOS 界面截图和仓库内开发命令。
 - Produces: 普通用户优先、开发者入口清楚、版本维护面受控的中文 README。
 
-- [ ] **Step 1: 记录 README 的现有失败条件**
+- [x] **Step 1: 记录 README 的现有失败条件**
 
 Run:
 
@@ -156,7 +156,7 @@ rg -n '2\.0\.1-beta|Latest Beta|Project Status|Highlights|Product Direction|deri
 
 Expected: 返回旧版本、英文标题和历史产品关系文案。
 
-- [ ] **Step 2: 建立首屏品牌、导航和产品定位**
+- [x] **Step 2: 建立首屏品牌、导航和产品定位**
 
 README 顶部按以下顺序实现：
 
@@ -179,7 +179,7 @@ README 顶部按以下顺序实现：
 
 标题后使用两段中文：第一段说明 Pastera 是独立、开源、键盘优先的 macOS 剪贴板效率工具；第二段说明当前 macOS 产品能力和 Windows 原生客户端方向，不把 Clipy 写入产品定位。
 
-- [ ] **Step 3: 建立下载、系统要求和可信安装说明**
+- [x] **Step 3: 建立下载、系统要求和可信安装说明**
 
 新增“下载”和“安装”区：
 
@@ -190,7 +190,7 @@ README 顶部按以下顺序实现：
 - 首次打开指引只引导用户在“系统设置 > 隐私与安全性”确认来源，不提供关闭 Gatekeeper 的命令。
 - Homebrew Cask 使用仓库内 `Casks/pastera.rb`，说明 GitHub 必须存在匹配 DMG。
 
-- [ ] **Step 4: 按用户任务重组核心能力**
+- [x] **Step 4: 按用户任务重组核心能力**
 
 使用四个二级内容组，不创建三列等宽卡片：
 
@@ -201,7 +201,7 @@ README 顶部按以下顺序实现：
 
 只写当前已交付能力，不把规划功能写成已完成。
 
-- [ ] **Step 5: 加入非对称真实界面区**
+- [x] **Step 5: 加入非对称真实界面区**
 
 在“界面预览”中使用一张 62% 宽设置图和两张 28% 宽主菜单图：
 
@@ -210,14 +210,14 @@ README 顶部按以下顺序实现：
   <img src="docs/windows-reference/preferences/01-general-dark.jpg" alt="Pastera 深色模式基础设置页面" width="62%" />
 </p>
 <p align="center">
-  <img src="docs/windows-reference/main-panel/01-history-synthetic-dark.jpg" alt="Pastera 使用脱敏合成数据展示历史记录" width="28%" />
-  <img src="docs/windows-reference/main-panel/02-search-open-dark.jpg" alt="Pastera 使用脱敏合成数据展示历史搜索" width="28%" />
+  <img src="docs/windows-reference/main-panel/03-snippets-empty-dark.jpg" alt="Pastera 深色模式片段空状态" width="28%" />
+  <img src="docs/windows-reference/main-panel/04-vault-locked-dark.jpg" alt="Pastera 深色模式密码箱锁定状态" width="28%" />
 </p>
 ```
 
 紧随图片说明这些画面使用脱敏合成内容，不包含真实剪贴板数据。
 
-- [ ] **Step 6: 收拢构建、状态、社区和归属**
+- [x] **Step 6: 收拢构建、状态、社区和归属**
 
 - “构建与本地开发”保留 `xcodebuild` build 命令和 `./script/install_local.sh`，完整测试命令链接到 Contributing。
 - “项目状态”说明仓库 `isFork: false` 的独立产品边界、macOS 当前基线和 Windows 后续方向。
@@ -226,13 +226,13 @@ README 顶部按以下顺序实现：
 - “历史归属与许可证”只保留一句来源摘要，链接 `LICENSE` 和 `NOTICE`。
 - 删除旧 Funding 申请状态文案，只保留指向 `docs/funding/OPEN_COLLECTIVE.md` 的稳定资金政策入口。
 
-- [ ] **Step 7: 验证 README 旧文案清理和资源存在**
+- [x] **Step 7: 验证 README 旧文案清理和资源存在**
 
 Run:
 
 ```bash
 ! rg -n '1\.2\.2beta|2\.0\.1-beta|Latest Beta|Project Status|Highlights|Product Direction|derived from Clipy|fork roadmap' README.md
-for task_asset in docs/assets/readme-hero.svg docs/windows-reference/preferences/01-general-dark.jpg docs/windows-reference/main-panel/01-history-synthetic-dark.jpg docs/windows-reference/main-panel/02-search-open-dark.jpg Casks/pastera.rb script/install_local.sh; do test -e "$task_asset"; done
+for task_asset in docs/assets/readme-hero.svg docs/windows-reference/preferences/01-general-dark.jpg docs/windows-reference/main-panel/03-snippets-empty-dark.jpg docs/windows-reference/main-panel/04-vault-locked-dark.jpg Casks/pastera.rb script/install_local.sh; do test -e "$task_asset"; done
 ```
 
 Expected: 旧文案无匹配，全部相对资源路径存在。
@@ -251,7 +251,7 @@ Expected: 旧文案无匹配，全部相对资源路径存在。
 - Consumes: 当前项目安全、隐私、数据和验证边界，以及仓库真实本地化文件结构。
 - Produces: 中文行为规范和可从零执行的中文贡献流程。
 
-- [ ] **Step 1: 重写 Code of Conduct**
+- [x] **Step 1: 重写 Code of Conduct**
 
 使用以下固定结构：
 
@@ -267,7 +267,7 @@ Expected: 旧文案无匹配，全部相对资源路径存在。
 
 保留尊重、聚焦代码与用户影响、隐私保护、禁止骚扰、禁止泄露凭据和禁止隐藏剪贴板行为等项目专用边界。行为问题通过普通 Issue 或仓库维护者处理，不把漏洞报告流程混入行为规范。
 
-- [ ] **Step 2: 重组 Contributing 的贡献路径**
+- [x] **Step 2: 重组 Contributing 的贡献路径**
 
 使用以下固定结构：
 
@@ -293,7 +293,7 @@ Expected: 旧文案无匹配，全部相对资源路径存在。
 - 代码入口使用当前 AGENTS 中的 AppDelegate、MenuManager、Services、Database、SnippetRepository 和验证文档路径。
 - 路线图名称改成“独立产品路线图”，不使用“Fork roadmap”。
 
-- [ ] **Step 3: 验证中文结构和失效路径清理**
+- [x] **Step 3: 验证中文结构和失效路径清理**
 
 Run:
 
@@ -315,7 +315,7 @@ Expected: 标题均为中文，旧产品关系和失效路径无匹配，真实�
 - Consumes: 用户已确认的远端设置授权、GitHub 仓库管理员权限和当前安全边界。
 - Produces: `enabled: true` 的私密报告通道，以及指向该通道的中文安全政策。
 
-- [ ] **Step 1: 记录远端设置基线并再次确认仓库目标**
+- [x] **Step 1: 记录远端设置基线并再次确认仓库目标**
 
 Run:
 
@@ -326,7 +326,7 @@ gh repo view pastera-app/Pastera --json nameWithOwner,isFork,parent --jq '{nameW
 
 Expected: 第一条当前返回 `{"enabled":false}`；第二条返回 `pastera-app/Pastera`、`isFork: false`、`parent: null`。
 
-- [ ] **Step 2: 启用并回读 Private Vulnerability Reporting**
+- [x] **Step 2: 启用并回读 Private Vulnerability Reporting**
 
 Run:
 
@@ -337,7 +337,7 @@ gh api repos/pastera-app/Pastera/private-vulnerability-reporting --jq '.enabled'
 
 Expected: PUT 成功，回读输出 `true`。若启用失败，停止 Security 文档实施，不发布不可用的私密链接。
 
-- [ ] **Step 3: 重写 Security 为中文安全政策**
+- [x] **Step 3: 重写 Security 为中文安全政策**
 
 使用以下固定结构：
 
@@ -359,7 +359,7 @@ Expected: PUT 成功，回读输出 `true`。若启用失败，停止 Security �
 - 明确本地数据、网络上传、遥测、自动粘贴、TCC、Accessibility、签名、Apple 公证和凭据边界。
 - 不承诺固定 SLA，只说明维护者会确认报告、评估影响并在私密线程同步处理进展。
 
-- [ ] **Step 4: 验证 Security 链接与远端状态**
+- [x] **Step 4: 验证 Security 链接与远端状态**
 
 Run:
 
@@ -386,7 +386,7 @@ Expected: 两类报告入口和关键边界存在，远端回读为 `true`。
 - Consumes: Tasks 1-4 的本地文档和 GitHub 设置结果。
 - Produces: 可复核的 Markdown 渲染、静态检查、远端回读和同一计划内 Delivery Record。
 
-- [ ] **Step 1: 运行文本、XML 和工作树卫生检查**
+- [x] **Step 1: 运行文本、XML 和工作树卫生检查**
 
 Run:
 
@@ -400,7 +400,7 @@ git diff --quiet HEAD -- LICENSE NOTICE
 
 Expected: 全部退出码为 0，LICENSE 和 NOTICE 无 diff。
 
-- [ ] **Step 2: 通过 GitHub API 渲染全部 Markdown**
+- [x] **Step 2: 通过 GitHub API 渲染全部 Markdown**
 
 Run:
 
@@ -413,7 +413,7 @@ done
 
 Expected: 四个文档均成功渲染，HTML 输出大于 100 字节。
 
-- [ ] **Step 3: 回读 GitHub 仓库状态**
+- [x] **Step 3: 回读 GitHub 仓库状态**
 
 Run:
 
@@ -424,7 +424,7 @@ gh repo view pastera-app/Pastera --json nameWithOwner,isFork,parent,defaultBranc
 
 Expected: `enabled: true`，仓库仍为 `pastera-app/Pastera`、`isFork: false`、`parent: null`、默认分支 `develop`。
 
-- [ ] **Step 4: 检查本次范围与既有工作区边界**
+- [x] **Step 4: 检查本次范围与既有工作区边界**
 
 Run:
 
@@ -435,11 +435,11 @@ git diff --name-only -- README.md docs/assets/readme-hero.svg CODE_OF_CONDUCT.md
 
 Expected: 本次新增 diff 只涉及计划列出的六个路径；密码箱源码、测试、本机配置和 `.superpowers/` 保持进入本任务前的状态且未暂存。
 
-- [ ] **Step 5: 回写同一计划的 Delivery Record**
+- [x] **Step 5: 回写同一计划的 Delivery Record**
 
 把真实实现、偏差、影响、验证命令结果、远端回读、剩余风险和后续项写入本文件，不创建第二份规格、计划、验证或交付文档。
 
-- [ ] **Step 6: 准备单一文档闭环提交**
+- [x] **Step 6: 准备单一文档闭环提交**
 
 ```bash
 git add README.md docs/assets/readme-hero.svg CODE_OF_CONDUCT.md .github/CONTRIBUTING.md SECURITY.md docs/superpowers/plans/2026-07-20-pastera-readme-community-docs.md
@@ -477,7 +477,7 @@ Evidence Profile: `standard`。本任务具有 XML 静态检查、GitHub Markdow
 ## Delivery Metadata
 
 - Plan Path: `docs/superpowers/plans/2026-07-20-pastera-readme-community-docs.md`
-- Plan Status: `ready-for-implementation`
+- Plan Status: `implemented-and-verified`
 - Evidence Profile: `standard`
 - Story ID: `not-requested`
 - Task IDs: `not-requested`
@@ -491,28 +491,43 @@ Evidence Profile: `standard`。本任务具有 XML 静态检查、GitHub Markdow
 
 ### Actual Implementation
 
-- 已完成需求审计、设计确认和唯一实施计划编写；README、社区文档、Hero 和远端设置尚未实施。
+- 将 README 重组为中文产品首页，提供长期有效的品牌首屏、下载与签名限制、四组当前能力、真实脱敏界面、安装构建、项目状态、社区入口、安全分流和历史归属。
+- 将 Hero 改为无版本依赖的中文品牌视觉，补充中文 `<title>` 与 `<desc>`，移除旧 beta 胶囊和英文界面标签。
+- 将 Code of Conduct、Contributing 和 Security 按各自职责重写为中文，补齐真实构建、本地化、隐私、凭据和安全报告边界。
+- 已为 `pastera-app/Pastera` 启用 GitHub Private Vulnerability Reporting，并让 Security 指向真实私密报告入口。
 
 ### Plan Deviations
 
 - 初始设计记录位于 `docs/superpowers/specs/`。为满足仓库“一项需求只保留一个计划/交付文件”的规则，已将其迁移并合并进本计划，不保留平行规格文件。
+- 初选的历史与搜索截图带有可见的 `Windows V1 synthetic` 样本文案。最终改用片段空状态和密码箱锁定状态，避免公开 README 产生平台定位混淆，同时保留脱敏内容说明。
+- 当前 `Casks/pastera.rb` 仍对应旧版资产，因此 README 只保留维护者入口，并明确要求版本、SHA-256 和 DMG 一致后再使用，没有把它描述为当前推荐安装方式。
 
 ### Impact
 
-- 当前只新增本计划记录。产品源码、测试、许可证、发布资产和 GitHub 安全设置尚未发生变化。
+- 本地影响仅限 `README.md`、Hero、三份社区文档和本计划，不改变应用源码、测试、Xcode 工程、用户数据、发布资产、`LICENSE` 或 `NOTICE`。
+- 远端影响仅为 Private Vulnerability Reporting 从 `enabled: false` 改为 `enabled: true`；仓库身份、默认分支、可见性和权限未变。
+- 当前分支中的密码箱源码、测试、本机配置和 `.superpowers/` 既有改动未被修改、清理或纳入本次暂存范围。
 
 ### Verification
 
-- 已核对根 `AGENTS.md`、当前 README 和社区文档、真实本地化路径、`v3.0.0-beta` Release、现有脱敏截图与 PVR `enabled: false` 基线。
-- 已查重既有 Superpowers plans；`2026-07-18-pastera-standalone.md` 负责仓库独立化，本计划负责 GitHub 首页和社区文档体验，目标不同。
+- `git diff --check`、`xmllint --noout docs/assets/readme-hero.svg`、长破折号扫描、旧版本与旧产品关系扫描均退出 0；`LICENSE` 和 `NOTICE` 无 diff。
+- 仓库内 Hero、三张界面图、Cask、安装脚本和 README 引用的本地文档路径均存在。
+- GitHub Markdown API 成功渲染四份文档：README `9117` 字节、Code of Conduct `3320` 字节、Contributing `8074` 字节、Security `3739` 字节。
+- GitHub API 回读 PVR 为 `enabled: true`；仓库仍为 `pastera-app/Pastera`、`isFork: false`、`parent: null`、默认分支 `develop`。
+- Hero 已通过 Quick Look 生成缩略图并人工检查文字、对比度和裁切；临时预览目录随后移入废纸篓。
+- 本任务只涉及文档、SVG 和 GitHub 设置，按 `standard` 证据档位不运行 Xcode 测试或安装应用。
 
 ### Remaining Risks
 
-- 尚未执行 Markdown 渲染、SVG XML、远端设置或最终工作树边界验证。
+- 当前文档位于功能分支，只有推送并合入默认分支后才会替换 GitHub 仓库首页和社区标签内容。
+- GitHub 移动端对受限 HTML 图片宽度的实际呈现仍需在默认分支页面人工观察；若两张窄图过小，可回退为单列大图。
+- `Casks/pastera.rb` 仍对应 `2.0.1-beta`，发布下一版 Cask 前必须同步版本、SHA-256 和 DMG。
+- GitHub Contributors 由保留的 Git 历史计算，本任务没有重写历史或更改贡献者统计。
 
 ### Follow-ups
 
-- 用户确认执行方式后，按 Task 1-5 顺序实施并持续回写本记录。
+- 后续推送并合入 `develop` 后，人工检查 GitHub 桌面端与移动端首屏、图片和社区标签渲染。
+- 发布新的 Homebrew Cask 时同步更新并验证 `Casks/pastera.rb`。
 
 ### ZenTao Closeout
 

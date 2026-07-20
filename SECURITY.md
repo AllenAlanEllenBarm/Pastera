@@ -1,42 +1,52 @@
-# Security Policy
+# 安全政策
 
-Pastera handles clipboard data locally, so security and privacy reports are
-important even when they do not involve a network service.
+Pastera 会处理可能包含私人信息的剪贴板内容。即使问题不涉及托管网络服务，数据访问、权限、自动粘贴、同步、密码箱和分发链路仍属于重要安全边界。
 
-## Supported Versions
+## 支持范围
 
-Security fixes target the latest public beta release and the current `develop`
-branch. Older beta builds may not receive separate patch releases.
+| 范围 | 安全修复状态 |
+| --- | --- |
+| 最新公开 beta | 支持 |
+| `develop` 分支 | 支持 |
+| 更早的 beta | 不保证单独发布修复 |
 
-## Reporting A Vulnerability
+报告时请提供受影响的 Pastera 版本或 commit。维护者会优先判断最新公开 beta 和 `develop` 是否仍受影响。
 
-If the report can be discussed publicly without exposing user data or an active
-exploit, open a GitHub issue with clear reproduction steps.
+## 报告安全漏洞
 
-For sensitive reports, do not post exploit details publicly. Contact a
-maintainer privately through GitHub and share only the minimum information
-needed to start triage.
+如果问题包含漏洞利用方式、私人数据、凭据、绕过步骤或尚未公开的高影响细节，请使用 [GitHub 私密漏洞报告](https://github.com/pastera-app/Pastera/security/advisories/new)。不要在公开 Issue、Pull Request、截图或日志中披露这些内容。
 
-Useful report details include:
+不含敏感信息的普通缺陷可以通过 [GitHub Issues](https://github.com/pastera-app/Pastera/issues/new) 提交，并附上最小复现步骤。
 
-- macOS version and Pastera version or commit.
-- Whether Accessibility, automatic paste, or sync was enabled.
-- The smallest reproduction steps.
-- What clipboard data type was involved: text, image, file, URL, RTF, or PDF.
-- Whether user data could be read, modified, leaked, or pasted unexpectedly.
+维护者会确认收到私密报告、评估影响，并通过同一私密线程同步处理进展。项目不承诺固定响应时限，但会优先处理可能导致剪贴板数据、密码箱内容、凭据或系统权限被意外访问的问题。
 
-## Security Boundaries
+## 请提供的信息
 
-Pastera should not:
+- macOS 版本，以及 Pastera 版本或 commit。
+- 是否启用了辅助功能、自动粘贴、OCR、OneDrive 同步或密码箱。
+- 能够稳定触发问题的最小操作步骤。
+- 涉及的剪贴板类型，例如文本、图片、文件、URL、RTF 或 PDF。
+- 可能的影响，例如读取、修改、泄漏、错误同步或意外粘贴。
+- 已经脱敏的最小样本、崩溃信息或相关日志。
+- 你已经尝试的缓解方式，以及问题是否仍可复现。
 
-- Upload clipboard data to a hosted Pastera service.
-- Collect clipboard telemetry without explicit user-facing consent.
-- Enable automatic paste without the user opting in.
-- Bypass macOS Gatekeeper, Transparency Consent and Control, or Accessibility
-  permission flows.
-- Store signing certificates, tokens, passwords, or notarization credentials in
-  the repository.
+不要提交真实密码、KDBX 主密码、OAuth 令牌、签名证书、剪贴板原文或能够识别用户的完整路径。
 
-Known distribution limitation: current beta builds are unsigned and not
-notarized. That is a trust and distribution gap, not an intentional bypass.
-Future trusted releases require Developer ID signing and Apple notarization.
+## 安全与隐私边界
+
+Pastera 应遵守以下边界：
+
+- 默认在本机保存和处理剪贴板数据。
+- 不把剪贴板内容上传到托管的 Pastera 服务。
+- 未经明确、可见的用户同意，不收集剪贴板遥测。
+- 自动粘贴默认关闭，只有用户主动启用后才请求辅助功能权限并发送 Command+V。
+- 不绕过 macOS Gatekeeper、Transparency Consent and Control、辅助功能或其他系统权限流程。
+- OneDrive 同步只操作用户选择的本地 OneDrive 文件夹，云端传输由 OneDrive 桌面客户端负责。
+- KDBX 密码箱内容、解锁材料和自动化授权不得写入日志、同步明文或仓库。
+- 签名证书、令牌、密码、Apple 公证凭据和 Keychain 内容不得提交到仓库。
+
+## 当前分发限制
+
+当前公开 beta DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。macOS 可能在首次启动时要求用户从“系统设置 > 隐私与安全性”确认来源。
+
+这是当前可信分发链路的限制，不表示项目会绕过系统安全机制。未来的可信公开版本需要 Pastera 自有的 Developer ID 签名和 Apple 公证流程。
