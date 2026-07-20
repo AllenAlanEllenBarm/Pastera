@@ -69,6 +69,37 @@ enum VaultAgentPasteTargetError: Error {
     case unavailable
 }
 
+final class VaultAgentIntegrationWorkGate {
+    let capacity: Int
+
+    private let lock = NSLock()
+    private var storedActiveCount = 0
+
+    init(capacity: Int = VaultAgentSocketServer.maximumConnections) {
+        precondition(capacity > 0)
+        self.capacity = capacity
+    }
+
+    var activeCount: Int {
+        lock.withLock { storedActiveCount }
+    }
+
+    func tryAcquire() -> Bool {
+        lock.withLock {
+            guard storedActiveCount < capacity else { return false }
+            storedActiveCount += 1
+            return true
+        }
+    }
+
+    func release() {
+        lock.withLock {
+            precondition(storedActiveCount > 0)
+            storedActiveCount -= 1
+        }
+    }
+}
+
 final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
     private let executor: VaultAgentSerialExecutor
     private let authorizationPolicy: VaultAgentAuthorizationPolicy
@@ -76,6 +107,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
     private let pasteTargetTracker: VaultAgentPasteTargetTracking
     private let integrationService: VaultAgentIntegrationServicing
     private let integrationWorker: DispatchQueue
+    private let integrationWorkGate: VaultAgentIntegrationWorkGate
     private let rateLimiter: VaultAgentRateLimiter
     private let ticketStore: VaultAgentTicketStore
     private let auditLogger: VaultAgentAuditLogging
@@ -95,6 +127,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
             label: "com.pastera.agent.integration-worker",
             qos: .utility
         ),
+        integrationWorkGate: VaultAgentIntegrationWorkGate = VaultAgentIntegrationWorkGate(),
         rateLimiter: VaultAgentRateLimiter = VaultAgentRateLimiter(),
         ticketStore: VaultAgentTicketStore,
         auditLogger: VaultAgentAuditLogging,
@@ -108,6 +141,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         self.pasteTargetTracker = pasteTargetTracker
         self.integrationService = integrationService
         self.integrationWorker = integrationWorker
+        self.integrationWorkGate = integrationWorkGate
         self.rateLimiter = rateLimiter
         self.ticketStore = ticketStore
         self.auditLogger = auditLogger
@@ -131,6 +165,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
             label: "com.pastera.agent.integration-worker",
             qos: .utility
         ),
+        integrationWorkGate: VaultAgentIntegrationWorkGate = VaultAgentIntegrationWorkGate(),
         rateLimiter: VaultAgentRateLimiter = VaultAgentRateLimiter(),
         auditLogger: VaultAgentAuditLogging,
         applicationURL: URL = Bundle.main.bundleURL,
@@ -151,6 +186,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
             pasteTargetTracker: pasteTargetTracker,
             integrationService: integrationService,
             integrationWorker: integrationWorker,
+            integrationWorkGate: integrationWorkGate,
             rateLimiter: rateLimiter,
             ticketStore: ticketStore,
             auditLogger: auditLogger,
@@ -304,7 +340,9 @@ private extension VaultAgentRuntime {
                 return
             }
             performIntegration(finish: finish) {
-                .integrationStatus(try self.integrationService.status(host: host))
+                self.resultBody {
+                    .integrationStatus(try self.integrationService.status(host: host))
+                }
             }
         case let .integrationInstall(host):
             guard identity.client == .cli else {
@@ -312,7 +350,9 @@ private extension VaultAgentRuntime {
                 return
             }
             performIntegration(finish: finish) {
-                .integrationStatus(try self.integrationService.install(host: host))
+                self.resultBody {
+                    .integrationStatus(try self.integrationService.install(host: host))
+                }
             }
         case let .integrationUninstall(host):
             guard identity.client == .cli else {
@@ -320,7 +360,9 @@ private extension VaultAgentRuntime {
                 return
             }
             performIntegration(finish: finish) {
-                .integrationStatus(try self.integrationService.uninstall(host: host))
+                self.resultBody {
+                    .integrationStatus(try self.integrationService.uninstall(host: host))
+                }
             }
         case let .search(request):
             withReady(identity: identity, category: .metadata, finish: finish) {
@@ -468,13 +510,13 @@ private extension VaultAgentRuntime {
             finish(statusBody(identity: identity, installed: true))
             return
         }
-        integrationWorker.async {
+        performIntegration(finish: finish) {
             let host: VaultAgentHostKind = identity.client == .codex ? .codex : .claude
             let integration = try? self.integrationService.status(host: host)
             let installed = integration?.hosts.first.map {
                 $0.mcpInstalled && $0.skillInstalled
             } ?? false
-            finish(self.statusBody(identity: identity, installed: installed))
+            return self.statusBody(identity: identity, installed: installed)
         }
     }
 
@@ -500,10 +542,15 @@ private extension VaultAgentRuntime {
 
     private func performIntegration(
         finish: @escaping (VaultAgentResponseBody) -> Void,
-        operation: @escaping () throws -> VaultAgentResponsePayload
+        operation: @escaping () -> VaultAgentResponseBody
     ) {
+        guard integrationWorkGate.tryAcquire() else {
+            finish(.failure(Self.failure(.vaultBusy)))
+            return
+        }
         integrationWorker.async {
-            finish(self.resultBody(operation))
+            defer { self.integrationWorkGate.release() }
+            finish(operation())
         }
     }
 

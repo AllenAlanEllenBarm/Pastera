@@ -954,6 +954,175 @@ private extension VaultAgentBrokerTests {
         #expect(firstResponse.body.failureCode == nil)
     }
 
+    @Test("integration work capacity remains occupied after clients disconnect")
+    func integrationWorkCapacitySurvivesDisconnects() throws {
+        let operationStarted = DispatchSemaphore(value: 0)
+        let releaseOperations = DispatchSemaphore(value: 0)
+        let status = VaultAgentIntegrationStatus(hosts: [.testStatus(host: .codex)])
+        let integration = RuntimeIntegrationService(status: status)
+        integration.statusOperation = { _ in
+            operationStarted.signal()
+            _ = releaseOperations.wait(timeout: .now() + 5)
+            return status
+        }
+        let integrationGate = VaultAgentIntegrationWorkGate()
+        #expect(integrationGate.capacity == VaultAgentSocketServer.maximumConnections)
+        let runtimeFixture = try RuntimeFixture(
+            client: .cli,
+            integrationService: integration,
+            integrationWorkGate: integrationGate
+        )
+        let socketFixture = try SocketFixture()
+        let connectionProbe = SocketConnectionProbe()
+        let server = VaultAgentSocketServer(
+            directoryURL: socketFixture.v1URL,
+            peerVerifier: FixedPeerVerifier(identity: runtimeFixture.identity),
+            handler: runtimeFixture.runtime,
+            queue: DispatchQueue(label: "VaultAgentSocketServerTests.integration-capacity"),
+            lifecycleProbe: .init(
+                sourceCreated: connectionProbe.sourceCreated,
+                descriptorClosed: connectionProbe.descriptorClosed
+            )
+        )
+        try server.start()
+        var clients: [(fileDescriptor: Int32, channel: VaultAgentSecureChannel)] = []
+        var ninthDescriptor: Int32 = -1
+        defer {
+            clients.forEach { Darwin.close($0.fileDescriptor) }
+            if ninthDescriptor >= 0 { Darwin.close(ninthDescriptor) }
+            for _ in 0..<VaultAgentSocketServer.maximumConnections { releaseOperations.signal() }
+            _ = waitUntil { integrationGate.activeCount == 0 }
+            server.stop()
+        }
+
+        for _ in 0..<VaultAgentSocketServer.maximumConnections {
+            clients.append(try socketFixture.connectAndHandshake())
+        }
+        for client in clients {
+            try socketFixture.writeOperation(
+                .integrationStatus(host: nil),
+                requestID: UUID(),
+                client: client
+            )
+        }
+        #expect(waitUntil { integrationGate.activeCount == VaultAgentSocketServer.maximumConnections })
+        #expect(operationStarted.wait(timeout: .now() + 2) == .success)
+        #expect(integration.statusCallCount == 1)
+
+        clients.forEach { Darwin.close($0.fileDescriptor) }
+        clients.removeAll()
+        #expect(connectionProbe.waitForNoConnections())
+
+        let ninth = try socketFixture.connectAndHandshake()
+        ninthDescriptor = ninth.fileDescriptor
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        #expect(setsockopt(
+            ninth.fileDescriptor,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        ) == 0)
+        let callsBeforeNinth = integration.statusCallCount
+        let requestStartedAt = Date()
+        try socketFixture.writeOperation(
+            .integrationStatus(host: nil),
+            requestID: UUID(),
+            client: ninth
+        )
+        let ninthResponse = try socketFixture.readOperationResponse(client: ninth)
+
+        guard case let .failure(failure) = ninthResponse.body else {
+            Issue.record("the request above integration capacity must fail")
+            return
+        }
+        #expect(Date().timeIntervalSince(requestStartedAt) < 0.5)
+        #expect(failure.code == .vaultBusy)
+        #expect(failure.retryable)
+        #expect(integration.statusCallCount == callsBeforeNinth)
+        #expect(integrationGate.activeCount == VaultAgentSocketServer.maximumConnections)
+
+        for _ in 0..<VaultAgentSocketServer.maximumConnections { releaseOperations.signal() }
+        #expect(waitUntil { integrationGate.activeCount == 0 })
+        #expect(integration.statusCallCount == VaultAgentSocketServer.maximumConnections)
+        #expect(runtimeFixture.audit.records.filter { $0.result == .vaultBusy }.count == 1)
+    }
+
+    @Test("non-CLI status shares integration work capacity")
+    func nonCLIStatusUsesIntegrationWorkGate() async throws {
+        let releaseOperation = DispatchSemaphore(value: 0)
+        let status = VaultAgentIntegrationStatus(hosts: [.testStatus(host: .codex)])
+        let integration = RuntimeIntegrationService(status: status)
+        integration.statusOperation = { _ in
+            _ = releaseOperation.wait(timeout: .now() + 5)
+            return status
+        }
+        let integrationGate = VaultAgentIntegrationWorkGate(capacity: 1)
+        let fixture = try RuntimeFixture(
+            client: .cli,
+            integrationService: integration,
+            integrationWorkGate: integrationGate
+        )
+        let codexIdentity = try fixture.authorizeAdditionalClient(.codex)
+        defer { releaseOperation.signal() }
+
+        async let firstResponse = fixture.call(.integrationStatus(host: nil))
+        #expect(waitUntil { integration.statusCallCount == 1 })
+        #expect(integrationGate.activeCount == 1)
+
+        let busy = try await fixture.call(.status, identity: codexIdentity)
+
+        guard case let .failure(failure) = busy.body else {
+            Issue.record("non-CLI status must share the full integration gate")
+            releaseOperation.signal()
+            _ = try await firstResponse
+            return
+        }
+        #expect(failure.code == .vaultBusy)
+        #expect(failure.retryable)
+        #expect(integration.statusCallCount == 1)
+        #expect(integrationGate.activeCount == 1)
+
+        let cliStatus = try await fixture.call(.status)
+        guard case let .success(.status(statusResponse)) = cliStatus.body else {
+            Issue.record("CLI status must bypass the integration gate")
+            releaseOperation.signal()
+            _ = try await firstResponse
+            return
+        }
+        #expect(statusResponse.client == .cli)
+        #expect(integration.statusCallCount == 1)
+        #expect(integrationGate.activeCount == 1)
+
+        releaseOperation.signal()
+        #expect(try await firstResponse.body.failureCode == nil)
+        #expect(waitUntil { integrationGate.activeCount == 0 })
+    }
+
+    @Test("throwing integration work releases capacity")
+    func throwingIntegrationWorkReleasesGate() async throws {
+        let integration = RuntimeIntegrationService()
+        integration.statusOperation = { _ in throw SocketTestError.rejected }
+        let integrationGate = VaultAgentIntegrationWorkGate(capacity: 1)
+        let fixture = try RuntimeFixture(
+            client: .cli,
+            integrationService: integration,
+            integrationWorkGate: integrationGate
+        )
+
+        let failed = try await fixture.call(.integrationStatus(host: nil))
+
+        #expect(failed.body.failureCode == .brokerUnavailable)
+        #expect(waitUntil { integrationGate.activeCount == 0 })
+        #expect(integration.statusCallCount == 1)
+
+        integration.statusOperation = nil
+        let recovered = try await fixture.call(.integrationStatus(host: nil))
+        #expect(recovered.body.failureCode == nil)
+        #expect(waitUntil { integrationGate.activeCount == 0 })
+        #expect(integration.statusCallCount == 2)
+    }
+
     @Test("existing files symlinks and active sockets are never removed")
     func conflictsArePreserved() throws {
         let plain = try SocketFixture()
@@ -1556,6 +1725,19 @@ private final class LockedCounter {
 
     func increment() { lock.lock(); count += 1; lock.unlock() }
 }
+
+private func waitUntil(
+    timeout: TimeInterval = 2,
+    condition: () -> Bool
+) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return true }
+        usleep(1_000)
+    }
+    return condition()
+}
+
 private final class SocketLifecycleRecorder {
     private let lock = NSLock()
     private var created: [Int32: Set<VaultAgentSocketSourceKind>] = [:]
@@ -1666,6 +1848,7 @@ private final class RuntimeFixture {
         authorized: Bool = true,
         cursorKey: Data = Data(repeating: 0x55, count: 32),
         integrationService: RuntimeIntegrationService = RuntimeIntegrationService(),
+        integrationWorkGate: VaultAgentIntegrationWorkGate = VaultAgentIntegrationWorkGate(),
         ticketCommandBuilder: ((VaultAgentClientKind, VaultAgentInjectionMode, String) -> [String])? = nil
     ) throws {
         self.integrationService = integrationService
@@ -1707,6 +1890,7 @@ private final class RuntimeFixture {
             vault: vault,
             pasteTargetTracker: RuntimeTargetTracker(),
             integrationService: integrationService,
+            integrationWorkGate: integrationWorkGate,
             rateLimiter: VaultAgentRateLimiter(),
             ticketStore: ticketStore,
             auditLogger: audit,
