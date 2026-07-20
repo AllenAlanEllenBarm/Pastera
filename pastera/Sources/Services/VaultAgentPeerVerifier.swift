@@ -220,6 +220,7 @@ final class VaultAgentPeerVerifier: VaultAgentPeerVerifying {
             guard hostIdentityProvider.installedHostIdentity(for: .cli) == nil else {
                 throw VaultAgentPeerVerificationError.unexpectedHostIdentity
             }
+            try requireFinalIdentity(snapshot: helperBefore, signature: helperSignature)
             return makeIdentity(mapping.client, helperSignature, helperBefore, host: nil, hostSnapshot: nil)
         case .codex, .claude:
             guard let installedHost = hostIdentityProvider.installedHostIdentity(for: mapping.client),
@@ -227,6 +228,7 @@ final class VaultAgentPeerVerifier: VaultAgentPeerVerifying {
                 throw VaultAgentPeerVerificationError.hostChainMismatch
             }
             let match = try findHost(startingAt: helperBefore.parentPID, installed: installedHost)
+            try requireFinalIdentity(snapshot: helperBefore, signature: helperSignature)
             return makeIdentity(mapping.client, helperSignature, helperBefore, host: match.signature, hostSnapshot: match.snapshot)
         }
     }
@@ -248,6 +250,7 @@ final class VaultAgentPeerVerifier: VaultAgentPeerVerifying {
                snapshot.executableURL.path == installed.canonicalPath,
                signature.isAdHoc == installed.isAdHoc,
                !signature.isAdHoc || signature.cdHash == installed.cdHash {
+                try requireFinalIdentity(snapshot: snapshot, signature: signature)
                 return (snapshot, signature)
             }
             pid = snapshot.parentPID
@@ -276,6 +279,20 @@ final class VaultAgentPeerVerifier: VaultAgentPeerVerifying {
         let after = try readSnapshot(pid: before.pid)
         guard before == after else {
             throw VaultAgentPeerVerificationError.unstableProcess
+        }
+    }
+
+    private func requireFinalIdentity(
+        snapshot: VaultAgentProcessSnapshot,
+        signature: VaultAgentCodeSignature
+    ) throws {
+        let finalSnapshot = try readSnapshot(pid: snapshot.pid)
+        guard snapshot == finalSnapshot else {
+            throw VaultAgentPeerVerificationError.unstableProcess
+        }
+        let finalSignature = try inspect(snapshot.executableURL)
+        guard signature == finalSignature else {
+            throw VaultAgentPeerVerificationError.invalidHelperSignature
         }
     }
 

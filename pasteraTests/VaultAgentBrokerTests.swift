@@ -4,6 +4,9 @@ import PasteraAgentProtocol
 import Testing
 @testable import Pastera
 
+// Task 5 keeps end-to-end Unix socket fixtures beside the broker regression suite for auditability.
+// swiftlint:disable file_length
+
 @Suite("Vault agent broker", .serialized)
 struct VaultAgentBrokerTests {
     private let clientKey = Data((0..<32).map(UInt8.init))
@@ -80,6 +83,26 @@ struct VaultAgentBrokerTests {
         #expect(throws: VaultAgentProtocolError.sequenceExhausted) { try pair.client.seal(Data()) }
     }
 
+    @Test("write readiness is rebuilt only after a draining source finishes cancellation")
+    func writeSourceLifecycleRebuildsAfterCancellation() {
+        var lifecycle = VaultAgentWriteSourceLifecycle()
+
+        let shouldInstallInitially = lifecycle.noteWouldBlock()
+        #expect(shouldInstallInitially)
+        lifecycle.didInstallSource()
+        let didBeginFirstCancellation = lifecycle.beginDrainCancellation()
+        let installedDuringCancellation = lifecycle.noteWouldBlock()
+        let shouldRebuild = lifecycle.cancellationCompleted(hasPendingOutput: true)
+        #expect(didBeginFirstCancellation)
+        #expect(!installedDuringCancellation)
+        #expect(shouldRebuild)
+        lifecycle.didInstallSource()
+        let didBeginSecondCancellation = lifecycle.beginDrainCancellation()
+        let rebuiltWithoutPendingOutput = lifecycle.cancellationCompleted(hasPendingOutput: false)
+        #expect(didBeginSecondCancellation)
+        #expect(!rebuiltWithoutPendingOutput)
+    }
+
     private func makePair() throws -> VaultAgentSecureChannel.Pair {
         try VaultAgentSecureChannel.makeTestPair(
             clientPrivateKey: clientKey,
@@ -89,6 +112,9 @@ struct VaultAgentBrokerTests {
             connectionID: connectionID
         )
     }
+}
+
+private extension VaultAgentBrokerTests {
     @Test("server creates private directory and socket and echoes fragmented encrypted frames")
     func privateSocketAndFragmentedRoundTrip() throws {
         let shortRoot = FileManager.default.temporaryDirectory.appendingPathComponent("pva-\(getpid())")
@@ -272,13 +298,125 @@ struct VaultAgentBrokerTests {
         #expect(Darwin.recv(client.fileDescriptor, &byte, 1, MSG_PEEK | MSG_DONTWAIT) < 0)
         #expect(errno == EAGAIN || errno == EWOULDBLOCK)
     }
+
+    @Test("plaintext handler responses over 32 KiB close before encryption")
+    func oversizedPlaintextResponseCloses() throws {
+        let fixture = try SocketFixture()
+        let response = Data(repeating: 0x41, count: VaultAgentLimits.maximumResponseBytes + 1)
+        let server = fixture.makeServer(handler: FixedResponseSocketHandler(response: response))
+        try server.start()
+        defer { server.stop() }
+
+        let client = try fixture.connectAndHandshake()
+        defer { Darwin.close(client.fileDescriptor) }
+        let request = try client.channel.seal(Data("request".utf8))
+        try fixture.writeFrame(try JSONEncoder().encode(request), fileDescriptor: client.fileDescriptor)
+        #expect(fixture.waitForEOF(fileDescriptor: client.fileDescriptor))
+    }
+
+    @Test("a failed Application Support lookup never falls back to a temporary directory")
+    func defaultDirectoryLookupFailsClosed() {
+        let server = VaultAgentSocketServer(
+            peerVerifier: FixedPeerVerifier(identity: SocketFixture.identity),
+            handler: EchoSocketHandler(),
+            queue: DispatchQueue(label: "VaultAgentSocketServerTests.default-directory"),
+            applicationSupportURLProvider: { throw SocketTestError.directory }
+        )
+
+        #expect(throws: VaultAgentSocketServerError.unavailable) {
+            try server.start()
+        }
+    }
+
+    @Test("64 KiB of one-byte activity keeps exactly one idle timer per connection")
+    func idleTimerCountIsBounded() throws {
+        let fixture = try SocketFixture()
+        let timerCount = LockedCounter()
+        let server = fixture.makeServer(idleTimerFactory: { queue in
+            timerCount.increment()
+            return DispatchSource.makeTimerSource(queue: queue)
+        })
+        try server.start()
+        defer { server.stop() }
+
+        let fileDescriptor = try fixture.connectOnly()
+        defer { Darwin.close(fileDescriptor) }
+        let payload = Data(repeating: 0x7b, count: VaultAgentLimits.maximumFrameBytes - 4)
+        let frame = try VaultAgentFrameCodec.frame(payload: payload)
+        #expect(frame.count == 65_536)
+        for value in frame {
+            var byte = value
+            guard Darwin.write(fileDescriptor, &byte, 1) == 1 else {
+                throw SocketTestError.write
+            }
+        }
+        #expect(timerCount.value == 1)
+    }
+
+    @Test("replacing the validated v1 directory fails before touching the replacement")
+    func directoryReplacementFailsClosed() throws {
+        let fixture = try SocketFixture()
+        let originalDirectory = fixture.root.appendingPathComponent("held-v1")
+        let sentinel = fixture.v1URL.appendingPathComponent("sentinel")
+        let server = VaultAgentSocketServer(
+            directoryURL: fixture.v1URL,
+            peerVerifier: FixedPeerVerifier(identity: SocketFixture.identity),
+            handler: EchoSocketHandler(),
+            queue: DispatchQueue(label: "VaultAgentSocketServerTests.directory-replacement"),
+            directoryIdentityValidationHook: {
+                try FileManager.default.moveItem(at: fixture.v1URL, to: originalDirectory)
+                try FileManager.default.createDirectory(at: fixture.v1URL, withIntermediateDirectories: false)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.v1URL.path)
+                FileManager.default.createFile(atPath: sentinel.path, contents: Data([0x5a]))
+            }
+        )
+
+        #expect(throws: VaultAgentSocketServerError.directoryConflict) {
+            try server.start()
+        }
+        #expect(fixture.mode(fixture.v1URL) == 0o755)
+        #expect((try Data(contentsOf: sentinel)) == Data([0x5a]))
+        #expect(!FileManager.default.fileExists(atPath: fixture.socketURL.path))
+        #expect(!FileManager.default.fileExists(atPath: originalDirectory.appendingPathComponent("broker.sock").path))
+    }
+
+    @Test("source cancellation completes before managed descriptors close and are reused")
+    func descriptorCloseWaitsForSourceCancellation() throws {
+        let fixture = try SocketFixture()
+        let recorder = SocketLifecycleRecorder()
+        let server = VaultAgentSocketServer(
+            directoryURL: fixture.v1URL,
+            peerVerifier: FixedPeerVerifier(identity: SocketFixture.identity),
+            handler: EchoSocketHandler(),
+            queue: DispatchQueue(label: "VaultAgentSocketServerTests.lifecycle"),
+            lifecycleProbe: .init(
+                sourceCreated: recorder.sourceCreated,
+                sourceCancellationCompleted: recorder.sourceCancellationCompleted,
+                descriptorClosed: recorder.descriptorClosed
+            )
+        )
+        try server.start()
+        let client = try fixture.connectAndHandshake()
+        defer { Darwin.close(client.fileDescriptor) }
+
+        let stopped = DispatchSemaphore(value: 0)
+        server.stop { stopped.signal() }
+        #expect(stopped.wait(timeout: .now() + 2) == .success)
+        #expect(recorder.managedDescriptorCount == 2)
+        #expect(recorder.allDescriptorsClosedAfterCancellation)
+        #expect(recorder.allClosedDescriptorsImmediatelyReusable)
+        #expect(!FileManager.default.fileExists(atPath: fixture.socketURL.path))
+        recorder.closeReusedDescriptors()
+
+        try server.start()
+        let restarted = DispatchSemaphore(value: 0)
+        server.stop { restarted.signal() }
+        #expect(restarted.wait(timeout: .now() + 2) == .success)
+    }
 }
 
 private final class SocketFixture {
-    let root: URL
-    let v1URL: URL
-    var socketURL: URL { v1URL.appendingPathComponent("broker.sock") }
-    let identity = VaultAgentPeerIdentity(
+    static let identity = VaultAgentPeerIdentity(
         client: .cli,
         helperRequirement: "helper",
         helperCDHash: Data([1]),
@@ -289,6 +427,10 @@ private final class SocketFixture {
         hostIsAdHoc: nil,
         hostPath: nil
     )
+
+    let root: URL
+    let v1URL: URL
+    var socketURL: URL { v1URL.appendingPathComponent("broker.sock") }
 
     init(root: URL? = nil, nestedAgentDirectory: Bool = false) throws {
         self.root = root ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -308,14 +450,18 @@ private final class SocketFixture {
 
     func makeServer(
         handler: VaultAgentSocketRequestHandling = EchoSocketHandler(),
-        idleTimeout: TimeInterval = 30
+        idleTimeout: TimeInterval = 30,
+        idleTimerFactory: @escaping (DispatchQueue) -> DispatchSourceTimer = {
+            DispatchSource.makeTimerSource(queue: $0)
+        }
     ) -> VaultAgentSocketServer {
         VaultAgentSocketServer(
             directoryURL: v1URL,
-            peerVerifier: FixedPeerVerifier(identity: identity),
+            peerVerifier: FixedPeerVerifier(identity: Self.identity),
             handler: handler,
             queue: DispatchQueue(label: "VaultAgentSocketServerTests.\(UUID())"),
-            idleTimeout: idleTimeout
+            idleTimeout: idleTimeout,
+            idleTimerFactory: idleTimerFactory
         )
     }
 
@@ -440,7 +586,7 @@ private final class SocketFixture {
     }
 }
 
-private enum SocketTestError: Error { case socket, bind, connect, write, read(Int, Int32), frame, rejected }
+private enum SocketTestError: Error { case socket, bind, connect, write, read(Int, Int32), frame, rejected, directory }
 private struct FixedPeerVerifier: VaultAgentPeerVerifying {
     let identity: VaultAgentPeerIdentity
 
@@ -479,6 +625,69 @@ private final class DuplicateSocketHandler: VaultAgentSocketRequestHandling {
     func handle(identity _: VaultAgentPeerIdentity, request: Data, completion: @escaping (Result<Data, Error>) -> Void) {
         completion(.success(request))
         completion(.success(Data("duplicate".utf8)))
+    }
+}
+private final class FixedResponseSocketHandler: VaultAgentSocketRequestHandling {
+    let response: Data
+
+    init(response: Data) { self.response = response }
+
+    func handle(identity _: VaultAgentPeerIdentity, request _: Data, completion: @escaping (Result<Data, Error>) -> Void) {
+        completion(.success(response))
+    }
+}
+private final class LockedCounter {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+
+    func increment() { lock.lock(); count += 1; lock.unlock() }
+}
+private final class SocketLifecycleRecorder {
+    private let lock = NSLock()
+    private var created: [Int32: Set<VaultAgentSocketSourceKind>] = [:]
+    private var cancelled: [Int32: Set<VaultAgentSocketSourceKind>] = [:]
+    private var closedAfterCancellation: [Int32: Bool] = [:]
+    private var reused: [Int32: Bool] = [:]
+    private var replacementDescriptors: [Int32] = []
+
+    var managedDescriptorCount: Int { lock.lock(); defer { lock.unlock() }; return created.count }
+    var allDescriptorsClosedAfterCancellation: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return closedAfterCancellation.count == created.count && closedAfterCancellation.values.allSatisfy { $0 }
+    }
+    var allClosedDescriptorsImmediatelyReusable: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return reused.count == created.count && reused.values.allSatisfy { $0 }
+    }
+
+    func sourceCreated(_ kind: VaultAgentSocketSourceKind, _ fileDescriptor: Int32) {
+        lock.lock(); created[fileDescriptor, default: []].insert(kind); lock.unlock()
+    }
+
+    func sourceCancellationCompleted(_ kind: VaultAgentSocketSourceKind, _ fileDescriptor: Int32) {
+        lock.lock(); cancelled[fileDescriptor, default: []].insert(kind); lock.unlock()
+    }
+
+    func descriptorClosed(_ fileDescriptor: Int32) {
+        lock.lock()
+        closedAfterCancellation[fileDescriptor] = created[fileDescriptor] == cancelled[fileDescriptor]
+        lock.unlock()
+
+        let replacement = socket(AF_UNIX, SOCK_STREAM, 0)
+        lock.lock()
+        reused[fileDescriptor] = replacement == fileDescriptor
+        if replacement >= 0 { replacementDescriptors.append(replacement) }
+        lock.unlock()
+    }
+
+    func closeReusedDescriptors() {
+        lock.lock()
+        let descriptors = replacementDescriptors
+        replacementDescriptors.removeAll()
+        lock.unlock()
+        descriptors.forEach { Darwin.close($0) }
     }
 }
 

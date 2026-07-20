@@ -362,6 +362,79 @@ enum VaultAgentSocketServerError: Error, Equatable {
     case unavailable
 }
 
+enum VaultAgentSocketSourceKind: Hashable {
+    case listener
+    case read
+    case write
+    case idle
+}
+
+struct VaultAgentSocketLifecycleProbe {
+    var sourceCreated: ((VaultAgentSocketSourceKind, Int32) -> Void)?
+    var sourceCancellationCompleted: ((VaultAgentSocketSourceKind, Int32) -> Void)?
+    var descriptorClosed: ((Int32) -> Void)?
+}
+
+private struct VaultAgentDirectoryHandle {
+    let fileDescriptor: Int32
+    let device: UInt64
+    let inode: UInt64
+}
+
+struct VaultAgentWriteSourceLifecycle {
+    private enum State {
+        case idle
+        case active
+        case cancelling(rebuildRequested: Bool)
+    }
+
+    private var state = State.idle
+
+    mutating func noteWouldBlock() -> Bool {
+        switch state {
+        case .idle:
+            return true
+        case .active:
+            return false
+        case .cancelling:
+            state = .cancelling(rebuildRequested: true)
+            return false
+        }
+    }
+
+    mutating func didInstallSource() {
+        guard case .idle = state else {
+            preconditionFailure("write source installation requires an idle lifecycle")
+        }
+        state = .active
+    }
+
+    mutating func beginDrainCancellation() -> Bool {
+        guard case .active = state else { return false }
+        state = .cancelling(rebuildRequested: false)
+        return true
+    }
+
+    mutating func cancellationCompleted(hasPendingOutput: Bool) -> Bool {
+        guard case let .cancelling(rebuildRequested) = state else { return false }
+        state = .idle
+        return rebuildRequested && hasPendingOutput
+    }
+
+    mutating func beginClose() -> Bool {
+        switch state {
+        case .idle:
+            return false
+        case .active:
+            state = .cancelling(rebuildRequested: false)
+            return true
+        case .cancelling:
+            state = .cancelling(rebuildRequested: false)
+            return false
+        }
+    }
+}
+
 final class VaultAgentSocketServer {
     private final class Connection {
         // swiftlint:disable:next nesting
@@ -376,9 +449,10 @@ final class VaultAgentSocketServer {
         var output = Data()
         var outputOffset = 0
         var inFlightID: UUID?
-        var idleGeneration: UInt64 = 0
         var readSource: DispatchSourceRead?
         var writeSource: DispatchSourceWrite?
+        var writeSourceLifecycle = VaultAgentWriteSourceLifecycle()
+        var idleTimer: DispatchSourceTimer?
         var closed = false
 
         init(fileDescriptor: Int32, identity: VaultAgentPeerIdentity) {
@@ -390,47 +464,91 @@ final class VaultAgentSocketServer {
     static let maximumConnections = 8
     static let defaultIdleTimeout: TimeInterval = 30
 
-    let directoryURL: URL
+    private let applicationSupportURLProvider: () throws -> URL
+    private var activeDirectoryURL: URL?
+    private var directoryURL: URL {
+        guard let activeDirectoryURL else {
+            preconditionFailure("Vault agent directory used before resolution")
+        }
+        return activeDirectoryURL
+    }
     var socketURL: URL { directoryURL.appendingPathComponent("broker.sock") }
 
     private let peerVerifier: VaultAgentPeerVerifying
     private let handler: VaultAgentSocketRequestHandling
     private let queue: DispatchQueue
     private let idleTimeout: TimeInterval
+    private let idleTimerFactory: (DispatchQueue) -> DispatchSourceTimer
+    private let directoryIdentityValidationHook: (() throws -> Void)?
+    private let lifecycleProbe: VaultAgentSocketLifecycleProbe
     private let queueKey = DispatchSpecificKey<UInt8>()
     private var listener: Int32 = -1
     private var listenerSource: DispatchSourceRead?
+    private var directoryDescriptor: Int32 = -1
+    private var directoryDevice: UInt64?
+    private var directoryInode: UInt64?
     private var boundDevice: UInt64?
     private var boundInode: UInt64?
     private var connections: [UUID: Connection] = [:]
+    private var closingConnections: [UUID: Connection] = [:]
+    private var stopCompletions: [() -> Void] = []
     private var running = false
+    private var stopping = false
+    private var shutdownRetention: VaultAgentSocketServer?
 
     init(
         directoryURL: URL? = nil,
         peerVerifier: VaultAgentPeerVerifying,
         handler: VaultAgentSocketRequestHandling,
         queue: DispatchQueue = DispatchQueue(label: "com.pastera-app.Pastera.vault-agent.socket"),
-        idleTimeout: TimeInterval = defaultIdleTimeout
+        idleTimeout: TimeInterval = defaultIdleTimeout,
+        idleTimerFactory: @escaping (DispatchQueue) -> DispatchSourceTimer = {
+            DispatchSource.makeTimerSource(queue: $0)
+        },
+        applicationSupportURLProvider: @escaping () throws -> URL = VaultAgentSocketServer.applicationSupportURL,
+        directoryIdentityValidationHook: (() throws -> Void)? = nil,
+        lifecycleProbe: VaultAgentSocketLifecycleProbe = .init()
     ) {
-        self.directoryURL = directoryURL ?? Self.defaultDirectoryURL()
+        activeDirectoryURL = directoryURL
+        self.applicationSupportURLProvider = applicationSupportURLProvider
         self.peerVerifier = peerVerifier
         self.handler = handler
         self.queue = queue
         self.idleTimeout = idleTimeout
+        self.idleTimerFactory = idleTimerFactory
+        self.directoryIdentityValidationHook = directoryIdentityValidationHook
+        self.lifecycleProbe = lifecycleProbe
         queue.setSpecific(key: queueKey, value: 1)
     }
 
     func start() throws {
         try onQueue {
             guard !running else { return }
+            guard !stopping, listener < 0, directoryDescriptor < 0 else {
+                throw VaultAgentSocketServerError.unavailable
+            }
+            try resolveDirectoryURL()
             try validateSocketPathLength()
-            try ensurePrivateDirectory()
-            try resolveExistingSocket()
+            let directory = try ensurePrivateDirectory()
+            directoryDescriptor = directory.fileDescriptor
+            directoryDevice = directory.device
+            directoryInode = directory.inode
 
             let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-            guard descriptor >= 0 else { throw VaultAgentSocketServerError.unavailable }
+            guard descriptor >= 0 else {
+                closeDirectoryDescriptor()
+                throw VaultAgentSocketServerError.unavailable
+            }
             do {
+                do {
+                    try directoryIdentityValidationHook?()
+                } catch {
+                    throw VaultAgentSocketServerError.directoryConflict
+                }
+                try validateDirectoryIdentity()
+                try resolveExistingSocket()
                 try configure(descriptor)
+                try validateDirectoryIdentity()
                 var address = try makeAddress()
                 let bindResult = withUnsafePointer(to: &address) { pointer in
                     pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -441,18 +559,20 @@ final class VaultAgentSocketServer {
                     throw VaultAgentSocketServerError.unavailable
                 }
                 var boundInfo = stat()
-                guard lstat(socketURL.path, &boundInfo) == 0,
+                guard fstatat(directoryDescriptor, "broker.sock", &boundInfo, AT_SYMLINK_NOFOLLOW) == 0,
                       (boundInfo.st_mode & S_IFMT) == S_IFSOCK,
                       boundInfo.st_uid == getuid() else {
                     throw VaultAgentSocketServerError.unavailable
                 }
                 boundDevice = UInt64(boundInfo.st_dev)
                 boundInode = UInt64(boundInfo.st_ino)
-                guard listen(descriptor, SOMAXCONN) == 0, chmod(socketURL.path, 0o600) == 0 else {
+                try validateDirectoryIdentity()
+                guard listen(descriptor, SOMAXCONN) == 0,
+                      fchmodat(directoryDescriptor, "broker.sock", 0o600, AT_SYMLINK_NOFOLLOW) == 0 else {
                     throw VaultAgentSocketServerError.unavailable
                 }
                 var securedInfo = stat()
-                guard lstat(socketURL.path, &securedInfo) == 0,
+                guard fstatat(directoryDescriptor, "broker.sock", &securedInfo, AT_SYMLINK_NOFOLLOW) == 0,
                       (securedInfo.st_mode & S_IFMT) == S_IFSOCK,
                       securedInfo.st_uid == getuid(),
                       securedInfo.st_dev == boundInfo.st_dev,
@@ -464,47 +584,62 @@ final class VaultAgentSocketServer {
                 running = true
                 let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
                 source.setEventHandler { [weak self] in self?.acceptAvailableConnections() }
+                source.setCancelHandler { [weak self] in
+                    self?.listenerSourceCancellationCompleted(fileDescriptor: descriptor)
+                }
                 listenerSource = source
+                lifecycleProbe.sourceCreated?(.listener, descriptor)
                 source.resume()
             } catch {
                 Darwin.close(descriptor)
                 removeOwnedSocketIfUnchanged()
                 boundDevice = nil
                 boundInode = nil
+                closeDirectoryDescriptor()
                 throw error
             }
         }
     }
 
-    func stop() {
+    func stop(completion: (() -> Void)? = nil) {
         onQueueNoThrow {
-            guard running || listener >= 0 || !connections.isEmpty else { return }
+            if let completion { stopCompletions.append(completion) }
+            guard running || listener >= 0 || !connections.isEmpty || !closingConnections.isEmpty else {
+                finishStopIfPossible()
+                return
+            }
+            stopping = true
+            shutdownRetention = self
             running = false
             listenerSource?.setEventHandler {}
             listenerSource?.cancel()
-            listenerSource = nil
-            if listener >= 0 {
-                Darwin.close(listener)
-                listener = -1
-            }
             for connection in Array(connections.values) { close(connection) }
             removeOwnedSocketIfUnchanged()
             boundDevice = nil
             boundInode = nil
+            finishStopIfPossible()
         }
     }
 }
 
 private extension VaultAgentSocketServer {
-    private static func defaultDirectoryURL() -> URL {
-        let applicationSupport = try? FileManager.default.url(
+    private static func applicationSupportURL() throws -> URL {
+        try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
         )
-        return (applicationSupport ?? URL(fileURLWithPath: NSTemporaryDirectory()))
-            .appendingPathComponent("Pastera/Agent/v1")
+    }
+
+    private func resolveDirectoryURL() throws {
+        guard activeDirectoryURL == nil else { return }
+        do {
+            activeDirectoryURL = try applicationSupportURLProvider()
+                .appendingPathComponent("Pastera/Agent/v1")
+        } catch {
+            throw VaultAgentSocketServerError.unavailable
+        }
     }
 
     private func validateSocketPathLength() throws {
@@ -514,17 +649,25 @@ private extension VaultAgentSocketServer {
         }
     }
 
-    private func ensurePrivateDirectory() throws {
+    private func ensurePrivateDirectory() throws -> VaultAgentDirectoryHandle {
+        try openDirectoryPath(createMissing: true, securePrivateDirectories: true)
+    }
+
+    private func openDirectoryPath(
+        createMissing: Bool,
+        securePrivateDirectories: Bool
+    ) throws -> VaultAgentDirectoryHandle {
         var currentDescriptor = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard currentDescriptor >= 0 else { throw VaultAgentSocketServerError.directoryConflict }
-        defer { if currentDescriptor >= 0 { Darwin.close(currentDescriptor) } }
+        var shouldClose = true
+        defer { if shouldClose { Darwin.close(currentDescriptor) } }
 
         let standardizedPath = directoryURL.standardizedFileURL.path
         let noAliasPath = standardizedPath.hasPrefix("/var/") ? "/private\(standardizedPath)" : standardizedPath
         let components = Array(URL(fileURLWithPath: noAliasPath).pathComponents.dropFirst())
         for (index, component) in components.enumerated() {
             var next = openat(currentDescriptor, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-            if next < 0, errno == ENOENT {
+            if next < 0, errno == ENOENT, createMissing {
                 guard mkdirat(currentDescriptor, component, 0o700) == 0 || errno == EEXIST else {
                     throw VaultAgentSocketServerError.directoryConflict
                 }
@@ -541,18 +684,47 @@ private extension VaultAgentSocketServer {
                 Darwin.close(next)
                 throw VaultAgentSocketServerError.directoryConflict
             }
-            if requiresCurrentOwner, fchmod(next, 0o700) != 0 {
-                Darwin.close(next)
-                throw VaultAgentSocketServerError.directoryConflict
+            if requiresCurrentOwner {
+                if securePrivateDirectories, fchmod(next, 0o700) != 0 {
+                    Darwin.close(next)
+                    throw VaultAgentSocketServerError.directoryConflict
+                }
+                guard fstat(next, &info) == 0, info.st_mode & 0o777 == 0o700 else {
+                    Darwin.close(next)
+                    throw VaultAgentSocketServerError.directoryConflict
+                }
             }
             Darwin.close(currentDescriptor)
             currentDescriptor = next
+        }
+        var finalInfo = stat()
+        guard fstat(currentDescriptor, &finalInfo) == 0,
+              (finalInfo.st_mode & S_IFMT) == S_IFDIR,
+              finalInfo.st_uid == getuid() else {
+            throw VaultAgentSocketServerError.directoryConflict
+        }
+        shouldClose = false
+        return VaultAgentDirectoryHandle(
+            fileDescriptor: currentDescriptor,
+            device: UInt64(finalInfo.st_dev),
+            inode: UInt64(finalInfo.st_ino)
+        )
+    }
+
+    private func validateDirectoryIdentity() throws {
+        let reopened = try openDirectoryPath(createMissing: false, securePrivateDirectories: false)
+        defer { Darwin.close(reopened.fileDescriptor) }
+        guard let directoryDevice,
+              let directoryInode,
+              reopened.device == directoryDevice,
+              reopened.inode == directoryInode else {
+            throw VaultAgentSocketServerError.directoryConflict
         }
     }
 
     private func resolveExistingSocket() throws {
         var before = stat()
-        guard lstat(socketURL.path, &before) == 0 else {
+        guard fstatat(directoryDescriptor, "broker.sock", &before, AT_SYMLINK_NOFOLLOW) == 0 else {
             if errno == ENOENT { return }
             throw VaultAgentSocketServerError.socketPathConflict
         }
@@ -564,25 +736,28 @@ private extension VaultAgentSocketServer {
         guard probe >= 0 else { throw VaultAgentSocketServerError.socketPathConflict }
         defer { Darwin.close(probe) }
         try configure(probe)
+        try validateDirectoryIdentity()
         var address = try makeAddress()
         let result = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        if result == 0 || errno == EINPROGRESS || errno == EALREADY {
+        let connectionError = result == 0 ? 0 : errno
+        try validateDirectoryIdentity()
+        if result == 0 || connectionError == EINPROGRESS || connectionError == EALREADY {
             throw VaultAgentSocketServerError.socketPathConflict
         }
-        guard errno == ECONNREFUSED || errno == ENOENT else {
+        guard connectionError == ECONNREFUSED || connectionError == ENOENT else {
             throw VaultAgentSocketServerError.socketPathConflict
         }
         var after = stat()
-        guard lstat(socketURL.path, &after) == 0,
+        guard fstatat(directoryDescriptor, "broker.sock", &after, AT_SYMLINK_NOFOLLOW) == 0,
               (after.st_mode & S_IFMT) == S_IFSOCK,
               after.st_uid == getuid(),
               before.st_dev == after.st_dev,
               before.st_ino == after.st_ino,
-              unlink(socketURL.path) == 0 else {
+              unlinkat(directoryDescriptor, "broker.sock", 0) == 0 else {
             throw VaultAgentSocketServerError.socketPathConflict
         }
     }
@@ -635,9 +810,26 @@ private extension VaultAgentSocketServer {
                     guard let connection else { return }
                     self?.readAvailable(from: connection)
                 }
+                source.setCancelHandler { [weak self, weak connection] in
+                    guard let connection else { return }
+                    self?.connectionSourceCancellationCompleted(.read, connection: connection)
+                }
                 connection.readSource = source
+                lifecycleProbe.sourceCreated?(.read, descriptor)
+                let timer = idleTimerFactory(queue)
+                timer.setEventHandler { [weak self, weak connection] in
+                    guard let connection else { return }
+                    self?.close(connection)
+                }
+                timer.setCancelHandler { [weak self, weak connection] in
+                    guard let connection else { return }
+                    self?.connectionSourceCancellationCompleted(.idle, connection: connection)
+                }
+                connection.idleTimer = timer
+                lifecycleProbe.sourceCreated?(.idle, descriptor)
                 scheduleIdle(for: connection)
                 source.resume()
+                timer.resume()
             } catch {
                 Darwin.close(descriptor)
             }
@@ -735,6 +927,10 @@ private extension VaultAgentSocketServer {
         connection.inFlightID = nil
         do {
             let response = try result.get()
+            guard response.count <= VaultAgentLimits.maximumResponseBytes else {
+                close(connection)
+                return
+            }
             let encrypted = try channel.seal(response)
             try enqueue(try JSONEncoder().encode(encrypted), for: connection)
         } catch {
@@ -769,7 +965,9 @@ private extension VaultAgentSocketServer {
                 connection.outputOffset += written
                 scheduleIdle(for: connection)
             } else if written < 0, errno == EAGAIN || errno == EWOULDBLOCK {
-                installWriteSource(for: connection)
+                if connection.writeSourceLifecycle.noteWouldBlock() {
+                    installWriteSource(for: connection)
+                }
                 return
             } else {
                 close(connection)
@@ -778,9 +976,7 @@ private extension VaultAgentSocketServer {
         }
         connection.output.removeAll(keepingCapacity: false)
         connection.outputOffset = 0
-        connection.writeSource?.setEventHandler {}
-        connection.writeSource?.cancel()
-        connection.writeSource = nil
+        cancelWriteSourceAfterDrain(for: connection)
     }
 
     private func installWriteSource(for connection: Connection) {
@@ -790,50 +986,127 @@ private extension VaultAgentSocketServer {
             guard let connection else { return }
             self?.flush(connection)
         }
+        source.setCancelHandler { [weak self, weak connection] in
+            guard let connection else { return }
+            self?.connectionSourceCancellationCompleted(.write, connection: connection)
+        }
         connection.writeSource = source
+        connection.writeSourceLifecycle.didInstallSource()
+        lifecycleProbe.sourceCreated?(.write, connection.fileDescriptor)
         source.resume()
     }
 
+    private func cancelWriteSourceAfterDrain(for connection: Connection) {
+        guard let source = connection.writeSource,
+              connection.writeSourceLifecycle.beginDrainCancellation() else { return }
+        source.setEventHandler {}
+        source.cancel()
+    }
+
     private func scheduleIdle(for connection: Connection) {
-        guard !connection.closed else { return }
-        connection.idleGeneration &+= 1
-        let generation = connection.idleGeneration
-        let connectionID = connection.id
-        queue.asyncAfter(deadline: .now() + idleTimeout) { [weak self] in
-            guard let self,
-                  let current = connections[connectionID],
-                  !current.closed,
-                  current.idleGeneration == generation else { return }
-            close(current)
-        }
+        guard !connection.closed, let timer = connection.idleTimer else { return }
+        timer.schedule(deadline: .now() + idleTimeout, repeating: .never)
     }
 
     private func close(_ connection: Connection) {
         guard !connection.closed else { return }
         connection.closed = true
+        connections.removeValue(forKey: connection.id)
+        closingConnections[connection.id] = connection
         connection.readSource?.setEventHandler {}
         connection.readSource?.cancel()
-        connection.readSource = nil
-        connection.writeSource?.setEventHandler {}
-        connection.writeSource?.cancel()
-        connection.writeSource = nil
+        if connection.writeSourceLifecycle.beginClose(), let source = connection.writeSource {
+            source.setEventHandler {}
+            source.cancel()
+        }
+        connection.idleTimer?.setEventHandler {}
+        connection.idleTimer?.cancel()
+        finishConnectionCloseIfPossible(connection)
+    }
+
+    private func connectionSourceCancellationCompleted(
+        _ kind: VaultAgentSocketSourceKind,
+        connection: Connection
+    ) {
+        lifecycleProbe.sourceCancellationCompleted?(kind, connection.fileDescriptor)
+        switch kind {
+        case .read:
+            connection.readSource = nil
+        case .write:
+            connection.writeSource = nil
+            let hasPendingOutput = connection.outputOffset < connection.output.count
+            if !connection.closed,
+               connection.writeSourceLifecycle.cancellationCompleted(hasPendingOutput: hasPendingOutput) {
+                installWriteSource(for: connection)
+            } else if connection.closed {
+                _ = connection.writeSourceLifecycle.cancellationCompleted(hasPendingOutput: false)
+            }
+        case .idle:
+            connection.idleTimer = nil
+        case .listener:
+            return
+        }
+        finishConnectionCloseIfPossible(connection)
+    }
+
+    private func finishConnectionCloseIfPossible(_ connection: Connection) {
+        guard connection.closed,
+              connection.readSource == nil,
+              connection.writeSource == nil,
+              connection.idleTimer == nil else { return }
         Darwin.close(connection.fileDescriptor)
+        lifecycleProbe.descriptorClosed?(connection.fileDescriptor)
         connection.input.removeAll(keepingCapacity: false)
         connection.output.removeAll(keepingCapacity: false)
         connection.channel = nil
         connection.inFlightID = nil
-        connections.removeValue(forKey: connection.id)
+        closingConnections.removeValue(forKey: connection.id)
+        finishStopIfPossible()
+    }
+
+    private func listenerSourceCancellationCompleted(fileDescriptor: Int32) {
+        guard listener == fileDescriptor else { return }
+        lifecycleProbe.sourceCancellationCompleted?(.listener, fileDescriptor)
+        listenerSource = nil
+        Darwin.close(fileDescriptor)
+        lifecycleProbe.descriptorClosed?(fileDescriptor)
+        listener = -1
+        finishStopIfPossible()
+    }
+
+    private func finishStopIfPossible() {
+        guard !running,
+              listener < 0,
+              connections.isEmpty,
+              closingConnections.isEmpty else { return }
+        removeOwnedSocketIfUnchanged()
+        boundDevice = nil
+        boundInode = nil
+        closeDirectoryDescriptor()
+        stopping = false
+        let completions = stopCompletions
+        stopCompletions.removeAll()
+        shutdownRetention = nil
+        completions.forEach { $0() }
     }
 
     private func removeOwnedSocketIfUnchanged() {
-        guard let boundDevice, let boundInode else { return }
+        guard directoryDescriptor >= 0, let boundDevice, let boundInode else { return }
         var info = stat()
-        guard lstat(socketURL.path, &info) == 0,
+        guard fstatat(directoryDescriptor, "broker.sock", &info, AT_SYMLINK_NOFOLLOW) == 0,
               (info.st_mode & S_IFMT) == S_IFSOCK,
               info.st_uid == getuid(),
               UInt64(info.st_dev) == boundDevice,
               UInt64(info.st_ino) == boundInode else { return }
-        _ = unlink(socketURL.path)
+        _ = unlinkat(directoryDescriptor, "broker.sock", 0)
+    }
+
+    private func closeDirectoryDescriptor() {
+        guard directoryDescriptor >= 0 else { return }
+        Darwin.close(directoryDescriptor)
+        directoryDescriptor = -1
+        directoryDevice = nil
+        directoryInode = nil
     }
 
     private func onQueue<T>(_ body: () throws -> T) rethrows -> T {

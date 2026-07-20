@@ -127,6 +127,63 @@ struct VaultAgentPeerVerifierTests {
         }
     }
 
+    @Test("helper and matched Host remain identical through the final verification window")
+    func finalVerificationWindowIsStable() throws {
+        let helperSnapshot = try PeerFixture(helper: "pastera", client: .cli)
+        helperSnapshot.addProcess(pid: 90, parent: 1, url: helperSnapshot.helperURL)
+        helperSnapshot.mutateOnReads[90] = [3]
+        #expect(throws: VaultAgentPeerVerificationError.unstableProcess) {
+            try helperSnapshot.verifier().verify(fileDescriptor: 9)
+        }
+
+        let helperSignature = try PeerFixture(helper: "pastera", client: .cli)
+        helperSignature.addProcess(pid: 90, parent: 1, url: helperSignature.helperURL)
+        helperSignature.signatureOnReads[helperSignature.helperURL.path] = [
+            2: .init(
+                identifier: "com.pastera-app.pastera",
+                designatedRequirement: "helper-req",
+                cdHash: Data([9, 9]),
+                isAdHoc: true
+            )
+        ]
+        #expect(throws: VaultAgentPeerVerificationError.invalidHelperSignature) {
+            try helperSignature.verifier().verify(fileDescriptor: 9)
+        }
+
+        let hostSnapshot = try PeerFixture(helper: "PasteraCodexMCP", client: .codex)
+        let changingHost = hostSnapshot.makeExecutable("Codex")
+        hostSnapshot.addProcess(pid: 90, parent: 80, url: hostSnapshot.helperURL)
+        hostSnapshot.addProcess(pid: 80, parent: 1, url: changingHost)
+        hostSnapshot.hosts[.codex] = hostSnapshot.hostRecord(client: .codex, url: changingHost)
+        hostSnapshot.mutateOnReads[80] = [3]
+        #expect(throws: VaultAgentPeerVerificationError.unstableProcess) {
+            try hostSnapshot.verifier().verify(fileDescriptor: 9)
+        }
+
+        let hostSignature = try PeerFixture(helper: "PasteraCodexMCP", client: .codex)
+        let host = hostSignature.makeExecutable("Codex")
+        hostSignature.signatures[host.path] = .init(
+            identifier: "host.Codex",
+            designatedRequirement: "host-req",
+            cdHash: Data([1]),
+            isAdHoc: false
+        )
+        hostSignature.addProcess(pid: 90, parent: 80, url: hostSignature.helperURL)
+        hostSignature.addProcess(pid: 80, parent: 1, url: host)
+        hostSignature.hosts[.codex] = hostSignature.hostRecord(client: .codex, url: host)
+        hostSignature.signatureOnReads[host.path] = [
+            2: .init(
+                identifier: "host.Codex",
+                designatedRequirement: "host-req",
+                cdHash: Data([2]),
+                isAdHoc: false
+            )
+        ]
+        #expect(throws: VaultAgentPeerVerificationError.invalidHelperSignature) {
+            try hostSignature.verifier().verify(fileDescriptor: 9)
+        }
+    }
+
     @Test("peer credentials come from the socket and must match the current UID")
     func socketPeerCredentialsAreAuthoritative() throws {
         let fixture = try PeerFixture(helper: "pastera", client: .cli)
@@ -160,7 +217,10 @@ private final class PeerFixture {
     var signatures: [String: VaultAgentCodeSignature] = [:]
     var hosts: [VaultAgentClientKind: VaultAgentInstalledHostIdentity] = [:]
     var mutateOnSecondRead: Set<pid_t> = []
+    var mutateOnReads: [pid_t: Set<Int>] = [:]
+    var signatureOnReads: [String: [Int: VaultAgentCodeSignature]] = [:]
     private var reads: [pid_t: Int] = [:]
+    private var signatureReads: [String: Int] = [:]
 
     init(helper: String, client: VaultAgentClientKind) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -218,9 +278,14 @@ private final class PeerFixture {
                 reads[pid, default: 0] += 1
                 guard var snapshot = processes[pid] else { throw ProbeFailure.missing }
                 if mutateOnSecondRead.contains(pid), reads[pid, default: 0] > 1 { snapshot.startSeconds += 1 }
+                if mutateOnReads[pid]?.contains(reads[pid, default: 0]) == true { snapshot.startSeconds += 1 }
                 return snapshot
             },
             codeSigningInspector: SigningProbe { [unowned self] url in
+                signatureReads[url.path, default: 0] += 1
+                if let signature = signatureOnReads[url.path]?[signatureReads[url.path, default: 0]] {
+                    return signature
+                }
                 guard let signature = signatures[url.path] else { throw ProbeFailure.missing }
                 return signature
             },
