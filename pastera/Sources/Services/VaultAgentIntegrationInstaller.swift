@@ -45,6 +45,21 @@ protocol VaultAgentInstallerCodeSigningInspecting: AnyObject {
 
 protocol VaultAgentHostCommandRunning: AnyObject {
     func run(executableURL: URL, arguments: [String]) throws -> Int32
+    func registration(
+        executableURL: URL,
+        host: VaultAgentHostKind
+    ) throws -> VaultAgentHostRegistration?
+}
+
+struct VaultAgentHostRegistration: Codable, Equatable {
+    let command: String
+    let arguments: [String]
+    let userScoped: Bool
+}
+
+enum VaultAgentAtomicWritePhase: Equatable {
+    case beforeSwap
+    case beforeConflictRollback
 }
 
 // swiftlint:disable:next type_name
@@ -115,8 +130,50 @@ final class VaultAgentSystemInstallerCodeSigningInspector:
 }
 
 final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
+    private final class BoundedOutput: @unchecked Sendable {
+        private let maximumBytes: Int
+        private let lock = NSLock()
+        private var data = Data()
+        private var overflowed = false
+        private var readFailed = false
+
+        init(maximumBytes: Int) {
+            self.maximumBytes = maximumBytes
+        }
+
+        func append(_ chunk: Data) {
+            lock.lock()
+            defer { lock.unlock() }
+            let remaining = max(0, maximumBytes - data.count)
+            data.append(chunk.prefix(remaining))
+            if chunk.count > remaining { overflowed = true }
+        }
+
+        func markReadFailed() {
+            lock.lock()
+            readFailed = true
+            lock.unlock()
+        }
+
+        func value() throws -> Data {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !overflowed, !readFailed else {
+                throw VaultAgentInstallerError.installationConflict
+            }
+            return data
+        }
+    }
+
+    private struct CapturedResult {
+        let exitCode: Int32
+        let standardOutput: Data
+        let standardError: Data
+    }
+
     private let timeout: TimeInterval
     private let terminationGracePeriod: TimeInterval
+    private let maximumCapturedBytes = 65_536
 
     init(timeout: TimeInterval = 30, terminationGracePeriod: TimeInterval = 1) {
         precondition(timeout > 0)
@@ -159,6 +216,40 @@ final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
         throw VaultAgentInstallerError.commandTimedOut
     }
 
+    func registration(
+        executableURL: URL,
+        host: VaultAgentHostKind
+    ) throws -> VaultAgentHostRegistration? {
+        let arguments: [String]
+        switch host {
+        case .codex:
+            arguments = ["mcp", "get", "pastera-vault", "--json"]
+        case .claude:
+            arguments = ["mcp", "get", "pastera-vault"]
+        }
+        let result = try runCaptured(executableURL: executableURL, arguments: arguments)
+        if result.exitCode != 0 {
+            guard let diagnostic = String(
+                data: result.standardOutput + result.standardError,
+                encoding: .utf8
+            )?.lowercased() else {
+                throw VaultAgentInstallerError.installationConflict
+            }
+            guard diagnostic.contains("no mcp server"),
+                  diagnostic.contains("pastera-vault"),
+                  diagnostic.contains("found") else {
+                throw VaultAgentInstallerError.commandFailed(result.exitCode)
+            }
+            return nil
+        }
+        switch host {
+        case .codex:
+            return try parseCodexRegistration(result.standardOutput)
+        case .claude:
+            return try parseClaudeRegistration(result.standardOutput)
+        }
+    }
+
     private func waitForExit(
         _ process: Process,
         semaphore: DispatchSemaphore,
@@ -167,6 +258,144 @@ final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
         guard semaphore.wait(timeout: .now() + timeout) == .success else { return false }
         process.waitUntilExit()
         return true
+    }
+
+    private func runCaptured(
+        executableURL: URL,
+        arguments: [String]
+    ) throws -> CapturedResult {
+        guard let nullDevice = FileHandle(forReadingAtPath: "/dev/null") else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        defer { try? nullDevice.close() }
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        let output = BoundedOutput(maximumBytes: maximumCapturedBytes)
+        let error = BoundedOutput(maximumBytes: maximumCapturedBytes)
+        let readers = DispatchGroup()
+        drain(outputPipe.fileHandleForReading, into: output, group: readers)
+        drain(errorPipe.fileHandleForReading, into: error, group: readers)
+
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardInput = nullDevice
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        do {
+            try process.run()
+        } catch {
+            try? outputPipe.fileHandleForWriting.close()
+            try? errorPipe.fileHandleForWriting.close()
+            try? finishReaders(outputPipe, errorPipe, group: readers)
+            throw VaultAgentInstallerError.commandLaunchFailed
+        }
+        try? outputPipe.fileHandleForWriting.close()
+        try? errorPipe.fileHandleForWriting.close()
+
+        guard waitForExit(process, semaphore: exited, timeout: timeout) else {
+            if process.isRunning { process.terminate() }
+            if !waitForExit(process, semaphore: exited, timeout: terminationGracePeriod),
+               process.isRunning {
+                _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+            try? finishReaders(outputPipe, errorPipe, group: readers)
+            throw VaultAgentInstallerError.commandTimedOut
+        }
+        try finishReaders(outputPipe, errorPipe, group: readers)
+        return .init(
+            exitCode: process.terminationStatus,
+            standardOutput: try output.value(),
+            standardError: try error.value()
+        )
+    }
+
+    private func drain(
+        _ handle: FileHandle,
+        into output: BoundedOutput,
+        group: DispatchGroup
+    ) {
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            defer { group.leave() }
+            do {
+                while let chunk = try handle.read(upToCount: 8_192), !chunk.isEmpty {
+                    output.append(chunk)
+                }
+            } catch {
+                output.markReadFailed()
+            }
+        }
+    }
+
+    private func finishReaders(
+        _ outputPipe: Pipe,
+        _ errorPipe: Pipe,
+        group: DispatchGroup
+    ) throws {
+        if group.wait(timeout: .now() + terminationGracePeriod) == .success { return }
+        try? outputPipe.fileHandleForReading.close()
+        try? errorPipe.fileHandleForReading.close()
+        guard group.wait(timeout: .now() + terminationGracePeriod) == .success else {
+            throw VaultAgentInstallerError.commandTimedOut
+        }
+    }
+
+    private func parseCodexRegistration(_ data: Data) throws -> VaultAgentHostRegistration {
+        let object: [String: Any]
+        do {
+            guard let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw VaultAgentInstallerError.installationConflict
+            }
+            object = decoded
+        } catch {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        guard
+              let transport = object["transport"] as? [String: Any],
+              transport["type"] as? String == "stdio",
+              let command = transport["command"] as? String else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        let rawArguments = transport["args"] ?? []
+        guard let arguments = rawArguments as? [Any],
+              arguments.allSatisfy({ $0 is String }) else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        return .init(
+            command: command,
+            arguments: arguments.compactMap { $0 as? String },
+            userScoped: true
+        )
+    }
+
+    private func parseClaudeRegistration(_ data: Data) throws -> VaultAgentHostRegistration {
+        guard let output = String(data: data, encoding: .utf8) else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let commandLine = lines.first(where: { $0.hasPrefix("Command:") }),
+              let scopeLine = lines.first(where: { $0.hasPrefix("Scope:") }),
+              let argumentsLine = lines.first(where: { $0.hasPrefix("Args:") }) else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        let command = commandLine.dropFirst("Command:".count)
+            .trimmingCharacters(in: .whitespaces)
+        let rawArguments = argumentsLine.dropFirst("Args:".count)
+            .trimmingCharacters(in: .whitespaces)
+        guard !command.isEmpty else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        return .init(
+            command: command,
+            arguments: rawArguments.isEmpty ? [] : [rawArguments],
+            userScoped: scopeLine.lowercased().contains("user")
+        )
     }
 }
 
@@ -274,6 +503,7 @@ final class VaultAgentIntegrationInstaller:
     private struct HostRecord: Codable, Equatable {
         let host: String
         let identity: HostIdentity
+        let registration: VaultAgentHostRegistration
         let helperRelativePath: String
         let helperSHA256: String
         let skillDestinationRelativePath: String
@@ -305,6 +535,11 @@ final class VaultAgentIntegrationInstaller:
         var object: [String: Any]
         let originalData: Data
         let snapshot: FileSnapshot?
+    }
+
+    private struct ClaudePermissionDelta {
+        let addedRules: [String]
+        let removedRules: [String]
     }
 
     private struct FileSnapshot: Equatable {
@@ -384,7 +619,7 @@ final class VaultAgentIntegrationInstaller:
     private let commandRunner: VaultAgentHostCommandRunning
     private let installationVersion: String
     private let environmentPathProvider: () -> String
-    private let atomicWriteInterposer: (URL) throws -> Void
+    private let atomicWriteInterposer: (URL, VaultAgentAtomicWritePhase) throws -> Void
     private let managedPermissionDispositionProvider:
         () -> VaultAgentManagedPermissionDisposition
     private let authorizationStatusProvider:
@@ -405,7 +640,10 @@ final class VaultAgentIntegrationInstaller:
         environmentPathProvider: @escaping () -> String = {
             ProcessInfo.processInfo.environment["PATH"] ?? ""
         },
-        atomicWriteInterposer: @escaping (URL) throws -> Void = { _ in },
+        atomicWriteInterposer: @escaping (
+            URL,
+            VaultAgentAtomicWritePhase
+        ) throws -> Void = { _, _ in },
         managedPermissionDispositionProvider: @escaping (
         ) -> VaultAgentManagedPermissionDisposition = {
             VaultAgentManagedPolicyDetector().disposition()
@@ -435,7 +673,9 @@ final class VaultAgentIntegrationInstaller:
         defer { transactionLock.unlock() }
         let manifest = try loadManifestState().manifest
         let requestedHosts = host.map { [$0] } ?? [.codex, .claude]
-        return .init(hosts: requestedHosts.map { makeStatus(host: $0, manifest: manifest) })
+        return .init(hosts: try requestedHosts.map {
+            try makeStatus(host: $0, manifest: manifest)
+        })
     }
 
     func installedHostIdentity(
@@ -469,6 +709,7 @@ final class VaultAgentIntegrationInstaller:
         let hostSignature = try inspect(hostURL, expectedIdentifier: nil)
         let identity = HostIdentity(canonicalPath: hostURL.path, signature: hostSignature)
         let helper = try validateHelper(for: host)
+        let expectedRegistration = makeRegistration(helperURL: helper.url)
         let state = try loadManifestState()
         let manifest = state.manifest
         let destination = skillDestination(for: host)
@@ -488,6 +729,10 @@ final class VaultAgentIntegrationInstaller:
             )
         }
 
+        guard try commandRunner.registration(executableURL: hostURL, host: host) == nil else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+
         let target = userRootURL.appendingPathComponent(destination)
         guard try pathKind(target) == nil else {
             throw VaultAgentInstallerError.installationConflict
@@ -498,12 +743,31 @@ final class VaultAgentIntegrationInstaller:
             executableURL: prepared.canonicalHostURL,
             arguments: addArguments(for: host, helperURL: prepared.helperURL)
         )
-        guard exitCode == 0 else {
+        if exitCode != 0 {
+            let registration = try commandRunner.registration(
+                executableURL: prepared.canonicalHostURL,
+                host: host
+            )
+            if registration == expectedRegistration {
+                try removeRegistrationIfOwned(
+                    host: host,
+                    hostURL: prepared.canonicalHostURL,
+                    expected: expectedRegistration
+                )
+            } else if registration != nil {
+                throw VaultAgentInstallerError.rollbackFailed
+            }
             throw VaultAgentInstallerError.commandFailed(exitCode)
         }
+        try verifyAddedRegistration(
+            host: host,
+            hostURL: prepared.canonicalHostURL,
+            expected: expectedRegistration
+        )
         let installedRecord = HostRecord(
             host: host.rawValue,
             identity: prepared.hostIdentity,
+            registration: expectedRegistration,
             helperRelativePath: prepared.helperRelativePath,
             helperSHA256: prepared.helperSHA256,
             skillDestinationRelativePath: prepared.skillDestinationRelativePath,
@@ -520,13 +784,11 @@ final class VaultAgentIntegrationInstaller:
             try writeManifest(updatedManifest, replacing: state.snapshot)
         } catch {
             let originalError = error
-            let rollbackCode = try? commandRunner.run(
-                executableURL: prepared.canonicalHostURL,
-                arguments: removeArguments(for: host)
+            try removeRegistrationIfOwned(
+                host: host,
+                hostURL: prepared.canonicalHostURL,
+                expected: expectedRegistration
             )
-            guard rollbackCode == 0 else {
-                throw VaultAgentInstallerError.rollbackFailed
-            }
             if movedSkill {
                 guard (try? validateOwnedSkillSnapshot(
                     installedRecord,
@@ -562,6 +824,10 @@ final class VaultAgentIntegrationInstaller:
             destination: skillDestination(for: host)
         )
         try validateOwnedFilesForUpdate(record, context: context)
+        guard try commandRunner.registration(executableURL: hostURL, host: host)
+                == record.registration else {
+            throw VaultAgentInstallerError.installationConflict
+        }
         let target = userRootURL.appendingPathComponent(record.skillDestinationRelativePath)
         let quarantine = target.deletingLastPathComponent()
             .appendingPathComponent(".pastera-vault-uninstall-\(UUID().uuidString).tmp")
@@ -580,30 +846,50 @@ final class VaultAgentIntegrationInstaller:
             guard exitCode == 0 else {
                 throw VaultAgentInstallerError.commandFailed(exitCode)
             }
+            guard try commandRunner.registration(executableURL: hostURL, host: host) == nil else {
+                throw VaultAgentInstallerError.rollbackFailed
+            }
         } catch {
+            let originalError = error
             try restoreQuarantinedItem(quarantine, to: target)
-            throw error
+            let currentRegistration = try commandRunner.registration(
+                executableURL: hostURL,
+                host: host
+            )
+            if currentRegistration == nil {
+                try restoreOwnedRegistration(
+                    host: host,
+                    hostURL: hostURL,
+                    registration: record.registration
+                )
+            } else if currentRegistration != record.registration {
+                throw VaultAgentInstallerError.rollbackFailed
+            }
+            throw originalError
         }
         manifest.hosts.removeValue(forKey: host.rawValue)
         do {
             try writeManifest(manifest, replacing: state.snapshot)
         } catch {
             let originalError = error
-            let rollbackCode = try? commandRunner.run(
-                executableURL: hostURL,
-                arguments: addArguments(for: host, helperURL: helper.url)
-            )
             do {
                 try restoreQuarantinedItem(quarantine, to: target)
             } catch {
                 throw VaultAgentInstallerError.rollbackFailed
             }
-            guard rollbackCode == 0 else {
-                throw VaultAgentInstallerError.rollbackFailed
-            }
+            try restoreOwnedRegistration(
+                host: host,
+                hostURL: hostURL,
+                registration: record.registration
+            )
             throw originalError
         }
-        try? fileManager.removeItem(at: quarantine)
+        do {
+            try fileManager.removeItem(at: quarantine)
+            try fsyncDirectory(quarantine.deletingLastPathComponent())
+        } catch {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
         return uninstalledStatus(host: host, hostPath: hostURL.path)
     }
 
@@ -690,7 +976,9 @@ final class VaultAgentIntegrationInstaller:
             try restoreQuarantinedItem(quarantine, to: target)
             throw error
         }
-        _ = unlink(quarantine.path)
+        guard unlink(quarantine.path) == 0 else {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
         try fsyncDirectory(target.deletingLastPathComponent())
         return makeCLIStatus(installed: false)
     }
@@ -772,6 +1060,7 @@ final class VaultAgentIntegrationInstaller:
         try commitClaudePermissionChange(
             settings: settings,
             updatedObject: updatedObject,
+            delta: .init(addedRules: addedRules, removedRules: []),
             manifest: updatedManifest,
             replacingManifest: state.snapshot
         )
@@ -781,9 +1070,6 @@ final class VaultAgentIntegrationInstaller:
     func removeOwnedClaudePermissionRules() throws -> VaultAgentPermissionChange {
         transactionLock.lock()
         defer { transactionLock.unlock() }
-        guard managedPermissionDispositionProvider() == .userRulesAllowed else {
-            throw VaultAgentInstallerError.managedPolicyRestricted
-        }
         let state = try loadManifestState()
         let ownedRules = state.manifest.claudePermissions?.ownedRules ?? []
         guard !ownedRules.isEmpty else {
@@ -808,6 +1094,7 @@ final class VaultAgentIntegrationInstaller:
         try commitClaudePermissionChange(
             settings: settings,
             updatedObject: updatedObject,
+            delta: .init(addedRules: [], removedRules: removedRules),
             manifest: updatedManifest,
             replacingManifest: state.snapshot
         )
@@ -819,7 +1106,7 @@ private extension VaultAgentIntegrationInstaller {
     private func makeStatus(
         host: VaultAgentHostKind,
         manifest: Manifest
-    ) -> VaultAgentHostIntegrationStatus {
+    ) throws -> VaultAgentHostIntegrationStatus {
         let detectedHostURL: URL?
         if let hostURL = try? locateHost(host),
            (try? inspect(hostURL, expectedIdentifier: nil)) != nil {
@@ -828,12 +1115,21 @@ private extension VaultAgentIntegrationInstaller {
             detectedHostURL = nil
         }
         let record = manifest.hosts[host.rawValue]
+        let registrationMatches: Bool
+        if let record, let detectedHostURL {
+            registrationMatches = try commandRunner.registration(
+                executableURL: detectedHostURL,
+                host: host
+            ) == record.registration
+        } else {
+            registrationMatches = false
+        }
         let authorization = authorizationStatusProvider(client(for: host))
         return .init(
             host: host,
             hostDetected: detectedHostURL != nil,
             hostExecutablePath: detectedHostURL?.path,
-            mcpInstalled: record != nil,
+            mcpInstalled: registrationMatches,
             skillInstalled: record.map(installedSkillMatches) ?? false,
             installedVersion: record == nil ? nil : manifest.installationVersion,
             authorized: authorization.authorized,
@@ -843,11 +1139,8 @@ private extension VaultAgentIntegrationInstaller {
     }
 
     private func installedSkillMatches(_ record: HostRecord) -> Bool {
-        guard record.files.count == Self.skillFiles.count else { return false }
-        return record.files.allSatisfy { file in
-            let installedURL = userRootURL.appendingPathComponent(file.destinationRelativePath)
-            return (try? digest(installedURL)) == file.sha256
-        }
+        let root = userRootURL.appendingPathComponent(record.skillDestinationRelativePath)
+        return (try? validateOwnedSkillSnapshot(record, at: root)) != nil
     }
 
     func locateHost(_ host: VaultAgentHostKind) throws -> URL {
@@ -935,8 +1228,8 @@ private extension VaultAgentIntegrationInstaller {
         )
         let staged = parent.appendingPathComponent(".pastera-vault-\(UUID().uuidString).tmp")
         try fileManager.createDirectory(at: staged, withIntermediateDirectories: false)
-        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: staged.path)
         do {
+            try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: staged.path)
             let files = try Self.skillFiles.map { relativePath in
                 try copySkillFile(
                     relativePath,
@@ -967,11 +1260,22 @@ private extension VaultAgentIntegrationInstaller {
         context: InstallContext
     ) throws -> VaultAgentIntegrationStatus {
         try validateOwnedFilesForUpdate(record, context: context)
+        guard try commandRunner.registration(
+            executableURL: context.hostURL,
+            host: context.host
+        ) == record.registration else {
+            throw VaultAgentInstallerError.installationConflict
+        }
         let prepared = try prepareInstall(context)
-        defer { try? fileManager.removeItem(at: prepared.stagedSkillURL) }
+        var stagedNeedsCleanup = true
+        defer {
+            if stagedNeedsCleanup { try? fileManager.removeItem(at: prepared.stagedSkillURL) }
+        }
+        let updatedRegistration = makeRegistration(helperURL: prepared.helperURL)
         let updatedRecord = HostRecord(
             host: context.host.rawValue,
             identity: prepared.hostIdentity,
+            registration: updatedRegistration,
             helperRelativePath: prepared.helperRelativePath,
             helperSHA256: prepared.helperSHA256,
             skillDestinationRelativePath: prepared.skillDestinationRelativePath,
@@ -981,38 +1285,56 @@ private extension VaultAgentIntegrationInstaller {
             return installedStatus(host: context.host, hostPath: context.hostURL.path)
         }
 
-        guard renamex_np(
-            prepared.stagedSkillURL.path,
-            prepared.targetSkillURL.path,
-            UInt32(RENAME_SWAP)
-        ) == 0 else {
-            throw VaultAgentInstallerError.installationConflict
+        let registrationChanged = updatedRegistration != record.registration
+        if registrationChanged {
+            try replaceOwnedRegistration(
+                host: context.host,
+                hostURL: context.hostURL,
+                current: record.registration,
+                replacement: updatedRegistration
+            )
         }
+        var skillSwapped = false
         do {
-            try validateOwnedSkillSnapshot(record, at: prepared.stagedSkillURL)
-        } catch {
             guard renamex_np(
                 prepared.stagedSkillURL.path,
                 prepared.targetSkillURL.path,
                 UInt32(RENAME_SWAP)
             ) == 0 else {
-                throw VaultAgentInstallerError.rollbackFailed
+                throw VaultAgentInstallerError.installationConflict
             }
-            throw error
-        }
-        var manifest = state.manifest
-        manifest.hosts[context.host.rawValue] = updatedRecord
-        do {
+            skillSwapped = true
+            try validateOwnedSkillSnapshot(record, at: prepared.stagedSkillURL)
+            try validateOwnedSkillSnapshot(updatedRecord, at: prepared.targetSkillURL)
+            var manifest = state.manifest
+            manifest.hosts[context.host.rawValue] = updatedRecord
             try writeManifest(manifest, replacing: state.snapshot)
         } catch {
-            guard renamex_np(
-                prepared.stagedSkillURL.path,
-                prepared.targetSkillURL.path,
-                UInt32(RENAME_SWAP)
-            ) == 0 else {
-                throw VaultAgentInstallerError.rollbackFailed
+            let originalError = error
+            if skillSwapped {
+                try rollbackSkillSwap(
+                    oldRecord: record,
+                    newRecord: updatedRecord,
+                    stagedURL: prepared.stagedSkillURL,
+                    targetURL: prepared.targetSkillURL
+                )
             }
-            throw error
+            if registrationChanged {
+                try replaceOwnedRegistration(
+                    host: context.host,
+                    hostURL: context.hostURL,
+                    current: updatedRegistration,
+                    replacement: record.registration
+                )
+            }
+            throw originalError
+        }
+        do {
+            try fileManager.removeItem(at: prepared.stagedSkillURL)
+            stagedNeedsCleanup = false
+            try fsyncDirectory(prepared.stagedSkillURL.deletingLastPathComponent())
+        } catch {
+            throw VaultAgentInstallerError.rollbackFailed
         }
         return installedStatus(host: context.host, hostPath: context.hostURL.path)
     }
@@ -1269,6 +1591,7 @@ private extension VaultAgentIntegrationInstaller {
     private func commitClaudePermissionChange(
         settings: ClaudeSettingsState,
         updatedObject: [String: Any],
+        delta: ClaudePermissionDelta,
         manifest: Manifest,
         replacingManifest manifestSnapshot: FileSnapshot?
     ) throws {
@@ -1295,24 +1618,56 @@ private extension VaultAgentIntegrationInstaller {
             try writeManifest(manifest, replacing: manifestSnapshot)
         } catch {
             let originalError = error
-            let currentSnapshot = try? fileSnapshot(settingsURL, maximumBytes: 4_194_304)
-            if currentSnapshot?.sha256 == sha256(updatedData) {
-                do {
-                    try restoreClaudeSettings(
-                        settings,
-                        replacing: currentSnapshot,
-                        at: settingsURL
-                    )
-                    try? removeBackup(backupURL)
-                } catch {
-                    throw VaultAgentInstallerError.rollbackFailed
-                }
-            } else {
-                try? removeBackup(backupURL)
+            do {
+                try compensateClaudePermissionChange(
+                    original: settings,
+                    writtenData: updatedData,
+                    delta: delta,
+                    settingsURL: settingsURL
+                )
+                try removeBackup(backupURL)
+            } catch {
+                throw VaultAgentInstallerError.rollbackFailed
             }
             throw originalError
         }
         try removeBackup(backupURL)
+    }
+
+    private func compensateClaudePermissionChange(
+        original: ClaudeSettingsState,
+        writtenData: Data,
+        delta: ClaudePermissionDelta,
+        settingsURL: URL
+    ) throws {
+        let currentSnapshot = try fileSnapshot(settingsURL, maximumBytes: 4_194_304)
+        if currentSnapshot?.sha256 == sha256(writtenData) {
+            try restoreClaudeSettings(
+                original,
+                replacing: currentSnapshot,
+                at: settingsURL
+            )
+            return
+        }
+
+        let current = try readClaudeSettings()
+        let currentRules = try claudeAllowRules(in: current.object)
+        let addedSet = Set(delta.addedRules)
+        var compensatedRules = currentRules.filter { !addedSet.contains($0) }
+        let compensatedSet = Set(compensatedRules)
+        compensatedRules.append(contentsOf: delta.removedRules.filter {
+            !compensatedSet.contains($0)
+        })
+        guard compensatedRules != currentRules else { return }
+        var compensatedObject = current.object
+        try setClaudeAllowRules(stableUnique(compensatedRules), in: &compensatedObject)
+        let compensatedData = try serializeJSONObject(compensatedObject)
+        try writeAtomicFile(
+            compensatedData,
+            to: settingsURL,
+            permissions: 0o600,
+            replacing: current.snapshot
+        )
     }
 
     private func createClaudeSettingsBackup(_ data: Data) throws -> URL {
@@ -1543,8 +1898,14 @@ private extension VaultAgentIntegrationInstaller {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
         descriptorOpen = false
+        guard let newSnapshot = try fileSnapshot(
+            temporary,
+            maximumBytes: max(data.count, 1)
+        ) else {
+            throw VaultAgentInstallerError.installationConflict
+        }
 
-        try atomicWriteInterposer(url)
+        try atomicWriteInterposer(url, .beforeSwap)
         if expectedSnapshot == nil {
             guard renamex_np(temporary.path, url.path, UInt32(RENAME_EXCL)) == 0 else {
                 throw VaultAgentInstallerError.installationConflict
@@ -1553,15 +1914,25 @@ private extension VaultAgentIntegrationInstaller {
             guard renamex_np(temporary.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
                 throw VaultAgentInstallerError.installationConflict
             }
-            let displacedSnapshot = try fileSnapshot(temporary, maximumBytes: 1_048_576)
+            let displacedSnapshot = try? fileSnapshot(
+                temporary,
+                maximumBytes: 4_194_304
+            )
             guard displacedSnapshot == expectedSnapshot else {
+                try atomicWriteInterposer(url, .beforeConflictRollback)
+                guard try fileSnapshot(
+                    url,
+                    maximumBytes: max(data.count, 1)
+                ) == newSnapshot else {
+                    throw VaultAgentInstallerError.installationConflict
+                }
                 guard renamex_np(temporary.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
                     throw VaultAgentInstallerError.rollbackFailed
                 }
                 throw VaultAgentInstallerError.installationConflict
             }
         }
-        guard try fileSnapshot(url, maximumBytes: max(data.count, 1))?.sha256 == sha256(data) else {
+        guard try fileSnapshot(url, maximumBytes: max(data.count, 1)) == newSnapshot else {
             throw VaultAgentInstallerError.installationConflict
         }
         try fsyncDirectory(url.deletingLastPathComponent())
@@ -1714,6 +2085,120 @@ private extension VaultAgentIntegrationInstaller {
                 "mcp", "add", "--transport", "stdio", "--scope", "user",
                 "pastera-vault", "--", helperURL.path
             ]
+        }
+    }
+
+    func makeRegistration(helperURL: URL) -> VaultAgentHostRegistration {
+        .init(command: helperURL.path, arguments: [], userScoped: true)
+    }
+
+    private func addArguments(
+        for host: VaultAgentHostKind,
+        registration: VaultAgentHostRegistration
+    ) -> [String] {
+        let helperURL = URL(fileURLWithPath: registration.command)
+        return addArguments(for: host, helperURL: helperURL) + registration.arguments
+    }
+
+    private func removeRegistrationIfOwned(
+        host: VaultAgentHostKind,
+        hostURL: URL,
+        expected: VaultAgentHostRegistration
+    ) throws {
+        guard try commandRunner.registration(executableURL: hostURL, host: host) == expected else {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
+        let exitCode = try commandRunner.run(
+            executableURL: hostURL,
+            arguments: removeArguments(for: host)
+        )
+        guard exitCode == 0,
+              try commandRunner.registration(executableURL: hostURL, host: host) == nil else {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
+    }
+
+    private func verifyAddedRegistration(
+        host: VaultAgentHostKind,
+        hostURL: URL,
+        expected: VaultAgentHostRegistration
+    ) throws {
+        do {
+            guard try commandRunner.registration(executableURL: hostURL, host: host)
+                    == expected else {
+                throw VaultAgentInstallerError.installationConflict
+            }
+        } catch {
+            try removeRegistrationIfOwned(host: host, hostURL: hostURL, expected: expected)
+            throw error
+        }
+    }
+
+    private func restoreOwnedRegistration(
+        host: VaultAgentHostKind,
+        hostURL: URL,
+        registration: VaultAgentHostRegistration
+    ) throws {
+        guard try commandRunner.registration(executableURL: hostURL, host: host) == nil else {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
+        let exitCode = try commandRunner.run(
+            executableURL: hostURL,
+            arguments: addArguments(for: host, registration: registration)
+        )
+        guard exitCode == 0,
+              try commandRunner.registration(executableURL: hostURL, host: host)
+                == registration else {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
+    }
+
+    private func replaceOwnedRegistration(
+        host: VaultAgentHostKind,
+        hostURL: URL,
+        current: VaultAgentHostRegistration,
+        replacement: VaultAgentHostRegistration
+    ) throws {
+        guard try commandRunner.registration(executableURL: hostURL, host: host) == current else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        let exitCode = try commandRunner.run(
+            executableURL: hostURL,
+            arguments: addArguments(for: host, registration: replacement)
+        )
+        guard exitCode == 0 else {
+            let observed = try commandRunner.registration(executableURL: hostURL, host: host)
+            if observed == replacement {
+                let rollbackCode = try commandRunner.run(
+                    executableURL: hostURL,
+                    arguments: addArguments(for: host, registration: current)
+                )
+                guard rollbackCode == 0,
+                      try commandRunner.registration(executableURL: hostURL, host: host)
+                        == current else {
+                    throw VaultAgentInstallerError.rollbackFailed
+                }
+            } else if observed != current {
+                throw VaultAgentInstallerError.rollbackFailed
+            }
+            throw VaultAgentInstallerError.commandFailed(exitCode)
+        }
+        guard try commandRunner.registration(executableURL: hostURL, host: host)
+                == replacement else {
+            throw VaultAgentInstallerError.rollbackFailed
+        }
+    }
+
+    private func rollbackSkillSwap(
+        oldRecord: HostRecord,
+        newRecord: HostRecord,
+        stagedURL: URL,
+        targetURL: URL
+    ) throws {
+        guard (try? validateOwnedSkillSnapshot(oldRecord, at: stagedURL)) != nil,
+              (try? validateOwnedSkillSnapshot(newRecord, at: targetURL)) != nil,
+              renamex_np(stagedURL.path, targetURL.path, UInt32(RENAME_SWAP)) == 0 else {
+            throw VaultAgentInstallerError.rollbackFailed
         }
     }
 

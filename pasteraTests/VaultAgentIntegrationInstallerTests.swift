@@ -25,6 +25,61 @@ struct VaultAgentIntegrationInstallerTests {
         ])
     }
 
+    @Test("foreign and changed MCP registrations are preserved as conflicts")
+    func foreignMCPRegistrationsArePreserved() throws {
+        do {
+            let fixture = try InstallerFixture()
+            let foreign = VaultAgentHostRegistration(
+                command: "/usr/local/bin/user-owned-mcp",
+                arguments: ["--serve"],
+                userScoped: true
+            )
+            fixture.runner.registrations[fixture.codexURL] = foreign
+
+            #expect(throws: VaultAgentInstallerError.installationConflict) {
+                _ = try fixture.installer().install(host: .codex)
+            }
+
+            #expect(fixture.runner.invocations.isEmpty)
+            #expect(fixture.runner.registrations[fixture.codexURL] == foreign)
+            #expect(!FileManager.default.fileExists(atPath: fixture.codexSkillURL.path))
+        }
+        do {
+            let fixture = try InstallerFixture()
+            let installer = fixture.installer()
+            _ = try installer.install(host: .codex)
+            let foreign = VaultAgentHostRegistration(
+                command: "/usr/local/bin/replacement-mcp",
+                arguments: [],
+                userScoped: true
+            )
+            fixture.runner.registrations[fixture.codexURL] = foreign
+
+            #expect(throws: VaultAgentInstallerError.installationConflict) {
+                _ = try installer.uninstall(host: .codex)
+            }
+
+            #expect(fixture.runner.invocations.count == 1)
+            #expect(fixture.runner.registrations[fixture.codexURL] == foreign)
+            #expect(FileManager.default.fileExists(atPath: fixture.codexSkillURL.path))
+        }
+    }
+
+    @Test("missing owned registration is not reported as installed or silently recreated")
+    func missingOwnedRegistrationIsAConflict() throws {
+        let fixture = try InstallerFixture()
+        let installer = fixture.installer()
+        _ = try installer.install(host: .codex)
+        fixture.runner.registrations[fixture.codexURL] = nil
+
+        let status = try installer.status(host: .codex)
+        #expect(status.hosts.first?.mcpInstalled == false)
+        #expect(throws: VaultAgentInstallerError.installationConflict) {
+            _ = try installer.install(host: .codex)
+        }
+        #expect(fixture.runner.invocations.count == 1)
+    }
+
     @Test("a user-modified installed Skill is preserved as a conflict")
     func userModifiedSkillIsPreserved() throws {
         let fixture = try InstallerFixture()
@@ -348,6 +403,19 @@ struct VaultAgentIntegrationInstallerTests {
         #expect(fixture.runner.invocations.map(\.arguments).filter { $0 == ["doctor"] }.count == 2)
     }
 
+    @Test("Claude settings above one MiB use the same bounded CAS path")
+    func largeClaudeSettingsUseTheSameCASBound() throws {
+        let fixture = try InstallerFixture()
+        let preserved = String(repeating: "x", count: 1_100_000)
+        try fixture.writeClaudeSettings(["preserved": preserved])
+        let installer = fixture.installer(permissionDisposition: .userRulesAllowed)
+        _ = try installer.install(host: .claude)
+
+        _ = try installer.applyClaudePermissionScope(.metadataOnly)
+
+        #expect(try fixture.readClaudeSettings()["preserved"] as? String == preserved)
+    }
+
     @Test("managed or unknown Claude policy fails closed without changing settings")
     func claudeManagedPolicyFailsClosed() throws {
         for disposition in [
@@ -366,6 +434,30 @@ struct VaultAgentIntegrationInstallerTests {
 
             #expect(try Data(contentsOf: fixture.claudeSettingsURL) == original)
             #expect(fixture.runner.invocations.map(\.arguments).filter { $0 == ["doctor"] }.isEmpty)
+        }
+    }
+
+    @Test("managed policy uncertainty never blocks removal of owned Claude rules")
+    func claudeOwnedRulesCanAlwaysBeRemoved() throws {
+        for disposition in [
+            VaultAgentManagedPermissionDisposition.managedRulesOnly,
+            .unknown
+        ] {
+            let fixture = try InstallerFixture()
+            try fixture.writeClaudeSettings(["theme": "dark"])
+            let allowed = fixture.installer(permissionDisposition: .userRulesAllowed)
+            _ = try allowed.install(host: .claude)
+            _ = try allowed.applyClaudePermissionScope(.metadataOnly)
+
+            let restricted = fixture.installer(permissionDisposition: disposition)
+            let removed = try restricted.removeOwnedClaudePermissionRules()
+
+            #expect(removed.removedRules == [
+                "mcp__pastera-vault__vault_get",
+                "mcp__pastera-vault__vault_search",
+                "mcp__pastera-vault__vault_status"
+            ])
+            #expect(try restricted.claudePermissionStatus().ownedRules.isEmpty)
         }
     }
 
@@ -430,8 +522,8 @@ struct VaultAgentIntegrationInstallerTests {
             let fixture = try InstallerFixture()
             try fixture.writeClaudeSettings(["theme": "before"])
             let installer = fixture.installer(
-                atomicWriteInterposer: { url in
-                    guard url == fixture.claudeSettingsURL else { return }
+                atomicWriteInterposer: { url, phase in
+                    guard url == fixture.claudeSettingsURL, phase == .beforeSwap else { return }
                     try fixture.writeClaudeSettings(["theme": "concurrent"])
                 },
                 permissionDisposition: .userRulesAllowed
@@ -463,6 +555,54 @@ struct VaultAgentIntegrationInstallerTests {
             #expect(try Data(contentsOf: fixture.claudeSettingsURL) == original)
             #expect(try installer.claudePermissionStatus().ownedRules.isEmpty)
         }
+        do {
+            let fixture = try InstallerFixture()
+            try fixture.writeClaudeSettings(["theme": "before"])
+            let installer = fixture.installer(permissionDisposition: .userRulesAllowed)
+            _ = try installer.install(host: .claude)
+            fixture.runner.handler = { _, arguments in
+                guard arguments == ["doctor"] else { return 0 }
+                var concurrent = try fixture.readClaudeSettings()
+                concurrent["theme"] = "concurrent"
+                try fixture.writeClaudeSettings(concurrent)
+                return 9
+            }
+
+            #expect(throws: VaultAgentInstallerError.commandFailed(9)) {
+                _ = try installer.applyClaudePermissionScope(.allCurrentPasteraTools)
+            }
+
+            let preserved = try fixture.readClaudeSettings()
+            #expect(preserved["theme"] as? String == "concurrent")
+            let permissions = try #require(preserved["permissions"] as? [String: Any])
+            #expect((permissions["allow"] as? [String])?.isEmpty == true)
+            #expect(try installer.claudePermissionStatus().ownedRules.isEmpty)
+        }
+    }
+
+    @Test("CAS rollback never overwrites a write that arrives after the first swap")
+    func atomicRollbackPreservesLateConcurrentWrite() throws {
+        let fixture = try InstallerFixture()
+        try fixture.writeClaudeSettings(["theme": "initial"])
+        let installer = fixture.installer(
+            atomicWriteInterposer: { url, phase in
+                guard url == fixture.claudeSettingsURL else { return }
+                switch phase {
+                case .beforeSwap:
+                    try fixture.writeClaudeSettings(["theme": "before-swap"])
+                case .beforeConflictRollback:
+                    try fixture.writeClaudeSettings(["theme": "after-swap"])
+                }
+            },
+            permissionDisposition: .userRulesAllowed
+        )
+        _ = try installer.install(host: .claude)
+
+        #expect(throws: VaultAgentInstallerError.installationConflict) {
+            _ = try installer.applyClaudePermissionScope(.metadataOnly)
+        }
+
+        #expect(try fixture.readClaudeSettings()["theme"] as? String == "after-swap")
     }
 
     @Test("a failed uninstall manifest commit restores host registration and Skill")
@@ -472,8 +612,8 @@ struct VaultAgentIntegrationInstallerTests {
         _ = try initial.install(host: .codex)
         let manifestBefore = try Data(contentsOf: fixture.manifestURL)
         var shouldFail = true
-        let failing = fixture.installer(atomicWriteInterposer: { url in
-            if shouldFail, url == fixture.manifestURL {
+        let failing = fixture.installer(atomicWriteInterposer: { url, phase in
+            if shouldFail, url == fixture.manifestURL, phase == .beforeSwap {
                 shouldFail = false
                 throw InstallerProbeError.injectedFailure
             }
@@ -683,6 +823,54 @@ struct VaultAgentIntegrationInstallerTests {
         #expect(Date().timeIntervalSince(hardKillStartedAt) < 2)
     }
 
+    @Test("system registration inspection accepts only bounded official Host output")
+    func systemRegistrationInspectionIsStrict() throws {
+        let fixture = try InstallerFixture()
+        let runner = VaultAgentSystemHostCommandRunner(timeout: 1)
+        let script = fixture.rootURL.appendingPathComponent("registration-probe")
+
+        try fixture.writeExecutableScript(
+            """
+            #!/bin/sh
+            printf '%s\\n' '{"transport":{"type":"stdio","command":"\(fixture.codexHelperURL.path)","args":[]}}'
+            """,
+            to: script
+        )
+        #expect(try runner.registration(executableURL: script, host: .codex) == .init(
+            command: fixture.codexHelperURL.path,
+            arguments: [],
+            userScoped: true
+        ))
+
+        try fixture.writeExecutableScript(
+            """
+            #!/bin/sh
+            printf 'pastera-vault:\\n  Scope: User config\\n  Command: \(fixture.claudeHelperURL.path)\\n  Args:\\n'
+            """,
+            to: script
+        )
+        #expect(try runner.registration(executableURL: script, host: .claude) == .init(
+            command: fixture.claudeHelperURL.path,
+            arguments: [],
+            userScoped: true
+        ))
+
+        try fixture.writeExecutableScript(
+            """
+            #!/bin/sh
+            printf '%s\\n' "Error: No MCP server named 'pastera-vault' found." >&2
+            exit 1
+            """,
+            to: script
+        )
+        #expect(try runner.registration(executableURL: script, host: .codex) == nil)
+
+        try fixture.writeExecutableScript("#!/bin/sh\nprintf 'unexpected\\n'\n", to: script)
+        #expect(throws: VaultAgentInstallerError.installationConflict) {
+            _ = try runner.registration(executableURL: script, host: .codex)
+        }
+    }
+
     private func expectPathChangeConflict() throws {
         let fixture = try InstallerFixture()
         _ = try fixture.installer().install(host: .codex)
@@ -829,7 +1017,10 @@ private final class InstallerFixture {
     func installer(
         hostCandidates: [VaultAgentHostCandidate]? = nil,
         environmentPath: String = "/usr/bin:/bin:/usr/sbin:/sbin",
-        atomicWriteInterposer: @escaping (URL) throws -> Void = { _ in },
+        atomicWriteInterposer: @escaping (
+            URL,
+            VaultAgentAtomicWritePhase
+        ) throws -> Void = { _, _ in },
         permissionDisposition: VaultAgentManagedPermissionDisposition = .unknown
     ) -> VaultAgentIntegrationInstaller {
         VaultAgentIntegrationInstaller(
@@ -944,6 +1135,11 @@ private final class InstallerFixture {
         try Data([0xCA, 0xFE]).write(to: url)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
+
+    func writeExecutableScript(_ contents: String, to url: URL) throws {
+        try Data(contents.utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+    }
 }
 
 private struct InstallerCommandInvocation: Equatable {
@@ -953,11 +1149,32 @@ private struct InstallerCommandInvocation: Equatable {
 
 private final class InstallerCommandRunnerProbe: VaultAgentHostCommandRunning {
     var invocations: [InstallerCommandInvocation] = []
+    var registrations: [URL: VaultAgentHostRegistration] = [:]
     var handler: ((URL, [String]) throws -> Int32)?
 
     func run(executableURL: URL, arguments: [String]) throws -> Int32 {
         invocations.append(.init(executableURL: executableURL, arguments: arguments))
-        return try handler?(executableURL, arguments) ?? 0
+        let exitCode = try handler?(executableURL, arguments) ?? 0
+        guard exitCode == 0 else { return exitCode }
+        if arguments.prefix(2) == ["mcp", "add"],
+           let separator = arguments.lastIndex(of: "--"),
+           separator + 1 < arguments.count {
+            registrations[executableURL] = .init(
+                command: arguments[separator + 1],
+                arguments: Array(arguments.dropFirst(separator + 2)),
+                userScoped: true
+            )
+        } else if arguments == ["mcp", "remove", "pastera-vault"] {
+            registrations[executableURL] = nil
+        }
+        return exitCode
+    }
+
+    func registration(
+        executableURL: URL,
+        host: VaultAgentHostKind
+    ) throws -> VaultAgentHostRegistration? {
+        registrations[executableURL]
     }
 }
 
