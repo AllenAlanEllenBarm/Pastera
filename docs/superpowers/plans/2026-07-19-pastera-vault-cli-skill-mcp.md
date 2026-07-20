@@ -1560,7 +1560,7 @@ git commit -m "feat(agent): 增加密码箱 CLI 和安全注入"
 - Consumes: 当前 App 内三个 Helper 路径与规范 Skill 资源。
 - Produces: `VaultAgentIntegrationInstalling`、Host 安装记录、所有权清单、CLI integration operations。
 
-- [ ] **Step 1：写幂等安装、用户修改冲突与配置保留失败测试**
+- [x] **Step 1：写幂等安装、用户修改冲突与配置保留失败测试**
 
 ~~~swift
 @Test("install is idempotent and uninstall preserves unrelated content")
@@ -1589,13 +1589,13 @@ func modifiedSkillProducesConflict() throws {
 }
 ~~~
 
-- [ ] **Step 2：运行并确认安装器缺失**
+- [x] **Step 2：运行并确认安装器缺失**
 
 Run：统一命令追加 `-only-testing:pasteraTests/VaultAgentIntegrationInstallerTests`。
 
 Expected：FAIL，缺失 `VaultAgentIntegrationInstaller`。
 
-- [ ] **Step 3：实现 Host 定位、签名记录与官方 CLI 调用**
+- [x] **Step 3：实现 Host 定位、签名记录与官方 CLI 调用**
 
 Host 定位只扫描已知路径与用户明确选择的文件，解析 symlink 后要求普通可执行文件并记录 designated requirement、Team ID、cdhash、真实路径。调用使用 `Process.executableURL` 与参数数组，不经 shell：
 
@@ -1606,11 +1606,11 @@ claude mcp add --transport stdio --scope user pastera-vault -- /Applications/Pas
 
 未签名或无法验证的 Host 安全失败，不能降级为只看路径。Codex/Claude 升级后 designated requirement 相同则保留；ad-hoc/无稳定 requirement 的 Host 更新必须重新安装并重新授权。
 
-- [ ] **Step 4：实现 Skill 原子复制与所有权清单**
+- [x] **Step 4：实现 Skill 原子复制与所有权清单**
 
 Codex 目标 `$HOME/.agents/skills/pastera-vault`，Claude 目标 `$HOME/.claude/skills/pastera-vault`。先复制到同父目录私有临时目录，校验每个文件 SHA-256，再原子 rename。清单保存在 `~/Library/Application Support/Pastera/Agent/v1/install-manifest.json`，只记录 Host、源/目标相对路径、摘要和安装版本。更新/卸载前摘要不匹配就报告冲突，不覆盖、不删除。
 
-- [ ] **Step 5：先写 Host 权限片段安全边界测试**
+- [x] **Step 5：先写 Host 权限片段安全边界测试**
 
 ~~~swift
 @Test("Claude permission snippets contain only exact known tool names")
@@ -1641,7 +1641,7 @@ func codexHasNoUnsafePermissionMutation() throws {
 
 Expected：测试先因缺少 `VaultAgentHostPermissionScope` 失败；不得通过放宽断言、加入 Server 级名称或修改全局 Host 配置使其通过。
 
-- [ ] **Step 6：实现显式应用、可逆且不静默扩权的窄权限能力**
+- [x] **Step 6：实现显式应用、可逆且不静默扩权的窄权限能力**
 
 `VaultAgentHostPermissionScope` 仅定义 `metadataOnly` 与 `allCurrentPasteraTools`。Claude 片段使用精确名称 `mcp__pastera-vault__<toolName>`，排序稳定，不包含 glob、Server 级名称、Shell 命令或尚未发布工具。默认只生成 metadata-only 片段；粘贴/命令注入范围只能由偏好页的第二次明确确认请求生成。安装 MCP/Skill、Pastera authorize、续期与恢复都不自动应用任何 Host 权限。
 
@@ -1649,7 +1649,7 @@ Expected：测试先因缺少 `VaultAgentHostPermissionScope` 失败；不得通
 
 Codex V1 返回 `hostManagedUnsupported`，不生成或修改 `approval_policy`、sandbox、bypass 或任何同等全局设置。后续若 Codex 官方提供单工具机制，必须另做兼容性探测、Fixture 与用户确认，不能在本任务中猜测配置键。
 
-- [ ] **Step 7：写入完整 Skill 契约**
+- [x] **Step 7：写入完整 Skill 契约**
 
 `SKILL.md` 必须以以下头部和决策顺序为准，细节分别链接两个 references，正文不复制工具 Schema：
 
@@ -1677,7 +1677,7 @@ Read `references/security-boundary.md` before command injection.
 
 偏好页 CLI 行把当前 App 内签名 `pastera` Helper 安装为 `$HOME/.local/bin/pastera` 符号链接；Broker 校验时先 realpath 回当前 App Helper。目标已存在且不是清单所有的同一链接时报告冲突，禁止覆盖。若 `$HOME/.local/bin` 不在当前 PATH，只显示一条添加 PATH 的提示，不自动修改 shell profile。
 
-- [ ] **Step 8：用 Skill 校验器和安装测试验证**
+- [x] **Step 8：用 Skill 校验器和安装测试验证**
 
 Run：
 
@@ -1689,7 +1689,7 @@ python3 /Users/feeyo/.codex/skills/.system/skill-creator/scripts/quick_validate.
 
 Expected：Skill 校验成功；安装/状态/卸载、修改冲突、Host identity 变化、无关配置保留，以及 Claude 精确 allowlist/Codex 无全局绕过测试全部 PASS。
 
-- [ ] **Step 9：提交 Skill 与安装器**
+- [x] **Step 9：提交 Skill 与安装器**
 
 ~~~bash
 git add integrations/pastera-vault pastera/Sources/Services/VaultAgentIntegrationInstaller.swift \
@@ -2072,7 +2072,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 
 ## 交付记录（Delivery Record）
 
-- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer；Task 5 已完成 Helper/Host 双重进程身份、X25519/HKDF/ChaChaPoly 认证通道、fd-relative 私有 Unix Socket，以及 active + closing 合计最多 8 个连接、每连接单 timer/单 in-flight 和有界 partial I/O 的事件驱动生命周期；Task 6 已完成 Broker 全部密码箱 operation、有界 HMAC cursor、稳定出站错误折叠、最近非 Agent 粘贴目标复核、固定 Helper 票据命令、仅成功敏感动作续期、零 Grant 清理，以及容量 8 的 integration running + queued 共用 gate；Task 7 已完成官方 MCP Swift SDK `0.12.1` 精确固定、Adapter-only 链接边界、Codex/Claude 双 Helper、固定五工具 Schema/注解、与 Task 5 逐字节兼容的认证 Client、capacity 1/queue 0 的 MCP admission，以及取消安全的共享冷启动和纯净 stdio 生命周期；Task 8 已完成人工 `pastera` CLI、稳定文本/JSON 输出、Codex/Claude Helper 的严格 exec 分派、无 shell 的 `posix_spawnp` 执行，以及秘密仅经有界 stdin/继承 fd 传递、取消安全的 TERM/KILL/reap 生命周期。Task 9–12 尚未实现。
+- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer；Task 5 已完成 Helper/Host 双重进程身份、X25519/HKDF/ChaChaPoly 认证通道、fd-relative 私有 Unix Socket，以及 active + closing 合计最多 8 个连接、每连接单 timer/单 in-flight 和有界 partial I/O 的事件驱动生命周期；Task 6 已完成 Broker 全部密码箱 operation、有界 HMAC cursor、稳定出站错误折叠、最近非 Agent 粘贴目标复核、固定 Helper 票据命令、仅成功敏感动作续期、零 Grant 清理，以及容量 8 的 integration running + queued 共用 gate；Task 7 已完成官方 MCP Swift SDK `0.12.1` 精确固定、Adapter-only 链接边界、Codex/Claude 双 Helper、固定五工具 Schema/注解、与 Task 5 逐字节兼容的认证 Client、capacity 1/queue 0 的 MCP admission，以及取消安全的共享冷启动和纯净 stdio 生命周期；Task 8 已完成人工 `pastera` CLI、稳定文本/JSON 输出、Codex/Claude Helper 的严格 exec 分派、无 shell 的 `posix_spawnp` 执行，以及秘密仅经有界 stdin/继承 fd 传递、取消安全的 TERM/KILL/reap 生命周期；Task 9 已完成规范唯一的 `pastera-vault` Skill、Codex/Claude/CLI 可逆安装、完整 Host/注册配置所有权指纹、摘要保护的原子 Skill 清单，以及 Claude 精确工具 allowlist 的显式合并、移除和失败补偿；Codex 仍保持 Host 自管审批。Task 10–12 尚未实现。
 - Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。Task 4 预检发现票据 command 生成、随机/碰撞失败、重放错误、容量边界、限流 retry-after 和审计密钥/记录 Schema 尚未固定；已明确 command builder 只生成响应且不落 Store、三类有界票据状态、严格滑动窗口、独立 Keychain HMAC key 和进程内 1,000 条 Ring Buffer，未改变 30 秒票据、5 秒 receipt 或外部操作范围。Task 4 首轮独立审查发现审计 key 读取未强制 ThisDeviceOnly，主流程复核同时发现票据/receipt 被其他访问惰性清理后会把 expired 漂移成 used；已把 accessibility 纳入全部 Keychain 匹配查询，并用单个 256 条 outcome tombstone 保持过期/重放语义。复审一度建议为成功 receipt 也保存 used tombstone；按原契约复核后撤回，因为未知与已完成 receipt 对外均为 used，额外状态不会改善安全行为且可能阻断秘密已写入后的 complete/续期。Task 5 预检发现原任务未固定 Helper identifier、进程 snapshot/PID 复用检查、HKDF/AAD 字节 transcript、socket stale/active 冲突处理、partial I/O 和异步 handler 生命周期，并且重放示例引用了尚不存在的协议错误 case；已补齐三个签名 identifier、双次 snapshot、固定加密向量、fd-relative no-follow 文件系统规则、事件驱动有界连接状态机和本地 transport errors，因此 Task 5 允许窄改协议错误枚举但不改变 wire error raw value 或业务操作。Task 5 首轮独立审查发现 source cancel 前关闭 fd、idle 闭包无界累积、默认目录临时回退、目录 TOCTOU、响应在加密后限长，以及最终进程/签名窗口不完整；已改为 cancel handler 完成后释放、每连接单 timer、默认路径 fail closed、生命周期持有 dirfd、seal 前限长和最终完整复读。第二轮复审发现 closing 连接未计入容量，已补 active + closing 合计上限和确定性峰值测试；不改变 wire 或授权语义。
 - Task 6 Preflight：原任务未固定 status 的 Grant 快照来源、cursor 密钥与 snapshot revision、完整 error/rate/audit 映射、目标代码身份复核、Helper 命令模板、零 Grant 清理的串行原子性，以及 Task 9 安装器尚不存在时的 integration 边界；已明确进程内随机 HMAC cursor、确定性 metadata revision、稳定错误折叠、activation/paste 双次进程与签名验证、固定 stdin/fd3 模板、共享 executor 清理和窄 integration service 注入，不扩大 V1 操作集合或秘密返回面。
 - Task 6 Review：实现提交为 `2a949b1`，首轮复审修复提交为 `4091c1f`，容量 gate 修复提交为 `f1f2c2d`；两轮复审依次补齐统一出站 wire 上限、paste target generation/fail-closed、integration worker 非阻塞、完整负向策略矩阵、canonical cursor，以及断连后仍限制 running + queued 的固定容量 gate。其间 `4299f86` 等 README/社区文档提交属于独立需求，不计入 Task 6 实现范围。
@@ -2080,8 +2080,10 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 - Task 7 Review：初始提交 `d5dd02d`，并发/启动加固提交 `f6f5e4b`，取消边界提交 `d112217`，稳定性测试提交 `e7875c4`。三轮独立复审依次补齐 connect timeout/cancel 终止、共享冷启动、capacity 1/queue 0 admission、launcher 标准流隔离、最后 waiter 取消后禁止 launch/retry、连接成功后取消时 discard fd、32/33 waiter 上限，以及以 socket peer EOF 取代可复用裸 fd 号断言；最终复审为 Approved，Critical/Important/Minor 均为 0。
 - Task 8 Preflight：原文件清单只创建 Runner/CLI，却未允许 Task 6 已生成的 Codex/Claude `exec` 命令进入两个现有 Helper main；已补两个入口修改范围，并固定三个 Helper 的参数分派、JSON payload 白名单、退出码、fd 3...255、redeem→spawn→完整写入→complete→wait 顺序、事件驱动回收、取消/SIGTERM 子进程清理，以及 partial I/O/错误后无 zombie/fd 泄漏边界。该补充不新增命令、秘密返回面或 Host 权限。
 - Task 8 Review：初始实现提交 `ecf7c3f`，生命周期加固提交 `b499c74`。独立审查发现写入期间取消关闭的 stale-fd 竞态、spawn/adopt 窗口缺少确定性保障、`waitpid` 对 EINTR/ECHILD 与 PID 复用边界不严谨，以及 ad-hoc CLI identifier 漂移；修复后写入/关闭/取消统一串行，退出事件在 wait/reap 前阻止升级信号，仅真实回收或 ECHILD 标记 reaped，并固定 `com.pastera-app.pastera` identifier。最终复审 Approved，Critical/Important/Minor 均为 0。
+- Task 9 Preflight：安装器复用 Task 5 的 Host/Helper 签名身份和 Task 6 的窄 integration service，不扩展 Broker operation；Skill 无加载基线能保持不索取明文，但会编造命令绑定字段和契约外消歧信息，因此加入精确工具与命令注入 references。Claude 受管策略存在远程/MDM 状态无法由本机完整观测，自动应用规则对未知状态 fail closed，但移除 Pastera 已拥有规则始终允许，以保证可以缩权。
+- Task 9 Review：初始实现提交 `10d05d5`，所有权事务加固提交 `92d7692`，并发补偿提交 `9685fdf`。三轮独立审查补齐同名 MCP 注册的完整 canonicalization、官方命令提交语义、无覆盖 CAS rollback、rename 后 verify/fsync 回滚、Claude 权限失败的语义差量补偿、统一 4 MiB 设置边界及临时资源失败上报；最终为 Critical 0 / Important 0 / Minor 2。剩余两项均是已提交事务或真实晚到写入后的私有 quarantine/rollback 文件缺少持久恢复记录和有界清理，当前优先保全用户数据并显式报错。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
-- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites；Task 7 经三轮加固与最终独立复审批准，focused 为 36 tests / 2 suites，Agent/协议为 45 tests / 3 suites，Broker 为 51 tests / 1 suite，Client suite 连续 10 轮共 250 tests 全通过，两个 Helper 均 `BUILD SUCCEEDED`，Codex/Claude initialize/list/call/EOF/SIGTERM smoke 均 exit 0、stderr 0；Task 8 最终 focused 为 60 tests / 4 suites，Agent 71 tests / 5 suites、Broker 51 tests / 1 suite，Runner 15 tests 连续 5 轮通过，四个 executable 均构建成功，CLI identifier 精确回读，真实 MCP/CLI/exec smoke、strict SwiftLint、范围化 `git diff --check`、`plutil` 与 `xmllint` 均通过。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
-- Remaining Risks：真实 Developer ID/ad-hoc Helper 身份、Host 父进程链、安装态默认 socket 路径、目标命令泄漏和 MCP SDK 1.0 前兼容性仍待 Task 11/12 实机验收，均已映射到验收与回滚。
-- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 9–12，并持续更新本文件复选框与 Delivery Record；Task 9 在现有 Host/Helper 身份模型上实现规范 Skill、原子所有权清单、官方 CLI 注册与可逆窄权限能力。
+- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites；Task 7 经三轮加固与最终独立复审批准，focused 为 36 tests / 2 suites，Agent/协议为 45 tests / 3 suites，Broker 为 51 tests / 1 suite，Client suite 连续 10 轮共 250 tests 全通过，两个 Helper 均 `BUILD SUCCEEDED`，Codex/Claude initialize/list/call/EOF/SIGTERM smoke 均 exit 0、stderr 0；Task 8 最终 focused 为 60 tests / 4 suites，Agent 71 tests / 5 suites、Broker 51 tests / 1 suite，Runner 15 tests 连续 5 轮通过，四个 executable 均构建成功，CLI identifier 精确回读，真实 MCP/CLI/exec smoke、strict SwiftLint、范围化 `git diff --check`、`plutil` 与 `xmllint` 均通过；Task 9 最终 installer 32 tests / 1 suite、Installer + PeerVerifier + Broker 90 tests / 3 suites、Protocol 9 tests / 1 suite，共 99 tests 通过，Skill quick validation、strict SwiftLint、范围化 `git diff --check` 与 `plutil` 均通过；`install_local.sh` 构建、ad-hoc 签名、安装并启动 `/Applications/Pastera.app` 成功。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
+- Remaining Risks：真实 Developer ID/ad-hoc Helper 身份、Host 父进程链、安装态默认 socket 路径、目标命令泄漏和 MCP SDK 1.0 前兼容性仍待 Task 11/12 实机验收。官方 Codex/Claude CLI 没有 conditional add/remove，同 UID 外部进程在 preflight 与 mutation 的窄窗口内并发写同名 MCP 项无法实现 CAS；安装器静态冲突与后续状态变化均 fail closed，继续使用官方 CLI 比直接改写 Host 配置风险更低。极端原子回滚竞态会为避免数据丢失保留每次最多约 4 MiB 的私有 rollback/write 文件，后续需补可发现恢复记录和有界清理。
+- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 10–12，并持续更新本文件复选框与 Delivery Record；Task 10 接入 Agent 集成偏好页、一次授权体验和独立 Host 权限选择，同时保持当前安装事务与授权边界。
 - ZenTao Closeout：不适用；用户未要求禅道操作。
