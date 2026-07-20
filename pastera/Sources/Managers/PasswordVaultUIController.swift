@@ -3,6 +3,9 @@ import Foundation
 import LocalAuthentication
 import PasteraAgentProtocol
 
+// Agent access and observer ownership remain beside the UI facade they secure.
+// swiftlint:disable file_length
+
 protocol PasswordVaultAuthorizing {
     func authorize(reason: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void)
 }
@@ -30,6 +33,8 @@ final class SystemPasswordVaultAuthorizer: PasswordVaultAuthorizing {
 }
 
 protocol PasswordVaultAgentAccess: AnyObject {
+    var agentVaultReady: Bool { get }
+
     func ensureReadyForAgent(completion: @escaping (Result<Void, PasswordVaultError>) -> Void)
     func agentMetadata(
         completion: @escaping (Result<([PasswordVaultFolder], [PasswordVaultEntry]), PasswordVaultError>) -> Void
@@ -40,13 +45,20 @@ protocol PasswordVaultAgentAccess: AnyObject {
         target: PasteTargetContext,
         completion: @escaping (Result<Void, PasswordVaultError>) -> Void
     )
+    func agentCopy(
+        entryID: UUID,
+        field: VaultAgentSecretField,
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    )
     func agentSecret(
         entryID: UUID,
         field: VaultAgentSecretField,
         completion: @escaping (Result<Data, PasswordVaultError>) -> Void
     )
+    func disableAutomationUnlockForAgent() throws
 }
 
+// swiftlint:disable:next type_body_length
 final class PasswordVaultUIController: PasswordVaultAgentAccess {
     private let store: PasswordVaultStore
     private let clipboard: SecureClipboardWriting
@@ -54,7 +66,9 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
     private let pasteService: PasteService
     private let storeQueue: DispatchQueue
     private let snapshotLock = NSLock()
+    private let interactiveSensitiveUseLock = NSLock()
     private var snapshot: PasswordVaultViewState
+    private var interactiveSensitiveUseObservers = [UUID: () -> Void]()
     let vaultAgentExecutor: VaultAgentSerialExecutor
     var onChange: (() -> Void)?
     var onInteractiveSensitiveUse: (() -> Void)?
@@ -86,6 +100,10 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         let snapshot = currentSnapshot
         return snapshot.isBusy ? .unlocking : snapshot.state
     }
+    var agentVaultReady: Bool {
+        let value = state
+        return value == .unlocked || value.isReadableWarning
+    }
     var viewState: PasswordVaultViewState { currentSnapshot }
 
     func folders() throws -> [PasswordVaultFolder] { currentSnapshot.folders }
@@ -100,7 +118,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
     }
 
     func createDatabase(
-        masterPassword: String,
+        masterPassword: String, // swiftlint:disable:this inclusive_language
         completion: @escaping (Result<Void, PasswordVaultError>) -> Void
     ) {
         performLifecycle(completion: completion) {
@@ -108,7 +126,10 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         }
     }
 
-    func unlock(masterPassword: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
+    func unlock(
+        masterPassword: String, // swiftlint:disable:this inclusive_language
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    ) {
         performLifecycle(completion: completion) {
             try self.store.unlock(masterPassword: masterPassword, rememberQuickUnlock: true)
         }
@@ -293,7 +314,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
             do {
                 result = .success(try operation())
                 if recordsInteractiveSensitiveUse {
-                    self.onInteractiveSensitiveUse?()
+                    self.notifyInteractiveSensitiveUse()
                 }
             } catch let error as PasswordVaultError {
                 result = .failure(error)
@@ -366,6 +387,33 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
                 ).utf8)
             }
         }
+    }
+
+    func agentCopy(
+        entryID: UUID,
+        field: VaultAgentSecretField,
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    ) {
+        performForAgent(completion: completion) {
+            let value: String
+            switch field {
+            case .username:
+                guard let entry = try self.store.listEntries().first(where: { $0.id == entryID }) else {
+                    throw PasswordVaultError.entryNotFound
+                }
+                value = entry.username
+            case .password:
+                value = try self.store.revealPassword(
+                    id: entryID,
+                    reason: "Pastera Agent password copy"
+                )
+            }
+            self.clipboard.copySecret(value, clearAfter: .seconds(60))
+        }
+    }
+
+    func disableAutomationUnlockForAgent() throws {
+        try vaultAgentExecutor.sync { try store.disableAutomationUnlock() }
     }
 
     private func performForAgent<T>(
@@ -441,6 +489,37 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         if case let .failure(value) = result { error = value } else { error = nil }
         refreshSnapshotFromStore(error: error)
         DispatchQueue.main.async { completion(result) }
+    }
+}
+
+extension PasswordVaultUIController {
+    var sensitiveObserverCountForTesting: Int {
+        interactiveSensitiveUseLock.lock()
+        defer { interactiveSensitiveUseLock.unlock() }
+        return interactiveSensitiveUseObservers.count
+    }
+
+    @discardableResult
+    func addInteractiveSensitiveUseObserver(_ observer: @escaping () -> Void) -> UUID {
+        let identifier = UUID()
+        interactiveSensitiveUseLock.lock()
+        interactiveSensitiveUseObservers[identifier] = observer
+        interactiveSensitiveUseLock.unlock()
+        return identifier
+    }
+
+    func removeInteractiveSensitiveUseObserver(_ identifier: UUID) {
+        interactiveSensitiveUseLock.lock()
+        interactiveSensitiveUseObservers.removeValue(forKey: identifier)
+        interactiveSensitiveUseLock.unlock()
+    }
+
+    private func notifyInteractiveSensitiveUse() {
+        interactiveSensitiveUseLock.lock()
+        let observers = Array(interactiveSensitiveUseObservers.values)
+        interactiveSensitiveUseLock.unlock()
+        onInteractiveSensitiveUse?()
+        observers.forEach { $0() }
     }
 }
 

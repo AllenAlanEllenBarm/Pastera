@@ -39,6 +39,20 @@ struct VaultAgentAuthorizationPolicyTests {
         #expect(store.grants[.codex] == nil)
     }
 
+    @Test("grant snapshot is a serialized read without exposing other clients")
+    func grantSnapshotIsClientScoped() throws {
+        let start = Date(timeIntervalSince1970: 25_000)
+        let store = InMemoryVaultAgentGrantStore()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: .testValue())
+        let codex = VaultAgentPeerIdentity.testValue(client: .codex)
+        let claude = VaultAgentPeerIdentity.testValue(client: .claude)
+        let codexGrant = try policy.authorize(identity: codex, authenticatedAt: start)
+        _ = try policy.authorize(identity: claude, authenticatedAt: start.addingTimeInterval(1))
+
+        #expect(policy.grantSnapshot(for: .codex) == codexGrant)
+        #expect(policy.grantSnapshot(for: .cli) == nil)
+    }
+
     @Test("idle and hard expiry boundaries are exclusive")
     func expiryBoundaries() throws {
         let start = Date(timeIntervalSince1970: 30_000)

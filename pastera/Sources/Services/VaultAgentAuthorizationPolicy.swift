@@ -56,6 +56,10 @@ final class VaultAgentSerialExecutor {
     func async(_ work: @escaping () -> Void) {
         queue.async(execute: work)
     }
+
+    var isCurrent: Bool {
+        DispatchQueue.getSpecific(key: key) == value
+    }
 }
 
 final class VaultAgentAuthorizationPolicy {
@@ -96,6 +100,10 @@ final class VaultAgentAuthorizationPolicy {
 
     func decision(for identity: VaultAgentPeerIdentity, at date: Date) -> VaultAgentGrantDecision {
         executor.sync { decision(for: identity, at: date, in: grants) }
+    }
+
+    func grantSnapshot(for client: VaultAgentClientKind) -> VaultAgentGrant? {
+        executor.sync { grants[client] }
     }
 
     func recordSensitiveSuccess(for identity: VaultAgentPeerIdentity, at date: Date) throws {
