@@ -413,6 +413,46 @@ private extension VaultAgentBrokerTests {
         server.stop { restarted.signal() }
         #expect(restarted.wait(timeout: .now() + 2) == .success)
     }
+
+    @Test("connection capacity includes descriptors awaiting source cancellation")
+    func connectionCapacityIncludesClosingResources() throws {
+        let fixture = try SocketFixture()
+        let recorder = SocketLifecycleRecorder()
+        let handler = CancellationWindowChurnHandler(fixture: fixture)
+        let serverQueue = DispatchQueue(label: "VaultAgentSocketServerTests.capacity-closing")
+        let server = VaultAgentSocketServer(
+            directoryURL: fixture.v1URL,
+            peerVerifier: FixedPeerVerifier(identity: SocketFixture.identity),
+            handler: handler,
+            queue: serverQueue,
+            lifecycleProbe: .init(
+                sourceCreated: recorder.sourceCreated,
+                sourceCancellationCompleted: recorder.sourceCancellationCompleted,
+                descriptorClosed: recorder.descriptorClosed
+            )
+        )
+        try server.start()
+        var clients: [(fileDescriptor: Int32, channel: VaultAgentSecureChannel)] = []
+        defer {
+            clients.forEach { Darwin.close($0.fileDescriptor) }
+            handler.closeReplacements()
+            let stopped = DispatchSemaphore(value: 0)
+            server.stop { stopped.signal() }
+            _ = stopped.wait(timeout: .now() + 2)
+            recorder.closeReusedDescriptors()
+        }
+        for _ in 0..<VaultAgentSocketServer.maximumConnections {
+            clients.append(try fixture.connectAndHandshake())
+        }
+
+        let request = try clients[0].channel.seal(Data("close-and-replace".utf8))
+        try fixture.writeFrame(try JSONEncoder().encode(request), fileDescriptor: clients[0].fileDescriptor)
+        #expect(handler.replacementsReady.wait(timeout: .now() + 2) == .success)
+        #expect(handler.replacementCount == 2)
+        serverQueue.sync {}
+
+        #expect(recorder.peakConnectionDescriptorCount <= VaultAgentSocketServer.maximumConnections)
+    }
 }
 
 private final class SocketFixture {
@@ -636,6 +676,35 @@ private final class FixedResponseSocketHandler: VaultAgentSocketRequestHandling 
         completion(.success(response))
     }
 }
+private final class CancellationWindowChurnHandler: VaultAgentSocketRequestHandling {
+    let replacementsReady = DispatchSemaphore(value: 0)
+    private let fixture: SocketFixture
+    private let lock = NSLock()
+    private var replacements: [Int32] = []
+
+    var replacementCount: Int { lock.lock(); defer { lock.unlock() }; return replacements.count }
+
+    init(fixture: SocketFixture) { self.fixture = fixture }
+
+    func handle(
+        identity _: VaultAgentPeerIdentity,
+        request _: Data,
+        completion: @escaping (Result<Data, Error>) -> Void
+    ) {
+        completion(.failure(SocketTestError.rejected))
+        let descriptors = (0..<2).compactMap { _ in try? fixture.connectOnly() }
+        lock.lock(); replacements.append(contentsOf: descriptors); lock.unlock()
+        replacementsReady.signal()
+    }
+
+    func closeReplacements() {
+        lock.lock()
+        let descriptors = replacements
+        replacements.removeAll()
+        lock.unlock()
+        descriptors.forEach { Darwin.close($0) }
+    }
+}
 private final class LockedCounter {
     private let lock = NSLock()
     private var count = 0
@@ -651,6 +720,8 @@ private final class SocketLifecycleRecorder {
     private var closedAfterCancellation: [Int32: Bool] = [:]
     private var reused: [Int32: Bool] = [:]
     private var replacementDescriptors: [Int32] = []
+    private var liveConnectionDescriptors: Set<Int32> = []
+    private var connectionDescriptorPeak = 0
 
     var managedDescriptorCount: Int { lock.lock(); defer { lock.unlock() }; return created.count }
     var allDescriptorsClosedAfterCancellation: Bool {
@@ -661,9 +732,19 @@ private final class SocketLifecycleRecorder {
         lock.lock(); defer { lock.unlock() }
         return reused.count == created.count && reused.values.allSatisfy { $0 }
     }
+    var peakConnectionDescriptorCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return connectionDescriptorPeak
+    }
 
     func sourceCreated(_ kind: VaultAgentSocketSourceKind, _ fileDescriptor: Int32) {
-        lock.lock(); created[fileDescriptor, default: []].insert(kind); lock.unlock()
+        lock.lock()
+        created[fileDescriptor, default: []].insert(kind)
+        if kind != .listener {
+            liveConnectionDescriptors.insert(fileDescriptor)
+            connectionDescriptorPeak = max(connectionDescriptorPeak, liveConnectionDescriptors.count)
+        }
+        lock.unlock()
     }
 
     func sourceCancellationCompleted(_ kind: VaultAgentSocketSourceKind, _ fileDescriptor: Int32) {
@@ -679,6 +760,7 @@ private final class SocketLifecycleRecorder {
         lock.lock()
         reused[fileDescriptor] = replacement == fileDescriptor
         if replacement >= 0 { replacementDescriptors.append(replacement) }
+        liveConnectionDescriptors.remove(fileDescriptor)
         lock.unlock()
     }
 

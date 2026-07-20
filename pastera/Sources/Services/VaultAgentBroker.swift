@@ -796,7 +796,7 @@ private extension VaultAgentSocketServer {
                 stop()
                 return
             }
-            guard connections.count < Self.maximumConnections else {
+            guard connections.count + closingConnections.count < Self.maximumConnections else {
                 Darwin.close(descriptor)
                 continue
             }
