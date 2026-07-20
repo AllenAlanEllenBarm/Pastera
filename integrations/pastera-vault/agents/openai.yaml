@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pastera Vault"
+  short_description: "Safely use credentials from the local Pastera vault"
+  default_prompt: "Use $pastera-vault to find or safely use a credential from my local Pastera vault."
