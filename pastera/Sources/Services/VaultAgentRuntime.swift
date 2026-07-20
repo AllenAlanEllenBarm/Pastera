@@ -212,7 +212,215 @@ enum VaultAgentPreferenceRuntimeProvider {
     }
 
     static func install(_ runtime: VaultAgentPreferenceRuntimeServicing) {
-        lock.withLock { storedRuntime = runtime }
+        let changed = lock.withLock {
+            guard storedRuntime !== runtime else { return false }
+            storedRuntime = runtime
+            return true
+        }
+        if changed { postStateDidChange() }
+    }
+
+    static func uninstall(_ runtime: VaultAgentPreferenceRuntimeServicing) {
+        let changed = lock.withLock {
+            guard storedRuntime === runtime else { return false }
+            storedRuntime = UnavailableVaultAgentPreferenceRuntime()
+            return true
+        }
+        if changed { postStateDidChange() }
+    }
+
+    private static func postStateDidChange() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .vaultAgentPreferenceStateDidChange, object: nil)
+        }
+    }
+}
+
+protocol VaultAgentApplicationRuntimeServicing: AnyObject {
+    func start()
+    func stop()
+}
+
+final class UnavailableVaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing {
+    func start() {}
+    func stop() {}
+}
+
+final class DeferredVaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing {
+    private let factory: () throws -> VaultAgentApplicationRuntimeServicing
+    private let worker: DispatchQueue
+    private let lock = NSLock()
+    private var requested = false
+    private var generation: UInt64 = 0
+    private var runtime: VaultAgentApplicationRuntimeServicing?
+
+    init(
+        factory: @escaping () throws -> VaultAgentApplicationRuntimeServicing,
+        worker: DispatchQueue = DispatchQueue(
+            label: "com.pastera-app.Pastera.vault-agent.bootstrap",
+            qos: .utility
+        )
+    ) {
+        self.factory = factory
+        self.worker = worker
+    }
+
+    func start() {
+        lock.lock()
+        guard !requested else {
+            lock.unlock()
+            return
+        }
+        requested = true
+        generation &+= 1
+        let startGeneration = generation
+        lock.unlock()
+        worker.async { [weak self] in
+            self?.buildAndStart(generation: startGeneration)
+        }
+    }
+
+    func stop() {
+        lock.lock()
+        requested = false
+        generation &+= 1
+        let current = runtime
+        runtime = nil
+        current?.stop()
+        lock.unlock()
+    }
+
+    private func buildAndStart(generation startGeneration: UInt64) {
+        let built: VaultAgentApplicationRuntimeServicing
+        do {
+            built = try factory()
+        } catch {
+            NSLog("Pastera vault agent bootstrap failed before durable state seed.")
+            lock.withLock {
+                guard requested, generation == startGeneration else { return }
+                requested = false
+                generation &+= 1
+            }
+            return
+        }
+        lock.lock()
+        guard requested, generation == startGeneration else {
+            lock.unlock()
+            built.stop()
+            return
+        }
+        runtime = built
+        built.start()
+        lock.unlock()
+    }
+}
+
+// App lifecycle work is event-driven and owns no timer. Durable installation state is seeded
+// before the socket begins accepting traffic; the password database is never unlocked here.
+final class VaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing {
+    private let startupSeed: () throws -> Void
+    private let preferenceRuntime: VaultAgentPreferenceRuntimeServicing
+    private let socketStart: () throws -> Void
+    private let socketStop: () -> Void
+    private let trackerStart: () -> Void
+    private let trackerStop: () -> Void
+    private let removeTickets: () -> Void
+    private let worker: DispatchQueue
+    private let lock = NSLock()
+    private var requested = false
+    private var generation: UInt64 = 0
+
+    init(
+        startupSeed: @escaping () throws -> Void,
+        preferenceRuntime: VaultAgentPreferenceRuntimeServicing,
+        socketStart: @escaping () throws -> Void,
+        socketStop: @escaping () -> Void,
+        trackerStart: @escaping () -> Void,
+        trackerStop: @escaping () -> Void,
+        removeTickets: @escaping () -> Void,
+        worker: DispatchQueue = DispatchQueue(
+            label: "com.pastera-app.Pastera.vault-agent.application-runtime",
+            qos: .utility
+        )
+    ) {
+        self.startupSeed = startupSeed
+        self.preferenceRuntime = preferenceRuntime
+        self.socketStart = socketStart
+        self.socketStop = socketStop
+        self.trackerStart = trackerStart
+        self.trackerStop = trackerStop
+        self.removeTickets = removeTickets
+        self.worker = worker
+    }
+
+    func start() {
+        lock.lock()
+        guard !requested else {
+            lock.unlock()
+            return
+        }
+        requested = true
+        generation &+= 1
+        let startGeneration = generation
+        lock.unlock()
+
+        worker.async { [weak self] in
+            self?.prepareStart(generation: startGeneration)
+        }
+    }
+
+    func stop() {
+        lock.lock()
+        requested = false
+        generation &+= 1
+        VaultAgentPreferenceRuntimeProvider.uninstall(preferenceRuntime)
+        trackerStop()
+        socketStop()
+        removeTickets()
+        lock.unlock()
+    }
+
+    private func prepareStart(generation startGeneration: UInt64) {
+        do {
+            try startupSeed()
+        } catch {
+            NSLog("Pastera vault agent bootstrap failed while seeding durable installation state.")
+            failStart(generation: startGeneration)
+            return
+        }
+
+        lock.lock()
+        guard requested, generation == startGeneration else {
+            lock.unlock()
+            return
+        }
+        do {
+            trackerStart()
+            try socketStart()
+            VaultAgentPreferenceRuntimeProvider.install(preferenceRuntime)
+            lock.unlock()
+        } catch {
+            NSLog("Pastera vault agent bootstrap failed while starting the Unix socket.")
+            trackerStop()
+            socketStop()
+            removeTickets()
+            requested = false
+            generation &+= 1
+            lock.unlock()
+        }
+    }
+
+    private func failStart(generation startGeneration: UInt64) {
+        lock.lock()
+        guard requested, generation == startGeneration else {
+            lock.unlock()
+            return
+        }
+        requested = false
+        generation &+= 1
+        VaultAgentPreferenceRuntimeProvider.uninstall(preferenceRuntime)
+        removeTickets()
+        lock.unlock()
     }
 }
 
@@ -1916,6 +2124,261 @@ private extension VaultAgentRuntime {
         case ..<1: .under1s
         default: .atLeast1s
         }
+    }
+}
+
+final class VaultAgentDurableStateSeeder {
+    private enum InstallationEvidence: Equatable {
+        case installed
+        case uninstalled
+        case unknown
+    }
+
+    private let integration: VaultAgentPreferenceIntegrationServicing
+    private let authorizationPolicy: VaultAgentAuthorizationPolicy
+    private let authorizationCoordinator: VaultAgentAuthorizationCoordinator
+    private let lifecycleReconciler: VaultAgentGrantLifecycleReconciling
+    private let now: () -> Date
+
+    init(
+        integration: VaultAgentPreferenceIntegrationServicing,
+        authorizationPolicy: VaultAgentAuthorizationPolicy,
+        authorizationCoordinator: VaultAgentAuthorizationCoordinator,
+        lifecycleReconciler: VaultAgentGrantLifecycleReconciling,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.integration = integration
+        self.authorizationPolicy = authorizationPolicy
+        self.authorizationCoordinator = authorizationCoordinator
+        self.lifecycleReconciler = lifecycleReconciler
+        self.now = now
+    }
+
+    func seed() throws {
+        let evidence = Dictionary(uniqueKeysWithValues: VaultAgentClientKind.allCases.map {
+            ($0, installationEvidence(for: $0))
+        })
+        for client in VaultAgentClientKind.allCases {
+            let clientEvidence = evidence[client] ?? .unknown
+            if case .uninstalled = clientEvidence,
+               authorizationPolicy.grantSnapshot(for: client)?.revokedAt == nil {
+                try authorizationPolicy.revoke(client, at: now())
+            }
+            let token = try authorizationCoordinator
+                .beginLifecycleMutation(for: client, kind: .install)
+                .get()
+            authorizationCoordinator.resolveLifecycleMutation(
+                token,
+                authorizationEligible: clientEvidence == .installed
+            )
+        }
+        try lifecycleReconciler.authorizationStateDidChange()
+    }
+
+    private func installationEvidence(
+        for client: VaultAgentClientKind
+    ) -> InstallationEvidence {
+        do {
+            switch client {
+            case .codex, .claude:
+                let host: VaultAgentHostKind = client == .codex ? .codex : .claude
+                guard let status = try integration.status(host: host).hosts.first(where: {
+                    $0.host == host
+                }) else { return .unknown }
+                return status.mcpInstalled && status.skillInstalled ? .installed : .uninstalled
+            case .cli:
+                return try integration.cliStatus().installed ? .installed : .uninstalled
+            }
+        } catch {
+            return .unknown
+        }
+    }
+}
+
+extension VaultAgentApplicationRuntime {
+    static func production(
+        vault: PasswordVaultUIController,
+        defaults: UserDefaults = .standard,
+        applicationURL: URL = Bundle.main.bundleURL,
+        userRootURL: URL = FileManager.default.homeDirectoryForCurrentUser,
+        installationVersion: String = Bundle.main.appVersion ?? "0"
+    ) -> VaultAgentApplicationRuntimeServicing {
+        DeferredVaultAgentApplicationRuntime {
+            try makeProduction(
+                vault: vault,
+                defaults: defaults,
+                applicationURL: applicationURL,
+                userRootURL: userRootURL,
+                installationVersion: installationVersion
+            )
+        }
+    }
+
+    private static func makeProduction(
+        vault: PasswordVaultUIController,
+        defaults: UserDefaults,
+        applicationURL: URL,
+        userRootURL: URL,
+        installationVersion: String
+    ) throws -> VaultAgentApplicationRuntime {
+        let executor = vault.vaultAgentExecutor
+        let policy = try VaultAgentAuthorizationPolicy(
+            store: VaultAgentGrantStore(),
+            executor: executor
+        )
+        let coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            defaults: defaults,
+            initiallySuspendedClients: Set(VaultAgentClientKind.allCases)
+        )
+        let integration = makeIntegration(
+            applicationURL: applicationURL,
+            userRootURL: userRootURL,
+            installationVersion: installationVersion,
+            authorizationStatusProvider: { client in
+                authorizationStatus(
+                    client: client,
+                    policy: policy,
+                    coordinator: coordinator,
+                    at: Date()
+                )
+            }
+        )
+        let lifecycleGate = VaultAgentIntegrationLifecycleGate(
+            authorizationCoordinator: coordinator,
+            authorizationPolicy: policy
+        )
+        let tracker = VaultAgentPasteTargetTracker(hostIdentityProvider: integration)
+        let ticketStore = VaultAgentTicketStore(commandBuilder: { client, mode, token in
+            VaultAgentRuntime.helperCommand(
+                applicationURL: applicationURL,
+                client: client,
+                mode: mode,
+                token: token
+            )
+        })
+        let auditLogger = try VaultAgentAuditLogger()
+        let integrationWorker = DispatchQueue(
+            label: "com.pastera.agent.integration-worker",
+            qos: .utility
+        )
+        let integrationWorkGate = VaultAgentIntegrationWorkGate()
+        let runtime = try VaultAgentRuntime(
+            executor: executor,
+            authorizationPolicy: policy,
+            authorizationCoordinator: coordinator,
+            automaticAuthorizationPrepare: { try vault.enableAutomationUnlockForAgent() },
+            vault: vault,
+            pasteTargetTracker: tracker,
+            integrationService: integration,
+            integrationLifecycleGate: lifecycleGate,
+            integrationWorker: integrationWorker,
+            integrationWorkGate: integrationWorkGate,
+            ticketStore: ticketStore,
+            auditLogger: auditLogger,
+            cursorKey: VaultAgentRuntime.secureRandomCursorKey()
+        )
+        let identityResolver = VaultAgentStaticIdentityResolver(
+            applicationURL: applicationURL,
+            hostIdentityProvider: integration
+        )
+        let preferenceRuntime = DefaultVaultAgentPreferenceRuntime(
+            integration: integration,
+            authorizationPolicy: policy,
+            authorizationCoordinator: coordinator,
+            vault: vault,
+            identityResolver: identityResolver,
+            lifecycleReconciler: runtime,
+            auditSource: auditLogger,
+            integrationLifecycleGate: lifecycleGate,
+            worker: integrationWorker,
+            workGate: integrationWorkGate
+        )
+        let peerVerifier = VaultAgentPeerVerifier(
+            applicationURL: applicationURL,
+            hostIdentityProvider: integration
+        )
+        let socketServer = VaultAgentSocketServer(
+            peerVerifier: peerVerifier,
+            handler: runtime
+        )
+        let seeder = VaultAgentDurableStateSeeder(
+            integration: integration,
+            authorizationPolicy: policy,
+            authorizationCoordinator: coordinator,
+            lifecycleReconciler: runtime
+        )
+        return VaultAgentApplicationRuntime(
+            startupSeed: { try seeder.seed() },
+            preferenceRuntime: preferenceRuntime,
+            socketStart: { try socketServer.start() },
+            socketStop: { socketServer.stop() },
+            trackerStart: { tracker.start() },
+            trackerStop: { tracker.stop() },
+            removeTickets: { ticketStore.removeAll() }
+        )
+    }
+
+    private static func makeIntegration(
+        applicationURL: URL,
+        userRootURL: URL,
+        installationVersion: String,
+        authorizationStatusProvider: @escaping (VaultAgentClientKind) ->
+            VaultAgentInstallerAuthorizationStatus
+    ) -> VaultAgentIntegrationInstaller {
+        VaultAgentIntegrationInstaller(
+            sourceSkillURL: applicationURL.appendingPathComponent(
+                "Contents/Resources/pastera-vault",
+                isDirectory: true
+            ),
+            applicationURL: applicationURL,
+            userRootURL: userRootURL,
+            hostCandidates: hostCandidates(userRootURL: userRootURL),
+            currentUID: getuid(),
+            installationVersion: installationVersion,
+            authorizationStatusProvider: authorizationStatusProvider
+        )
+    }
+
+    private static func authorizationStatus(
+        client: VaultAgentClientKind,
+        policy: VaultAgentAuthorizationPolicy,
+        coordinator: VaultAgentAuthorizationCoordinator,
+        at date: Date
+    ) -> VaultAgentInstallerAuthorizationStatus {
+        guard !coordinator.isAuthorizationBlocked(for: client),
+              let grant = policy.grantSnapshot(for: client),
+              case let .allowed(current) = policy.decision(for: grant.identity, at: date) else {
+            return .unauthorized
+        }
+        return .init(
+            authorized: true,
+            idleExpiresAt: current.idleExpiresAt,
+            hardExpiresAt: current.hardExpiresAt
+        )
+    }
+
+    private static func hostCandidates(userRootURL: URL) -> [VaultAgentHostCandidate] {
+        [
+            .init(host: .codex, urls: [
+                URL(fileURLWithPath: "/Applications/Codex.app/Contents/MacOS/Codex"),
+                userRootURL.appendingPathComponent("Applications/Codex.app/Contents/MacOS/Codex"),
+                URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
+                userRootURL.appendingPathComponent("Applications/ChatGPT.app/Contents/Resources/codex"),
+                userRootURL.appendingPathComponent(".local/bin/codex"),
+                URL(fileURLWithPath: "/opt/homebrew/bin/codex"),
+                URL(fileURLWithPath: "/usr/local/bin/codex")
+            ]),
+            .init(host: .claude, urls: [
+                URL(fileURLWithPath: "/Applications/Claude.app/Contents/MacOS/Claude"),
+                userRootURL.appendingPathComponent("Applications/Claude.app/Contents/MacOS/Claude"),
+                userRootURL.appendingPathComponent(".local/bin/claude"),
+                userRootURL.appendingPathComponent(".claude/local/claude"),
+                URL(fileURLWithPath: "/opt/homebrew/bin/claude"),
+                URL(fileURLWithPath: "/usr/local/bin/claude")
+            ])
+        ]
     }
 }
 

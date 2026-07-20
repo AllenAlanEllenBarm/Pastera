@@ -8,16 +8,59 @@ protocol VaultAgentKeychainAccessing {
     func add(_ query: [String: Any]) -> OSStatus
 }
 
+enum VaultAgentKeychainBackend {
+    static let currentProcessUsesDataProtectionKeychain: Bool = {
+        guard let task = SecTaskCreateFromSelf(nil) else { return false }
+        let accessGroups = SecTaskCopyValueForEntitlement(
+            task,
+            "keychain-access-groups" as CFString,
+            nil
+        ) as? [String]
+        let applicationIdentifier = SecTaskCopyValueForEntitlement(
+            task,
+            "application-identifier" as CFString,
+            nil
+        ) as? String
+        return isEligible(
+            applicationIdentifier: applicationIdentifier,
+            keychainAccessGroups: accessGroups
+        )
+    }()
+
+    static func isEligible(
+        applicationIdentifier: String?,
+        keychainAccessGroups: [String]?
+    ) -> Bool {
+        if applicationIdentifier?.isEmpty == false { return true }
+        return keychainAccessGroups?.contains(where: { !$0.isEmpty }) == true
+    }
+
+    static func configure(
+        _ query: inout [String: Any],
+        usesDataProtectionKeychain: Bool
+    ) {
+        if usesDataProtectionKeychain {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
+    }
+}
+
 final class VaultAgentGrantStore: VaultAgentGrantStoring {
     static let service = "com.pastera-app.Pastera.agent-grants.v1"
     private static let account = "grants"
 
     private let keychain: VaultAgentKeychainAccessing
+    private let usesDataProtectionKeychain: Bool
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(keychain: VaultAgentKeychainAccessing = SystemVaultAgentKeychainAccess()) {
+    init(
+        keychain: VaultAgentKeychainAccessing = SystemVaultAgentKeychainAccess(),
+        usesDataProtectionKeychain: Bool =
+            VaultAgentKeychainBackend.currentProcessUsesDataProtectionKeychain
+    ) {
         self.keychain = keychain
+        self.usesDataProtectionKeychain = usesDataProtectionKeychain
     }
 
     func load() throws -> [VaultAgentClientKind: VaultAgentGrant] {
@@ -58,12 +101,17 @@ final class VaultAgentGrantStore: VaultAgentGrantStoring {
     }
 
     private var baseQuery: [String: Any] {
-        [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
             kSecAttrAccount as String: Self.account,
             kSecAttrSynchronizable as String: false
         ]
+        VaultAgentKeychainBackend.configure(
+            &query,
+            usesDataProtectionKeychain: usesDataProtectionKeychain
+        )
+        return query
     }
 }
 

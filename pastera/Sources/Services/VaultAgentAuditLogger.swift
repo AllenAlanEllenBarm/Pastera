@@ -66,13 +66,17 @@ final class VaultAgentAuditKeyStore {
 
     private static let creationLock = NSLock()
     private let keychain: VaultAgentAuditKeychainAccessing
+    private let usesDataProtectionKeychain: Bool
     private let randomBytes: () throws -> Data
 
     init(
         keychain: VaultAgentAuditKeychainAccessing = SystemVaultAgentAuditKeychainAccess(),
+        usesDataProtectionKeychain: Bool =
+            VaultAgentKeychainBackend.currentProcessUsesDataProtectionKeychain,
         randomBytes: @escaping () throws -> Data = VaultAgentAuditKeyStore.secureRandomBytes
     ) {
         self.keychain = keychain
+        self.usesDataProtectionKeychain = usesDataProtectionKeychain
         self.randomBytes = randomBytes
     }
 
@@ -80,7 +84,7 @@ final class VaultAgentAuditKeyStore {
         Self.creationLock.lock()
         defer { Self.creationLock.unlock() }
 
-        let (readStatus, existing) = keychain.copyMatching(Self.loadQuery)
+        let (readStatus, existing) = keychain.copyMatching(loadQuery)
         if readStatus == errSecSuccess {
             return try Self.requireKey(existing)
         }
@@ -99,17 +103,19 @@ final class VaultAgentAuditKeyStore {
         }
 
         let secureAttributes: [String: Any] = [kSecValueData as String: generated]
-        switch keychain.update(Self.itemQuery, attributes: secureAttributes) {
+        let updateStatus = keychain.update(itemQuery, attributes: secureAttributes)
+        switch updateStatus {
         case errSecSuccess:
             return generated
         case errSecItemNotFound:
-            var addQuery = Self.itemQuery
+            var addQuery = itemQuery
             secureAttributes.forEach { addQuery[$0.key] = $0.value }
-            switch keychain.add(addQuery) {
+            let addStatus = keychain.add(addQuery)
+            switch addStatus {
             case errSecSuccess:
                 return generated
             case errSecDuplicateItem:
-                let (retryStatus, established) = keychain.copyMatching(Self.loadQuery)
+                let (retryStatus, established) = keychain.copyMatching(loadQuery)
                 guard retryStatus == errSecSuccess else {
                     throw VaultAgentAuditKeyStoreError.unavailable
                 }
@@ -122,17 +128,22 @@ final class VaultAgentAuditKeyStore {
         }
     }
 
-    private static var itemQuery: [String: Any] {
-        [
+    private var itemQuery: [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
             kSecAttrSynchronizable as String: false,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
+        VaultAgentKeychainBackend.configure(
+            &query,
+            usesDataProtectionKeychain: usesDataProtectionKeychain
+        )
+        return query
     }
 
-    private static var loadQuery: [String: Any] {
+    private var loadQuery: [String: Any] {
         var query = itemQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne

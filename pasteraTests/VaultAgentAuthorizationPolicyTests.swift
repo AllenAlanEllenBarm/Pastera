@@ -250,7 +250,7 @@ extension VaultAgentAuthorizationPolicyTests {
     func notFoundLoadsEmpty() throws {
         let keychain = VaultAgentKeychainProbe()
         keychain.copyStatus = errSecItemNotFound
-        let store = VaultAgentGrantStore(keychain: keychain)
+        let store = VaultAgentGrantStore(keychain: keychain, usesDataProtectionKeychain: true)
 
         #expect(try store.load().isEmpty)
         let query = try #require(keychain.copyQuery)
@@ -258,6 +258,7 @@ extension VaultAgentAuthorizationPolicyTests {
         #expect(query[kSecAttrService as String] as? String == "com.pastera-app.Pastera.agent-grants.v1")
         #expect(query[kSecAttrAccount as String] as? String == "grants")
         #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
+        #expect(query[kSecUseDataProtectionKeychain as String] as? Bool == true)
         #expect(query[kSecReturnData as String] as? Bool == true)
         #expect(query[kSecMatchLimit as String] as? String == kSecMatchLimitOne as String)
     }
@@ -267,16 +268,18 @@ extension VaultAgentAuthorizationPolicyTests {
         let keychain = VaultAgentKeychainProbe()
         keychain.updateStatus = errSecItemNotFound
         keychain.addStatus = errSecSuccess
-        let store = VaultAgentGrantStore(keychain: keychain)
+        let store = VaultAgentGrantStore(keychain: keychain, usesDataProtectionKeychain: true)
         let grant = VaultAgentGrant.testValue(client: .codex)
 
         try store.save([.codex: grant])
 
         let update = try #require(keychain.updateQuery)
         #expect(update[kSecAttrService as String] as? String == "com.pastera-app.Pastera.agent-grants.v1")
+        #expect(update[kSecUseDataProtectionKeychain as String] as? Bool == true)
         let add = try #require(keychain.addQuery)
         #expect(add[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         #expect(add[kSecAttrSynchronizable as String] as? Bool == false)
+        #expect(add[kSecUseDataProtectionKeychain as String] as? Bool == true)
         let data = try #require(add[kSecValueData as String] as? Data)
         keychain.copyStatus = errSecSuccess
         keychain.copyData = data
@@ -299,6 +302,36 @@ extension VaultAgentAuthorizationPolicyTests {
         keychain.updateStatus = errSecItemNotFound
         keychain.addStatus = errSecAuthFailed
         #expect(throws: VaultAgentErrorCode.automationUnlockUnavailable) { try store.save([:]) }
+    }
+
+    @Test("ad-hoc builds omit the unavailable Data Protection Keychain selector")
+    func adHocBuildUsesLegacyKeychain() throws {
+        let keychain = VaultAgentKeychainProbe()
+        keychain.copyStatus = errSecItemNotFound
+        let store = VaultAgentGrantStore(keychain: keychain, usesDataProtectionKeychain: false)
+
+        #expect(try store.load().isEmpty)
+        #expect(keychain.copyQuery?[kSecUseDataProtectionKeychain as String] == nil)
+    }
+
+    @Test("Data Protection Keychain requires an application access-group entitlement")
+    func dataProtectionEligibility() {
+        #expect(!VaultAgentKeychainBackend.isEligible(
+            applicationIdentifier: nil,
+            keychainAccessGroups: nil
+        ))
+        #expect(!VaultAgentKeychainBackend.isEligible(
+            applicationIdentifier: "",
+            keychainAccessGroups: [""]
+        ))
+        #expect(VaultAgentKeychainBackend.isEligible(
+            applicationIdentifier: "BBCHAJ584H.com.pastera-app.Pastera",
+            keychainAccessGroups: nil
+        ))
+        #expect(VaultAgentKeychainBackend.isEligible(
+            applicationIdentifier: nil,
+            keychainAccessGroups: ["BBCHAJ584H.com.pastera-app.Pastera"]
+        ))
     }
 }
 

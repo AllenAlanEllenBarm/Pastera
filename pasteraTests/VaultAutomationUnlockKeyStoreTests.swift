@@ -11,7 +11,7 @@ struct VaultAutomationUnlockKeyStoreTests {
     func automationKeyUsesDistinctNoninteractiveItem() throws {
         let client = VaultAutomationKeychainProbe()
         client.updateStatuses = [errSecItemNotFound]
-        let store = VaultAutomationUnlockKeyStore(client: client)
+        let store = VaultAutomationUnlockKeyStore(client: client, usesDataProtectionKeychain: true)
         let key = Data(repeating: 0x2A, count: 32)
 
         try store.save(key)
@@ -23,9 +23,11 @@ struct VaultAutomationUnlockKeyStoreTests {
         #expect(query[kSecAttrService as String] as? String == "com.pastera-app.Pastera.password-vault.agent-unlock.v1")
         #expect(query[kSecAttrAccount as String] as? String == "PasteraVaultAgentUnlock")
         #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
+        #expect(query[kSecUseDataProtectionKeychain as String] as? Bool == true)
         #expect(attributes[kSecValueData as String] as? Data == key)
         #expect(attributes[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         #expect(added[kSecValueData as String] as? Data == key)
+        #expect(added[kSecUseDataProtectionKeychain as String] as? Bool == true)
         #expect(added[kSecAttrAccessControl as String] == nil)
     }
 
@@ -33,7 +35,7 @@ struct VaultAutomationUnlockKeyStoreTests {
     func existingKeyUpdatesInPlace() throws {
         let client = VaultAutomationKeychainProbe()
         client.updateStatuses = [errSecSuccess]
-        let store = VaultAutomationUnlockKeyStore(client: client)
+        let store = VaultAutomationUnlockKeyStore(client: client, usesDataProtectionKeychain: true)
 
         try store.save(Data(repeating: 0x11, count: 32))
 
@@ -92,12 +94,23 @@ struct VaultAutomationUnlockKeyStoreTests {
         let expected = Data(repeating: 0x55, count: 32)
         client.copyStatus = errSecSuccess
         client.copyResult = expected as CFData
-        let store = VaultAutomationUnlockKeyStore(client: client)
+        let store = VaultAutomationUnlockKeyStore(client: client, usesDataProtectionKeychain: true)
 
         #expect(try store.load() == expected)
         let query = try #require(client.copyQueries.first)
         #expect(query[kSecReturnData as String] as? Bool == true)
         #expect(query[kSecAttrAccessible as String] == nil)
+        #expect(query[kSecUseDataProtectionKeychain as String] as? Bool == true)
+    }
+
+    @Test("ad-hoc builds omit the unavailable Data Protection Keychain selector")
+    func adHocBuildUsesLegacyKeychain() {
+        let client = VaultAutomationKeychainProbe()
+        client.copyStatus = errSecItemNotFound
+        let store = VaultAutomationUnlockKeyStore(client: client, usesDataProtectionKeychain: false)
+
+        _ = store.containsKey
+        #expect(client.copyQueries.first?[kSecUseDataProtectionKeychain as String] == nil)
     }
 
     @Test("load maps missing and Keychain errors to unavailable")

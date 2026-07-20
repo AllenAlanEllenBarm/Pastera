@@ -116,6 +116,20 @@ struct AgentIntegrationPreferenceTests {
         }
     }
 
+    @Test("page created before async bootstrap adopts the installed runtime")
+    func pageCreatedBeforeBootstrapAdoptsRuntime() async throws {
+        VaultAgentPreferenceRuntimeProvider.install(UnavailableVaultAgentPreferenceRuntime())
+        defer { VaultAgentPreferenceRuntimeProvider.install(UnavailableVaultAgentPreferenceRuntime()) }
+        let controller = CPYAgentIntegrationPreferenceViewController()
+        controller.loadView()
+        controller.viewWillAppear()
+
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .installedAll)
+        VaultAgentPreferenceRuntimeProvider.install(runtime)
+
+        try await waitUntil { runtime.loadCount >= 1 }
+    }
+
     @Test("partial installs update first and installed clients retain a secondary uninstall route")
     func updateAndSecondaryUninstallRouting() async throws {
         let runtime = AgentPreferenceRuntimeProbe(snapshot: .init(

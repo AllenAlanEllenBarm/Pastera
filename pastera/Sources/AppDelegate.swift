@@ -447,6 +447,8 @@ extension AppDelegate: NSApplicationDelegate {
 
         guard context != .test else { return }
 
+        AppEnvironment.current.vaultAgentApplicationRuntime.start()
+
         // SDKs
         CPYUtilities.initSDKs()
         InstallationLocationService().showMoveToApplicationsAlertIfNeeded()
@@ -498,6 +500,10 @@ extension AppDelegate: NSApplicationDelegate {
             }
         }
 #endif
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AppEnvironment.current.vaultAgentApplicationRuntime.stop()
     }
 
 }

@@ -104,6 +104,22 @@ end tell
 EOF
 }
 
+sign_ad_hoc_app() {
+    local helpers_dir="${APP_PATH}/Contents/Helpers"
+
+    /usr/bin/codesign --force --deep --sign - "${APP_PATH}"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.PasteraCodexMCP \
+        "${helpers_dir}/PasteraCodexMCP"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.PasteraClaudeMCP \
+        "${helpers_dir}/PasteraClaudeMCP"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.pastera \
+        "${helpers_dir}/pastera"
+    /usr/bin/codesign --force --sign - "${APP_PATH}"
+}
+
 while (($#)); do
     case "$1" in
         --version)
@@ -181,7 +197,7 @@ else
         CODE_SIGNING_ALLOWED=YES
         CODE_SIGNING_REQUIRED=YES
         CODE_SIGN_IDENTITY="${DEVELOPER_ID_APPLICATION}"
-        OTHER_CODE_SIGN_FLAGS=--timestamp
+        OTHER_CODE_SIGN_FLAGS="--timestamp --identifier \$(PRODUCT_BUNDLE_IDENTIFIER)"
     )
 fi
 
@@ -199,7 +215,7 @@ if [[ ! -d "${APP_PATH}" ]]; then
 fi
 
 if [[ "${SKIP_NOTARIZATION}" == "1" ]]; then
-    /usr/bin/codesign --force --deep --sign - "${APP_PATH}"
+    sign_ad_hoc_app
 fi
 
 /usr/bin/codesign --verify --deep --strict --verbose=4 "${APP_PATH}"

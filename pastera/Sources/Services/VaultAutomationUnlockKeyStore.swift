@@ -41,13 +41,19 @@ final class VaultAutomationUnlockKeyStore: VaultAutomationUnlockKeyStoring {
     static let account = "PasteraVaultAgentUnlock"
 
     private let client: VaultAutomationKeychainAccessing
+    private let usesDataProtectionKeychain: Bool
 
-    init(client: VaultAutomationKeychainAccessing = SystemVaultAutomationKeychainAccess()) {
+    init(
+        client: VaultAutomationKeychainAccessing = SystemVaultAutomationKeychainAccess(),
+        usesDataProtectionKeychain: Bool =
+            VaultAgentKeychainBackend.currentProcessUsesDataProtectionKeychain
+    ) {
         self.client = client
+        self.usesDataProtectionKeychain = usesDataProtectionKeychain
     }
 
     var containsKey: Bool {
-        client.copyMatching(Self.availabilityQuery).0 == errSecSuccess
+        client.copyMatching(availabilityQuery).0 == errSecSuccess
     }
 
     func save(_ data: Data) throws {
@@ -56,11 +62,11 @@ final class VaultAutomationUnlockKeyStore: VaultAutomationUnlockKeyStoring {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
-        switch client.update(Self.itemQuery, attributes: attributes) {
+        switch client.update(itemQuery, attributes: attributes) {
         case errSecSuccess:
             return
         case errSecItemNotFound:
-            var addQuery = Self.itemQuery
+            var addQuery = itemQuery
             attributes.forEach { addQuery[$0.key] = $0.value }
             guard client.add(addQuery) == errSecSuccess else {
                 throw PasswordVaultError.keychainUnavailable
@@ -71,7 +77,7 @@ final class VaultAutomationUnlockKeyStore: VaultAutomationUnlockKeyStoring {
     }
 
     func load() throws -> Data {
-        let (status, result) = client.copyMatching(Self.loadQuery)
+        let (status, result) = client.copyMatching(loadQuery)
         guard status == errSecSuccess,
               let data = result as? Data,
               data.count == 32 else {
@@ -81,28 +87,33 @@ final class VaultAutomationUnlockKeyStore: VaultAutomationUnlockKeyStoring {
     }
 
     func delete() throws {
-        let status = client.delete(Self.itemQuery)
+        let status = client.delete(itemQuery)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw PasswordVaultError.keychainUnavailable
         }
     }
 
-    private static var itemQuery: [String: Any] {
-        [
+    private var itemQuery: [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
             kSecAttrSynchronizable as String: false
         ]
+        VaultAgentKeychainBackend.configure(
+            &query,
+            usesDataProtectionKeychain: usesDataProtectionKeychain
+        )
+        return query
     }
 
-    private static var availabilityQuery: [String: Any] {
+    private var availabilityQuery: [String: Any] {
         var query = itemQuery
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         return query
     }
 
-    private static var loadQuery: [String: Any] {
+    private var loadQuery: [String: Any] {
         var query = availabilityQuery
         query[kSecReturnData as String] = true
         return query

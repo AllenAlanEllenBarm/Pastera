@@ -45,6 +45,8 @@ struct AppEnvironment {
                      passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
                      secureClipboard: SecureClipboardWriting = current.secureClipboard,
                      passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
+                     vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
+                         current.vaultAgentApplicationRuntime,
                      clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
                      menuManager: MenuManager = current.menuManager,
                      defaults: UserDefaults = current.defaults) {
@@ -57,6 +59,7 @@ struct AppEnvironment {
                                       passwordVaultStore: passwordVaultStore,
                                       secureClipboard: secureClipboard,
                                       passwordVaultUIController: passwordVaultUIController,
+                                      vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
                                       clipboardScriptCoordinator: clipboardScriptCoordinator,
                                       menuManager: menuManager,
                                       defaults: defaults))
@@ -71,6 +74,8 @@ struct AppEnvironment {
                                passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
                                secureClipboard: SecureClipboardWriting = current.secureClipboard,
                                passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
+                               vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
+                                   current.vaultAgentApplicationRuntime,
                                clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
                                menuManager: MenuManager = current.menuManager,
                                defaults: UserDefaults = current.defaults) {
@@ -83,6 +88,7 @@ struct AppEnvironment {
                                                 passwordVaultStore: passwordVaultStore,
                                                 secureClipboard: secureClipboard,
                                                 passwordVaultUIController: passwordVaultUIController,
+                                                vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
                                                 clipboardScriptCoordinator: clipboardScriptCoordinator,
                                                 menuManager: menuManager,
                                                 defaults: defaults))
@@ -98,6 +104,12 @@ struct AppEnvironment {
         return Environment(hotKeyService: HotKeyService(defaults: defaults),
                            excludeAppService: excludeAppService,
                            accessibilityService: AccessibilityService(),
+                           vaultAgentApplicationRuntimeFactory: { controller in
+                               VaultAgentApplicationRuntime.production(
+                                   vault: controller,
+                                   defaults: defaults
+                               )
+                           },
                            menuManager: MenuManager(),
                            defaults: defaults)
     }

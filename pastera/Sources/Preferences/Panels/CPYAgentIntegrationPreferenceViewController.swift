@@ -111,7 +111,8 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
         }
     }
 
-    private let runtime: VaultAgentPreferenceRuntimeServicing
+    private let runtimeProvider: () -> VaultAgentPreferenceRuntimeServicing
+    private var runtime: VaultAgentPreferenceRuntimeServicing { runtimeProvider() }
     private let notificationCenter: NotificationCenter
     private let sensitiveConfirmation: (() -> Bool)?
     private let copyText: (String) -> Void
@@ -143,7 +144,7 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
     private let removePermissionButton = NSButton(title: Text.remove, target: nil, action: nil)
 
     init(
-        runtime: VaultAgentPreferenceRuntimeServicing = VaultAgentPreferenceRuntimeProvider.runtime,
+        runtime: VaultAgentPreferenceRuntimeServicing? = nil,
         confirmSensitivePermission: (() -> Bool)? = nil,
         notificationCenter: NotificationCenter = .default,
         copyText: @escaping (String) -> Void = { value in
@@ -151,7 +152,11 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
             NSPasteboard.general.setString(value, forType: .string)
         }
     ) {
-        self.runtime = runtime
+        if let runtime {
+            runtimeProvider = { runtime }
+        } else {
+            runtimeProvider = { VaultAgentPreferenceRuntimeProvider.runtime }
+        }
         self.notificationCenter = notificationCenter
         self.sensitiveConfirmation = confirmSensitivePermission
         self.copyText = copyText

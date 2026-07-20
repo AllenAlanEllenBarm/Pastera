@@ -1381,6 +1381,106 @@ private extension VaultAgentBrokerTests {
         }
     }
 
+    @Test("idle application runtime starts one broker without unlocking the vault")
+    func idleApplicationRuntimeStartsOnce() {
+        let seedCount = RuntimeLockedInt()
+        let socketStartCount = RuntimeLockedInt()
+        let trackerStartCount = RuntimeLockedInt()
+        let ticketClearCount = RuntimeLockedInt()
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: { seedCount.increment() },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: { socketStartCount.increment() },
+            socketStop: {},
+            trackerStart: { trackerStartCount.increment() },
+            trackerStop: {},
+            removeTickets: { ticketClearCount.increment() },
+            worker: DispatchQueue(label: "VaultAgentApplicationRuntimeTests.idle")
+        )
+
+        runtime.start()
+        runtime.start()
+
+        #expect(waitUntil { socketStartCount.value == 1 })
+        #expect(seedCount.value == 1)
+        #expect(trackerStartCount.value == 1)
+        #expect(ticketClearCount.value == 0)
+        runtime.stop()
+        #expect(ticketClearCount.value == 1)
+    }
+
+    @Test("stopping during durable seed prevents late broker startup")
+    func stopDuringSeedFailsClosed() {
+        let seedStarted = DispatchSemaphore(value: 0)
+        let releaseSeed = DispatchSemaphore(value: 0)
+        let socketStartCount = RuntimeLockedInt()
+        let trackerStartCount = RuntimeLockedInt()
+        let ticketClearCount = RuntimeLockedInt()
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: {
+                seedStarted.signal()
+                releaseSeed.wait()
+            },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: { socketStartCount.increment() },
+            socketStop: {},
+            trackerStart: { trackerStartCount.increment() },
+            trackerStop: {},
+            removeTickets: { ticketClearCount.increment() },
+            worker: DispatchQueue(label: "VaultAgentApplicationRuntimeTests.stop-during-seed")
+        )
+
+        runtime.start()
+        #expect(seedStarted.wait(timeout: .now() + 1) == .success)
+        runtime.stop()
+        releaseSeed.signal()
+
+        #expect(waitUntil { ticketClearCount.value == 1 })
+        #expect(socketStartCount.value == 0)
+        #expect(trackerStartCount.value == 0)
+    }
+
+    @Test("durable seed revokes confirmed stale grants and blocks unknown installations")
+    func durableSeedFailsClosedBeforeTraffic() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let grants = Dictionary(uniqueKeysWithValues: VaultAgentClientKind.allCases.map { client in
+            (client, SeederGrantFactory.grant(client: client, now: now))
+        })
+        let store = SeederGrantStore(grants: grants)
+        let executor = VaultAgentSerialExecutor(
+            queue: DispatchQueue(label: "VaultAgentDurableStateSeederTests.executor")
+        )
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            initiallySuspendedClients: Set(VaultAgentClientKind.allCases),
+            now: { now }
+        )
+        let integration = SeederIntegrationProbe(
+            evidence: [.codex: .installed, .claude: .uninstalled, .cli: .unknown]
+        )
+        let reconciler = SeederLifecycleProbe()
+        let seeder = VaultAgentDurableStateSeeder(
+            integration: integration,
+            authorizationPolicy: policy,
+            authorizationCoordinator: coordinator,
+            lifecycleReconciler: reconciler,
+            now: { now }
+        )
+
+        try seeder.seed()
+
+        #expect(!coordinator.isAuthorizationBlocked(for: .codex))
+        #expect(coordinator.isAuthorizationBlocked(for: .claude))
+        #expect(coordinator.isAuthorizationBlocked(for: .cli))
+        #expect(policy.grantSnapshot(for: .codex)?.revokedAt == nil)
+        #expect(policy.grantSnapshot(for: .claude)?.revokedAt == now)
+        #expect(policy.grantSnapshot(for: .cli)?.revokedAt == nil)
+        #expect(reconciler.callCount == 1)
+    }
+
     @Test("64 KiB of one-byte activity keeps exactly one idle timer per connection")
     func idleTimerCountIsBounded() throws {
         let fixture = try SocketFixture()
@@ -2423,6 +2523,133 @@ private final class RuntimeLockedInt {
         lock.lock()
         storage += 1
         lock.unlock()
+    }
+}
+
+private enum SeederInstallationEvidence {
+    case installed
+    case uninstalled
+    case unknown
+}
+
+private final class SeederIntegrationProbe: VaultAgentPreferenceIntegrationServicing {
+    private let evidence: [VaultAgentClientKind: SeederInstallationEvidence]
+
+    init(evidence: [VaultAgentClientKind: SeederInstallationEvidence]) {
+        self.evidence = evidence
+    }
+
+    func status(host: VaultAgentHostKind?) throws -> VaultAgentIntegrationStatus {
+        let requested = host.map { [$0] } ?? [.codex, .claude]
+        return .init(hosts: try requested.map { host in
+            let client: VaultAgentClientKind = host == .codex ? .codex : .claude
+            let installed = try isInstalled(client)
+            return .init(
+                host: host,
+                hostDetected: true,
+                hostExecutablePath: "/Applications/Host.app/Contents/MacOS/Host",
+                mcpInstalled: installed,
+                skillInstalled: installed,
+                installedVersion: installed ? "1" : nil,
+                authorized: false,
+                idleExpiresAt: nil,
+                hardExpiresAt: nil
+            )
+        })
+    }
+
+    func install(host _: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus {
+        throw SocketTestError.rejected
+    }
+
+    func uninstall(host _: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus {
+        throw SocketTestError.rejected
+    }
+
+    func installedHostIdentity(
+        for _: VaultAgentClientKind
+    ) -> VaultAgentInstalledHostIdentity? { nil }
+
+    func cliStatus() throws -> VaultAgentCLIInstallationStatus {
+        .init(installed: try isInstalled(.cli), executablePath: "/tmp/pastera", pathHint: nil)
+    }
+
+    func installCLI() throws -> VaultAgentCLIInstallationStatus {
+        throw SocketTestError.rejected
+    }
+
+    func uninstallCLI() throws -> VaultAgentCLIInstallationStatus {
+        throw SocketTestError.rejected
+    }
+
+    func permissionSnippet(
+        for _: VaultAgentHostKind,
+        scope: VaultAgentHostPermissionScope
+    ) throws -> VaultAgentPermissionSnippet {
+        try .canonical(for: scope)
+    }
+
+    func claudePermissionStatus() throws -> VaultAgentClaudePermissionStatus {
+        .init(policyDisposition: .userRulesAllowed, ownedRules: [])
+    }
+
+    func applyClaudePermissionScope(
+        _: VaultAgentHostPermissionScope
+    ) throws -> VaultAgentPermissionChange {
+        .init(addedRules: [], removedRules: [], unchanged: true)
+    }
+
+    func removeOwnedClaudePermissionRules() throws -> VaultAgentPermissionChange {
+        .init(addedRules: [], removedRules: [], unchanged: true)
+    }
+
+    private func isInstalled(_ client: VaultAgentClientKind) throws -> Bool {
+        switch evidence[client] ?? .unknown {
+        case .installed: true
+        case .uninstalled: false
+        case .unknown: throw SocketTestError.rejected
+        }
+    }
+}
+
+private final class SeederGrantStore: VaultAgentGrantStoring {
+    private var grants: [VaultAgentClientKind: VaultAgentGrant]
+
+    init(grants: [VaultAgentClientKind: VaultAgentGrant]) {
+        self.grants = grants
+    }
+
+    func load() -> [VaultAgentClientKind: VaultAgentGrant] { grants }
+    func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) { self.grants = grants }
+}
+
+private final class SeederLifecycleProbe: VaultAgentGrantLifecycleReconciling {
+    private(set) var callCount = 0
+
+    func authorizationStateDidChange() { callCount += 1 }
+}
+
+private enum SeederGrantFactory {
+    static func grant(client: VaultAgentClientKind, now: Date) -> VaultAgentGrant {
+        let hasHost = client != .cli
+        return .init(
+            identity: .init(
+                client: client,
+                helperRequirement: "identifier com.pastera.helper",
+                helperCDHash: Data([1]),
+                helperIsAdHoc: true,
+                helperPath: "/Applications/Pastera.app/Contents/Helpers/helper",
+                hostRequirement: hasHost ? "identifier com.pastera.host" : nil,
+                hostCDHash: hasHost ? Data([2]) : nil,
+                hostIsAdHoc: hasHost ? true : nil,
+                hostPath: hasHost ? "/Applications/Host.app/Contents/MacOS/Host" : nil
+            ),
+            authenticatedAt: now,
+            idleExpiresAt: now.addingTimeInterval(3_600),
+            hardExpiresAt: now.addingTimeInterval(7_200),
+            lastSensitiveUseAt: nil,
+            revokedAt: nil
+        )
     }
 }
 

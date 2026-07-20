@@ -56,6 +56,10 @@
 		A69000000000000000000003 /* VaultAgentIntegrationInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69000000000000000000004 /* VaultAgentIntegrationInstaller.swift */; };
 		A6A000000000000000000001 /* AgentIntegrationPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A000000000000000000002 /* AgentIntegrationPreferenceTests.swift */; };
 		A6A000000000000000000003 /* CPYAgentIntegrationPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A000000000000000000004 /* CPYAgentIntegrationPreferenceViewController.swift */; };
+		A6B000000000000000000001 /* PasteraCodexMCP in Embed Agent Helpers */ = {isa = PBXBuildFile; fileRef = A67000000000000000000020 /* PasteraCodexMCP */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A6B000000000000000000002 /* PasteraClaudeMCP in Embed Agent Helpers */ = {isa = PBXBuildFile; fileRef = A67000000000000000000021 /* PasteraClaudeMCP */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A6B000000000000000000003 /* pastera in Embed Agent Helpers */ = {isa = PBXBuildFile; fileRef = A6800000000000000000000D /* pastera */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A6B000000000000000000004 /* pastera-vault in Resources */ = {isa = PBXBuildFile; fileRef = A6B000000000000000000005 /* pastera-vault */; };
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
@@ -230,6 +234,22 @@
 		FAE911B91DE045E2008A4BEC /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAE911B81DE045E2008A4BEC /* HotKeyService.swift */; };
 		FAE911BB1DE054F1008A4BEC /* NSCoding+Archive.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAE911BA1DE054F1008A4BEC /* NSCoding+Archive.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A6B000000000000000000006 /* Embed Agent Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				A6B000000000000000000002 /* PasteraClaudeMCP in Embed Agent Helpers */,
+				A6B000000000000000000001 /* PasteraCodexMCP in Embed Agent Helpers */,
+				A6B000000000000000000003 /* pastera in Embed Agent Helpers */,
+			);
+			name = "Embed Agent Helpers";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXContainerItemProxy section */
 		FAC43DD91B35D8B100C06102 /* PBXContainerItemProxy */ = {
@@ -441,6 +461,7 @@
 		A69000000000000000000004 /* VaultAgentIntegrationInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentIntegrationInstaller.swift; sourceTree = "<group>"; };
 		A6A000000000000000000002 /* AgentIntegrationPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentIntegrationPreferenceTests.swift; sourceTree = "<group>"; };
 		A6A000000000000000000004 /* CPYAgentIntegrationPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYAgentIntegrationPreferenceViewController.swift; sourceTree = "<group>"; };
+		A6B000000000000000000005 /* pastera-vault */ = {isa = PBXFileReference; lastKnownFileType = folder; path = integrations/pastera-vault; sourceTree = SOURCE_ROOT; };
 		A6800000000000000000000D /* pastera */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = pastera; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6800000000000000000000E /* PasteraSecretConsumerFixture */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = PasteraSecretConsumerFixture; sourceTree = BUILT_PRODUCTS_DIR; };
 		A62000000000000000000009 /* VaultAgentGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGrantStore.swift; sourceTree = "<group>"; };
@@ -862,6 +883,7 @@
 			isa = PBXGroup;
 			children = (
 				C5208B822FC6E74B00BC4568 /* Configurations */,
+				A6B000000000000000000005 /* pastera-vault */,
 				FAC43DC81B35D8B100C06102 /* pastera */,
 				FAC43DDB1B35D8B100C06102 /* pasteraTests */,
 				A61000000000000000000005 /* pasteraAgentTests */,
@@ -1203,10 +1225,14 @@
 				FAC43DC21B35D8B100C06102 /* Sources */,
 				FAC43DC31B35D8B100C06102 /* Frameworks */,
 				FAC43DC41B35D8B100C06102 /* Resources */,
+				A6B000000000000000000006 /* Embed Agent Helpers */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A6B000000000000000000007 /* PasteraCodexMCP */,
+				A6B000000000000000000008 /* PasteraClaudeMCP */,
+				A6B000000000000000000009 /* PasteraCLI */,
 				A62000000000000000000007 /* PBXTargetDependency */,
 				C5A4B2022FC9D76000B71510 /* PBXTargetDependency */,
 			);
@@ -1338,6 +1364,7 @@
 		FAC43DC41B35D8B100C06102 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				A6B000000000000000000004 /* pastera-vault in Resources */,
 				FA6DD5141C7DEDB600317E73 /* (null) in Resources */,
 				FA1DB4901DDCA5D9007F95C8 /* Assets.xcassets in Resources */,
 				FA6DD5151C7DEDB600317E73 /* (null) in Resources */,
@@ -1654,6 +1681,21 @@
 			target = A68000000000000000000017 /* PasteraSecretConsumerFixture */;
 			targetProxy = A68000000000000000000020 /* PBXContainerItemProxy */;
 		};
+		A6B000000000000000000007 /* PasteraCodexMCP */ = {
+			isa = PBXTargetDependency;
+			target = A6700000000000000000002C /* PasteraCodexMCP */;
+			targetProxy = A6B00000000000000000000A /* PBXContainerItemProxy */;
+		};
+		A6B000000000000000000008 /* PasteraClaudeMCP */ = {
+			isa = PBXTargetDependency;
+			target = A6700000000000000000002D /* PasteraClaudeMCP */;
+			targetProxy = A6B00000000000000000000B /* PBXContainerItemProxy */;
+		};
+		A6B000000000000000000009 /* PasteraCLI */ = {
+			isa = PBXTargetDependency;
+			target = A68000000000000000000016 /* PasteraCLI */;
+			targetProxy = A6B00000000000000000000C /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1734,6 +1776,27 @@
 			remoteGlobalIDString = A68000000000000000000017;
 			remoteInfo = PasteraSecretConsumerFixture;
 		};
+		A6B00000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FAC43DBE1B35D8B100C06102 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A6700000000000000000002C;
+			remoteInfo = PasteraCodexMCP;
+		};
+		A6B00000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FAC43DBE1B35D8B100C06102 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A6700000000000000000002D;
+			remoteInfo = PasteraClaudeMCP;
+		};
+		A6B00000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FAC43DBE1B35D8B100C06102 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A68000000000000000000016;
+			remoteInfo = PasteraCLI;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXVariantGroup section */
@@ -1778,6 +1841,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_CODE_SIGN_FLAGS = "--identifier $(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.PasteraCodexMCP";
 				PRODUCT_NAME = PasteraCodexMCP;
 				SWIFT_VERSION = 6.0;
@@ -1788,6 +1852,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_CODE_SIGN_FLAGS = "--identifier $(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.PasteraCodexMCP";
 				PRODUCT_NAME = PasteraCodexMCP;
 				SWIFT_VERSION = 6.0;
@@ -1798,6 +1863,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_CODE_SIGN_FLAGS = "--identifier $(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.PasteraClaudeMCP";
 				PRODUCT_NAME = PasteraClaudeMCP;
 				SWIFT_VERSION = 6.0;
@@ -1808,6 +1874,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_CODE_SIGN_FLAGS = "--identifier $(PRODUCT_BUNDLE_IDENTIFIER)";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.pastera-app.PasteraClaudeMCP";
 				PRODUCT_NAME = PasteraClaudeMCP;
 				SWIFT_VERSION = 6.0;

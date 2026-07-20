@@ -459,14 +459,18 @@ extension VaultAgentTicketStoreTests {
     func auditKeyReadsExistingItem() throws {
         let key = Data(repeating: 0x41, count: 32)
         let probe = AuditKeychainProbe(copyResults: [(errSecSuccess, key)])
-        let store = VaultAgentAuditKeyStore(keychain: probe, randomBytes: { throw TicketProbeError.failed })
+        let store = VaultAgentAuditKeyStore(
+            keychain: probe,
+            usesDataProtectionKeychain: true,
+            randomBytes: { throw TicketProbeError.failed }
+        )
 
         #expect(try store.loadOrCreate() == key)
         let query = try #require(probe.copyQueries.first)
         assertAuditBaseQuery(query)
         #expect(Set(query.keys) == Set([
             kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable,
-            kSecAttrAccessible, kSecReturnData, kSecMatchLimit
+            kSecAttrAccessible, kSecUseDataProtectionKeychain, kSecReturnData, kSecMatchLimit
         ].map { $0 as String }))
         #expect(query[kSecReturnData as String] as? Bool == true)
         #expect(query[kSecMatchLimit as String] as? String == kSecMatchLimitOne as String)
@@ -482,7 +486,11 @@ extension VaultAgentTicketStoreTests {
             updateStatuses: [errSecItemNotFound],
             addStatuses: [errSecSuccess]
         )
-        let store = VaultAgentAuditKeyStore(keychain: probe, randomBytes: { key })
+        let store = VaultAgentAuditKeyStore(
+            keychain: probe,
+            usesDataProtectionKeychain: true,
+            randomBytes: { key }
+        )
 
         #expect(try store.loadOrCreate() == key)
         let update = try #require(probe.updateQueries.first)
@@ -492,12 +500,12 @@ extension VaultAgentTicketStoreTests {
         assertAuditBaseQuery(add)
         #expect(Set(update.keys) == Set([
             kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable,
-            kSecAttrAccessible
+            kSecAttrAccessible, kSecUseDataProtectionKeychain
         ].map { $0 as String }))
         #expect(Set(attributes.keys) == Set([kSecValueData as String]))
         #expect(Set(add.keys) == Set([
             kSecClass, kSecAttrService, kSecAttrAccount, kSecAttrSynchronizable,
-            kSecValueData, kSecAttrAccessible
+            kSecValueData, kSecAttrAccessible, kSecUseDataProtectionKeychain
         ].map { $0 as String }))
         #expect(attributes[kSecValueData as String] as? Data == key)
         #expect(add[kSecValueData as String] as? Data == key)
@@ -523,6 +531,20 @@ extension VaultAgentTicketStoreTests {
         )
         #expect(try VaultAgentAuditKeyStore(keychain: duplicate, randomBytes: { generated }).loadOrCreate() == established)
         #expect(duplicate.copyQueries.count == 2)
+    }
+
+    @Test("ad-hoc builds omit the unavailable Data Protection Keychain selector")
+    func auditKeyAdHocBuildUsesLegacyKeychain() throws {
+        let key = Data(repeating: 0x45, count: 32)
+        let probe = AuditKeychainProbe(copyResults: [(errSecSuccess, key)])
+        let store = VaultAgentAuditKeyStore(
+            keychain: probe,
+            usesDataProtectionKeychain: false,
+            randomBytes: { throw TicketProbeError.failed }
+        )
+
+        #expect(try store.loadOrCreate() == key)
+        #expect(probe.copyQueries.first?[kSecUseDataProtectionKeychain as String] == nil)
     }
 
     @Test("a weaker same-name audit item cannot be accepted or migrated")
@@ -689,6 +711,7 @@ private func assertAuditBaseQuery(_ query: [String: Any]) {
     #expect(query[kSecAttrService as String] as? String == "com.pastera-app.Pastera.password-vault.agent-audit.v1")
     #expect(query[kSecAttrAccount as String] as? String == "PasteraVaultAgentAuditKey")
     #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
+    #expect(query[kSecUseDataProtectionKeychain as String] as? Bool == true)
     #expect(hasSecureAuditAccessibility(query))
 }
 
