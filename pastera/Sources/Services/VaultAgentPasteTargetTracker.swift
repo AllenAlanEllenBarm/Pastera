@@ -49,6 +49,8 @@ final class VaultAgentPasteTargetTracker: VaultAgentPasteTargetTracking {
     private let lock = NSLock()
     private var observer: NSObjectProtocol?
     private var target: StoredTarget?
+    private var started = false
+    private var activationGeneration: UInt64 = 0
 
     convenience init(hostIdentityProvider: VaultAgentHostIdentityProviding) {
         self.init(
@@ -105,6 +107,8 @@ final class VaultAgentPasteTargetTracker: VaultAgentPasteTargetTracking {
             lock.unlock()
             return
         }
+        started = true
+        activationGeneration &+= 1
         observer = notificationCenter.addObserver(
             forName: notificationName,
             object: nil,
@@ -119,6 +123,8 @@ final class VaultAgentPasteTargetTracker: VaultAgentPasteTargetTracking {
         lock.lock()
         let current = observer
         observer = nil
+        started = false
+        activationGeneration &+= 1
         target = nil
         lock.unlock()
         if let current { notificationCenter.removeObserver(current) }
@@ -173,6 +179,16 @@ final class VaultAgentPasteTargetTracker: VaultAgentPasteTargetTracking {
         let excludedPaths = Set(excludedExecutableURLs().map(Self.canonicalPath))
         guard !excludedPaths.contains(path) else { return }
 
+        lock.lock()
+        guard started else {
+            lock.unlock()
+            return
+        }
+        activationGeneration &+= 1
+        let candidateGeneration = activationGeneration
+        target = nil
+        lock.unlock()
+
         let snapshot: VaultAgentProcessSnapshot
         let signature: VaultAgentCodeSignature
         do {
@@ -193,7 +209,9 @@ final class VaultAgentPasteTargetTracker: VaultAgentPasteTargetTracking {
             focusedElement: focusedElement(application.processIdentifier)
         )
         lock.lock()
-        target = stored
+        if started, activationGeneration == candidateGeneration {
+            target = stored
+        }
         lock.unlock()
     }
 

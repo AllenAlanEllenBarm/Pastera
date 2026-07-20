@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import ApplicationServices
+import CryptoKit
 import PasteraAgentProtocol
 import Testing
 @testable import Pastera
@@ -185,6 +186,160 @@ private extension VaultAgentBrokerTests {
         #expect(fixture.audit.records.count == 1)
     }
 
+    @Test("copy and integration mutations are CLI-only")
+    func cliOnlyOperations() async throws {
+        for client in [VaultAgentClientKind.codex, .claude] {
+            let fixture = try RuntimeFixture(client: client)
+
+            let copy = try await fixture.call(.copy(
+                entryID: fixture.entryID,
+                field: .password
+            ))
+            let status = try await fixture.call(.integrationStatus(host: nil))
+            let install = try await fixture.call(.integrationInstall(host: .codex))
+            let uninstall = try await fixture.call(.integrationUninstall(host: .claude))
+
+            #expect(copy.body.failureCode == .invalidRequest)
+            #expect(status.body.failureCode == .invalidRequest)
+            #expect(install.body.failureCode == .invalidRequest)
+            #expect(uninstall.body.failureCode == .invalidRequest)
+            #expect(fixture.vault.ensureReadyCount == 0)
+            #expect(fixture.vault.copyCount == 0)
+            #expect(fixture.integrationService.statusCallCount == 0)
+        }
+    }
+
+    @Test("authorization then rate limit then vault readiness is the fixed check order")
+    func authorizationRateLimitReadinessOrder() async throws {
+        let fixture = try RuntimeFixture(client: .cli, authorized: false)
+        let unauthorized = try await fixture.call(.copy(
+            entryID: fixture.entryID,
+            field: .password
+        ))
+        #expect(unauthorized.body.failureCode == .authorizationRequired)
+        #expect(fixture.vault.ensureReadyCount == 0)
+
+        try fixture.authorizationPolicy.authorize(
+            identity: fixture.identity,
+            authenticatedAt: fixture.currentDate
+        )
+        try fixture.runtime.authorizationStateDidChange()
+        for _ in 0..<VaultAgentRateLimitCategory.directSecret.limit {
+            let response = try await fixture.call(.copy(
+                entryID: fixture.entryID,
+                field: .password
+            ))
+            #expect(response.body.failureCode == nil)
+        }
+        let limited = try await fixture.call(.copy(
+            entryID: fixture.entryID,
+            field: .password
+        ))
+
+        guard case let .failure(failure) = limited.body else {
+            Issue.record("the request above the direct-secret limit must fail")
+            return
+        }
+        #expect(failure.code == .rateLimited)
+        #expect(failure.retryable)
+        #expect(failure.retryAfterMilliseconds == 60_000)
+        #expect(fixture.vault.ensureReadyCount == VaultAgentRateLimitCategory.directSecret.limit)
+        #expect(fixture.vault.copyCount == VaultAgentRateLimitCategory.directSecret.limit)
+    }
+
+    @Test("prepare never reads a secret and only successful copy renews a grant")
+    func prepareAndCopyRenewalBoundary() async throws {
+        let fixture = try RuntimeFixture(client: .cli)
+        let originalExpiry = try #require(fixture.grantStore.grants[.cli]?.idleExpiresAt)
+        fixture.advanceNow(by: 60)
+
+        _ = try await fixture.call(.prepareExec(
+            entryID: fixture.entryID,
+            field: .password,
+            mode: .stdin
+        ))
+        #expect(fixture.vault.secretCount == 0)
+        #expect(fixture.grantStore.grants[.cli]?.idleExpiresAt == originalExpiry)
+
+        fixture.vault.copyResult = .failure(.saveFailed)
+        let failed = try await fixture.call(.copy(
+            entryID: fixture.entryID,
+            field: .password
+        ))
+        #expect(failed.body.failureCode == .brokerUnavailable)
+        #expect(fixture.grantStore.grants[.cli]?.idleExpiresAt == originalExpiry)
+
+        fixture.vault.copyResult = .success(())
+        _ = try await fixture.call(.copy(entryID: fixture.entryID, field: .password))
+        #expect(try #require(fixture.grantStore.grants[.cli]?.idleExpiresAt) > originalExpiry)
+    }
+
+    @Test("late and repeated ticket completion never renew a grant")
+    func lateAndRepeatedCompletionDoNotRenew() async throws {
+        let fixture = try RuntimeFixture(client: .cli)
+        let originalExpiry = try #require(fixture.grantStore.grants[.cli]?.idleExpiresAt)
+        let lateTicket = try fixture.issueTicket()
+        let lateReceipt = try fixture.ticketStore.redeem(
+            token: lateTicket.token,
+            client: .cli,
+            mode: .stdin,
+            now: fixture.currentDate
+        ).receiptID
+        fixture.advanceNow(by: VaultAgentTicketStore.receiptLifetime)
+
+        let late = try await fixture.call(.completeTicket(receiptID: lateReceipt))
+        #expect(late.body.failureCode == .ticketExpired)
+        #expect(fixture.grantStore.grants[.cli]?.idleExpiresAt == originalExpiry)
+
+        let validTicket = try fixture.issueTicket()
+        let validReceipt = try fixture.ticketStore.redeem(
+            token: validTicket.token,
+            client: .cli,
+            mode: .stdin,
+            now: fixture.currentDate
+        ).receiptID
+        let completed = try await fixture.call(.completeTicket(receiptID: validReceipt))
+        #expect(completed.body.failureCode == nil)
+        let renewedExpiry = try #require(fixture.grantStore.grants[.cli]?.idleExpiresAt)
+        #expect(renewedExpiry > originalExpiry)
+
+        fixture.advanceNow(by: 1)
+        let repeated = try await fixture.call(.completeTicket(receiptID: validReceipt))
+        #expect(repeated.body.failureCode == .ticketUsed)
+        #expect(fixture.grantStore.grants[.cli]?.idleExpiresAt == renewedExpiry)
+    }
+
+    @Test("audit records contain only action result and optional entry digest")
+    func auditAllowlistExcludesSensitiveOperationData() async throws {
+        let fixture = try RuntimeFixture(client: .cli)
+        _ = try await fixture.call(.get(entryID: fixture.entryID))
+        _ = try await fixture.call(.search(.init(
+            query: "audit-query-secret",
+            folderID: nil,
+            limit: 20,
+            cursor: nil
+        )))
+        let prepared = try await fixture.call(.prepareExec(
+            entryID: fixture.entryID,
+            field: .password,
+            mode: .stdin
+        ))
+        guard case let .success(.ticket(ticket)) = prepared.body else {
+            Issue.record("prepare must return a ticket")
+            return
+        }
+        let redeemed = try await fixture.call(.redeemTicket(token: ticket.token, mode: .stdin))
+        #expect(redeemed.body.failureCode == nil)
+
+        let records = fixture.audit.records
+        #expect(records.map(\.action) == [.get, .search, .prepareExec, .redeemTicket])
+        #expect(records.map(\.result).allSatisfy { $0 == nil })
+        #expect(records[0].entryDigest == fixture.audit.digest(fixture.entryID))
+        #expect(records[1].entryDigest == nil)
+        #expect(records[2].entryDigest == fixture.audit.digest(fixture.entryID))
+        #expect(records[3].entryDigest == nil)
+    }
+
     @Test("a decoded operation audits and completes exactly once")
     func decodedOperationFinishesOnce() throws {
         let fixture = try RuntimeFixture(client: .codex)
@@ -292,6 +447,48 @@ private extension VaultAgentBrokerTests {
         ))).body.failureCode == .invalidRequest)
     }
 
+    @Test("cursor rejects padding and standard Base64 alphabet aliases")
+    func cursorRequiresCanonicalBase64URL() async throws {
+        let fixture = try RuntimeFixture(client: .codex)
+        fixture.vault.entries.append(fixture.makeEntry(
+            idSuffix: 9,
+            title: "Mail second",
+            updatedAt: 1
+        ))
+        let first = try await fixture.search(query: "mail", folderID: nil, limit: 1)
+        let cursor = try #require(first.nextCursor)
+        let padded = cursor + "="
+        var canonicalBase64 = cursor
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = canonicalBase64.utf8.count % 4
+        if remainder != 0 {
+            canonicalBase64.append(String(repeating: "=", count: 4 - remainder))
+        }
+        let canonicalData = try #require(Data(base64Encoded: canonicalBase64))
+        #expect(canonicalData.last == 0x7D)
+        let standardBase64 = (canonicalData.dropLast() + Data(",\"ignored\":\">\"}".utf8))
+            .base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+        #expect(standardBase64.contains("+") || standardBase64.contains("/"))
+
+        let paddedResponse = try await fixture.call(.search(.init(
+            query: "mail",
+            folderID: nil,
+            limit: 1,
+            cursor: padded
+        )))
+        let standardResponse = try await fixture.call(.search(.init(
+            query: "mail",
+            folderID: nil,
+            limit: 1,
+            cursor: standardBase64
+        )))
+
+        #expect(paddedResponse.body.failureCode == .invalidRequest)
+        #expect(standardResponse.body.failureCode == .invalidRequest)
+    }
+
     @Test("search dynamically shrinks a page without truncating the 32 KiB response")
     func searchResponseShrinksToWireLimit() async throws {
         let fixture = try RuntimeFixture(client: .codex)
@@ -335,6 +532,95 @@ private extension VaultAgentBrokerTests {
         #expect(response.sequence == 1)
         #expect(response.requestID == fixture.requestID)
         #expect(response.body.failureCode == .invalidRequest)
+        #expect(try JSONEncoder().encode(response).count <= VaultAgentLimits.maximumResponseBytes)
+    }
+
+    @Test("get rejects an oversized metadata field without truncation or identifier loss")
+    func getRejectsOversizedMetadata() async throws {
+        let fixture = try RuntimeFixture(client: .codex)
+        fixture.vault.entries[0].title = String(
+            repeating: "t",
+            count: VaultAgentLimits.maximumMetadataFieldBytes + 1
+        )
+
+        let response = try await fixture.call(.get(entryID: fixture.entryID))
+
+        #expect(response.connectionID == fixture.connectionID)
+        #expect(response.sequence == 1)
+        #expect(response.requestID == fixture.requestID)
+        #expect(response.body.failureCode == .brokerUnavailable)
+        #expect(fixture.vault.entries[0].title.count == VaultAgentLimits.maximumMetadataFieldBytes + 1)
+        #expect(fixture.audit.records.last?.result == .brokerUnavailable)
+    }
+
+    @Test("redeem rejects a secret above 16 KiB without truncation or identifier loss")
+    func redeemRejectsOversizedSecret() async throws {
+        let fixture = try RuntimeFixture(client: .cli)
+        fixture.vault.secretBytes = Data(
+            repeating: 0x53,
+            count: VaultAgentLimits.maximumSecretBytes + 1
+        )
+        let ticket = try fixture.issueTicket()
+
+        let response = try await fixture.call(.redeemTicket(token: ticket.token, mode: .stdin))
+
+        #expect(response.connectionID == fixture.connectionID)
+        #expect(response.sequence == 1)
+        #expect(response.requestID == fixture.requestID)
+        #expect(response.body.failureCode == .brokerUnavailable)
+        #expect(fixture.vault.secretBytes.count == VaultAgentLimits.maximumSecretBytes + 1)
+        #expect(fixture.audit.records.last?.result == .brokerUnavailable)
+    }
+
+    @Test("integration rejects oversized paths versions and host collections")
+    func integrationRejectsInvalidOutboundFields() async throws {
+        let invalidStatuses = [
+            VaultAgentIntegrationStatus(hosts: [.testStatus(
+                path: String(repeating: "p", count: VaultAgentLimits.maximumPathBytes + 1)
+            )]),
+            VaultAgentIntegrationStatus(hosts: [.testStatus(
+                version: String(repeating: "v", count: VaultAgentLimits.maximumMetadataFieldBytes + 1)
+            )]),
+            VaultAgentIntegrationStatus(hosts: [
+                .testStatus(host: .codex),
+                .testStatus(host: .claude),
+                .testStatus(host: .codex)
+            ])
+        ]
+
+        for status in invalidStatuses {
+            let service = RuntimeIntegrationService(status: status)
+            let fixture = try RuntimeFixture(client: .cli, integrationService: service)
+
+            let response = try await fixture.call(.integrationStatus(host: nil))
+
+            #expect(response.connectionID == fixture.connectionID)
+            #expect(response.sequence == 1)
+            #expect(response.requestID == fixture.requestID)
+            #expect(response.body.failureCode == .brokerUnavailable)
+            #expect(fixture.audit.records.last?.result == .brokerUnavailable)
+        }
+    }
+
+    @Test("a valid-field success envelope above 32 KiB fails closed with original identifiers")
+    func oversizedSuccessEnvelopeFailsClosed() async throws {
+        let argument = String(repeating: "a", count: VaultAgentLimits.maximumCommandArgumentBytes)
+        let fixture = try RuntimeFixture(
+            client: .cli,
+            ticketCommandBuilder: { _, _, _ in Array(repeating: argument, count: 9) }
+        )
+
+        let response = try await fixture.call(.prepareExec(
+            entryID: fixture.entryID,
+            field: .password,
+            mode: .stdin
+        ))
+
+        #expect(response.connectionID == fixture.connectionID)
+        #expect(response.sequence == 1)
+        #expect(response.requestID == fixture.requestID)
+        #expect(response.body.failureCode == .brokerUnavailable)
+        #expect(fixture.audit.records.last?.result == .brokerUnavailable)
         #expect(try JSONEncoder().encode(response).count <= VaultAgentLimits.maximumResponseBytes)
     }
 
@@ -487,6 +773,102 @@ private extension VaultAgentBrokerTests {
         #expect(throws: VaultAgentPasteTargetError.self) { try tracker.resolve() }
     }
 
+    @Test("paste tracker keeps only the latest activation when inspections finish in reverse order")
+    func pasteTargetLatestActivationWins() throws {
+        let harness = PasteTargetHarness()
+        let tracker = harness.makeTracker()
+        let firstStarted = DispatchSemaphore(value: 0)
+        let releaseFirst = DispatchSemaphore(value: 0)
+        let firstFinished = DispatchSemaphore(value: 0)
+        harness.prepare(pid: 42, bundleID: "com.example.first", path: harness.targetURL)
+        harness.prepare(pid: 44, bundleID: "com.example.second", path: harness.secondTargetURL)
+        harness.snapshotWillRun = { pid in
+            guard pid == 42 else { return }
+            firstStarted.signal()
+            _ = releaseFirst.wait(timeout: .now() + 2)
+        }
+        tracker.start()
+        defer {
+            releaseFirst.signal()
+            tracker.stop()
+        }
+
+        DispatchQueue.global().async {
+            harness.notifyActivation(pid: 42)
+            firstFinished.signal()
+        }
+        #expect(firstStarted.wait(timeout: .now() + 1) == .success)
+        harness.notifyActivation(pid: 44)
+        releaseFirst.signal()
+        #expect(firstFinished.wait(timeout: .now() + 1) == .success)
+
+        #expect(try tracker.resolve().processIdentifier == 44)
+    }
+
+    @Test("paste tracker stop invalidates an inspection already in flight")
+    func pasteTargetStopInvalidatesInflightActivation() throws {
+        let harness = PasteTargetHarness()
+        let tracker = harness.makeTracker()
+        let inspectionStarted = DispatchSemaphore(value: 0)
+        let releaseInspection = DispatchSemaphore(value: 0)
+        let inspectionFinished = DispatchSemaphore(value: 0)
+        harness.prepare(pid: 42, bundleID: "com.example.first", path: harness.targetURL)
+        harness.snapshotWillRun = { pid in
+            guard pid == 42 else { return }
+            inspectionStarted.signal()
+            _ = releaseInspection.wait(timeout: .now() + 2)
+        }
+        tracker.start()
+        defer { releaseInspection.signal() }
+
+        DispatchQueue.global().async {
+            harness.notifyActivation(pid: 42)
+            inspectionFinished.signal()
+        }
+        #expect(inspectionStarted.wait(timeout: .now() + 1) == .success)
+        tracker.stop()
+        releaseInspection.signal()
+        #expect(inspectionFinished.wait(timeout: .now() + 1) == .success)
+
+        #expect(throws: VaultAgentPasteTargetError.self) { try tracker.resolve() }
+    }
+
+    @Test("a failed external activation clears the previous paste target")
+    func failedExternalActivationClearsTarget() throws {
+        let harness = PasteTargetHarness()
+        let tracker = harness.makeTracker()
+        tracker.start()
+        defer { tracker.stop() }
+        harness.activate(pid: 42, bundleID: "com.example.first", path: harness.targetURL)
+        #expect(try tracker.resolve().processIdentifier == 42)
+
+        harness.prepare(pid: 44, bundleID: "com.example.second", path: harness.secondTargetURL)
+        harness.snapshots[44] = nil
+        harness.notifyActivation(pid: 44)
+
+        #expect(throws: VaultAgentPasteTargetError.self) { try tracker.resolve() }
+    }
+
+    @Test("excluded host helper and Pastera activations preserve an external paste target")
+    func excludedActivationsPreserveTarget() throws {
+        let harness = PasteTargetHarness()
+        let tracker = harness.makeTracker()
+        tracker.start()
+        defer { tracker.stop() }
+        harness.activate(pid: 42, bundleID: "com.example.editor", path: harness.targetURL)
+
+        harness.activate(pid: 40, bundleID: "com.openai.codex", path: harness.hostURL)
+        #expect(try tracker.resolve().processIdentifier == 42)
+        harness.activate(pid: 41, bundleID: "com.pastera.helper", path: harness.helperURL)
+        #expect(try tracker.resolve().processIdentifier == 42)
+        harness.activate(
+            pid: 10,
+            bundleID: "com.pastera-app.Pastera",
+            path: URL(fileURLWithPath: "/Applications/Pastera.app/Contents/MacOS/Pastera")
+        )
+        #expect(try tracker.resolve().processIdentifier == 42)
+    }
+
     @Test("server creates private directory and socket and echoes fragmented encrypted frames")
     func privateSocketAndFragmentedRoundTrip() throws {
         let shortRoot = FileManager.default.temporaryDirectory.appendingPathComponent("pva-\(getpid())")
@@ -525,6 +907,51 @@ private extension VaultAgentBrokerTests {
 
         server.stop()
         #expect(!FileManager.default.fileExists(atPath: fixture.socketURL.path))
+    }
+
+    @Test("a pending integration probe does not block ordinary status on another broker connection")
+    func integrationProbeDoesNotBlockBroker() throws {
+        let integrationStarted = DispatchSemaphore(value: 0)
+        let releaseIntegration = DispatchSemaphore(value: 0)
+        let status = VaultAgentIntegrationStatus(hosts: [.testStatus(host: .codex)])
+        let integration = RuntimeIntegrationService(status: status)
+        integration.statusOperation = { _ in
+            integrationStarted.signal()
+            _ = releaseIntegration.wait(timeout: .now() + 5)
+            return status
+        }
+        let runtimeFixture = try RuntimeFixture(client: .cli, integrationService: integration)
+        let socketFixture = try SocketFixture()
+        let server = socketFixture.makeServer(handler: runtimeFixture.runtime)
+        try server.start()
+        defer {
+            releaseIntegration.signal()
+            server.stop()
+        }
+        let first = try socketFixture.connectAndHandshake()
+        let second = try socketFixture.connectAndHandshake()
+        defer {
+            Darwin.close(first.fileDescriptor)
+            Darwin.close(second.fileDescriptor)
+        }
+
+        try socketFixture.writeOperation(
+            .integrationStatus(host: .codex),
+            requestID: UUID(),
+            client: first
+        )
+        #expect(integrationStarted.wait(timeout: .now() + 1) == .success)
+        try socketFixture.writeOperation(.status, requestID: UUID(), client: second)
+
+        let secondResponse = try socketFixture.readOperationResponse(client: second)
+        guard case let .success(.status(responseStatus)) = secondResponse.body else {
+            Issue.record("ordinary status must complete while integration remains pending")
+            return
+        }
+        #expect(responseStatus.client == .cli)
+        releaseIntegration.signal()
+        let firstResponse = try socketFixture.readOperationResponse(client: first)
+        #expect(firstResponse.body.failureCode == nil)
     }
 
     @Test("existing files symlinks and active sockets are never removed")
@@ -767,7 +1194,7 @@ private extension VaultAgentBrokerTests {
         #expect(!FileManager.default.fileExists(atPath: originalDirectory.appendingPathComponent("broker.sock").path))
     }
 
-    @Test("source cancellation completes before managed descriptors close and are reused")
+    @Test("managed descriptors close only after source cancellation completes")
     func descriptorCloseWaitsForSourceCancellation() throws {
         let fixture = try SocketFixture()
         let recorder = SocketLifecycleRecorder()
@@ -791,9 +1218,7 @@ private extension VaultAgentBrokerTests {
         #expect(stopped.wait(timeout: .now() + 2) == .success)
         #expect(recorder.managedDescriptorCount == 2)
         #expect(recorder.allDescriptorsClosedAfterCancellation)
-        #expect(recorder.allClosedDescriptorsImmediatelyReusable)
         #expect(!FileManager.default.fileExists(atPath: fixture.socketURL.path))
-        recorder.closeReusedDescriptors()
 
         try server.start()
         let restarted = DispatchSemaphore(value: 0)
@@ -826,7 +1251,6 @@ private extension VaultAgentBrokerTests {
             let stopped = DispatchSemaphore(value: 0)
             server.stop { stopped.signal() }
             _ = stopped.wait(timeout: .now() + 2)
-            recorder.closeReusedDescriptors()
         }
         for _ in 0..<VaultAgentSocketServer.maximumConnections {
             clients.append(try fixture.connectAndHandshake())
@@ -977,6 +1401,38 @@ private final class SocketFixture {
         return try readExactly(Int(length), fileDescriptor: fileDescriptor)
     }
 
+    func writeOperation(
+        _ operation: VaultAgentOperation,
+        requestID: UUID,
+        client: (fileDescriptor: Int32, channel: VaultAgentSecureChannel)
+    ) throws {
+        let request = VaultAgentRequestEnvelope(
+            protocolVersion: VaultAgentLimits.protocolVersion,
+            connectionID: UUID(),
+            sequence: 1,
+            requestID: requestID,
+            operation: operation
+        )
+        let encrypted = try client.channel.seal(JSONEncoder().encode(request))
+        try writeFrame(
+            JSONEncoder().encode(encrypted),
+            fileDescriptor: client.fileDescriptor
+        )
+    }
+
+    func readOperationResponse(
+        client: (fileDescriptor: Int32, channel: VaultAgentSecureChannel)
+    ) throws -> VaultAgentResponseEnvelope {
+        let encrypted = try JSONDecoder().decode(
+            VaultAgentEncryptedFrame.self,
+            from: readFrame(fileDescriptor: client.fileDescriptor)
+        )
+        return try JSONDecoder().decode(
+            VaultAgentResponseEnvelope.self,
+            from: client.channel.open(encrypted)
+        )
+    }
+
     func waitForEOF(fileDescriptor: Int32) -> Bool {
         for _ in 0..<100 {
             if isEOF(fileDescriptor: fileDescriptor) { return true }
@@ -1105,19 +1561,17 @@ private final class SocketLifecycleRecorder {
     private var created: [Int32: Set<VaultAgentSocketSourceKind>] = [:]
     private var cancelled: [Int32: Set<VaultAgentSocketSourceKind>] = [:]
     private var closedAfterCancellation: [Int32: Bool] = [:]
-    private var reused: [Int32: Bool] = [:]
-    private var replacementDescriptors: [Int32] = []
+    private var invalidAfterClose: [Int32: Bool] = [:]
     private var liveConnectionDescriptors: Set<Int32> = []
     private var connectionDescriptorPeak = 0
 
     var managedDescriptorCount: Int { lock.lock(); defer { lock.unlock() }; return created.count }
     var allDescriptorsClosedAfterCancellation: Bool {
         lock.lock(); defer { lock.unlock() }
-        return closedAfterCancellation.count == created.count && closedAfterCancellation.values.allSatisfy { $0 }
-    }
-    var allClosedDescriptorsImmediatelyReusable: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return reused.count == created.count && reused.values.allSatisfy { $0 }
+        return closedAfterCancellation.count == created.count &&
+            closedAfterCancellation.values.allSatisfy { $0 } &&
+            invalidAfterClose.count == created.count &&
+            invalidAfterClose.values.allSatisfy { $0 }
     }
     var peakConnectionDescriptorCount: Int {
         lock.lock(); defer { lock.unlock() }
@@ -1139,24 +1593,14 @@ private final class SocketLifecycleRecorder {
     }
 
     func descriptorClosed(_ fileDescriptor: Int32) {
+        errno = 0
+        let descriptorState = fcntl(fileDescriptor, F_GETFD)
+        let descriptorIsClosed = descriptorState == -1 && errno == EBADF
         lock.lock()
         closedAfterCancellation[fileDescriptor] = created[fileDescriptor] == cancelled[fileDescriptor]
-        lock.unlock()
-
-        let replacement = socket(AF_UNIX, SOCK_STREAM, 0)
-        lock.lock()
-        reused[fileDescriptor] = replacement == fileDescriptor
-        if replacement >= 0 { replacementDescriptors.append(replacement) }
+        invalidAfterClose[fileDescriptor] = descriptorIsClosed
         liveConnectionDescriptors.remove(fileDescriptor)
         lock.unlock()
-    }
-
-    func closeReusedDescriptors() {
-        lock.lock()
-        let descriptors = replacementDescriptors
-        replacementDescriptors.removeAll()
-        lock.unlock()
-        descriptors.forEach { Darwin.close($0) }
     }
 }
 
@@ -1210,6 +1654,7 @@ private final class RuntimeFixture {
     let grantStore = RuntimeGrantStore()
     let vault: RuntimeVaultProbe
     let audit = RuntimeAuditProbe()
+    let integrationService: RuntimeIntegrationService
     let executor: VaultAgentSerialExecutor
     let authorizationPolicy: VaultAgentAuthorizationPolicy
     let ticketStore: VaultAgentTicketStore
@@ -1219,8 +1664,11 @@ private final class RuntimeFixture {
     init(
         client: VaultAgentClientKind,
         authorized: Bool = true,
-        cursorKey: Data = Data(repeating: 0x55, count: 32)
+        cursorKey: Data = Data(repeating: 0x55, count: 32),
+        integrationService: RuntimeIntegrationService = RuntimeIntegrationService(),
+        ticketCommandBuilder: ((VaultAgentClientKind, VaultAgentInjectionMode, String) -> [String])? = nil
     ) throws {
+        self.integrationService = integrationService
         identity = .init(
             client: client,
             helperRequirement: "identifier com.pastera.helper",
@@ -1242,7 +1690,10 @@ private final class RuntimeFixture {
         ticketStore = VaultAgentTicketStore(
             randomBytes: ticketRandom.next,
             commandBuilder: { client, mode, token in
-                VaultAgentRuntime.helperCommand(
+                if let ticketCommandBuilder {
+                    return ticketCommandBuilder(client, mode, token)
+                }
+                return VaultAgentRuntime.helperCommand(
                     applicationURL: URL(fileURLWithPath: "/Applications/Pastera.app"),
                     client: client,
                     mode: mode,
@@ -1255,7 +1706,7 @@ private final class RuntimeFixture {
             authorizationPolicy: authorizationPolicy,
             vault: vault,
             pasteTargetTracker: RuntimeTargetTracker(),
-            integrationService: RuntimeIntegrationService(),
+            integrationService: integrationService,
             rateLimiter: VaultAgentRateLimiter(),
             ticketStore: ticketStore,
             auditLogger: audit,
@@ -1398,12 +1849,15 @@ private final class RuntimeVaultProbe: PasswordVaultAgentAccess {
     private(set) var ensureReadyCount = 0
     private(set) var metadataCount = 0
     private(set) var secretCount = 0
+    private(set) var copyCount = 0
     private(set) var automationCleanupCount = 0
     private(set) var cleanupRanOnExecutor = false
     private(set) var maximumConcurrentMetadata = 0
     private(set) var metadataRanOnExecutor = false
     var observeConcurrentMetadata = false
     var metadataCallbackCount = 1
+    var secretBytes = Data("secret".utf8)
+    var copyResult: Result<Void, PasswordVaultError> = .success(())
     private let executor: VaultAgentSerialExecutor
     private var activeMetadata = 0
 
@@ -1459,7 +1913,10 @@ private final class RuntimeVaultProbe: PasswordVaultAgentAccess {
         entryID _: UUID,
         field _: VaultAgentSecretField,
         completion: @escaping (Result<Void, PasswordVaultError>) -> Void
-    ) { completion(.success(())) }
+    ) {
+        copyCount += 1
+        completion(copyResult)
+    }
 
     func agentSecret(
         entryID _: UUID,
@@ -1467,7 +1924,7 @@ private final class RuntimeVaultProbe: PasswordVaultAgentAccess {
         completion: @escaping (Result<Data, PasswordVaultError>) -> Void
     ) {
         secretCount += 1
-        completion(.success(Data("secret".utf8)))
+        completion(.success(secretBytes))
     }
 
     func disableAutomationUnlockForAgent() throws {
@@ -1482,40 +1939,105 @@ private final class RuntimeTargetTracker: VaultAgentPasteTargetTracking {
     }
 }
 
-private struct RuntimeIntegrationService: VaultAgentIntegrationServicing {
+private final class RuntimeIntegrationService: VaultAgentIntegrationServicing {
+    private let lock = NSLock()
+    private var storedStatusCallCount = 0
+    var statusResult: VaultAgentIntegrationStatus
+    var statusOperation: ((VaultAgentHostKind?) throws -> VaultAgentIntegrationStatus)?
+
+    var statusCallCount: Int {
+        lock.withLock { storedStatusCallCount }
+    }
+
+    init(status: VaultAgentIntegrationStatus? = nil) {
+        statusResult = status ?? .init(hosts: [
+            .testStatus(host: .codex),
+            .testStatus(host: .claude)
+        ])
+    }
+
     func status(host: VaultAgentHostKind?) throws -> VaultAgentIntegrationStatus {
-        .init(hosts: (host.map { [$0] } ?? [.codex, .claude]).map {
-            .init(
-                host: $0,
-                hostDetected: true,
-                hostExecutablePath: "/Applications/Host.app/Contents/MacOS/Host",
-                mcpInstalled: true,
-                skillInstalled: true,
-                installedVersion: "1",
-                authorized: true,
-                idleExpiresAt: nil,
-                hardExpiresAt: nil
-            )
-        })
+        lock.withLock { storedStatusCallCount += 1 }
+        if let statusOperation { return try statusOperation(host) }
+        guard let host else { return statusResult }
+        return .init(hosts: statusResult.hosts.filter { $0.host == host })
     }
     func install(host _: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus { .init(hosts: []) }
     func uninstall(host _: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus { .init(hosts: []) }
 }
 
 private final class RuntimeAuditProbe: VaultAgentAuditLogging {
-    struct Record { let client: VaultAgentClientKind }
+    struct Record {
+        let client: VaultAgentClientKind
+        let action: VaultAgentAuditAction
+        let entryDigest: String?
+        let result: VaultAgentErrorCode?
+        let latencyBucket: VaultAgentLatencyBucket
+        let date: Date
+    }
 
-    private(set) var records: [Record] = []
+    private let lock = NSLock()
+    private let key = SymmetricKey(data: Data(repeating: 0xA5, count: 32))
+    private var storage: [Record] = []
+
+    var records: [Record] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func digest(_ entryID: UUID) -> String {
+        Data(HMAC<SHA256>.authenticationCode(
+            for: Data(entryID.uuidString.utf8),
+            using: key
+        ))
+        .base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+    }
 
     // swiftlint:disable:next function_parameter_count
     func record(
         client: VaultAgentClientKind,
-        action _: VaultAgentAuditAction,
-        entryID _: UUID?,
-        result _: VaultAgentErrorCode?,
-        latencyBucket _: VaultAgentLatencyBucket,
-        at _: Date
-    ) { records.append(.init(client: client)) }
+        action: VaultAgentAuditAction,
+        entryID: UUID?,
+        result: VaultAgentErrorCode?,
+        latencyBucket: VaultAgentLatencyBucket,
+        at date: Date
+    ) {
+        let record = Record(
+            client: client,
+            action: action,
+            entryDigest: entryID.map(digest),
+            result: result,
+            latencyBucket: latencyBucket,
+            date: date
+        )
+        lock.lock()
+        storage.append(record)
+        lock.unlock()
+    }
+}
+
+private extension VaultAgentHostIntegrationStatus {
+    static func testStatus(
+        host: VaultAgentHostKind = .codex,
+        path: String? = "/Applications/Host.app/Contents/MacOS/Host",
+        version: String? = "1"
+    ) -> Self {
+        .init(
+            host: host,
+            hostDetected: true,
+            hostExecutablePath: path,
+            mcpInstalled: true,
+            skillInstalled: true,
+            installedVersion: version,
+            authorized: true,
+            idleExpiresAt: nil,
+            hardExpiresAt: nil
+        )
+    }
 }
 
 private final class PasteTargetHarness {
@@ -1534,6 +2056,7 @@ private final class PasteTargetHarness {
     var snapshots: [pid_t: VaultAgentProcessSnapshot] = [:]
     var signatures: [String: VaultAgentCodeSignature] = [:]
     var focusedElements: [pid_t: AXUIElement] = [:]
+    var snapshotWillRun: ((pid_t) -> Void)?
 
     func makeTracker() -> VaultAgentPasteTargetTracker {
         VaultAgentPasteTargetTracker(
@@ -1548,6 +2071,7 @@ private final class PasteTargetHarness {
             },
             runningApplication: { [weak self] pid in self?.applications[pid] },
             processInspector: PasteTargetProcessInspector { [weak self] pid in
+                self?.snapshotWillRun?(pid)
                 guard let snapshot = self?.snapshots[pid] else { throw SocketTestError.rejected }
                 return snapshot
             },
@@ -1560,6 +2084,16 @@ private final class PasteTargetHarness {
     }
 
     func activate(
+        pid: pid_t,
+        bundleID: String,
+        path: URL,
+        focus: AXUIElement? = AXUIElementCreateApplication(99)
+    ) {
+        prepare(pid: pid, bundleID: bundleID, path: path, focus: focus)
+        notifyActivation(pid: pid)
+    }
+
+    func prepare(
         pid: pid_t,
         bundleID: String,
         path: URL,
@@ -1585,6 +2119,9 @@ private final class PasteTargetHarness {
         )
         signatures[path.path] = signature
         focusedElements[pid] = focus
+    }
+
+    func notifyActivation(pid: pid_t) {
         notificationCenter.post(name: .vaultAgentPasteTargetTestActivation, object: pid)
     }
 }

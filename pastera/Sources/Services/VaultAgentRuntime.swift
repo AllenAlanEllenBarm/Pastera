@@ -75,6 +75,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
     private let vault: PasswordVaultAgentAccess
     private let pasteTargetTracker: VaultAgentPasteTargetTracking
     private let integrationService: VaultAgentIntegrationServicing
+    private let integrationWorker: DispatchQueue
     private let rateLimiter: VaultAgentRateLimiter
     private let ticketStore: VaultAgentTicketStore
     private let auditLogger: VaultAgentAuditLogging
@@ -90,6 +91,10 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         vault: PasswordVaultAgentAccess,
         pasteTargetTracker: VaultAgentPasteTargetTracking,
         integrationService: VaultAgentIntegrationServicing = UnavailableVaultAgentIntegrationService(),
+        integrationWorker: DispatchQueue = DispatchQueue(
+            label: "com.pastera.agent.integration-worker",
+            qos: .utility
+        ),
         rateLimiter: VaultAgentRateLimiter = VaultAgentRateLimiter(),
         ticketStore: VaultAgentTicketStore,
         auditLogger: VaultAgentAuditLogging,
@@ -102,6 +107,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         self.vault = vault
         self.pasteTargetTracker = pasteTargetTracker
         self.integrationService = integrationService
+        self.integrationWorker = integrationWorker
         self.rateLimiter = rateLimiter
         self.ticketStore = ticketStore
         self.auditLogger = auditLogger
@@ -121,6 +127,10 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         vault: PasswordVaultAgentAccess,
         pasteTargetTracker: VaultAgentPasteTargetTracking,
         integrationService: VaultAgentIntegrationServicing = UnavailableVaultAgentIntegrationService(),
+        integrationWorker: DispatchQueue = DispatchQueue(
+            label: "com.pastera.agent.integration-worker",
+            qos: .utility
+        ),
         rateLimiter: VaultAgentRateLimiter = VaultAgentRateLimiter(),
         auditLogger: VaultAgentAuditLogging,
         applicationURL: URL = Bundle.main.bundleURL,
@@ -140,6 +150,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
             vault: vault,
             pasteTargetTracker: pasteTargetTracker,
             integrationService: integrationService,
+            integrationWorker: integrationWorker,
             rateLimiter: rateLimiter,
             ticketStore: ticketStore,
             auditLogger: auditLogger,
@@ -215,22 +226,23 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         let finish: (VaultAgentResponseBody) -> Void = { [weak self] body in
             guard completionGate.claim() else { return }
             guard let self else {
-                completion(.success(Self.encodeFallbackFailure(.brokerUnavailable)))
+                completion(.success(Self.finalize(
+                    envelope: envelope,
+                    proposedBody: .failure(Self.failure(.brokerUnavailable))
+                ).data))
                 return
             }
+            let finalized = Self.finalize(envelope: envelope, proposedBody: body)
             let finishedAt = self.now()
             self.auditLogger.record(
                 client: identity.client,
                 action: action,
                 entryID: entryID,
-                result: body.failureCode,
+                result: finalized.body.failureCode,
                 latencyBucket: Self.latencyBucket(finishedAt.timeIntervalSince(startedAt)),
                 at: finishedAt
             )
-            completion(.success(Self.encode(
-                envelope: envelope,
-                body: body
-            )))
+            completion(.success(finalized.data))
         }
 
         do {
@@ -285,25 +297,31 @@ private extension VaultAgentRuntime {
     ) {
         switch operation {
         case .status:
-            finish(status(identity: identity))
+            status(identity: identity, finish: finish)
         case let .integrationStatus(host):
             guard identity.client == .cli else {
                 finish(.failure(Self.failure(.invalidRequest)))
                 return
             }
-            finish(resultBody { .integrationStatus(try integrationService.status(host: host)) })
+            performIntegration(finish: finish) {
+                .integrationStatus(try self.integrationService.status(host: host))
+            }
         case let .integrationInstall(host):
             guard identity.client == .cli else {
                 finish(.failure(Self.failure(.invalidRequest)))
                 return
             }
-            finish(resultBody { .integrationStatus(try integrationService.install(host: host)) })
+            performIntegration(finish: finish) {
+                .integrationStatus(try self.integrationService.install(host: host))
+            }
         case let .integrationUninstall(host):
             guard identity.client == .cli else {
                 finish(.failure(Self.failure(.invalidRequest)))
                 return
             }
-            finish(resultBody { .integrationStatus(try integrationService.uninstall(host: host)) })
+            performIntegration(finish: finish) {
+                .integrationStatus(try self.integrationService.uninstall(host: host))
+            }
         case let .search(request):
             withReady(identity: identity, category: .metadata, finish: finish) {
                 self.vault.agentMetadata { result in
@@ -442,21 +460,33 @@ private extension VaultAgentRuntime {
         }
     }
 
-    private func status(identity: VaultAgentPeerIdentity) -> VaultAgentResponseBody {
+    private func status(
+        identity: VaultAgentPeerIdentity,
+        finish: @escaping (VaultAgentResponseBody) -> Void
+    ) {
+        if identity.client == .cli {
+            finish(statusBody(identity: identity, installed: true))
+            return
+        }
+        integrationWorker.async {
+            let host: VaultAgentHostKind = identity.client == .codex ? .codex : .claude
+            let integration = try? self.integrationService.status(host: host)
+            let installed = integration?.hosts.first.map {
+                $0.mcpInstalled && $0.skillInstalled
+            } ?? false
+            finish(self.statusBody(identity: identity, installed: installed))
+        }
+    }
+
+    private func statusBody(
+        identity: VaultAgentPeerIdentity,
+        installed: Bool
+    ) -> VaultAgentResponseBody {
         let date = now()
         let decision = authorizationPolicy.decision(for: identity, at: date)
         let grant = authorizationPolicy.grantSnapshot(for: identity.client)
         let authorized: Bool
         if case .allowed = decision { authorized = true } else { authorized = false }
-        let installed: Bool
-        switch identity.client {
-        case .cli:
-            installed = true
-        case .codex, .claude:
-            let host: VaultAgentHostKind = identity.client == .codex ? .codex : .claude
-            let integration = try? integrationService.status(host: host)
-            installed = integration?.hosts.first.map { $0.mcpInstalled && $0.skillInstalled } ?? false
-        }
         return .success(.status(.init(
             client: identity.client,
             installed: installed,
@@ -466,6 +496,15 @@ private extension VaultAgentRuntime {
             hardExpiresAt: grant?.hardExpiresAt,
             protocolVersion: VaultAgentLimits.protocolVersion
         )))
+    }
+
+    private func performIntegration(
+        finish: @escaping (VaultAgentResponseBody) -> Void,
+        operation: @escaping () throws -> VaultAgentResponsePayload
+    ) {
+        integrationWorker.async {
+            finish(self.resultBody(operation))
+        }
     }
 
     private func search(
@@ -751,10 +790,24 @@ private extension VaultAgentRuntime {
         }
     }
 
-    private static func encode(
+    private static func finalize(
+        envelope: VaultAgentRequestEnvelope,
+        proposedBody: VaultAgentResponseBody
+    ) -> (data: Data, body: VaultAgentResponseBody) {
+        if let data = validatedEncoding(envelope: envelope, body: proposedBody) {
+            return (data, proposedBody)
+        }
+        let failureBody = VaultAgentResponseBody.failure(failure(.brokerUnavailable))
+        if let data = validatedEncoding(envelope: envelope, body: failureBody) {
+            return (data, failureBody)
+        }
+        return (encodeFallbackFailure(.brokerUnavailable), failureBody)
+    }
+
+    private static func validatedEncoding(
         envelope: VaultAgentRequestEnvelope,
         body: VaultAgentResponseBody
-    ) -> Data {
+    ) -> Data? {
         let response = VaultAgentResponseEnvelope(
             protocolVersion: VaultAgentLimits.protocolVersion,
             connectionID: envelope.connectionID,
@@ -762,7 +815,12 @@ private extension VaultAgentRuntime {
             requestID: envelope.requestID,
             body: body
         )
-        return (try? JSONEncoder().encode(response)) ?? encodeFallbackFailure(.brokerUnavailable)
+        guard let data = try? JSONEncoder().encode(response),
+              data.count <= VaultAgentLimits.maximumResponseBytes,
+              (try? JSONDecoder().decode(VaultAgentResponseEnvelope.self, from: data)) != nil else {
+            return nil
+        }
+        return data
     }
 
     private static func encodeFallbackFailure(_ code: VaultAgentErrorCode) -> Data {
@@ -874,11 +932,26 @@ private extension Data {
 
     init?(vaultAgentBase64URL value: String) {
         guard value.lengthOfBytes(using: .utf8) <= VaultAgentLimits.maximumCursorBytes else { return nil }
+        guard !value.isEmpty,
+              value.utf8.allSatisfy({ byte in
+                  switch byte {
+                  case 45, 48...57, 65...90, 95, 97...122:
+                      return true
+                  default:
+                      return false
+                  }
+              }) else {
+            return nil
+        }
         var base64 = value
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         let remainder = base64.utf8.count % 4
         if remainder != 0 { base64.append(String(repeating: "=", count: 4 - remainder)) }
-        self.init(base64Encoded: base64)
+        guard let decoded = Data(base64Encoded: base64),
+              decoded.vaultAgentBase64URL == value else {
+            return nil
+        }
+        self = decoded
     }
 }
