@@ -12,6 +12,9 @@ import SystemPackage
 
 @testable import PasteraAgentAdapter
 
+// Tool contract and real transport fixtures stay together to keep the Agent target isolated.
+// swiftlint:disable file_length type_body_length
+
 @Suite("Pastera MCP server", .serialized)
 struct PasteraMCPServerTests {
     @Test("MCP publishes exactly five bounded tools")
@@ -262,6 +265,58 @@ struct PasteraMCPServerTests {
             .objectValue?["code"]?.stringValue == "BROKER_UNAVAILABLE")
     }
 
+    @Test("a concurrent tool call is rejected immediately with stable VAULT_BUSY")
+    func rejectsConcurrentCallWithoutEnteringClient() async throws {
+        let requester = VaultAgentAdmissionProbe()
+        let server = PasteraMCPServer(client: requester)
+        let first = Task { await server.call(name: "vault_status", arguments: nil) }
+        await requester.waitUntilFirstRequestEntered()
+
+        let busy = await server.call(name: "vault_status", arguments: nil)
+        let busyData = try JSONEncoder().encode(try #require(busy.structuredContent))
+        let busyJSON = try #require(String(data: busyData, encoding: .utf8))
+        let error = try #require(busy.structuredContent?.objectValue?["error"]?.objectValue)
+
+        #expect(busy.isError == true)
+        #expect(error["code"]?.stringValue == "VAULT_BUSY")
+        #expect(error["retryable"]?.boolValue == true)
+        #expect(busyData.count <= VaultAgentLimits.maximumResponseBytes)
+        #expect(!busyJSON.contains("PASTERA_SECRET_SENTINEL"))
+        #expect(await requester.requestCount() == 1)
+
+        await requester.releaseFirstRequest()
+        #expect(await first.value.isError == false)
+    }
+
+    @Test("cancelled and throwing calls release the single admission slot")
+    func releasesAdmissionAfterCancellationAndThrow() async throws {
+        let cancellable = VaultAgentCancellableAdmissionProbe()
+        let cancellableServer = PasteraMCPServer(client: cancellable)
+        let cancelledCall = Task {
+            await cancellableServer.call(name: "vault_status", arguments: nil)
+        }
+        await cancellable.waitUntilFirstRequestEntered()
+        cancelledCall.cancel()
+        let cancelledResult = await cancelledCall.value
+        let afterCancellation = await cancellableServer.call(
+            name: "vault_status",
+            arguments: nil
+        )
+
+        #expect(cancelledResult.isError == true)
+        #expect(afterCancellation.isError == false)
+        #expect(await cancellable.requestCount() == 2)
+
+        let throwing = VaultAgentThrowThenSucceedProbe()
+        let throwingServer = PasteraMCPServer(client: throwing)
+        let thrownResult = await throwingServer.call(name: "vault_status", arguments: nil)
+        let afterThrow = await throwingServer.call(name: "vault_status", arguments: nil)
+
+        #expect(thrownResult.isError == true)
+        #expect(afterThrow.isError == false)
+        #expect(await throwing.requestCount() == 2)
+    }
+
     @Test("real dual pipes initialize, list, call, and stop cleanly on EOF", .timeLimit(.minutes(1)))
     func stdioLifecycleThroughRealPipes() async throws {
         let status = VaultAgentStatus(
@@ -326,6 +381,7 @@ struct PasteraMCPServerTests {
         try await withTask7Timeout { try await runTask.value }
     }
 }
+// swiftlint:enable type_body_length
 
 private actor VaultAgentRequestProbe: VaultAgentRequesting {
     private(set) var operations: [VaultAgentOperation] = []
@@ -352,6 +408,100 @@ private struct VaultAgentThrowingRequester: VaultAgentRequesting {
     func request(_ operation: VaultAgentOperation) async throws -> VaultAgentResponseBody {
         throw SentinelError(value: sentinel)
     }
+}
+
+private actor VaultAgentAdmissionProbe: VaultAgentRequesting {
+    private var requestTotal = 0
+    private var firstEnteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstRelease: CheckedContinuation<Void, Never>?
+
+    func request(_ operation: VaultAgentOperation) async throws -> VaultAgentResponseBody {
+        requestTotal += 1
+        guard requestTotal == 1 else {
+            return .success(.status(Self.readyStatus))
+        }
+        let waiters = firstEnteredWaiters
+        firstEnteredWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        await withCheckedContinuation { firstRelease = $0 }
+        return .success(.status(Self.readyStatus))
+    }
+
+    func waitUntilFirstRequestEntered() async {
+        guard requestTotal == 0 else { return }
+        await withCheckedContinuation { firstEnteredWaiters.append($0) }
+    }
+
+    func releaseFirstRequest() {
+        firstRelease?.resume()
+        firstRelease = nil
+    }
+
+    func requestCount() -> Int { requestTotal }
+
+    private static let readyStatus = VaultAgentStatus(
+        client: .codex,
+        installed: true,
+        authorized: true,
+        vaultReady: true,
+        idleExpiresAt: nil,
+        hardExpiresAt: nil,
+        protocolVersion: VaultAgentLimits.protocolVersion
+    )
+}
+
+private actor VaultAgentCancellableAdmissionProbe: VaultAgentRequesting {
+    private var requestTotal = 0
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func request(_ operation: VaultAgentOperation) async throws -> VaultAgentResponseBody {
+        requestTotal += 1
+        guard requestTotal == 1 else { return .success(.status(Self.readyStatus)) }
+        let waiters = enteredWaiters
+        enteredWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        try await Task.sleep(for: .seconds(60))
+        return .success(.status(Self.readyStatus))
+    }
+
+    func waitUntilFirstRequestEntered() async {
+        guard requestTotal == 0 else { return }
+        await withCheckedContinuation { enteredWaiters.append($0) }
+    }
+
+    func requestCount() -> Int { requestTotal }
+
+    private static let readyStatus = VaultAgentStatus(
+        client: .codex,
+        installed: true,
+        authorized: true,
+        vaultReady: true,
+        idleExpiresAt: nil,
+        hardExpiresAt: nil,
+        protocolVersion: VaultAgentLimits.protocolVersion
+    )
+}
+
+private actor VaultAgentThrowThenSucceedProbe: VaultAgentRequesting {
+    private var count = 0
+
+    func request(_ operation: VaultAgentOperation) async throws -> VaultAgentResponseBody {
+        count += 1
+        if count == 1 { throw CancellationError() }
+        return .success(.status(Self.readyStatus))
+    }
+
+    func requestCount() -> Int { count }
+
+    private static let readyStatus = VaultAgentStatus(
+        client: .codex,
+        installed: true,
+        authorized: true,
+        vaultReady: true,
+        idleExpiresAt: nil,
+        hardExpiresAt: nil,
+        protocolVersion: VaultAgentLimits.protocolVersion
+    )
 }
 
 private final class MCPDuplexPipes: @unchecked Sendable {

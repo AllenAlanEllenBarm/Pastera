@@ -45,6 +45,8 @@ enum VaultAgentConnectionRetrier {
     static let delays = [50, 100, 200, 400, 800]
 
     static func connect<Value: Sendable>(
+        deadline: UInt64? = nil,
+        now: @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         connect: @Sendable () throws -> Value,
         launch: @Sendable () throws -> Void,
         sleep: @Sendable (Int) async throws -> Void
@@ -52,28 +54,61 @@ enum VaultAgentConnectionRetrier {
         do {
             return try connect()
         } catch {
+            guard isUnavailable(error) else { throw normalized(error) }
+            try checkDeadline(deadline, now: now)
             do {
                 try launch()
             } catch {
-                throw VaultAgentClientError.unavailable
+                throw normalized(error)
             }
         }
 
         for delay in delays {
+            try checkSleepBudget(delay, deadline: deadline, now: now)
             do {
                 try await sleep(delay)
-            } catch is CancellationError {
-                throw VaultAgentClientError.cancelled
             } catch {
-                throw VaultAgentClientError.unavailable
+                throw normalized(error)
             }
+            try checkDeadline(deadline, now: now)
             do {
                 return try connect()
             } catch {
-                continue
+                guard isUnavailable(error) else { throw normalized(error) }
             }
         }
         throw VaultAgentClientError.unavailable
+    }
+
+    private static func isUnavailable(_ error: Error) -> Bool {
+        (error as? VaultAgentClientError) == .unavailable
+    }
+
+    private static func normalized(_ error: Error) -> VaultAgentClientError {
+        if error is CancellationError { return .cancelled }
+        return (error as? VaultAgentClientError) ?? .unavailable
+    }
+
+    private static func checkDeadline(
+        _ deadline: UInt64?,
+        now: @Sendable () -> UInt64
+    ) throws {
+        guard let deadline else { return }
+        guard now() < deadline else { throw VaultAgentClientError.timedOut }
+    }
+
+    private static func checkSleepBudget(
+        _ milliseconds: Int,
+        deadline: UInt64?,
+        now: @Sendable () -> UInt64
+    ) throws {
+        guard let deadline else { return }
+        let current = now()
+        guard current < deadline else { throw VaultAgentClientError.timedOut }
+        let nanoseconds = UInt64(milliseconds) * 1_000_000
+        guard nanoseconds < deadline - current else {
+            throw VaultAgentClientError.timedOut
+        }
     }
 }
 
@@ -102,7 +137,8 @@ public actor VaultAgentClient: VaultAgentRequesting {
         )
     }
 
-    private final class Connection {
+    // Establishment runs off-actor, then ownership is committed to this actor before I/O.
+    private final class Connection: @unchecked Sendable {
         let fileDescriptor: Int32
         let channel: VaultAgentClientSecureChannel
 
@@ -114,10 +150,18 @@ public actor VaultAgentClient: VaultAgentRequesting {
         deinit { Darwin.close(fileDescriptor) }
     }
 
+    private struct ConnectingState {
+        let id: UUID
+        let task: Task<Connection, Error>
+        var waiters: [UUID: CheckedContinuation<Connection, Error>]
+    }
+
     private static let requestTimeoutNanoseconds: UInt64 = 10_000_000_000
+    private static let maximumConnectionWaiters = 32
     private let client: VaultAgentClientKind
     private let dependencies: Dependencies
     private var connection: Connection?
+    private var connectingState: ConnectingState?
 
     public init(client: VaultAgentClientKind) {
         self.client = client
@@ -132,9 +176,12 @@ public actor VaultAgentClient: VaultAgentRequesting {
     public func request(_ operation: VaultAgentOperation) async throws -> VaultAgentResponseBody {
         let deadline = dependencies.now().addingReportingOverflow(Self.requestTimeoutNanoseconds)
         guard !deadline.overflow else { throw VaultAgentClientError.timedOut }
+        var requestStarted = false
         do {
             try Task.checkCancellation()
             let activeConnection = try await activeConnection(deadline: deadline.partialValue)
+            try Task.checkCancellation()
+            requestStarted = true
             let requestID = UUID()
             let sequence = try activeConnection.channel.nextOutboundSequence()
             let request = VaultAgentRequestEnvelope(
@@ -177,18 +224,26 @@ public actor VaultAgentClient: VaultAgentRequesting {
             }
             return response.body
         } catch is CancellationError {
-            connection = nil
+            if requestStarted { connection = nil }
             throw VaultAgentClientError.cancelled
         } catch let error as VaultAgentClientError {
-            connection = nil
+            if requestStarted { connection = nil }
             throw error
         } catch {
-            connection = nil
+            if requestStarted { connection = nil }
             throw VaultAgentClientError.protocolFailure
         }
     }
 
     func close() {
+        let state = connectingState
+        connectingState = nil
+        state?.task.cancel()
+        if let state {
+            for waiter in state.waiters.values {
+                waiter.resume(throwing: CancellationError())
+            }
+        }
         connection = nil
     }
 }
@@ -205,14 +260,117 @@ extension VaultAgentClient {
         if let connection { return connection }
         let dependencies = dependencies
         let client = client
+        let stateID: UUID
+        if let connectingState {
+            stateID = connectingState.id
+        } else {
+            let id = UUID()
+            let task = Task.detached {
+                try await Self.establishConnection(
+                    deadline: deadline,
+                    dependencies: dependencies,
+                    client: client
+                )
+            }
+            connectingState = ConnectingState(id: id, task: task, waiters: [:])
+            stateID = id
+            Task { [weak self] in
+                let result = await task.result
+                await self?.finishConnectingState(id: id, result: result)
+            }
+        }
+        let waiterID = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                registerConnectionWaiter(
+                    continuation,
+                    waiterID: waiterID,
+                    stateID: stateID
+                )
+            }
+        } onCancel: {
+            Task {
+                await self.cancelConnectionWaiter(waiterID: waiterID, stateID: stateID)
+            }
+        }
+    }
+
+    private func registerConnectionWaiter(
+        _ continuation: CheckedContinuation<Connection, Error>,
+        waiterID: UUID,
+        stateID: UUID
+    ) {
+        if Task.isCancelled {
+            if let state = connectingState, state.id == stateID, state.waiters.isEmpty {
+                connectingState = nil
+                state.task.cancel()
+            }
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        if let connection {
+            continuation.resume(returning: connection)
+            return
+        }
+        guard var state = connectingState, state.id == stateID else {
+            continuation.resume(throwing: VaultAgentClientError.unavailable)
+            return
+        }
+        guard state.waiters.count < Self.maximumConnectionWaiters else {
+            continuation.resume(throwing: VaultAgentClientError.unavailable)
+            return
+        }
+        state.waiters[waiterID] = continuation
+        connectingState = state
+    }
+
+    private func cancelConnectionWaiter(waiterID: UUID, stateID: UUID) {
+        guard var state = connectingState, state.id == stateID,
+              let waiter = state.waiters.removeValue(forKey: waiterID) else { return }
+        if state.waiters.isEmpty {
+            connectingState = nil
+            state.task.cancel()
+        } else {
+            connectingState = state
+        }
+        waiter.resume(throwing: CancellationError())
+    }
+
+    private func finishConnectingState(
+        id: UUID,
+        result: Result<Connection, Error>
+    ) {
+        guard let state = connectingState, state.id == id else { return }
+        connectingState = nil
+        switch result {
+        case let .success(established):
+            let activeConnection = connection ?? established
+            connection = activeConnection
+            for waiter in state.waiters.values {
+                waiter.resume(returning: activeConnection)
+            }
+        case let .failure(error):
+            for waiter in state.waiters.values {
+                waiter.resume(throwing: error)
+            }
+        }
+    }
+
+    private static func establishConnection(
+        deadline: UInt64,
+        dependencies: Dependencies,
+        client: VaultAgentClientKind
+    ) async throws -> Connection {
         let fileDescriptor: Int32 = try await VaultAgentConnectionRetrier.connect(
+            deadline: deadline,
+            now: dependencies.now,
             connect: {
                 let socketURL = try dependencies.socketURL()
                 return try dependencies.connect(socketURL, deadline)
             },
             launch: {
                 guard let executableURL = dependencies.executableURL(),
-                      let appURL = Self.containingApplication(
+                      let appURL = containingApplication(
                         executableURL: executableURL,
                         client: client
                       ) else {
@@ -223,13 +381,11 @@ extension VaultAgentClient {
             sleep: dependencies.sleep
         )
         do {
-            let established = try Self.handshake(
+            return try handshake(
                 fileDescriptor: fileDescriptor,
                 deadline: deadline,
                 dependencies: dependencies
             )
-            connection = established
-            return established
         } catch {
             Darwin.close(fileDescriptor)
             throw error
@@ -301,10 +457,27 @@ extension VaultAgentClient {
     }
 
     private static func launchApplication(_ applicationURL: URL) throws {
+        try makeApplicationLaunchProcess(applicationURL).run()
+    }
+
+    static func makeApplicationLaunchProcess(_ applicationURL: URL) -> Process {
+        makeNullRoutedProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/open"),
+            arguments: ["-gj", applicationURL.path]
+        )
+    }
+
+    static func makeNullRoutedProcess(
+        executableURL: URL,
+        arguments: [String]
+    ) -> Process {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-gj", applicationURL.path]
-        try process.run()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        return process
     }
 
     private static func randomNonce() throws -> Data {

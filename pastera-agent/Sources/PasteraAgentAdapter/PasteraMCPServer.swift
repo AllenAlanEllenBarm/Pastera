@@ -23,6 +23,8 @@ public final class PasteraMCPServer: @unchecked Sendable {
     private let client: any VaultAgentRequesting
     private let serverLock = NSLock()
     private var activeServer: Server?
+    private let admissionLock = NSLock()
+    private var requestInFlight = false
 
     public init(client: any VaultAgentRequesting) {
         self.client = client
@@ -194,6 +196,8 @@ extension PasteraMCPServer {
         } catch {
             return invalidRequest()
         }
+        guard acquireAdmission() else { return failure(Self.busyFailure) }
+        defer { releaseAdmission() }
 
         do {
             switch try await client.request(operation) {
@@ -203,6 +207,18 @@ extension PasteraMCPServer {
         } catch {
             return failure(Self.localUnavailableFailure)
         }
+    }
+
+    private func acquireAdmission() -> Bool {
+        admissionLock.withLock {
+            guard !requestInFlight else { return false }
+            requestInFlight = true
+            return true
+        }
+    }
+
+    private func releaseAdmission() {
+        admissionLock.withLock { requestInFlight = false }
     }
 
     private func parse(
@@ -420,6 +436,13 @@ extension PasteraMCPServer {
         message: "Broker is unavailable.",
         retryable: false,
         retryAfterMilliseconds: nil
+    )
+
+    private static let busyFailure = VaultAgentFailure(
+        code: .vaultBusy,
+        message: "Vault is busy.",
+        retryable: true,
+        retryAfterMilliseconds: 50
     )
 
     private static let minimumUnavailableResult = CallTool.Result(
