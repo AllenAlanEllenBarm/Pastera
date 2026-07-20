@@ -1456,13 +1456,15 @@ git commit -m "feat(agent): 增加 Codex 和 Claude MCP"
 - Create: `pasteraAgentTests/VaultCLITests.swift`
 - Create: `pasteraAgentTests/VaultAgentCommandRunnerTests.swift`
 - Create: `pasteraAgentTests/Fixtures/SecretConsumer/main.swift`
+- Modify: `pastera-agent/Sources/PasteraCodexMCP/main.swift`
+- Modify: `pastera-agent/Sources/PasteraClaudeMCP/main.swift`
 - Modify: `pastera.xcodeproj/project.pbxproj`
 - Modify: `pastera.xcodeproj/xcshareddata/xcschemes/pastera.xcscheme`
 
 **Interfaces：**
 
 - Consumes: `VaultAgentClient` 与 ticket redeem/complete。
-- Produces: 文档外部契约中的 `pastera` 命令、稳定 JSON envelope 和 `VaultAgentCommandRunner.run`。
+- Produces: 文档外部契约中的 `pastera` 命令、稳定 JSON envelope、`VaultAgentCommandRunner.run`，以及三个 Helper 共用的 `exec` 参数分派。
 
 - [ ] **Step 1：写 CLI 解析和无明文 JSON 失败测试**
 
@@ -1493,7 +1495,9 @@ Expected：FAIL，缺失 `VaultCLICommand`。
 
 - [ ] **Step 3：实现无第三方解析器的命令树**
 
-只接受外部契约列出的命令、选项和位置参数；重复参数、未知参数、limit 越界、无效 UUID、无命令分隔符 `--` 都返回 `INVALID_REQUEST`。文本结果写 stdout、诊断写 stderr；`--json` 使用稳定 envelope 和排序稳定的 `JSONEncoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]`。
+只接受外部契约列出的命令、选项和位置参数；重复参数、未知参数、limit 越界、无效 UUID、无命令分隔符 `--` 都返回 `INVALID_REQUEST`。`integration status` 的 Host 可省略，其他 install/uninstall Host 必填且只接受 `codex`/`claude`；`vault search` 默认 limit 20、范围 1...50；`exec` 必须恰有一个 ticket、一个 `--stdin` 或 `--fd 3...255`、一个分隔符 `--` 和至少一个命令参数。Codex/Claude Helper 无参数时启动 MCP，仅非空 `exec` 参数进入 Runner；人工 `pastera` 使用 `.cli` 身份并支持完整命令树。
+
+文本结果写 stdout、诊断写 stderr；`--json` 使用稳定 envelope、ISO-8601 日期和排序稳定的 `JSONEncoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]`。JSON renderer 只允许 `empty/status/search/entry/integrationStatus`，必须拒绝 `secretDelivery` 与 ticket 的意外渲染。CLI 成功退出 0、解析错误退出 2、Broker/本地执行错误退出 1；`exec` 成功完成协议后透传子进程正常退出码，被信号终止映射为 `128 + signal`。
 
 - [ ] **Step 4：先写真实 pipe 注入失败测试**
 
@@ -1516,19 +1520,23 @@ func writesSecretToInheritedFD() async throws {
 
 - [ ] **Step 5：用 `posix_spawnp` 实现命令执行**
 
-Runner 本地参数类型固定为 `enum VaultAgentCommandInput { case standardInput; case fileDescriptor(Int32) }`，并映射到票据中的 `VaultAgentInjectionMode`。禁止 `/bin/sh -c`。为 stdin/fd 创建 `pipe`，用 `posix_spawn_file_actions_adddup2` 把 read end 映射到 `STDIN_FILENO` 或 3...255 的指定 fd；子进程参数与环境不加入秘密。spawn 成功后父进程写入 UTF-8 bytes，stdin 模式追加一个换行，关闭 write end，再发送 `completeTicket`，最后 `waitpid` 并透传子进程退出码。写入或 spawn 失败不发送 complete，且始终关闭所有 fd。
+Runner 本地参数类型固定为 `enum VaultAgentCommandInput { case standardInput; case fileDescriptor(Int32) }`，并映射到票据中的 `VaultAgentInjectionMode`。禁止 `/bin/sh -c`。先兑换 ticket，再为 stdin/fd 创建 close-on-exec `pipe`，用 `posix_spawn_file_actions_adddup2` 把 read end 映射到 `STDIN_FILENO` 或 3...255 的指定 fd；子进程参数与环境不加入秘密，不创建临时文件。spawn 成功后父进程完整写入 bytes，stdin 模式追加一个换行，关闭 write end，再发送 `completeTicket`，最后用事件驱动的进程 source 触发一次 `waitpid` 并透传子进程退出码。必须处理 read end 已等于目标 fd、partial write、`EINTR`、`EPIPE`、spawn/complete/wait 失败；写入或 spawn 失败不发送 complete，但已经 spawn 的子进程仍必须终止/回收且所有 fd 只关闭一次。
+
+Runner 取消与 Helper SIGTERM 必须关闭父端 pipe、向仍存活的子进程发送 SIGTERM并最终 `waitpid` 回收；等待不得轮询或阻塞 Swift cooperative executor。`completeTicket` 只能在全部秘密字节写入并关闭 pipe 后调用；即使 complete 失败也要回收子进程，再向调用方返回稳定错误。请求级 `Data` 不进入 argv、environment、日志、JSON、错误或 tmp，并在本地作用域结束后释放。
 
 - [ ] **Step 6：运行 CLI 与命令执行测试**
 
 Run：统一命令追加 `-only-testing:pasteraAgentTests/VaultCLITests -only-testing:pasteraAgentTests/VaultAgentCommandRunnerTests`。
 
-Expected：PASS；覆盖 stdin、fd、30 秒过期、重复 ticket、spawn 失败、子进程非零退出、SIGTERM 清理，以及 argv/env/tmp 无哨兵值。
+Expected：PASS；覆盖 stdin 只追加一个换行、fd 原样写入、30 秒过期、重复 ticket、fd 3/255 边界、spawn/partial-write/complete/wait 失败、子进程非零/信号退出、取消/SIGTERM 回收，以及 argv/env/tmp/JSON/stderr 无哨兵值。真实 Runner 测试不得遗留子进程、僵尸进程或打开 fd。
 
 - [ ] **Step 7：提交 CLI 闭环**
 
 ~~~bash
 git add pastera-agent/Sources/PasteraAgentAdapter/VaultAgentCommandRunner.swift \
   pastera-agent/Sources/PasteraAgentAdapter/VaultCLI.swift pastera-agent/Sources/PasteraCLI \
+  pastera-agent/Sources/PasteraCodexMCP/main.swift \
+  pastera-agent/Sources/PasteraClaudeMCP/main.swift \
   pasteraAgentTests/VaultCLITests.swift pasteraAgentTests/VaultAgentCommandRunnerTests.swift \
   pasteraAgentTests/Fixtures/SecretConsumer pastera.xcodeproj
 git commit -m "feat(agent): 增加密码箱 CLI 和安全注入"
@@ -2051,7 +2059,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付元数据（Delivery Metadata）
 
 - Plan Path：`docs/superpowers/plans/2026-07-19-pastera-vault-cli-skill-mcp.md`
-- Plan Status：`implementation-in-progress-task-7-complete`
+- Plan Status：`implementation-in-progress-task-8-preflight`
 - Evidence Profile：`standard`
 - Story ID：未请求、未分配
 - Task IDs：未请求、未分配
@@ -2070,6 +2078,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 - Task 6 Review：实现提交为 `2a949b1`，首轮复审修复提交为 `4091c1f`，容量 gate 修复提交为 `f1f2c2d`；两轮复审依次补齐统一出站 wire 上限、paste target generation/fail-closed、integration worker 非阻塞、完整负向策略矩阵、canonical cursor，以及断连后仍限制 running + queued 的固定容量 gate。其间 `4299f86` 等 README/社区文档提交属于独立需求，不计入 Task 6 实现范围。
 - Task 7 Preflight：固定官方 `modelcontextprotocol/swift-sdk` exact `0.12.1` 与 resolved revision `a0ae212e`，并明确 MCP 依赖只进入 Adapter、两个 Helper 和 Agent tests；Client 必须复用 Task 5 固定加密 transcript，stdio production logger 为 no-op，App 拉起和请求 deadline 均有界。
 - Task 7 Review：初始提交 `d5dd02d`，并发/启动加固提交 `f6f5e4b`，取消边界提交 `d112217`，稳定性测试提交 `e7875c4`。三轮独立复审依次补齐 connect timeout/cancel 终止、共享冷启动、capacity 1/queue 0 admission、launcher 标准流隔离、最后 waiter 取消后禁止 launch/retry、连接成功后取消时 discard fd、32/33 waiter 上限，以及以 socket peer EOF 取代可复用裸 fd 号断言；最终复审为 Approved，Critical/Important/Minor 均为 0。
+- Task 8 Preflight：原文件清单只创建 Runner/CLI，却未允许 Task 6 已生成的 Codex/Claude `exec` 命令进入两个现有 Helper main；已补两个入口修改范围，并固定三个 Helper 的参数分派、JSON payload 白名单、退出码、fd 3...255、redeem→spawn→完整写入→complete→wait 顺序、事件驱动回收、取消/SIGTERM 子进程清理，以及 partial I/O/错误后无 zombie/fd 泄漏边界。该补充不新增命令、秘密返回面或 Host 权限。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
 - Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites；Task 7 经三轮加固与最终独立复审批准，focused 为 36 tests / 2 suites，Agent/协议为 45 tests / 3 suites，Broker 为 51 tests / 1 suite，Client suite 连续 10 轮共 250 tests 全通过，两个 Helper 均 `BUILD SUCCEEDED`，Codex/Claude initialize/list/call/EOF/SIGTERM smoke 均 exit 0、stderr 0；strict SwiftLint、范围化 `git diff --check`、`plutil` 与 `xmllint` 均通过。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder、Thread Performance Checker 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：真实 Developer ID/ad-hoc Helper 身份、Host 父进程链、安装态默认 socket 路径、目标命令泄漏和 MCP SDK 1.0 前兼容性仍待 Task 11/12 实机验收，均已映射到验收与回滚。
