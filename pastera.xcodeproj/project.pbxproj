@@ -60,6 +60,9 @@
 		A6B000000000000000000002 /* PasteraClaudeMCP in Embed Agent Helpers */ = {isa = PBXBuildFile; fileRef = A67000000000000000000021 /* PasteraClaudeMCP */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		A6B000000000000000000003 /* pastera in Embed Agent Helpers */ = {isa = PBXBuildFile; fileRef = A6800000000000000000000D /* pastera */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		A6B000000000000000000004 /* pastera-vault in Resources */ = {isa = PBXBuildFile; fileRef = A6B000000000000000000005 /* pastera-vault */; };
+		A6C000000000000000000001 /* VaultAgentLeakRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C000000000000000000002 /* VaultAgentLeakRegressionTests.swift */; };
+		A6C000000000000000000003 /* VaultAgentPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C000000000000000000004 /* VaultAgentPerformanceTests.swift */; };
+		A6D000000000000000000001 /* PasteraEventDrivenStdioTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D000000000000000000002 /* PasteraEventDrivenStdioTransport.swift */; };
 		C5A900002FD0A10000B7C0DE /* CPYWindowAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900012FD0A10000B7C0DE /* CPYWindowAppearance.swift */; };
 		C5A900022FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */; };
 		C5A900042FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */; };
@@ -462,6 +465,9 @@
 		A6A000000000000000000002 /* AgentIntegrationPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentIntegrationPreferenceTests.swift; sourceTree = "<group>"; };
 		A6A000000000000000000004 /* CPYAgentIntegrationPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYAgentIntegrationPreferenceViewController.swift; sourceTree = "<group>"; };
 		A6B000000000000000000005 /* pastera-vault */ = {isa = PBXFileReference; lastKnownFileType = folder; path = integrations/pastera-vault; sourceTree = SOURCE_ROOT; };
+		A6C000000000000000000002 /* VaultAgentLeakRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentLeakRegressionTests.swift; sourceTree = "<group>"; };
+		A6C000000000000000000004 /* VaultAgentPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentPerformanceTests.swift; sourceTree = "<group>"; };
+		A6D000000000000000000002 /* PasteraEventDrivenStdioTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraEventDrivenStdioTransport.swift; sourceTree = "<group>"; };
 		A6800000000000000000000D /* pastera */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = pastera; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6800000000000000000000E /* PasteraSecretConsumerFixture */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = PasteraSecretConsumerFixture; sourceTree = BUILT_PRODUCTS_DIR; };
 		A62000000000000000000009 /* VaultAgentGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGrantStore.swift; sourceTree = "<group>"; };
@@ -923,6 +929,8 @@
 		FAC43DDB1B35D8B100C06102 /* pasteraTests */ = {
 			isa = PBXGroup;
 			children = (
+				A6C000000000000000000002 /* VaultAgentLeakRegressionTests.swift */,
+				A6C000000000000000000004 /* VaultAgentPerformanceTests.swift */,
 				A6A000000000000000000002 /* AgentIntegrationPreferenceTests.swift */,
 				A69000000000000000000002 /* VaultAgentIntegrationInstallerTests.swift */,
 				A65000000000000000000002 /* VaultAgentPeerVerifierTests.swift */,
@@ -1022,6 +1030,7 @@
 		A67000000000000000000022 /* PasteraAgentAdapter */ = {
 			isa = PBXGroup;
 			children = (
+				A6D000000000000000000002 /* PasteraEventDrivenStdioTransport.swift */,
 				A68000000000000000000004 /* VaultCLI.swift */,
 				A68000000000000000000008 /* VaultAgentCommandRunner.swift */,
 				A67000000000000000000006 /* VaultAgentClient.swift */,
@@ -1385,6 +1394,7 @@
 		A67000000000000000000025 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A6D000000000000000000001 /* PasteraEventDrivenStdioTransport.swift in Sources */,
 				A68000000000000000000003 /* VaultCLI.swift in Sources */,
 				A68000000000000000000007 /* VaultAgentCommandRunner.swift in Sources */,
 				A67000000000000000000005 /* VaultAgentClient.swift in Sources */,
@@ -1547,6 +1557,8 @@
 		FAC43DD41B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				A6C000000000000000000001 /* VaultAgentLeakRegressionTests.swift in Sources */,
+				A6C000000000000000000003 /* VaultAgentPerformanceTests.swift in Sources */,
 				A6A000000000000000000001 /* AgentIntegrationPreferenceTests.swift in Sources */,
 				A69000000000000000000001 /* VaultAgentIntegrationInstallerTests.swift in Sources */,
 				A65000000000000000000001 /* VaultAgentPeerVerifierTests.swift in Sources */,

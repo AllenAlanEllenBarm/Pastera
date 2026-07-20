@@ -6,7 +6,13 @@ import PasteraAgentProtocol
 // This file keeps the pipe, process and cancellation state machine together for auditability.
 // swiftlint:disable file_length
 
-public enum VaultAgentCommandRunnerError: Error, Equatable, Sendable {
+public enum VaultAgentCommandRunnerError:
+    Error,
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    LocalizedError {
     case broker(VaultAgentFailure)
     case invalidResponse
     case spawnFailed
@@ -14,6 +20,22 @@ public enum VaultAgentCommandRunnerError: Error, Equatable, Sendable {
     case waitFailed
     case transportFailure
     case cancelled
+
+    public var description: String { stableDescription }
+    public var debugDescription: String { stableDescription }
+    public var errorDescription: String? { stableDescription }
+
+    private var stableDescription: String {
+        switch self {
+        case let .broker(failure): "broker(\(failure.code.rawValue))"
+        case .invalidResponse: "invalidResponse"
+        case .spawnFailed: "spawnFailed"
+        case .writeFailed: "writeFailed"
+        case .waitFailed: "waitFailed"
+        case .transportFailure: "transportFailure"
+        case .cancelled: "cancelled"
+        }
+    }
 }
 
 public struct VaultAgentCommandRunner: Sendable {

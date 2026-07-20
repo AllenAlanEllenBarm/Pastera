@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import MCP
+import OSLog
 import PasteraAgentProtocol
 import Testing
 
@@ -234,6 +235,22 @@ struct PasteraMCPServerTests {
     @Test("oversized or local failures collapse to a bounded secret-free result")
     func boundsAndSanitizesFailures() async throws {
         let sentinel = "PASTERA_SECRET_SENTINEL_7C89"
+        let short = await PasteraMCPServer(
+            client: VaultAgentRequestProbe(responses: [
+                .failure(.init(
+                    code: .grantExpired,
+                    message: sentinel,
+                    retryable: false,
+                    retryAfterMilliseconds: nil
+                ))
+            ])
+        ).call(name: "vault_status", arguments: nil)
+        let shortData = try JSONEncoder().encode(try #require(short.structuredContent))
+
+        #expect(!shortData.contains(Data(sentinel.utf8)))
+        #expect(short.structuredContent?.objectValue?["error"]?
+            .objectValue?["message"]?.stringValue == "Authorization has expired.")
+
         let oversizedRequester = VaultAgentRequestProbe(responses: [
             .failure(.init(
                 code: .vaultBusy,
@@ -248,21 +265,53 @@ struct PasteraMCPServerTests {
         )
         let oversizedData = try JSONEncoder().encode(try #require(oversized.structuredContent))
         let oversizedJSON = try #require(String(data: oversizedData, encoding: .utf8))
+        let oversizedContent = try JSONEncoder().encode(oversized.content)
 
         #expect(oversizedData.count <= VaultAgentLimits.maximumResponseBytes)
         #expect(!oversizedJSON.contains(sentinel))
+        #expect(!oversizedContent.contains(Data(sentinel.utf8)))
         #expect(oversized.structuredContent?.objectValue?["error"]?
-            .objectValue?["code"]?.stringValue == "BROKER_UNAVAILABLE")
+            .objectValue?["code"]?.stringValue == "VAULT_BUSY")
+        #expect(oversized.structuredContent?.objectValue?["error"]?
+            .objectValue?["message"]?.stringValue == "The vault is busy.")
 
         let local = await PasteraMCPServer(
             client: VaultAgentThrowingRequester(sentinel: sentinel)
         ).call(name: "vault_status", arguments: nil)
         let localData = try JSONEncoder().encode(try #require(local.structuredContent))
         let localJSON = try #require(String(data: localData, encoding: .utf8))
+        let localContent = try JSONEncoder().encode(local.content)
 
         #expect(!localJSON.contains(sentinel))
+        #expect(!localContent.contains(Data(sentinel.utf8)))
         #expect(local.structuredContent?.objectValue?["error"]?
             .objectValue?["code"]?.stringValue == "BROKER_UNAVAILABLE")
+    }
+
+    @Test("secret-bearing failures stay absent from captured unified logs")
+    func failuresStayOutOfUnifiedLogs() async throws {
+        let store = try OSLogStore(scope: .currentProcessIdentifier)
+        let start = store.position(date: Date())
+        let sentinel = "PASTERA-OSLOG-\(UUID().uuidString)"
+        _ = await PasteraMCPServer(
+            client: VaultAgentThrowingRequester(sentinel: sentinel)
+        ).call(name: "vault_status", arguments: nil)
+
+        let marker = "PasteraLogCapture-\(UUID().uuidString)"
+        Logger(subsystem: "com.pastera-app.tests", category: "vault-agent")
+            .notice("\(marker, privacy: .public)")
+
+        var messages = [String]()
+        for _ in 0..<20 {
+            try await Task.sleep(for: .milliseconds(50))
+            messages = try store.getEntries(at: start).compactMap {
+                ($0 as? OSLogEntryLog)?.composedMessage
+            }
+            if messages.contains(where: { $0.contains(marker) }) { break }
+        }
+
+        #expect(messages.contains(where: { $0.contains(marker) }))
+        #expect(messages.allSatisfy { !$0.contains(sentinel) })
     }
 
     @Test("a concurrent tool call is rejected immediately with stable VAULT_BUSY")
@@ -379,6 +428,149 @@ struct PasteraMCPServerTests {
         try await Task.sleep(for: .milliseconds(50))
         await server.stop()
         try await withTask7Timeout { try await runTask.value }
+    }
+
+    @Test("event-driven stdio performs no reads while input is idle")
+    func eventDrivenStdioDoesNotPoll() async throws {
+        var inputPipe = [Int32](repeating: -1, count: 2)
+        var outputPipe = [Int32](repeating: -1, count: 2)
+        guard Darwin.pipe(&inputPipe) == 0, Darwin.pipe(&outputPipe) == 0 else {
+            throw POSIXError(.EMFILE)
+        }
+        defer {
+            (inputPipe + outputPipe).forEach { Darwin.close($0) }
+        }
+        let readCounter = StdioReadCounter()
+        let transport = PasteraEventDrivenStdioTransport(
+            inputFileDescriptor: inputPipe[0],
+            outputFileDescriptor: outputPipe[1],
+            readObserver: { readCounter.increment() }
+        )
+
+        try await transport.connect()
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(readCounter.value == 0)
+
+        let message = Array("{}\n".utf8)
+        #expect(Darwin.write(inputPipe[1], message, message.count) == message.count)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(readCounter.value >= 1)
+        await transport.disconnect()
+    }
+
+    @Test("closed Host output returns EPIPE without terminating the Helper")
+    func closedOutputDoesNotRaiseSIGPIPE() async throws {
+        var inputPipe = [Int32](repeating: -1, count: 2)
+        var outputPipe = [Int32](repeating: -1, count: 2)
+        guard Darwin.pipe(&inputPipe) == 0, Darwin.pipe(&outputPipe) == 0 else {
+            throw POSIXError(.EMFILE)
+        }
+        defer {
+            inputPipe.filter { $0 >= 0 }.forEach { Darwin.close($0) }
+            outputPipe.filter { $0 >= 0 }.forEach { Darwin.close($0) }
+        }
+        Darwin.close(outputPipe[0])
+        outputPipe[0] = -1
+        let transport = PasteraEventDrivenStdioTransport(
+            inputFileDescriptor: inputPipe[0],
+            outputFileDescriptor: outputPipe[1]
+        )
+
+        try await transport.connect()
+        do {
+            try await transport.send(Data("{}".utf8))
+            Issue.record("Expected EPIPE from a closed Host output pipe")
+        } catch let error as POSIXError {
+            #expect(error.code == .EPIPE)
+        }
+        await transport.disconnect()
+    }
+
+    @Test(
+        "input and output buffering fail closed at eight pending messages",
+        .timeLimit(.minutes(1))
+    )
+    func stdioBufferingIsBounded() async throws {
+        try await verifyBoundedInputBuffer()
+        try await verifyBoundedOutputBuffer()
+    }
+
+    private func verifyBoundedInputBuffer() async throws {
+        var inputPipe = [Int32](repeating: -1, count: 2)
+        var outputPipe = [Int32](repeating: -1, count: 2)
+        guard Darwin.pipe(&inputPipe) == 0, Darwin.pipe(&outputPipe) == 0 else {
+            throw POSIXError(.EMFILE)
+        }
+        defer { (inputPipe + outputPipe).forEach { Darwin.close($0) } }
+        let transport = PasteraEventDrivenStdioTransport(
+            inputFileDescriptor: inputPipe[0],
+            outputFileDescriptor: outputPipe[1]
+        )
+        let stream = await transport.receive()
+        try await transport.connect()
+        let batch = Data(String(repeating: "{}\n", count: 9).utf8)
+        let written = batch.withUnsafeBytes {
+            Darwin.write(inputPipe[1], $0.baseAddress, $0.count)
+        }
+        #expect(written == batch.count)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let outcome = try await withTask7Timeout {
+            var received = 0
+            var terminalCode: POSIXErrorCode?
+            do {
+                for try await _ in stream { received += 1 }
+            } catch let error as POSIXError {
+                terminalCode = error.code
+            }
+            return StdioInputOutcome(received: received, terminalCode: terminalCode)
+        }
+        #expect(outcome.received == 8)
+        #expect(outcome.terminalCode == .ENOBUFS)
+        await transport.disconnect()
+    }
+
+    private func verifyBoundedOutputBuffer() async throws {
+        var inputPipe = [Int32](repeating: -1, count: 2)
+        var outputPipe = [Int32](repeating: -1, count: 2)
+        guard Darwin.pipe(&inputPipe) == 0, Darwin.pipe(&outputPipe) == 0 else {
+            throw POSIXError(.EMFILE)
+        }
+        defer { (inputPipe + outputPipe).forEach { Darwin.close($0) } }
+        let flags = Darwin.fcntl(outputPipe[1], F_GETFL)
+        #expect(flags >= 0)
+        #expect(Darwin.fcntl(outputPipe[1], F_SETFL, flags | O_NONBLOCK) == 0)
+        let filler = [UInt8](repeating: 0x61, count: 4_096)
+        while filler.withUnsafeBytes({
+            Darwin.write(outputPipe[1], $0.baseAddress, $0.count)
+        }) > 0 {}
+        #expect(errno == EAGAIN || errno == EWOULDBLOCK)
+
+        let transport = PasteraEventDrivenStdioTransport(
+            inputFileDescriptor: inputPipe[0],
+            outputFileDescriptor: outputPipe[1]
+        )
+        try await transport.connect()
+        let tasks = (0..<9).map { _ in
+            Task { () -> POSIXErrorCode? in
+                do {
+                    try await transport.send(Data("{}".utf8))
+                    return nil
+                } catch let error as POSIXError {
+                    return error.code
+                } catch {
+                    return .EIO
+                }
+            }
+        }
+        let codes = try await withTask7Timeout {
+            var values = [POSIXErrorCode?]()
+            for task in tasks { values.append(await task.value) }
+            return values
+        }
+        #expect(codes.count == 9)
+        #expect(codes.allSatisfy { $0 == .ENOBUFS })
+        await transport.disconnect()
     }
 }
 // swiftlint:enable type_body_length
@@ -549,6 +741,22 @@ private final class MCPDuplexPipes: @unchecked Sendable {
 }
 
 private enum Task7TimeoutError: Error { case elapsed }
+
+private struct StdioInputOutcome: Sendable {
+    let received: Int
+    let terminalCode: POSIXErrorCode?
+}
+
+private final class StdioReadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    func increment() {
+        lock.withLock { count += 1 }
+    }
+}
 
 private func withTask7Timeout<Value: Sendable>(
     _ operation: @escaping @Sendable () async throws -> Value

@@ -223,7 +223,7 @@ public enum VaultCLIJSONRenderer {
         switch response {
         case let .failure(failure):
             prefix = #"{"ok":false,"error":"#
-            encodedValue = try encoder.encode(failure)
+            encodedValue = try encoder.encode(failure.agentSafeOutput)
         case let .success(payload):
             prefix = #"{"ok":true,"data":"#
             switch payload {
@@ -377,7 +377,7 @@ public struct VaultCLIApplication: Sendable {
             if json {
                 return .init(
                     exitCode: 1,
-                    stdout: try VaultCLIJSONRenderer.render(response) + "\n",
+                    stdout: try VaultCLIJSONRenderer.render(.failure(failure.agentSafeOutput)) + "\n",
                     stderr: ""
                 )
             }

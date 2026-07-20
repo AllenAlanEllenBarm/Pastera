@@ -83,21 +83,24 @@ struct VaultCLITests {
 
     @Test("JSON failure uses one stable compact envelope")
     func rendersStableFailureEnvelope() throws {
+        let sentinel = "PASTERA-RENDERER-\(UUID().uuidString)"
         let withoutRetry = try VaultCLIJSONRenderer.render(.failure(.init(
             code: .grantExpired,
-            message: "授权已过期。",
+            message: sentinel,
             retryable: false,
             retryAfterMilliseconds: nil
         )))
         let withRetry = try VaultCLIJSONRenderer.render(.failure(.init(
             code: .rateLimited,
-            message: "请稍后重试。",
+            message: sentinel,
             retryable: true,
             retryAfterMilliseconds: 250
         )))
 
-        #expect(withoutRetry == #"{"ok":false,"error":{"code":"GRANT_EXPIRED","message":"授权已过期。","retryable":false}}"#)
-        #expect(withRetry == #"{"ok":false,"error":{"code":"RATE_LIMITED","message":"请稍后重试。","retry_after_ms":250,"retryable":true}}"#)
+        #expect(withoutRetry == #"{"ok":false,"error":{"code":"GRANT_EXPIRED","message":"Authorization has expired.","retryable":false}}"#)
+        #expect(withRetry == #"{"ok":false,"error":{"code":"RATE_LIMITED","message":"Too many requests.","retry_after_ms":250,"retryable":true}}"#)
+        #expect(!withoutRetry.contains(sentinel))
+        #expect(!withRetry.contains(sentinel))
     }
 
     @Test("JSON success is stable uses ISO dates and omits protocol tags")
@@ -215,11 +218,12 @@ struct VaultCLITests {
         ])
     }
 
-    @Test("application emits exactly one JSON line for stable Broker failure")
+    @Test("application emits one stable secret-free JSON failure line")
     func applicationRendersJSONFailureLine() async {
+        let sentinel = "PASTERA-CLI-\(UUID().uuidString)"
         let client = VaultCLIClientProbe(responses: [.failure(.init(
             code: .grantExpired,
-            message: "授权已过期。",
+            message: sentinel,
             retryable: false,
             retryAfterMilliseconds: nil
         ))])
@@ -228,7 +232,8 @@ struct VaultCLITests {
             .run(arguments: ["vault", "status", "--json"])
 
         #expect(result.exitCode == 1)
-        #expect(result.stdout == #"{"ok":false,"error":{"code":"GRANT_EXPIRED","message":"授权已过期。","retryable":false}}"# + "\n")
+        #expect(result.stdout == #"{"ok":false,"error":{"code":"GRANT_EXPIRED","message":"Authorization has expired.","retryable":false}}"# + "\n")
+        #expect(!result.stdout.contains(sentinel))
         #expect(result.stderr.isEmpty)
         #expect(result.stdout.filter { $0 == "\n" }.count == 1)
     }

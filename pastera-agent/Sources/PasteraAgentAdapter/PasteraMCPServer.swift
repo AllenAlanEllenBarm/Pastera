@@ -163,10 +163,9 @@ public extension PasteraMCPServer {
             await call(name: parameters.name, arguments: parameters.arguments)
         }
         serverLock.withLock { activeServer = server }
-        let transport = StdioTransport(
-            input: FileDescriptor(rawValue: inputFileDescriptor),
-            output: FileDescriptor(rawValue: outputFileDescriptor),
-            logger: nil
+        let transport = PasteraEventDrivenStdioTransport(
+            inputFileDescriptor: inputFileDescriptor,
+            outputFileDescriptor: outputFileDescriptor
         )
         do {
             try await server.start(transport: transport)
@@ -313,12 +312,13 @@ extension PasteraMCPServer {
     }
 
     private func failure(_ failure: VaultAgentFailure) -> CallTool.Result {
+        let safeFailure = failure.agentSafeOutput
         var error: [String: Value] = [
-            "code": .string(failure.code.rawValue),
-            "message": .string(failure.message),
-            "retryable": .bool(failure.retryable)
+            "code": .string(safeFailure.code.rawValue),
+            "message": .string(safeFailure.message),
+            "retryable": .bool(safeFailure.retryable)
         ]
-        if let retryAfter = failure.retryAfterMilliseconds {
+        if let retryAfter = safeFailure.retryAfterMilliseconds {
             error["retry_after_ms"] = .int(retryAfter)
         }
         return boundedResult(
@@ -457,6 +457,38 @@ extension PasteraMCPServer {
         ],
         isError: true
     )
+}
+
+extension VaultAgentFailure {
+    var agentSafeOutput: VaultAgentFailure {
+        VaultAgentFailure(
+            code: code,
+            message: code.agentSafeMessage,
+            retryable: retryable,
+            retryAfterMilliseconds: retryAfterMilliseconds
+        )
+    }
+}
+
+private extension VaultAgentErrorCode {
+    var agentSafeMessage: String {
+        switch self {
+        case .authorizationRequired: "Authorization is required."
+        case .grantExpired: "Authorization has expired."
+        case .grantRevoked: "Authorization was revoked."
+        case .vaultNotConfigured: "The vault is not configured."
+        case .automationUnlockUnavailable: "Automatic unlock is unavailable."
+        case .brokerUnavailable: "Pastera is unavailable."
+        case .vaultBusy: "The vault is busy."
+        case .rateLimited: "Too many requests."
+        case .entryNotFound: "The entry was not found."
+        case .targetUnavailable: "The paste target is unavailable."
+        case .ticketExpired: "The ticket has expired."
+        case .ticketUsed: "The ticket was already used."
+        case .protocolMismatch: "The protocol version is unsupported."
+        case .invalidRequest: "The request is invalid."
+        }
+    }
 }
 
 private extension PasteraMCPServer {

@@ -1172,6 +1172,8 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
     private let now: () -> Date
     private let preferenceNotificationCenter: NotificationCenter
     private let cursorKey: Data
+    private let metadataRevisionLock = NSLock()
+    private var metadataRevisionCache: VaultAgentMetadataRevisionCache?
     private weak var interactiveSensitiveUseSource: VaultAgentSensitiveUseObserving?
     private var interactiveSensitiveUseObserverID: UUID?
     private var lastValidGrantCount: Int?
@@ -1768,7 +1770,7 @@ private extension VaultAgentRuntime {
         let folderNames = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
         let rawQuery = request.query ?? ""
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let revision = try Self.metadataRevision(folders: folders, entries: entries)
+        let revision = try metadataRevision(folders: folders, entries: entries)
         let offset: Int
         if let cursor = request.cursor {
             offset = try decodeCursor(
@@ -1883,15 +1885,15 @@ private extension VaultAgentRuntime {
         return payload.offset
     }
 
-    private static func metadataRevision(
+    private func metadataRevision(
         folders: [PasswordVaultFolder],
         entries: [PasswordVaultEntry]
     ) throws -> Data {
         let snapshot = VaultAgentMetadataRevision(
-            folders: folders.sorted { $0.id.uuidString < $1.id.uuidString }.map {
+            folders: folders.map {
                 .init(id: $0.id, name: $0.name, updatedAt: $0.updatedAt)
             },
-            entries: entries.sorted { $0.id.uuidString < $1.id.uuidString }.map {
+            entries: entries.map {
                 .init(
                     id: $0.id,
                     folderID: $0.folderID,
@@ -1902,7 +1904,18 @@ private extension VaultAgentRuntime {
                 )
             }
         )
-        return Data(SHA256.hash(data: try cursorEncoder.encode(snapshot)))
+        return try metadataRevisionLock.withLock {
+            if let cache = metadataRevisionCache, cache.snapshot == snapshot {
+                return cache.revision
+            }
+            let canonical = VaultAgentMetadataRevision(
+                folders: snapshot.folders.sorted { $0.id.uuidString < $1.id.uuidString },
+                entries: snapshot.entries.sorted { $0.id.uuidString < $1.id.uuidString }
+            )
+            let revision = Data(SHA256.hash(data: try Self.cursorEncoder.encode(canonical)))
+            metadataRevisionCache = .init(snapshot: snapshot, revision: revision)
+            return revision
+        }
     }
 
     private static func fitsMaximumResponse(_ payload: VaultAgentResponsePayload) -> Bool {
@@ -2415,14 +2428,14 @@ private struct VaultAgentCursorContainer: Codable {
     let signature: Data
 }
 
-private struct VaultAgentMetadataRevision: Codable {
-    struct Folder: Codable {
+private struct VaultAgentMetadataRevision: Codable, Equatable {
+    struct Folder: Codable, Equatable {
         let id: UUID
         let name: String
         let updatedAt: Date
     }
 
-    struct Entry: Codable {
+    struct Entry: Codable, Equatable {
         let id: UUID
         let folderID: UUID
         let title: String
@@ -2433,6 +2446,11 @@ private struct VaultAgentMetadataRevision: Codable {
 
     let folders: [Folder]
     let entries: [Entry]
+}
+
+private struct VaultAgentMetadataRevisionCache {
+    let snapshot: VaultAgentMetadataRevision
+    let revision: Data
 }
 
 private extension Data {

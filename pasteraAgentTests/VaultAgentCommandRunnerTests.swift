@@ -13,6 +13,24 @@ import Testing
 struct VaultAgentCommandRunnerTests {
     private let sentinel = Data("PASTERA_TASK8_SECRET_SENTINEL".utf8)
 
+    @Test("runner error descriptions never expose Broker message details")
+    func errorDescriptionsAreSecretFree() throws {
+        let text = try #require(String(bytes: sentinel, encoding: .utf8))
+        let failure = VaultAgentFailure(
+            code: .brokerUnavailable,
+            message: text,
+            retryable: false,
+            retryAfterMilliseconds: nil
+        )
+        let descriptions = [
+            String(describing: VaultAgentCommandRunnerError.broker(failure)),
+            String(reflecting: VaultAgentCommandRunnerError.broker(failure)),
+            VaultAgentCommandRunnerError.broker(failure).localizedDescription
+        ]
+
+        #expect(descriptions.allSatisfy { !$0.contains(text) })
+    }
+
     @Test("stdin appends exactly one newline and fd passes bytes unchanged", arguments: [3, 255])
     func writesExactSecretBytes(targetFD: Int32) async throws {
         let stdinProbe = VaultRunnerClientProbe(secret: sentinel)
