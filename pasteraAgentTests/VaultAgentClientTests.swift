@@ -216,7 +216,7 @@ struct VaultAgentClientTests {
 
     @Test("cancelling a blocked connect prevents launch and every retry side effect")
     func cancelledBlockedConnectHasNoSideEffects() async throws {
-        let probe = try VaultAgentBlockingUnavailableProbe()
+        let probe = VaultAgentBlockingUnavailableProbe()
         let task = Task {
             try await VaultAgentConnectionRetrier.connect(
                 connect: { try probe.connect() },
@@ -236,8 +236,43 @@ struct VaultAgentClientTests {
         #expect(snapshot.connectCount == 1)
         #expect(snapshot.launchCount == 0)
         #expect(snapshot.delays.isEmpty)
-        #expect(fcntl(snapshot.descriptor, F_GETFD) == -1)
-        #expect(errno == EBADF)
+    }
+
+    @Test("a cancelled successful connect is discarded exactly once and closes its peer")
+    func cancelledSuccessfulConnectDiscardsDescriptor() async throws {
+        let socket = try VaultAgentSocketPair()
+        let clientDescriptor = socket.takeClientDescriptor()
+        let serverDescriptor = socket.takeServerDescriptor()
+        defer { Darwin.close(serverDescriptor) }
+        let flags = fcntl(serverDescriptor, F_GETFL)
+        guard flags >= 0,
+              fcntl(serverDescriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            throw POSIXError(.EINVAL)
+        }
+        let probe = VaultAgentBlockingSuccessfulProbe(descriptor: clientDescriptor)
+        let task = Task {
+            try await VaultAgentConnectionRetrier.connect(
+                connect: { probe.connect() },
+                launch: { probe.launch() },
+                sleep: { probe.sleepIgnoringCancellation(milliseconds: $0) },
+                discard: { probe.discard($0) }
+            )
+        }
+        await probe.waitUntilConnectEntered()
+
+        task.cancel()
+        probe.releaseConnect()
+
+        await #expect(throws: VaultAgentClientError.cancelled) {
+            try await task.value
+        }
+        let snapshot = probe.snapshot()
+        #expect(snapshot.connectCount == 1)
+        #expect(snapshot.discardCount == 1)
+        #expect(snapshot.launchCount == 0)
+        #expect(snapshot.delays.isEmpty)
+        var byte: UInt8 = 0
+        #expect(Darwin.read(serverDescriptor, &byte, 1) == 0)
     }
 
     @Test("client launches only its containing Pastera app and keeps retries bounded")
@@ -905,7 +940,6 @@ private final class VaultAgentBlockingUnavailableProbe: @unchecked Sendable {
         let connectCount: Int
         let launchCount: Int
         let delays: [Int]
-        let descriptor: Int32
     }
 
     private let lock = NSLock()
@@ -915,18 +949,6 @@ private final class VaultAgentBlockingUnavailableProbe: @unchecked Sendable {
     private var connectCount = 0
     private var launchCount = 0
     private var delays: [Int] = []
-    private let descriptor: Int32
-    private var descriptorClosed = false
-
-    init() throws {
-        descriptor = Darwin.open("/dev/null", O_RDONLY)
-        guard descriptor >= 0 else { throw POSIXError(.EMFILE) }
-    }
-
-    deinit {
-        let shouldClose = lock.withLock { !descriptorClosed }
-        if shouldClose { Darwin.close(descriptor) }
-    }
 
     func connect() throws -> Int {
         let state = lock.withLock { () -> (Bool, [CheckedContinuation<Void, Never>]) in
@@ -937,11 +959,7 @@ private final class VaultAgentBlockingUnavailableProbe: @unchecked Sendable {
             return (true, enteredWaiters)
         }
         for waiter in state.1 { waiter.resume() }
-        if state.0 {
-            releaseSemaphore.wait()
-            Darwin.close(descriptor)
-            lock.withLock { descriptorClosed = true }
-        }
+        if state.0 { releaseSemaphore.wait() }
         throw VaultAgentClientError.unavailable
     }
 
@@ -969,8 +987,75 @@ private final class VaultAgentBlockingUnavailableProbe: @unchecked Sendable {
             Snapshot(
                 connectCount: connectCount,
                 launchCount: launchCount,
-                delays: delays,
-                descriptor: descriptor
+                delays: delays
+            )
+        }
+    }
+}
+
+private final class VaultAgentBlockingSuccessfulProbe: @unchecked Sendable {
+    struct Snapshot {
+        let connectCount: Int
+        let discardCount: Int
+        let launchCount: Int
+        let delays: [Int]
+    }
+
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private let descriptor: Int32
+    private var entered = false
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var connectCount = 0
+    private var discardCount = 0
+    private var launchCount = 0
+    private var delays: [Int] = []
+
+    init(descriptor: Int32) { self.descriptor = descriptor }
+
+    func connect() -> Int32 {
+        let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            connectCount += 1
+            entered = true
+            defer { enteredWaiters.removeAll() }
+            return enteredWaiters
+        }
+        for waiter in waiters { waiter.resume() }
+        releaseSemaphore.wait()
+        return descriptor
+    }
+
+    func waitUntilConnectEntered() async {
+        if lock.withLock({ entered }) { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock { () -> Bool in
+                if entered { return true }
+                enteredWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func releaseConnect() { releaseSemaphore.signal() }
+    func launch() { lock.withLock { launchCount += 1 } }
+
+    func sleepIgnoringCancellation(milliseconds: Int) {
+        lock.withLock { delays.append(milliseconds) }
+    }
+
+    func discard(_ discardedDescriptor: Int32) {
+        lock.withLock { discardCount += 1 }
+        Darwin.close(discardedDescriptor)
+    }
+
+    func snapshot() -> Snapshot {
+        lock.withLock {
+            Snapshot(
+                connectCount: connectCount,
+                discardCount: discardCount,
+                launchCount: launchCount,
+                delays: delays
             )
         }
     }
