@@ -4,6 +4,12 @@ import Foundation
 import PasteraAgentProtocol
 import Security
 
+extension Notification.Name {
+    static let vaultAgentPreferenceStateDidChange = Notification.Name(
+        "Pastera.VaultAgent.PreferenceStateDidChange"
+    )
+}
+
 // The dispatcher keeps the complete V1 operation and error allowlists together for security review.
 // swiftlint:disable file_length
 
@@ -90,15 +96,16 @@ struct VaultAgentPreferenceClientSnapshot: Equatable {
     let installed: Bool
     let installationNeedsUpdate: Bool
     let hostPathSummary: String?
+    let installationHint: String?
     let authorization: VaultAgentPreferenceAuthorizationState
     let idleExpiresAt: Date?
     let hardExpiresAt: Date?
     let lastSensitiveUseAt: Date?
 
     var primaryAction: VaultAgentPreferencePrimaryAction {
+        if installationNeedsUpdate { return .update }
         if installed, client != .cli, !hostDetected { return .uninstall }
         if !installed { return .install }
-        if installationNeedsUpdate { return .update }
         switch authorization {
         case .authorized: return .revoke
         case .missing: return .authorize
@@ -114,6 +121,7 @@ struct VaultAgentPreferenceClientSnapshot: Equatable {
             installed: false,
             installationNeedsUpdate: false,
             hostPathSummary: nil,
+            installationHint: nil,
             authorization: .unavailable,
             idleExpiresAt: nil,
             hardExpiresAt: nil,
@@ -228,6 +236,7 @@ protocol VaultAgentPreferenceVaultServicing: AnyObject {
     func checkQuickUnlockAvailability(completion: @escaping (Bool) -> Void)
     func unlockWithQuickKey(completion: @escaping (Result<Void, PasswordVaultError>) -> Void)
     func enableAutomationUnlockForAgent() throws
+    func disableAutomationUnlockForAgent() throws
 }
 
 extension PasswordVaultUIController: VaultAgentPreferenceVaultServicing {}
@@ -362,10 +371,16 @@ protocol VaultAgentGrantLifecycleReconciling: AnyObject {
 extension VaultAgentRuntime: VaultAgentGrantLifecycleReconciling {}
 
 // The preference facade serializes bounded integration work away from AppKit's main thread.
+// swiftlint:disable:next type_body_length
 final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServicing {
     private enum WorkKey: Hashable {
         case client(VaultAgentClientKind)
         case permission
+    }
+
+    private enum WorkReservation {
+        case exclusive(UUID)
+        case authorizations(Set<UUID>)
     }
 
     private let integration: VaultAgentPreferenceIntegrationServicing
@@ -379,7 +394,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
     private let workGate: VaultAgentIntegrationWorkGate
     private let now: () -> Date
     private let inFlightLock = NSLock()
-    private var inFlight = Set<WorkKey>()
+    private var inFlight = [WorkKey: WorkReservation]()
 
     init(
         integration: VaultAgentPreferenceIntegrationServicing,
@@ -414,12 +429,14 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
     ) {
         let key = workKey(for: action)
-        guard begin(key) else {
+        let isAuthorization: Bool
+        if case .authorize = action { isAuthorization = true } else { isAuthorization = false }
+        guard let token = reserve(key, isAuthorization: isAuthorization) else {
             deliver(.failure(VaultAgentErrorCode.vaultBusy), completion: completion)
             return
         }
         if case let .authorize(client) = action {
-            authorize(client, key: key, completion: completion)
+            authorize(client, key: key, token: token, completion: completion)
             return
         }
         performBounded(
@@ -428,7 +445,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
                 return try self.makeSnapshot()
             },
             completion: { result in
-                self.end(key)
+                self.end(key, token: token)
                 completion(result)
             }
         )
@@ -446,6 +463,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
     private func authorize(
         _ client: VaultAgentClientKind,
         key: WorkKey,
+        token: UUID,
         completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
     ) {
         performBounded(
@@ -453,9 +471,9 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
             completion: { result in
                 switch result {
                 case let .success(identity):
-                    self.authenticate(identity, key: key, completion: completion)
+                    self.authenticate(identity, key: key, token: token, completion: completion)
                 case let .failure(error):
-                    self.end(key)
+                    self.end(key, token: token)
                     completion(.failure(error))
                 }
             }
@@ -465,6 +483,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
     private func authenticate(
         _ identity: VaultAgentPeerIdentity,
         key: WorkKey,
+        token: UUID,
         completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
     ) {
         if vault.agentVaultReady {
@@ -472,13 +491,14 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
                 identity,
                 authentication: nil,
                 key: key,
+                token: token,
                 completion: completion
             )
             return
         }
         vault.checkQuickUnlockAvailability { available in
             guard available else {
-                self.end(key)
+                self.end(key, token: token)
                 completion(.failure(PasswordVaultError.vaultLocked))
                 return
             }
@@ -490,6 +510,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
                     }
                 },
                 key: key,
+                token: token,
                 completion: completion
             )
         }
@@ -499,6 +520,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         _ identity: VaultAgentPeerIdentity,
         authentication: VaultAgentAuthorizationCoordinator.AuthenticationAction?,
         key: WorkKey,
+        token: UUID,
         completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
     ) {
         authorizationCoordinator.authorize(
@@ -506,12 +528,13 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
             trigger: .explicitPreferencesAction,
             authentication: authentication,
             prepare: { try self.vault.enableAutomationUnlockForAgent() },
+            rollbackPrepare: { try self.vault.disableAutomationUnlockForAgent() },
             completion: { result in
                 switch result {
                 case .success:
-                    self.refreshAfterAction(key: key, completion: completion)
+                    self.refreshAfterAction(key: key, token: token, completion: completion)
                 case let .failure(error):
-                    self.end(key)
+                    self.end(key, token: token)
                     completion(.failure(error))
                 }
             }
@@ -520,12 +543,13 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
 
     private func refreshAfterAction(
         key: WorkKey,
+        token: UUID,
         completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
     ) {
         performBounded(
             { try self.makeSnapshot() },
             completion: { result in
-                self.end(key)
+                self.end(key, token: token)
                 completion(result)
             }
         )
@@ -591,22 +615,26 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         let needsUpdate: Bool
         let detected: Bool
         let path: String?
+        let hint: String?
         if let hostStatus {
             installed = hostStatus.mcpInstalled && hostStatus.skillInstalled
             needsUpdate = hostStatus.mcpInstalled != hostStatus.skillInstalled ||
                 (installed && hostStatus.installedVersion == nil)
             detected = hostStatus.hostDetected
             path = hostStatus.hostExecutablePath
+            hint = nil
         } else if let cliStatus {
             installed = cliStatus.installed
             needsUpdate = false
             detected = true
             path = cliStatus.executablePath
+            hint = cliStatus.pathHint
         } else {
             installed = false
             needsUpdate = false
             detected = false
             path = nil
+            hint = nil
         }
 
         let grant = authorizationPolicy.grantSnapshot(for: client)
@@ -628,6 +656,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
             installed: installed,
             installationNeedsUpdate: needsUpdate,
             hostPathSummary: path.map(Self.pathSummary),
+            installationHint: hint,
             authorization: authorization,
             idleExpiresAt: grant?.idleExpiresAt,
             hardExpiresAt: grant?.hardExpiresAt,
@@ -660,12 +689,35 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         }
     }
 
-    private func begin(_ key: WorkKey) -> Bool {
-        inFlightLock.withLock { inFlight.insert(key).inserted }
+    private func reserve(_ key: WorkKey, isAuthorization: Bool) -> UUID? {
+        inFlightLock.withLock {
+            let token = UUID()
+            switch (inFlight[key], isAuthorization) {
+            case (nil, true):
+                inFlight[key] = .authorizations([token])
+            case (nil, false):
+                inFlight[key] = .exclusive(token)
+            case let (.authorizations(tokens)?, true):
+                inFlight[key] = .authorizations(tokens.union([token]))
+            case (.some(.authorizations(_)), false), (.some(.exclusive(_)), _):
+                return nil
+            }
+            return token
+        }
     }
 
-    private func end(_ key: WorkKey) {
-        inFlightLock.withLock { _ = inFlight.remove(key) }
+    private func end(_ key: WorkKey, token: UUID) {
+        inFlightLock.withLock {
+            switch inFlight[key] {
+            case let .some(.exclusive(owner)) where owner == token:
+                inFlight.removeValue(forKey: key)
+            case let .some(.authorizations(tokens)):
+                let remaining = tokens.subtracting([token])
+                inFlight[key] = remaining.isEmpty ? nil : .authorizations(remaining)
+            default:
+                break
+            }
+        }
     }
 
     private func deliver<T>(
@@ -731,10 +783,14 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
     private let ticketStore: VaultAgentTicketStore
     private let auditLogger: VaultAgentAuditLogging
     private let now: () -> Date
+    private let preferenceNotificationCenter: NotificationCenter
     private let cursorKey: Data
     private weak var interactiveSensitiveUseSource: VaultAgentSensitiveUseObserving?
     private var interactiveSensitiveUseObserverID: UUID?
     private var lastValidGrantCount: Int?
+    private var observedAuthorizationStates = [
+        VaultAgentClientKind: VaultAgentPreferenceAuthorizationState
+    ]()
 
     init(
         executor: VaultAgentSerialExecutor,
@@ -753,6 +809,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         ticketStore: VaultAgentTicketStore,
         auditLogger: VaultAgentAuditLogging,
         now: @escaping () -> Date = Date.init,
+        preferenceNotificationCenter: NotificationCenter = .default,
         cursorKey: Data
     ) throws {
         guard cursorKey.count == 32 else { throw VaultAgentErrorCode.brokerUnavailable }
@@ -772,6 +829,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         self.ticketStore = ticketStore
         self.auditLogger = auditLogger
         self.now = now
+        self.preferenceNotificationCenter = preferenceNotificationCenter
         self.cursorKey = cursorKey
         if let source = vault as? VaultAgentSensitiveUseObserving {
             interactiveSensitiveUseSource = source
@@ -797,7 +855,8 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         rateLimiter: VaultAgentRateLimiter = VaultAgentRateLimiter(),
         auditLogger: VaultAgentAuditLogging,
         applicationURL: URL = Bundle.main.bundleURL,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        preferenceNotificationCenter: NotificationCenter = .default
     ) throws {
         let ticketStore = VaultAgentTicketStore(commandBuilder: { client, mode, token in
             Self.helperCommand(
@@ -821,6 +880,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
             ticketStore: ticketStore,
             auditLogger: auditLogger,
             now: now,
+            preferenceNotificationCenter: preferenceNotificationCenter,
             cursorKey: Self.secureRandomCursorKey()
         )
     }
@@ -949,6 +1009,7 @@ private extension VaultAgentRuntime {
                 let date = now()
                 try authorizationPolicy.recordInteractiveSensitiveSuccess(at: date)
                 try reconcileGrantLifecycle(at: date)
+                postPreferenceStateDidChange()
             } catch {
                 // The interactive action already succeeded; persistence is best-effort here.
             }
@@ -995,7 +1056,12 @@ private extension VaultAgentRuntime {
                 }
             }
         case let .search(request):
-            withReady(identity: identity, category: .metadata, finish: finish) {
+            withReady(
+                identity: identity,
+                category: .metadata,
+                permitsAutomaticAuthorization: true,
+                finish: finish
+            ) {
                 self.vault.agentMetadata { result in
                     finish(self.metadataBody(result) { folders, entries in
                         try self.search(request, folders: folders, entries: entries)
@@ -1003,7 +1069,12 @@ private extension VaultAgentRuntime {
                 }
             }
         case let .get(entryID):
-            withReady(identity: identity, category: .metadata, finish: finish) {
+            withReady(
+                identity: identity,
+                category: .metadata,
+                permitsAutomaticAuthorization: true,
+                finish: finish
+            ) {
                 self.vault.agentMetadata { result in
                     finish(self.metadataBody(result) { folders, entries in
                         guard let entry = entries.first(where: { $0.id == entryID }) else {
@@ -1014,7 +1085,12 @@ private extension VaultAgentRuntime {
                 }
             }
         case let .paste(entryID, field):
-            withReady(identity: identity, category: .directSecret, finish: finish) {
+            withReady(
+                identity: identity,
+                category: .directSecret,
+                permitsAutomaticAuthorization: true,
+                finish: finish
+            ) {
                 let target: PasteTargetContext
                 do { target = try self.pasteTargetTracker.resolve() } catch {
                     finish(.failure(Self.failure(.targetUnavailable)))
@@ -1034,7 +1110,12 @@ private extension VaultAgentRuntime {
                 finish(.failure(Self.failure(.invalidRequest)))
                 return
             }
-            withReady(identity: identity, category: .directSecret, finish: finish) {
+            withReady(
+                identity: identity,
+                category: .directSecret,
+                permitsAutomaticAuthorization: true,
+                finish: finish
+            ) {
                 self.vault.agentCopy(entryID: entryID, field: field) { result in
                     switch result {
                     case .success:
@@ -1045,7 +1126,12 @@ private extension VaultAgentRuntime {
                 }
             }
         case let .prepareExec(entryID, field, mode):
-            withReady(identity: identity, category: .ticket, finish: finish) {
+            withReady(
+                identity: identity,
+                category: .ticket,
+                permitsAutomaticAuthorization: true,
+                finish: finish
+            ) {
                 self.vault.agentMetadata { result in
                     finish(self.metadataBody(result) { _, entries in
                         guard entries.contains(where: { $0.id == entryID }) else {
@@ -1109,18 +1195,23 @@ private extension VaultAgentRuntime {
     private func withReady(
         identity: VaultAgentPeerIdentity,
         category: VaultAgentRateLimitCategory,
+        permitsAutomaticAuthorization: Bool = false,
         finish: @escaping (VaultAgentResponseBody) -> Void,
         operation: @escaping () -> Void
     ) {
         let decision = authorizationPolicy.decision(for: identity, at: now())
+        observeAuthorizationDecision(decision, client: identity.client)
         if let code = Self.authorizationFailure(decision) {
-            if vault.agentVaultReady,
-               decision == .missing || decision == .identityChanged {
+            if permitsAutomaticAuthorization, vault.agentVaultReady, decision == .missing {
                 authorizationCoordinator?.authorize(
                     identity: identity,
                     trigger: .automaticFirstRequest,
-                    prepare: automaticAuthorizationPrepare
-                ) { _ in }
+                    prepare: automaticAuthorizationPrepare,
+                    rollbackPrepare: { try self.vault.disableAutomationUnlockForAgent() },
+                    completion: { result in
+                        if case .success = result { self.postPreferenceStateDidChange() }
+                    }
+                )
             }
             finish(.failure(Self.failure(code)))
             return
@@ -1136,6 +1227,28 @@ private extension VaultAgentRuntime {
             case .success: operation()
             case let .failure(error): finish(.failure(Self.failure(for: error)))
             }
+        }
+    }
+
+    private func observeAuthorizationDecision(
+        _ decision: VaultAgentGrantDecision,
+        client: VaultAgentClientKind
+    ) {
+        let state: VaultAgentPreferenceAuthorizationState
+        switch decision {
+        case .allowed: state = .authorized
+        case .missing: state = .missing
+        case .identityChanged: state = .identityChanged
+        case .idleExpired, .hardExpired: state = .expired
+        case .revoked: state = .revoked
+        }
+        let changed = executor.sync {
+            let changed = observedAuthorizationStates[client] != state
+            observedAuthorizationStates[client] = state
+            return changed
+        }
+        if changed, [.identityChanged, .expired, .revoked].contains(state) {
+            postPreferenceStateDidChange()
         }
     }
 
@@ -1377,10 +1490,15 @@ private extension VaultAgentRuntime {
     private func renewalBody(identity: VaultAgentPeerIdentity) -> VaultAgentResponseBody {
         do {
             try authorizationPolicy.recordSensitiveSuccess(for: identity, at: now())
+            postPreferenceStateDidChange()
             return .success(.empty)
         } catch {
             return .failure(Self.failure(.brokerUnavailable))
         }
+    }
+
+    private func postPreferenceStateDidChange() {
+        preferenceNotificationCenter.post(name: .vaultAgentPreferenceStateDidChange, object: nil)
     }
 
     private func resultBody(

@@ -4,10 +4,57 @@ import PasteraAgentProtocol
 
 protocol VaultAgentIdentityAuthenticating {
     func authenticate(completion: @escaping (Result<Void, Error>) -> Void)
+    func authenticate(
+        identity: VaultAgentPeerIdentity,
+        completion: @escaping (Result<Void, Error>) -> Void
+    )
+}
+
+extension VaultAgentIdentityAuthenticating {
+    func authenticate(
+        identity _: VaultAgentPeerIdentity,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        authenticate(completion: completion)
+    }
 }
 
 final class SystemVaultAgentIdentityAuthenticator: VaultAgentIdentityAuthenticating {
     func authenticate(completion: @escaping (Result<Void, Error>) -> Void) {
+        evaluate(
+            reason: "Authenticate to authorize password vault automation.",
+            completion: completion
+        )
+    }
+
+    func authenticate(
+        identity: VaultAgentPeerIdentity,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        evaluate(reason: Self.authorizationReason(for: identity), completion: completion)
+    }
+
+    static func authorizationReason(for identity: VaultAgentPeerIdentity) -> String {
+        let client: String
+        switch identity.client {
+        case .codex: client = "Codex"
+        case .claude: client = "Claude Code"
+        case .cli: client = "Pastera CLI"
+        }
+        let scopeKey = identity.client == .cli
+            ? "Metadata, paste, copy, and controlled injection"
+            : "Metadata, paste, and controlled injection"
+        return [
+            "\(pasteraPreferenceString("Authorize")) \(client): \(pasteraPreferenceString(scopeKey)).",
+            pasteraPreferenceString("7 idle days · 30 days total"),
+            pasteraPreferenceString("Unattended automation can expose secrets to client commands.")
+        ].joined(separator: " ")
+    }
+
+    private func evaluate(
+        reason: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
         let context = LAContext()
         var evaluationError: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &evaluationError) else {
@@ -16,7 +63,7 @@ final class SystemVaultAgentIdentityAuthenticator: VaultAgentIdentityAuthenticat
         }
         context.evaluatePolicy(
             .deviceOwnerAuthentication,
-            localizedReason: "Authenticate to authorize password vault automation."
+            localizedReason: reason
         ) { success, error in
             if success {
                 completion(.success(()))
@@ -41,6 +88,7 @@ final class VaultAgentAuthorizationCoordinator {
         let identity: VaultAgentPeerIdentity
         let trigger: Trigger
         let prepare: PrepareAction?
+        let rollbackPrepare: PrepareAction?
         var completions: [Completion]
     }
 
@@ -81,6 +129,7 @@ final class VaultAgentAuthorizationCoordinator {
         trigger: Trigger,
         authentication: AuthenticationAction? = nil,
         prepare: PrepareAction? = nil,
+        rollbackPrepare: PrepareAction? = nil,
         completion: @escaping (Result<VaultAgentGrant, VaultAgentErrorCode>) -> Void
     ) {
         executor.async { [self] in
@@ -108,10 +157,13 @@ final class VaultAgentAuthorizationCoordinator {
                 identity: identity,
                 trigger: trigger,
                 prepare: prepare,
+                rollbackPrepare: rollbackPrepare,
                 completions: [completion]
             )
             let lifetime = InFlightLifetime(self)
-            let authenticate = authentication ?? authenticator.authenticate
+            let authenticate = authentication ?? { callback in
+                self.authenticator.authenticate(identity: identity, completion: callback)
+            }
             authenticate { [executor] result in
                 executor.async {
                     guard let coordinator = lifetime.coordinator else { return }
@@ -130,12 +182,21 @@ final class VaultAgentAuthorizationCoordinator {
         let authorizationResult: Result<VaultAgentGrant, VaultAgentErrorCode>
         switch result {
         case .success:
+            var prepared = false
+            let authorizationDate = now()
             do {
                 try current.prepare?()
-                let grant = try policy.authorize(identity: current.identity, authenticatedAt: now())
+                prepared = true
+                let grant = try policy.authorize(
+                    identity: current.identity,
+                    authenticatedAt: authorizationDate
+                )
                 defaults.removeObject(forKey: cooldownKey(client))
                 authorizationResult = .success(grant)
             } catch {
+                if prepared, policy.validGrantCount(at: authorizationDate) == 0 {
+                    try? current.rollbackPrepare?()
+                }
                 authorizationResult = .failure(.automationUnlockUnavailable)
             }
         case let .failure(error):

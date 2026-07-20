@@ -5,8 +5,12 @@ import PasteraAgentProtocol
 import Testing
 @testable import Pastera
 
+// The suite keeps its UI, authorization transaction, and preference-runtime probes together.
+// swiftlint:disable file_length
+
 @MainActor
 @Suite("Agent integration preferences", .serialized)
+// swiftlint:disable:next type_body_length
 struct AgentIntegrationPreferenceTests {
     @Test("agent integrations are searchable and expose independent client rows")
     func agentIntegrationPageIsRegistered() throws {
@@ -31,6 +35,7 @@ struct AgentIntegrationPreferenceTests {
                     installed: true,
                     installationNeedsUpdate: false,
                     hostPathSummary: "/Applications/Codex.app",
+                    installationHint: nil,
                     authorization: .authorized,
                     idleExpiresAt: start.addingTimeInterval(60),
                     hardExpiresAt: start.addingTimeInterval(120),
@@ -65,6 +70,38 @@ struct AgentIntegrationPreferenceTests {
         #expect(controller.clientGroupCountForTesting == 1)
         #expect(controller.maximumClientRowWidthForTesting <= 444)
         #expect(controller.primaryActionCenterYOffsetsForTesting.allSatisfy { abs($0) <= 2 })
+        #expect(controller.permissionControlsFitForTesting(width: 444))
+    }
+
+    @Test("partial installs update first and installed clients retain a secondary uninstall route")
+    func updateAndSecondaryUninstallRouting() async throws {
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .init(
+            clients: [
+                .codex: .testValue(client: .codex, installed: true, authorization: .authorized),
+                .claude: .testValue(
+                    client: .claude,
+                    installed: false,
+                    needsUpdate: true,
+                    authorization: .missing
+                )
+            ],
+            claudePermission: .unavailable,
+            audit: []
+        ))
+        let controller = CPYAgentIntegrationPreferenceViewController(runtime: runtime)
+        controller.loadView()
+
+        let codex = try #require(controller.rowSnapshotForTesting(.codex))
+        let claude = try #require(controller.rowSnapshotForTesting(.claude))
+        #expect(codex.primaryAction == .revoke)
+        #expect(codex.primaryActionCount == 1)
+        #expect(codex.showsSecondaryUninstall)
+        #expect(claude.primaryAction == .update)
+
+        controller.triggerSecondaryUninstallForTesting(.codex)
+        controller.triggerPrimaryActionForTesting(.claude)
+        try await waitUntil { runtime.actions.count == 2 }
+        #expect(runtime.actions == [.uninstall(.codex), .install(.claude)])
     }
 
     @Test("Codex exposes host-managed approval text but no broad permission control")
@@ -99,17 +136,110 @@ struct AgentIntegrationPreferenceTests {
         #expect(runtime.snippetScopes == [.allCurrentPasteraTools])
     }
 
-    @Test("Claude metadata permission routes an exact three-tool scope")
-    func metadataPermissionRoutesExactScope() async throws {
-        let runtime = AgentPreferenceRuntimeProbe(snapshot: .allUnavailable)
+    @Test("Claude metadata preview exposes the exact tools before copy and apply become available")
+    func metadataPermissionRequiresExactPreview() async throws {
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .installedClaude)
+        var copied = ""
+        let controller = CPYAgentIntegrationPreferenceViewController(runtime: runtime)
+        let copiedController = CPYAgentIntegrationPreferenceViewController(
+            runtime: runtime,
+            copyText: { copied = $0 }
+        )
+        copiedController.loadView()
+
+        #expect(!copiedController.metadataApplyEnabledForTesting)
+        #expect(!copiedController.copyPermissionEnabledForTesting)
+        copiedController.previewClaudeMetadataForTesting()
+        try await waitUntil { copiedController.metadataApplyEnabledForTesting }
+
+        #expect(copiedController.permissionPreviewForTesting == "vault_status, vault_search, vault_get")
+        #expect(copiedController.copyPermissionEnabledForTesting)
+        copiedController.copyClaudePermissionForTesting()
+        copiedController.applyClaudeMetadataPermissionForTesting()
+        try await waitUntil { runtime.actions.count == 1 }
+
+        #expect(copied == "{metadata}")
+        #expect(runtime.actions == [.applyClaudePermission(.metadataOnly)])
+        #expect(runtime.snippetScopes == [.metadataOnly])
+
+        // Keep the original controller alive to prove previews are controller-local.
+        controller.loadView()
+        #expect(!controller.metadataApplyEnabledForTesting)
+    }
+
+    @Test("client and permission failures stay in their own visual regions")
+    func failuresAreIsolated() async throws {
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .installedAll)
+        runtime.actionFailure = (.revoke(.codex), VaultAgentErrorCode.brokerUnavailable)
+        runtime.snippetFailure = VaultAgentErrorCode.invalidRequest
         let controller = CPYAgentIntegrationPreferenceViewController(runtime: runtime)
         controller.loadView()
 
-        controller.applyClaudePermissionForTesting(.metadataOnly)
-        try await waitUntil { runtime.actions.count == 1 }
+        controller.triggerPrimaryActionForTesting(.codex)
+        try await waitUntil { !controller.clientErrorForTesting(.codex).isEmpty }
+        #expect(controller.clientErrorForTesting(.claude).isEmpty)
+        #expect(controller.permissionErrorForTesting.isEmpty)
 
-        #expect(runtime.actions == [.applyClaudePermission(.metadataOnly)])
-        #expect(runtime.snippetScopes == [.metadataOnly])
+        controller.previewClaudeMetadataForTesting()
+        try await waitUntil { !controller.permissionErrorForTesting.isEmpty }
+        #expect(!controller.clientErrorForTesting(.codex).isEmpty)
+        #expect(controller.clientErrorForTesting(.claude).isEmpty)
+    }
+
+    @Test("missing and reauthorization rows disclose scopes expiry boundaries and unattended risk")
+    func consentBoundariesAreVisibleBeforeAuthentication() throws {
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .init(
+            clients: [
+                .codex: .testValue(client: .codex, installed: true, authorization: .missing),
+                .cli: .testValue(client: .cli, installed: true, authorization: .identityChanged)
+            ],
+            claudePermission: .unavailable,
+            audit: []
+        ))
+        let controller = CPYAgentIntegrationPreferenceViewController(runtime: runtime)
+        controller.loadView()
+
+        let codex = controller.clientDetailForTesting(.codex)
+        let cli = controller.clientDetailForTesting(.cli)
+        for detail in [codex, cli] {
+            #expect(detail.contains("7"))
+            #expect(detail.contains("30"))
+            #expect(detail.contains(pasteraPreferenceString(
+                "Unattended automation can expose secrets to client commands."
+            )))
+            #expect(!detail.localizedCaseInsensitiveContains("never"))
+        }
+        #expect(codex.contains(pasteraPreferenceString(
+            "Metadata, paste, and controlled injection"
+        )))
+        #expect(cli.contains(pasteraPreferenceString(
+            "Metadata, paste, copy, and controlled injection"
+        )))
+    }
+
+    @Test("the system authorization reason binds identity scopes expiry and unattended risk")
+    func systemAuthorizationReasonIsInformed() {
+        let codex = SystemVaultAgentIdentityAuthenticator.authorizationReason(
+            for: .preferenceTestValue(client: .codex)
+        )
+        let cli = SystemVaultAgentIdentityAuthenticator.authorizationReason(
+            for: .preferenceTestValue(client: .cli)
+        )
+
+        for reason in [codex, cli] {
+            #expect(reason.contains(pasteraPreferenceString("7 idle days · 30 days total")))
+            #expect(reason.contains(pasteraPreferenceString(
+                "Unattended automation can expose secrets to client commands."
+            )))
+        }
+        #expect(codex.localizedCaseInsensitiveContains("Codex"))
+        #expect(codex.contains(pasteraPreferenceString(
+            "Metadata, paste, and controlled injection"
+        )))
+        #expect(cli.localizedCaseInsensitiveContains("Pastera CLI"))
+        #expect(cli.contains(pasteraPreferenceString(
+            "Metadata, paste, copy, and controlled injection"
+        )))
     }
 
     @Test("audit summaries contain only action result and time")
@@ -179,6 +309,70 @@ struct AgentIntegrationPreferenceTests {
         #expect(store.grants[.cli] == nil)
     }
 
+    @Test("a failed grant save rolls back a newly prepared automation key")
+    func grantSaveFailureRollsBackPrepare() async throws {
+        let store = AgentGrantStoreProbe()
+        let executor = VaultAgentSerialExecutor(
+            queue: DispatchQueue(label: "test.agent-preference.rollback")
+        )
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        store.saveError = PasswordVaultError.keychainUnavailable
+        let coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            authenticator: AgentIdentityAuthenticatorProbe(result: .success(())),
+            defaults: try #require(UserDefaults(suiteName: UUID().uuidString))
+        )
+        var prepareCount = 0
+        var rollbackCount = 0
+
+        let result = await authorize(
+            coordinator,
+            identity: .preferenceTestValue(client: .cli),
+            prepare: { prepareCount += 1 },
+            rollbackPrepare: { rollbackCount += 1 }
+        )
+
+        #expect(result == .failure(.automationUnlockUnavailable))
+        #expect(prepareCount == 1)
+        #expect(rollbackCount == 1)
+        #expect(store.grants.isEmpty)
+    }
+
+    @Test("a failed additional grant save preserves automation unlock for another valid client")
+    func grantSaveFailurePreservesAnotherClient() async throws {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let codexIdentity = VaultAgentPeerIdentity.preferenceTestValue(client: .codex)
+        let store = AgentGrantStoreProbe(grants: [
+            .codex: .testValue(identity: codexIdentity, authenticatedAt: now)
+        ])
+        let executor = VaultAgentSerialExecutor(
+            queue: DispatchQueue(label: "test.agent-preference.rollback-isolation")
+        )
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        store.saveError = PasswordVaultError.keychainUnavailable
+        let coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            authenticator: AgentIdentityAuthenticatorProbe(result: .success(())),
+            defaults: try #require(UserDefaults(suiteName: UUID().uuidString)),
+            now: { now }
+        )
+        var rollbackCount = 0
+
+        let result = await authorize(
+            coordinator,
+            identity: .preferenceTestValue(client: .cli),
+            prepare: {},
+            rollbackPrepare: { rollbackCount += 1 }
+        )
+
+        #expect(result == .failure(.automationUnlockUnavailable))
+        #expect(rollbackCount == 0)
+        #expect(policy.validGrantCount(at: now) == 1)
+        #expect(store.grants[.codex]?.identity == codexIdentity)
+    }
+
     @Test("quick-key authentication bypasses the default local authentication action")
     func quickKeyAuthenticationBypassesDefaultAuthenticator() async throws {
         let store = AgentGrantStoreProbe()
@@ -230,18 +424,248 @@ struct AgentIntegrationPreferenceTests {
         #expect(harness.authenticator.callCount == 1)
         #expect(harness.vault.ensureReadyCount == 0)
     }
+
+    @Test("automatic authorization prompts only for a missing grant")
+    func automaticAuthorizationDecisionMatrix() async throws {
+        for decision in AutomaticAuthorizationRuntimeHarness.DecisionFixture.allCases {
+            let harness = try AutomaticAuthorizationRuntimeHarness(decision: decision)
+
+            let code = await harness.call(.get(entryID: UUID()))
+
+            if decision == .missing {
+                try await waitUntil { harness.authenticator.callCount == 1 }
+            }
+            #expect(code != nil)
+            #expect(harness.authenticator.callCount == (decision == .missing ? 1 : 0))
+        }
+    }
+
+    @Test("only direct entry operations can trigger the first automatic authorization prompt")
+    func automaticAuthorizationOperationMatrix() async throws {
+        let directOperations: [VaultAgentOperation] = [
+            .search(.init(query: "", folderID: nil, limit: 1, cursor: nil)),
+            .get(entryID: UUID()),
+            .paste(entryID: UUID(), field: .password),
+            .copy(entryID: UUID(), field: .password),
+            .prepareExec(entryID: UUID(), field: .password, mode: .stdin)
+        ]
+        for operation in directOperations {
+            let harness = try AutomaticAuthorizationRuntimeHarness()
+            _ = await harness.call(operation)
+            try await waitUntil { harness.authenticator.callCount == 1 }
+        }
+
+        let internalOperations: [VaultAgentOperation] = [
+            .redeemTicket(token: "invalid", mode: .stdin),
+            .completeTicket(receiptID: UUID())
+        ]
+        for operation in internalOperations {
+            let harness = try AutomaticAuthorizationRuntimeHarness()
+            _ = await harness.call(operation)
+            #expect(harness.authenticator.callCount == 0)
+        }
+    }
+
+    @Test("runtime emits one redacted state notification for authorization and sensitive transitions")
+    func runtimeStateNotificationsAreBounded() async throws {
+        let expiredCenter = NotificationCenter()
+        var expiredNotifications = 0
+        let expiredToken = expiredCenter.addObserver(
+            forName: .vaultAgentPreferenceStateDidChange,
+            object: nil,
+            queue: nil
+        ) { _ in expiredNotifications += 1 }
+        defer { expiredCenter.removeObserver(expiredToken) }
+        let expired = try AutomaticAuthorizationRuntimeHarness(
+            decision: .expired,
+            notificationCenter: expiredCenter
+        )
+        _ = await expired.call(.get(entryID: UUID()))
+        _ = await expired.call(.get(entryID: UUID()))
+        #expect(expiredNotifications == 1)
+
+        let missingCenter = NotificationCenter()
+        var authorizationNotifications = 0
+        let missingToken = missingCenter.addObserver(
+            forName: .vaultAgentPreferenceStateDidChange,
+            object: nil,
+            queue: nil
+        ) { _ in authorizationNotifications += 1 }
+        defer { missingCenter.removeObserver(missingToken) }
+        let missing = try AutomaticAuthorizationRuntimeHarness(notificationCenter: missingCenter)
+        _ = await missing.call(.get(entryID: UUID()))
+        try await waitUntil { missing.authenticator.callCount == 1 }
+        missing.authenticator.completeAll(.success(()))
+        try await waitUntil { authorizationNotifications == 1 }
+
+        let sensitiveCenter = NotificationCenter()
+        var sensitiveNotifications = 0
+        let sensitiveToken = sensitiveCenter.addObserver(
+            forName: .vaultAgentPreferenceStateDidChange,
+            object: nil,
+            queue: nil
+        ) { _ in sensitiveNotifications += 1 }
+        defer { sensitiveCenter.removeObserver(sensitiveToken) }
+        let sensitive = try AutomaticAuthorizationRuntimeHarness(
+            decision: .allowed,
+            notificationCenter: sensitiveCenter
+        )
+        _ = await sensitive.call(.copy(entryID: UUID(), field: .password))
+        sensitive.vault.reportInteractiveSensitiveSuccess()
+        try await waitUntil { sensitiveNotifications == 2 }
+
+        #expect(sensitiveNotifications == 2)
+    }
+
+    @Test("page refreshes when shown again and on redacted runtime state notifications")
+    func pageRefreshesWithoutPolling() async throws {
+        let center = NotificationCenter()
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .allUnavailable)
+        let controller = CPYAgentIntegrationPreferenceViewController(
+            runtime: runtime,
+            notificationCenter: center
+        )
+        controller.loadView()
+        let initialLoads = runtime.loadCount
+
+        controller.viewWillAppear()
+        try await waitUntil { runtime.loadCount == initialLoads + 1 }
+        center.post(name: .vaultAgentPreferenceStateDidChange, object: nil)
+        try await waitUntil { runtime.loadCount == initialLoads + 2 }
+
+        #expect(runtime.loadCount == initialLoads + 2)
+    }
+
+    @Test("CLI PATH guidance is visible and snapshot refresh failures are not silent")
+    func cliPathHintAndRefreshFailureAreVisible() {
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .init(
+            clients: [
+                .cli: .testValue(
+                    client: .cli,
+                    installed: true,
+                    authorization: .missing,
+                    installationHint: "Add /usr/local/bin to PATH"
+                )
+            ],
+            claudePermission: .unavailable,
+            audit: []
+        ))
+        let controller = CPYAgentIntegrationPreferenceViewController(runtime: runtime)
+        controller.loadView()
+        #expect(controller.clientDetailForTesting(.cli).contains("/usr/local/bin"))
+
+        runtime.loadFailure = VaultAgentErrorCode.brokerUnavailable
+        controller.viewWillAppear()
+        #expect(!controller.pageErrorForTesting.isEmpty)
+        #expect(controller.clientDetailForTesting(.cli).contains("/usr/local/bin"))
+    }
+
+    @Test("duplicate facade authorization calls merge in the coordinator and complete on main")
+    func duplicateExplicitAuthorizationMerges() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(authenticatorResult: nil)
+        var results: [Result<VaultAgentPreferenceSnapshot, Error>] = []
+        var mainFlags: [Bool] = []
+
+        harness.runtime.perform(.authorize(.cli)) { result in
+            results.append(result)
+            mainFlags.append(Thread.isMainThread)
+        }
+        harness.runtime.perform(.authorize(.cli)) { result in
+            results.append(result)
+            mainFlags.append(Thread.isMainThread)
+        }
+        try await waitUntil { harness.authenticator.callCount == 1 }
+        harness.authenticator.completeAll(.success(()))
+        try await waitUntil { results.count == 2 }
+
+        #expect(results.allSatisfy { $0.isSuccess })
+        #expect(mainFlags == [true, true])
+        #expect(harness.vault.enableCount == 1)
+    }
+
+    @Test("an authorization waiter cannot release another authorization or admit a conflicting revoke")
+    func authorizationReservationIsolation() async throws {
+        let resolver = SequencedIdentityResolverProbe(results: [
+            .success(.preferenceTestValue(client: .cli)),
+            .failure(VaultAgentErrorCode.authorizationRequired)
+        ])
+        let harness = try DefaultPreferenceRuntimeHarness(
+            authenticatorResult: nil,
+            identityResolver: resolver
+        )
+        var first: Result<VaultAgentPreferenceSnapshot, Error>?
+        var waiter: Result<VaultAgentPreferenceSnapshot, Error>?
+        harness.runtime.perform(.authorize(.cli)) { first = $0 }
+        try await waitUntil { harness.authenticator.callCount == 1 }
+        harness.runtime.perform(.authorize(.cli)) { waiter = $0 }
+        try await waitUntil { waiter != nil }
+
+        let conflict = await perform(harness.runtime, .revoke(.cli))
+        #expect(conflict.errorCode == .vaultBusy)
+        harness.authenticator.completeAll(.success(()))
+        try await waitUntil { first != nil }
+
+        let afterCompletion = await perform(harness.runtime, .revoke(.cli))
+        #expect(afterCompletion.isSuccess)
+    }
+
+    @Test("default facade releases its gate and reports busy completions on main")
+    func defaultRuntimeGateAndCompletionContract() async throws {
+        let gate = VaultAgentIntegrationWorkGate(capacity: 1)
+        let harness = try DefaultPreferenceRuntimeHarness(workGate: gate)
+        #expect(gate.tryAcquire())
+
+        let busy = await loadSnapshot(harness.runtime)
+        #expect(busy.errorCode == .vaultBusy)
+        #expect(busy.completedOnMain)
+        gate.release()
+
+        let success = await loadSnapshot(harness.runtime)
+        #expect(success.result.isSuccess)
+        #expect(success.completedOnMain)
+        #expect(gate.activeCount == 0)
+    }
+
+    @Test("client lifecycle actions never mutate Claude permissions and last revoke cleans automation")
+    func facadeActionAndGrantIsolation() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(useProductionLifecycle: true)
+
+        _ = await perform(harness.runtime, .install(.codex))
+        _ = await perform(harness.runtime, .authorize(.codex))
+        _ = await perform(harness.runtime, .authorize(.cli))
+        #expect(harness.policy.validGrantCount(at: harness.now) == 2)
+        _ = await perform(harness.runtime, .revoke(.codex))
+        #expect(harness.policy.validGrantCount(at: harness.now) == 1)
+        #expect(harness.vault.disableCount == 0)
+        _ = await perform(harness.runtime, .uninstall(.codex))
+        #expect(harness.integration.permissionMutationCount == 0)
+
+        _ = await perform(harness.runtime, .revoke(.cli))
+        #expect(harness.policy.validGrantCount(at: harness.now) == 0)
+        #expect(harness.vault.disableCount == 1)
+        #expect(harness.integration.permissionMutationCount == 0)
+    }
 }
 
 private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServicing {
     var snapshot: VaultAgentPreferenceSnapshot
+    var loadFailure: Error?
+    var actionFailure: (action: VaultAgentPreferenceAction, error: Error)?
+    var snippetFailure: Error?
     private(set) var actions: [VaultAgentPreferenceAction] = []
     private(set) var snippetScopes: [VaultAgentHostPermissionScope] = []
+    private(set) var loadCount = 0
 
     init(snapshot: VaultAgentPreferenceSnapshot) {
         self.snapshot = snapshot
     }
 
     func loadSnapshot(completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void) {
+        loadCount += 1
+        if let loadFailure {
+            completion(.failure(loadFailure))
+            return
+        }
         completion(.success(snapshot))
     }
 
@@ -250,6 +674,10 @@ private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServ
         completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
     ) {
         actions.append(action)
+        if let failure = actionFailure, failure.action == action {
+            completion(.failure(failure.error))
+            return
+        }
         completion(.success(snapshot))
     }
 
@@ -258,48 +686,97 @@ private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServ
         completion: @escaping (Result<VaultAgentPermissionSnippet, Error>) -> Void
     ) {
         snippetScopes.append(scope)
+        if let snippetFailure {
+            completion(.failure(snippetFailure))
+            return
+        }
         let tools = scope == .metadataOnly
             ? ["vault_status", "vault_search", "vault_get"]
             : ["vault_status", "vault_search", "vault_get", "vault_paste", "vault_prepare_exec"]
-        completion(.success(.init(allowedTools: tools, serialized: "{}")))
+        let serialized = scope == .metadataOnly ? "{metadata}" : "{sensitive}"
+        completion(.success(.init(allowedTools: tools, serialized: serialized)))
     }
 }
 
 private final class AgentGrantStoreProbe: VaultAgentGrantStoring {
     var grants: [VaultAgentClientKind: VaultAgentGrant] = [:]
+    var saveError: Error?
+
+    init(grants: [VaultAgentClientKind: VaultAgentGrant] = [:]) {
+        self.grants = grants
+    }
 
     func load() -> [VaultAgentClientKind: VaultAgentGrant] { grants }
-    func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) { self.grants = grants }
+    func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) throws {
+        if let saveError { throw saveError }
+        self.grants = grants
+    }
 }
 
 private final class AgentIdentityAuthenticatorProbe: VaultAgentIdentityAuthenticating {
+    private let lock = NSLock()
     private let result: Result<Void, Error>?
     private var completions: [(Result<Void, Error>) -> Void] = []
-    private(set) var callCount = 0
+    private var storedIdentities: [VaultAgentPeerIdentity] = []
+
+    var callCount: Int { lock.withLock { completions.count } }
+    var identities: [VaultAgentPeerIdentity] { lock.withLock { storedIdentities } }
 
     init(result: Result<Void, Error>?) {
         self.result = result
     }
 
     func authenticate(completion: @escaping (Result<Void, Error>) -> Void) {
-        callCount += 1
-        completions.append(completion)
+        lock.withLock { completions.append(completion) }
         if let result { DispatchQueue.global().async { completion(result) } }
+    }
+
+    func authenticate(
+        identity: VaultAgentPeerIdentity,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        lock.withLock { storedIdentities.append(identity) }
+        authenticate(completion: completion)
+    }
+
+    func completeAll(_ result: Result<Void, Error>) {
+        lock.withLock { completions }.forEach { $0(result) }
     }
 }
 
 private final class AutomaticAuthorizationRuntimeHarness {
+    enum DecisionFixture: CaseIterable {
+        case missing
+        case identityChanged
+        case expired
+        case revoked
+        case allowed
+
+        static let allCases: [Self] = [.missing, .identityChanged, .expired, .revoked]
+    }
+
     let authenticator = AgentIdentityAuthenticatorProbe(result: nil)
     let vault = AutomaticAuthorizationVaultProbe()
     private let runtime: VaultAgentRuntime
-    private let identity = VaultAgentPeerIdentity.preferenceTestValue(client: .cli)
+    private let identity: VaultAgentPeerIdentity
 
-    init() throws {
+    init(
+        decision: DecisionFixture = .missing,
+        notificationCenter: NotificationCenter = .default
+    ) throws {
+        let currentIdentity = VaultAgentPeerIdentity.preferenceTestValue(client: .cli)
+        identity = currentIdentity
         let executor = VaultAgentSerialExecutor(
             queue: DispatchQueue(label: "test.agent-preference.automatic")
         )
+        let now = Date(timeIntervalSince1970: 100_000)
+        let store = AgentGrantStoreProbe(grants: Self.grants(
+            for: decision,
+            currentIdentity: currentIdentity,
+            now: now
+        ))
         let policy = try VaultAgentAuthorizationPolicy(
-            store: AgentGrantStoreProbe(),
+            store: store,
             executor: executor
         )
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
@@ -318,8 +795,55 @@ private final class AutomaticAuthorizationRuntimeHarness {
             pasteTargetTracker: AutomaticAuthorizationTargetProbe(),
             ticketStore: VaultAgentTicketStore(commandBuilder: { _, _, _ in ["/usr/bin/false"] }),
             auditLogger: AutomaticAuthorizationAuditProbe(),
+            now: { now },
+            preferenceNotificationCenter: notificationCenter,
             cursorKey: Data(repeating: 1, count: 32)
         )
+    }
+
+    private static func grants(
+        for fixture: DecisionFixture,
+        currentIdentity: VaultAgentPeerIdentity,
+        now: Date
+    ) -> [VaultAgentClientKind: VaultAgentGrant] {
+        switch fixture {
+        case .missing:
+            return [:]
+        case .identityChanged:
+            var changed = VaultAgentPeerIdentity.preferenceTestValue(client: .cli)
+            changed = .init(
+                client: changed.client,
+                helperRequirement: "identifier previous.helper",
+                helperCDHash: changed.helperCDHash,
+                helperIsAdHoc: changed.helperIsAdHoc,
+                helperPath: changed.helperPath,
+                hostRequirement: changed.hostRequirement,
+                hostCDHash: changed.hostCDHash,
+                hostIsAdHoc: changed.hostIsAdHoc,
+                hostPath: changed.hostPath
+            )
+            return [.cli: .testValue(identity: changed, authenticatedAt: now)]
+        case .expired:
+            return [.cli: .init(
+                identity: currentIdentity,
+                authenticatedAt: now.addingTimeInterval(-100),
+                idleExpiresAt: now,
+                hardExpiresAt: now.addingTimeInterval(100),
+                lastSensitiveUseAt: nil,
+                revokedAt: nil
+            )]
+        case .revoked:
+            return [.cli: .init(
+                identity: currentIdentity,
+                authenticatedAt: now.addingTimeInterval(-100),
+                idleExpiresAt: now.addingTimeInterval(100),
+                hardExpiresAt: now.addingTimeInterval(200),
+                lastSensitiveUseAt: nil,
+                revokedAt: now.addingTimeInterval(-1)
+            )]
+        case .allowed:
+            return [.cli: .testValue(identity: currentIdentity, authenticatedAt: now)]
+        }
     }
 
     func call(_ operation: VaultAgentOperation) async -> VaultAgentErrorCode? {
@@ -342,9 +866,12 @@ private final class AutomaticAuthorizationRuntimeHarness {
     }
 }
 
-private final class AutomaticAuthorizationVaultProbe: PasswordVaultAgentAccess {
+private final class AutomaticAuthorizationVaultProbe:
+    PasswordVaultAgentAccess,
+    VaultAgentSensitiveUseObserving {
     var agentVaultReady = true
     private(set) var ensureReadyCount = 0
+    private var sensitiveObservers = [UUID: () -> Void]()
 
     func ensureReadyForAgent(completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
         ensureReadyCount += 1
@@ -375,6 +902,20 @@ private final class AutomaticAuthorizationVaultProbe: PasswordVaultAgentAccess {
     ) { completion(.success(Data())) }
 
     func disableAutomationUnlockForAgent() throws {}
+
+    func addInteractiveSensitiveUseObserver(_ observer: @escaping () -> Void) -> UUID {
+        let identifier = UUID()
+        sensitiveObservers[identifier] = observer
+        return identifier
+    }
+
+    func removeInteractiveSensitiveUseObserver(_ identifier: UUID) {
+        sensitiveObservers.removeValue(forKey: identifier)
+    }
+
+    func reportInteractiveSensitiveSuccess() {
+        sensitiveObservers.values.forEach { $0() }
+    }
 }
 
 private final class AutomaticAuthorizationTargetProbe: VaultAgentPasteTargetTracking {
@@ -395,6 +936,218 @@ private final class AutomaticAuthorizationAuditProbe: VaultAgentAuditLogging {
     ) {}
 }
 
+private final class DefaultPreferenceRuntimeHarness {
+    let now = Date(timeIntervalSince1970: 400_000)
+    let integration = PreferenceIntegrationProbe()
+    let vault = PreferenceVaultProbe()
+    let authenticator: AgentIdentityAuthenticatorProbe
+    let policy: VaultAgentAuthorizationPolicy
+    let runtime: DefaultVaultAgentPreferenceRuntime
+    private var productionLifecycle: VaultAgentRuntime?
+
+    init(
+        authenticatorResult: Result<Void, Error>? = .success(()),
+        workGate: VaultAgentIntegrationWorkGate = VaultAgentIntegrationWorkGate(capacity: 4),
+        useProductionLifecycle: Bool = false,
+        identityResolver: VaultAgentPreferenceIdentityResolving = PreferenceIdentityResolverProbe()
+    ) throws {
+        let executor = VaultAgentSerialExecutor(
+            queue: DispatchQueue(label: "test.agent-preference.default-runtime.store")
+        )
+        let store = AgentGrantStoreProbe()
+        policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        authenticator = AgentIdentityAuthenticatorProbe(result: authenticatorResult)
+        let coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            authenticator: authenticator,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { [now] in now }
+        )
+        let lifecycle: VaultAgentGrantLifecycleReconciling
+        if useProductionLifecycle {
+            let runtime = try VaultAgentRuntime(
+                executor: executor,
+                authorizationPolicy: policy,
+                vault: vault,
+                pasteTargetTracker: AutomaticAuthorizationTargetProbe(),
+                ticketStore: VaultAgentTicketStore(commandBuilder: { _, _, _ in ["/usr/bin/false"] }),
+                auditLogger: AutomaticAuthorizationAuditProbe(),
+                now: { [now] in now },
+                cursorKey: Data(repeating: 2, count: 32)
+            )
+            productionLifecycle = runtime
+            lifecycle = runtime
+        } else {
+            lifecycle = PreferenceLifecycleProbe()
+        }
+        runtime = DefaultVaultAgentPreferenceRuntime(
+            integration: integration,
+            authorizationPolicy: policy,
+            authorizationCoordinator: coordinator,
+            vault: vault,
+            identityResolver: identityResolver,
+            lifecycleReconciler: lifecycle,
+            worker: DispatchQueue(label: "test.agent-preference.default-runtime.worker"),
+            workGate: workGate,
+            now: { [now] in now }
+        )
+    }
+}
+
+private final class PreferenceIntegrationProbe: VaultAgentPreferenceIntegrationServicing {
+    private let lock = NSLock()
+    private var installedHosts = Set<VaultAgentHostKind>()
+    private var cliInstalled = false
+    private var permissionMutations = 0
+
+    var permissionMutationCount: Int { lock.withLock { permissionMutations } }
+
+    func status(host: VaultAgentHostKind?) -> VaultAgentIntegrationStatus {
+        lock.withLock {
+            let hosts = host.map { [$0] } ?? [.codex, .claude]
+            return .init(hosts: hosts.map { current in
+                let installed = installedHosts.contains(current)
+                return .init(
+                    host: current,
+                    hostDetected: true,
+                    hostExecutablePath: "/Applications/\(current.rawValue).app/Contents/MacOS/host",
+                    mcpInstalled: installed,
+                    skillInstalled: installed,
+                    installedVersion: installed ? "1" : nil,
+                    authorized: false,
+                    idleExpiresAt: nil,
+                    hardExpiresAt: nil
+                )
+            })
+        }
+    }
+
+    func install(host: VaultAgentHostKind) -> VaultAgentIntegrationStatus {
+        lock.withLock { _ = installedHosts.insert(host) }
+        return status(host: host)
+    }
+
+    func uninstall(host: VaultAgentHostKind) -> VaultAgentIntegrationStatus {
+        lock.withLock { _ = installedHosts.remove(host) }
+        return status(host: host)
+    }
+
+    func cliStatus() -> VaultAgentCLIInstallationStatus {
+        lock.withLock {
+            .init(installed: cliInstalled, executablePath: "/usr/local/bin/pastera", pathHint: nil)
+        }
+    }
+
+    func installCLI() -> VaultAgentCLIInstallationStatus {
+        lock.withLock { cliInstalled = true }
+        return cliStatus()
+    }
+
+    func uninstallCLI() -> VaultAgentCLIInstallationStatus {
+        lock.withLock { cliInstalled = false }
+        return cliStatus()
+    }
+
+    func permissionSnippet(
+        for _: VaultAgentHostKind,
+        scope: VaultAgentHostPermissionScope
+    ) -> VaultAgentPermissionSnippet {
+        let tools = scope == .metadataOnly
+            ? ["vault_status", "vault_search", "vault_get"]
+            : ["vault_status", "vault_search", "vault_get", "vault_paste", "vault_prepare_exec"]
+        return .init(allowedTools: tools, serialized: "{}")
+    }
+
+    func claudePermissionStatus() -> VaultAgentClaudePermissionStatus {
+        .init(policyDisposition: .userRulesAllowed, ownedRules: [])
+    }
+
+    func applyClaudePermissionScope(
+        _: VaultAgentHostPermissionScope
+    ) -> VaultAgentPermissionChange {
+        lock.withLock { permissionMutations += 1 }
+        return .init(addedRules: [], removedRules: [], unchanged: false)
+    }
+
+    func removeOwnedClaudePermissionRules() -> VaultAgentPermissionChange {
+        lock.withLock { permissionMutations += 1 }
+        return .init(addedRules: [], removedRules: [], unchanged: false)
+    }
+
+    func installedHostIdentity(for client: VaultAgentClientKind) -> VaultAgentInstalledHostIdentity? {
+        guard client != .cli else { return nil }
+        return .init(
+            client: client,
+            canonicalPath: "/Applications/host",
+            designatedRequirement: "identifier host",
+            cdHash: nil,
+            isAdHoc: false
+        )
+    }
+}
+
+private final class PreferenceVaultProbe: PasswordVaultAgentAccess, VaultAgentPreferenceVaultServicing {
+    var agentVaultReady = true
+    private(set) var enableCount = 0
+    private(set) var disableCount = 0
+
+    func checkQuickUnlockAvailability(completion: @escaping (Bool) -> Void) { completion(true) }
+    func unlockWithQuickKey(completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
+        completion(.success(()))
+    }
+    func enableAutomationUnlockForAgent() throws { enableCount += 1 }
+    func disableAutomationUnlockForAgent() throws { disableCount += 1 }
+    func ensureReadyForAgent(completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
+        completion(.success(()))
+    }
+    func agentMetadata(
+        completion: @escaping (Result<([PasswordVaultFolder], [PasswordVaultEntry]), PasswordVaultError>) -> Void
+    ) { completion(.success(([], []))) }
+    func agentPaste(
+        entryID _: UUID,
+        field _: VaultAgentSecretField,
+        target _: PasteTargetContext,
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    ) { completion(.success(())) }
+    func agentCopy(
+        entryID _: UUID,
+        field _: VaultAgentSecretField,
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    ) { completion(.success(())) }
+    func agentSecret(
+        entryID _: UUID,
+        field _: VaultAgentSecretField,
+        completion: @escaping (Result<Data, PasswordVaultError>) -> Void
+    ) { completion(.success(Data())) }
+}
+
+private struct PreferenceIdentityResolverProbe: VaultAgentPreferenceIdentityResolving {
+    func resolveIdentity(for client: VaultAgentClientKind) -> VaultAgentPeerIdentity {
+        .preferenceTestValue(client: client)
+    }
+}
+
+private final class SequencedIdentityResolverProbe: VaultAgentPreferenceIdentityResolving {
+    private let lock = NSLock()
+    private var results: [Result<VaultAgentPeerIdentity, Error>]
+
+    init(results: [Result<VaultAgentPeerIdentity, Error>]) {
+        self.results = results
+    }
+
+    func resolveIdentity(for _: VaultAgentClientKind) throws -> VaultAgentPeerIdentity {
+        try lock.withLock {
+            guard !results.isEmpty else { throw VaultAgentErrorCode.authorizationRequired }
+            return try results.removeFirst().get()
+        }
+    }
+}
+
+private final class PreferenceLifecycleProbe: VaultAgentGrantLifecycleReconciling {
+    func authorizationStateDidChange() throws {}
+}
+
 private extension VaultAgentPreferenceSnapshot {
     static let allUnavailable = VaultAgentPreferenceSnapshot(
         clients: Dictionary(uniqueKeysWithValues: VaultAgentClientKind.allCases.map {
@@ -403,6 +1156,64 @@ private extension VaultAgentPreferenceSnapshot {
         claudePermission: .unavailable,
         audit: []
     )
+
+    static let installedClaude = VaultAgentPreferenceSnapshot(
+        clients: [
+            .codex: .unavailable(client: .codex),
+            .claude: .testValue(client: .claude, installed: true, authorization: .missing),
+            .cli: .unavailable(client: .cli)
+        ],
+        claudePermission: .init(policyDisposition: .userRulesAllowed, ownedRules: []),
+        audit: []
+    )
+
+    static let installedAll = VaultAgentPreferenceSnapshot(
+        clients: Dictionary(uniqueKeysWithValues: VaultAgentClientKind.allCases.map {
+            ($0, VaultAgentPreferenceClientSnapshot.testValue(
+                client: $0,
+                installed: true,
+                authorization: .authorized
+            ))
+        }),
+        claudePermission: .init(policyDisposition: .userRulesAllowed, ownedRules: []),
+        audit: []
+    )
+}
+
+private extension VaultAgentPreferenceClientSnapshot {
+    static func testValue(
+        client: VaultAgentClientKind,
+        installed: Bool,
+        needsUpdate: Bool = false,
+        authorization: VaultAgentPreferenceAuthorizationState,
+        installationHint: String? = nil
+    ) -> Self {
+        .init(
+            client: client,
+            hostDetected: true,
+            installed: installed,
+            installationNeedsUpdate: needsUpdate,
+            hostPathSummary: "Applications/Host",
+            installationHint: installationHint,
+            authorization: authorization,
+            idleExpiresAt: authorization == .authorized ? Date(timeIntervalSince1970: 2_000) : nil,
+            hardExpiresAt: authorization == .authorized ? Date(timeIntervalSince1970: 3_000) : nil,
+            lastSensitiveUseAt: nil
+        )
+    }
+}
+
+private extension VaultAgentGrant {
+    static func testValue(identity: VaultAgentPeerIdentity, authenticatedAt: Date) -> Self {
+        .init(
+            identity: identity,
+            authenticatedAt: authenticatedAt,
+            idleExpiresAt: authenticatedAt.addingTimeInterval(VaultAgentAuthorizationPolicy.idleLifetime),
+            hardExpiresAt: authenticatedAt.addingTimeInterval(VaultAgentAuthorizationPolicy.hardLifetime),
+            lastSensitiveUseAt: nil,
+            revokedAt: nil
+        )
+    }
 }
 
 private extension VaultAgentPeerIdentity {
@@ -421,24 +1232,62 @@ private extension VaultAgentPeerIdentity {
     }
 }
 
-private extension Result where Success == VaultAgentGrant, Failure == VaultAgentErrorCode {
+private extension Result {
     var isSuccess: Bool {
         if case .success = self { return true }
         return false
     }
 }
 
+private extension Result where Failure == Error {
+    var errorCode: VaultAgentErrorCode? {
+        guard case let .failure(error) = self else { return nil }
+        return error as? VaultAgentErrorCode
+    }
+}
+
 private func authorize(
     _ coordinator: VaultAgentAuthorizationCoordinator,
     identity: VaultAgentPeerIdentity,
-    prepare: @escaping () throws -> Void
+    prepare: @escaping () throws -> Void,
+    rollbackPrepare: (() throws -> Void)? = nil
 ) async -> Result<VaultAgentGrant, VaultAgentErrorCode> {
     await withCheckedContinuation { continuation in
         coordinator.authorize(
             identity: identity,
             trigger: .explicitPreferencesAction,
-            prepare: prepare
+            prepare: prepare,
+            rollbackPrepare: rollbackPrepare
         ) { continuation.resume(returning: $0) }
+    }
+}
+
+private struct SnapshotResult {
+    let result: Result<VaultAgentPreferenceSnapshot, Error>
+    let completedOnMain: Bool
+
+    var errorCode: VaultAgentErrorCode? { result.errorCode }
+}
+
+@MainActor
+private func loadSnapshot(_ runtime: VaultAgentPreferenceRuntimeServicing) async -> SnapshotResult {
+    await withCheckedContinuation { continuation in
+        runtime.loadSnapshot { result in
+            continuation.resume(returning: .init(
+                result: result,
+                completedOnMain: Thread.isMainThread
+            ))
+        }
+    }
+}
+
+@MainActor
+private func perform(
+    _ runtime: VaultAgentPreferenceRuntimeServicing,
+    _ action: VaultAgentPreferenceAction
+) async -> Result<VaultAgentPreferenceSnapshot, Error> {
+    await withCheckedContinuation { continuation in
+        runtime.perform(action) { continuation.resume(returning: $0) }
     }
 }
 
