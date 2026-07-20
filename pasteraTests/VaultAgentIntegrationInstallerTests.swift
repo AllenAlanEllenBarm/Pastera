@@ -30,9 +30,10 @@ struct VaultAgentIntegrationInstallerTests {
         do {
             let fixture = try InstallerFixture()
             let foreign = VaultAgentHostRegistration(
-                command: "/usr/local/bin/user-owned-mcp",
-                arguments: ["--serve"],
-                userScoped: true
+                command: fixture.codexHelperURL.path,
+                arguments: [],
+                userScoped: true,
+                hasAdditionalConfiguration: true
             )
             fixture.runner.registrations[fixture.codexURL] = foreign
 
@@ -592,6 +593,10 @@ struct VaultAgentIntegrationInstallerTests {
                     try fixture.writeClaudeSettings(["theme": "before-swap"])
                 case .beforeConflictRollback:
                     try fixture.writeClaudeSettings(["theme": "after-swap"])
+                case .afterSwapBeforeSync:
+                    break
+                case .afterRollbackTargetQuarantined:
+                    break
                 }
             },
             permissionDisposition: .userRulesAllowed
@@ -603,6 +608,41 @@ struct VaultAgentIntegrationInstallerTests {
         }
 
         #expect(try fixture.readClaudeSettings()["theme"] as? String == "after-swap")
+    }
+
+    @Test("CAS rollback preserves writes racing after its target quarantine")
+    func atomicRollbackQuarantineRacePreservesAllUserData() throws {
+        let fixture = try InstallerFixture()
+        try fixture.writeClaudeSettings(["theme": "initial"])
+        let installer = fixture.installer(
+            atomicWriteInterposer: { url, phase in
+                guard url == fixture.claudeSettingsURL else { return }
+                if phase == .beforeSwap {
+                    try fixture.writeClaudeSettings(["theme": "before-swap"])
+                } else if phase == .afterRollbackTargetQuarantined {
+                    try fixture.writeClaudeSettings(["theme": "late-write"])
+                }
+            },
+            permissionDisposition: .userRulesAllowed
+        )
+        _ = try installer.install(host: .claude)
+
+        #expect(throws: VaultAgentInstallerError.rollbackFailed) {
+            _ = try installer.applyClaudePermissionScope(.metadataOnly)
+        }
+
+        #expect(try fixture.readClaudeSettings()["theme"] as? String == "late-write")
+        let preservedTemporaryFiles = try FileManager.default.contentsOfDirectory(
+            at: fixture.claudeSettingsURL.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix(".pastera-write-") }
+        #expect(!preservedTemporaryFiles.isEmpty)
+        #expect(try preservedTemporaryFiles.contains { url in
+            let object = try #require(JSONSerialization.jsonObject(
+                with: Data(contentsOf: url)
+            ) as? [String: Any])
+            return object["theme"] as? String == "before-swap"
+        })
     }
 
     @Test("a failed uninstall manifest commit restores host registration and Skill")
@@ -630,6 +670,50 @@ struct VaultAgentIntegrationInstallerTests {
         ])
         #expect(FileManager.default.fileExists(atPath: fixture.codexSkillURL.path))
         #expect(try Data(contentsOf: fixture.manifestURL) == manifestBefore)
+    }
+
+    @Test("a post-swap manifest failure restores the prior manifest and external state")
+    func postSwapManifestFailureRollsBack() throws {
+        do {
+            let fixture = try InstallerFixture()
+            let initial = fixture.installer()
+            _ = try initial.install(host: .codex)
+            let manifestBefore = try Data(contentsOf: fixture.manifestURL)
+            var shouldFail = true
+            let failing = fixture.installer(atomicWriteInterposer: { url, phase in
+                if shouldFail, url == fixture.manifestURL, phase == .afterSwapBeforeSync {
+                    shouldFail = false
+                    throw InstallerProbeError.injectedFailure
+                }
+            })
+
+            #expect(throws: InstallerProbeError.injectedFailure) {
+                _ = try failing.uninstall(host: .codex)
+            }
+
+            #expect(try Data(contentsOf: fixture.manifestURL) == manifestBefore)
+            #expect(FileManager.default.fileExists(atPath: fixture.codexSkillURL.path))
+            #expect(fixture.runner.registrations[fixture.codexURL]?.command
+                    == fixture.codexHelperURL.path)
+        }
+        do {
+            let fixture = try InstallerFixture()
+            var shouldFail = true
+            let failing = fixture.installer(atomicWriteInterposer: { url, phase in
+                if shouldFail, url == fixture.manifestURL, phase == .afterSwapBeforeSync {
+                    shouldFail = false
+                    throw InstallerProbeError.injectedFailure
+                }
+            })
+
+            #expect(throws: InstallerProbeError.injectedFailure) {
+                _ = try failing.install(host: .codex)
+            }
+
+            #expect(!FileManager.default.fileExists(atPath: fixture.manifestURL.path))
+            #expect(!FileManager.default.fileExists(atPath: fixture.codexSkillURL.path))
+            #expect(fixture.runner.registrations[fixture.codexURL] == nil)
+        }
     }
     @Test("service status is ordered, scoped, non-throwing for missing hosts, and authorization-aware")
     func statusIsNarrowAndReadOnly() throws {
@@ -845,7 +929,19 @@ struct VaultAgentIntegrationInstallerTests {
         try fixture.writeExecutableScript(
             """
             #!/bin/sh
-            printf 'pastera-vault:\\n  Scope: User config\\n  Command: \(fixture.claudeHelperURL.path)\\n  Args:\\n'
+            printf '%s\\n' '{"transport":{"type":"stdio","command":"\(fixture.codexHelperURL.path)","args":[],"env":{"USER_VALUE":"redacted"}}}'
+            """,
+            to: script
+        )
+        #expect(try runner.registration(
+            executableURL: script,
+            host: .codex
+        )?.hasAdditionalConfiguration == true)
+
+        try fixture.writeExecutableScript(
+            """
+            #!/bin/sh
+            printf 'pastera-vault:\\n  Scope: User config\\n  Type: stdio\\n  Command: \(fixture.claudeHelperURL.path)\\n  Args:\\n  Environment:\\n'
             """,
             to: script
         )
@@ -854,6 +950,18 @@ struct VaultAgentIntegrationInstallerTests {
             arguments: [],
             userScoped: true
         ))
+
+        try fixture.writeExecutableScript(
+            """
+            #!/bin/sh
+            printf 'pastera-vault:\\n  Scope: User config\\n  Type: stdio\\n  Command: \(fixture.claudeHelperURL.path)\\n  Args:\\n  Environment:\\n    TOKEN=redacted\\n'
+            """,
+            to: script
+        )
+        #expect(try runner.registration(
+            executableURL: script,
+            host: .claude
+        )?.hasAdditionalConfiguration == true)
 
         try fixture.writeExecutableScript(
             """

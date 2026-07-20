@@ -55,11 +55,26 @@ struct VaultAgentHostRegistration: Codable, Equatable {
     let command: String
     let arguments: [String]
     let userScoped: Bool
+    let hasAdditionalConfiguration: Bool
+
+    init(
+        command: String,
+        arguments: [String],
+        userScoped: Bool,
+        hasAdditionalConfiguration: Bool = false
+    ) {
+        self.command = command
+        self.arguments = arguments
+        self.userScoped = userScoped
+        self.hasAdditionalConfiguration = hasAdditionalConfiguration
+    }
 }
 
 enum VaultAgentAtomicWritePhase: Equatable {
     case beforeSwap
     case beforeConflictRollback
+    case afterSwapBeforeSync
+    case afterRollbackTargetQuarantined
 }
 
 // swiftlint:disable:next type_name
@@ -129,6 +144,7 @@ final class VaultAgentSystemInstallerCodeSigningInspector:
     }
 }
 
+// swiftlint:disable:next type_body_length
 final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
     private final class BoundedOutput: @unchecked Sendable {
         private let maximumBytes: Int
@@ -319,7 +335,7 @@ final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
         group: DispatchGroup
     ) {
         group.enter()
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .userInitiated).async {
             defer { group.leave() }
             do {
                 while let chunk = try handle.read(upToCount: 8_192), !chunk.isEmpty {
@@ -365,10 +381,39 @@ final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
               arguments.allSatisfy({ $0 is String }) else {
             throw VaultAgentInstallerError.installationConflict
         }
+        let environmentConfigured = nonEmptyDictionaryOrUnexpectedValue(
+            transport["env"]
+        )
+        let inheritedEnvironmentConfigured = nonEmptyArrayOrUnexpectedValue(
+            transport["env_vars"]
+        )
+        let additionalConfiguration = environmentConfigured
+            || inheritedEnvironmentConfigured
+            || nonNullValue(transport["cwd"])
+            || (object["name"] as? String).map { $0 != "pastera-vault" } == true
+            || (object["enabled"] as? Bool == false)
+            || nonNullValue(object["disabled_reason"])
+            || nonNullValue(object["enabled_tools"])
+            || nonNullValue(object["disabled_tools"])
+            || nonNullValue(object["startup_timeout_sec"])
+            || nonNullValue(object["tool_timeout_sec"])
+            || hasUnknownKeys(
+                object,
+                allowed: [
+                    "name", "enabled", "disabled_reason", "transport",
+                    "enabled_tools", "disabled_tools", "startup_timeout_sec",
+                    "tool_timeout_sec"
+                ]
+            )
+            || hasUnknownKeys(
+                transport,
+                allowed: ["type", "command", "args", "env", "env_vars", "cwd"]
+            )
         return .init(
             command: command,
             arguments: arguments.compactMap { $0 as? String },
-            userScoped: true
+            userScoped: true,
+            hasAdditionalConfiguration: additionalConfiguration
         )
     }
 
@@ -376,26 +421,99 @@ final class VaultAgentSystemHostCommandRunner: VaultAgentHostCommandRunning {
         guard let output = String(data: data, encoding: .utf8) else {
             throw VaultAgentInstallerError.installationConflict
         }
-        let lines = output
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let rawLines = output.split(whereSeparator: \.isNewline).map(String.init)
+        let lines = rawLines.map { $0.trimmingCharacters(in: .whitespaces) }
         guard let commandLine = lines.first(where: { $0.hasPrefix("Command:") }),
               let scopeLine = lines.first(where: { $0.hasPrefix("Scope:") }),
-              let argumentsLine = lines.first(where: { $0.hasPrefix("Args:") }) else {
+              let typeLine = lines.first(where: { $0.hasPrefix("Type:") }),
+              let argumentsLine = lines.first(where: { $0.hasPrefix("Args:") }),
+              let environmentLine = lines.first(where: { $0.hasPrefix("Environment:") }) else {
             throw VaultAgentInstallerError.installationConflict
         }
         let command = commandLine.dropFirst("Command:".count)
             .trimmingCharacters(in: .whitespaces)
         let rawArguments = argumentsLine.dropFirst("Args:".count)
             .trimmingCharacters(in: .whitespaces)
-        guard !command.isEmpty else {
+        let rawEnvironment = environmentLine.dropFirst("Environment:".count)
+            .trimmingCharacters(in: .whitespaces)
+        let hasNestedArguments = sectionHasNestedValues(
+            named: "Args:",
+            rawLines: rawLines
+        )
+        let hasNestedEnvironment = sectionHasNestedValues(
+            named: "Environment:",
+            rawLines: rawLines
+        )
+        let hasUnknownConfigurationField = claudeHasUnknownConfigurationField(
+            rawLines,
+            scopeLine: scopeLine
+        )
+        guard !command.isEmpty, typeLine.lowercased() == "type: stdio" else {
             throw VaultAgentInstallerError.installationConflict
         }
         return .init(
             command: command,
-            arguments: rawArguments.isEmpty ? [] : [rawArguments],
-            userScoped: scopeLine.lowercased().contains("user")
+            arguments: rawArguments.isEmpty && !hasNestedArguments ? [] : ["<configured>"],
+            userScoped: scopeLine.lowercased().contains("user"),
+            hasAdditionalConfiguration: !rawEnvironment.isEmpty
+                || hasNestedEnvironment
+                || hasUnknownConfigurationField
         )
+    }
+
+    private func hasUnknownKeys(
+        _ object: [String: Any],
+        allowed: Set<String>
+    ) -> Bool {
+        !Set(object.keys).isSubset(of: allowed)
+    }
+
+    private func claudeHasUnknownConfigurationField(
+        _ rawLines: [String],
+        scopeLine: String
+    ) -> Bool {
+        guard let scopeIndex = rawLines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces) == scopeLine
+        }) else { return true }
+        let fieldIndent = leadingWhitespaceCount(rawLines[scopeIndex])
+        let knownPrefixes = [
+            "Scope:", "Status:", "Type:", "Command:", "Args:", "Environment:"
+        ]
+        return rawLines.contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return leadingWhitespaceCount(line) == fieldIndent
+                && trimmed.contains(":")
+                && !knownPrefixes.contains(where: { trimmed.hasPrefix($0) })
+        }
+    }
+
+    private func sectionHasNestedValues(named name: String, rawLines: [String]) -> Bool {
+        guard let index = rawLines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix(name)
+        }) else { return false }
+        let sectionIndent = leadingWhitespaceCount(rawLines[index])
+        return rawLines.dropFirst(index + 1).prefix { line in
+            line.trimmingCharacters(in: .whitespaces).isEmpty
+                || leadingWhitespaceCount(line) > sectionIndent
+        }.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    private func leadingWhitespaceCount(_ value: String) -> Int {
+        value.prefix { $0 == " " || $0 == "\t" }.count
+    }
+
+    private func nonNullValue(_ value: Any?) -> Bool {
+        value != nil && !(value is NSNull)
+    }
+
+    private func nonEmptyDictionaryOrUnexpectedValue(_ value: Any?) -> Bool {
+        guard let value, !(value is NSNull) else { return false }
+        return (value as? [String: Any])?.isEmpty != true
+    }
+
+    private func nonEmptyArrayOrUnexpectedValue(_ value: Any?) -> Bool {
+        guard let value, !(value is NSNull) else { return false }
+        return (value as? [Any])?.isEmpty != true
     }
 }
 
@@ -759,11 +877,6 @@ final class VaultAgentIntegrationInstaller:
             }
             throw VaultAgentInstallerError.commandFailed(exitCode)
         }
-        try verifyAddedRegistration(
-            host: host,
-            hostURL: prepared.canonicalHostURL,
-            expected: expectedRegistration
-        )
         let installedRecord = HostRecord(
             host: host.rawValue,
             identity: prepared.hostIdentity,
@@ -845,9 +958,6 @@ final class VaultAgentIntegrationInstaller:
             )
             guard exitCode == 0 else {
                 throw VaultAgentInstallerError.commandFailed(exitCode)
-            }
-            guard try commandRunner.registration(executableURL: hostURL, host: host) == nil else {
-                throw VaultAgentInstallerError.rollbackFailed
             }
         } catch {
             let originalError = error
@@ -1875,9 +1985,10 @@ private extension VaultAgentIntegrationInstaller {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
         var descriptorOpen = true
+        var shouldRemoveTemporary = true
         defer {
             if descriptorOpen { close(descriptor) }
-            unlink(temporary.path)
+            if shouldRemoveTemporary { unlink(temporary.path) }
         }
         try data.withUnsafeBytes { bytes in
             guard let baseAddress = bytes.baseAddress else { return }
@@ -1920,20 +2031,75 @@ private extension VaultAgentIntegrationInstaller {
             )
             guard displacedSnapshot == expectedSnapshot else {
                 try atomicWriteInterposer(url, .beforeConflictRollback)
-                guard try fileSnapshot(
-                    url,
-                    maximumBytes: max(data.count, 1)
-                ) == newSnapshot else {
-                    throw VaultAgentInstallerError.installationConflict
-                }
-                guard renamex_np(temporary.path, url.path, UInt32(RENAME_SWAP)) == 0 else {
-                    throw VaultAgentInstallerError.rollbackFailed
-                }
+                try rollbackCommittedAtomicWrite(
+                    at: url,
+                    temporary: temporary,
+                    newSnapshot: newSnapshot,
+                    restoreDisplacedFile: true,
+                    shouldRemoveTemporary: &shouldRemoveTemporary
+                )
                 throw VaultAgentInstallerError.installationConflict
             }
         }
-        guard try fileSnapshot(url, maximumBytes: max(data.count, 1)) == newSnapshot else {
-            throw VaultAgentInstallerError.installationConflict
+        do {
+            try atomicWriteInterposer(url, .afterSwapBeforeSync)
+            guard try fileSnapshot(url, maximumBytes: max(data.count, 1)) == newSnapshot else {
+                throw VaultAgentInstallerError.installationConflict
+            }
+            try fsyncDirectory(url.deletingLastPathComponent())
+        } catch {
+            let originalError = error
+            do {
+                try rollbackCommittedAtomicWrite(
+                    at: url,
+                    temporary: temporary,
+                    newSnapshot: newSnapshot,
+                    restoreDisplacedFile: expectedSnapshot != nil,
+                    shouldRemoveTemporary: &shouldRemoveTemporary
+                )
+            } catch {
+                throw VaultAgentInstallerError.rollbackFailed
+            }
+            throw originalError
+        }
+    }
+
+    private func rollbackCommittedAtomicWrite(
+        at url: URL,
+        temporary: URL,
+        newSnapshot: FileSnapshot,
+        restoreDisplacedFile: Bool,
+        shouldRemoveTemporary: inout Bool
+    ) throws {
+        let rollbackCandidate = url.deletingLastPathComponent()
+            .appendingPathComponent(".pastera-rollback-\(UUID().uuidString).tmp")
+        guard renamex_np(url.path, rollbackCandidate.path, UInt32(RENAME_EXCL)) == 0 else {
+            shouldRemoveTemporary = false
+            throw VaultAgentInstallerError.rollbackFailed
+        }
+        try atomicWriteInterposer(url, .afterRollbackTargetQuarantined)
+        let candidateIsPasteraWrite = (try? fileSnapshot(
+            rollbackCandidate,
+            maximumBytes: max(Int(newSnapshot.size), 1)
+        )) == newSnapshot
+        guard candidateIsPasteraWrite else {
+            guard renamex_np(rollbackCandidate.path, url.path, UInt32(RENAME_EXCL)) == 0 else {
+                shouldRemoveTemporary = false
+                throw VaultAgentInstallerError.rollbackFailed
+            }
+            try fsyncDirectory(url.deletingLastPathComponent())
+            return
+        }
+
+        if restoreDisplacedFile {
+            guard renamex_np(temporary.path, url.path, UInt32(RENAME_EXCL)) == 0 else {
+                shouldRemoveTemporary = false
+                throw VaultAgentInstallerError.rollbackFailed
+            }
+            shouldRemoveTemporary = false
+        }
+        guard unlink(rollbackCandidate.path) == 0 else {
+            throw VaultAgentInstallerError.rollbackFailed
         }
         try fsyncDirectory(url.deletingLastPathComponent())
     }
@@ -2112,25 +2278,8 @@ private extension VaultAgentIntegrationInstaller {
             executableURL: hostURL,
             arguments: removeArguments(for: host)
         )
-        guard exitCode == 0,
-              try commandRunner.registration(executableURL: hostURL, host: host) == nil else {
+        guard exitCode == 0 else {
             throw VaultAgentInstallerError.rollbackFailed
-        }
-    }
-
-    private func verifyAddedRegistration(
-        host: VaultAgentHostKind,
-        hostURL: URL,
-        expected: VaultAgentHostRegistration
-    ) throws {
-        do {
-            guard try commandRunner.registration(executableURL: hostURL, host: host)
-                    == expected else {
-                throw VaultAgentInstallerError.installationConflict
-            }
-        } catch {
-            try removeRegistrationIfOwned(host: host, hostURL: hostURL, expected: expected)
-            throw error
         }
     }
 
@@ -2146,9 +2295,7 @@ private extension VaultAgentIntegrationInstaller {
             executableURL: hostURL,
             arguments: addArguments(for: host, registration: registration)
         )
-        guard exitCode == 0,
-              try commandRunner.registration(executableURL: hostURL, host: host)
-                == registration else {
+        guard exitCode == 0 else {
             throw VaultAgentInstallerError.rollbackFailed
         }
     }
@@ -2182,10 +2329,6 @@ private extension VaultAgentIntegrationInstaller {
                 throw VaultAgentInstallerError.rollbackFailed
             }
             throw VaultAgentInstallerError.commandFailed(exitCode)
-        }
-        guard try commandRunner.registration(executableURL: hostURL, host: host)
-                == replacement else {
-            throw VaultAgentInstallerError.rollbackFailed
         }
     }
 
