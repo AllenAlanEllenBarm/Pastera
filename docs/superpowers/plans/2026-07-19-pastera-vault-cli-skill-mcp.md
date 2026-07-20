@@ -1366,7 +1366,7 @@ git commit -m "feat(agent): 完成 broker 密码箱操作"
 - Consumes: Task 1 wire contract 与 Task 5/6 Broker。
 - Produces: `VaultAgentClient.request(_:) async throws`、`PasteraMCPServer.run()`、`PasteraCodexMCP` 与 `PasteraClaudeMCP`。
 
-- [ ] **Step 1：写工具清单、Schema 和注解失败测试**
+- [x] **Step 1：写工具清单、Schema 和注解失败测试**
 
 ~~~swift
 @Test("MCP publishes exactly five bounded tools")
@@ -1394,7 +1394,7 @@ func structuredResultOmitsSecretFields() throws {
 }
 ~~~
 
-- [ ] **Step 2：增加 Target/依赖并确认测试先失败**
+- [x] **Step 2：增加 Target/依赖并确认测试先失败**
 
 在 Xcode 中固定 `https://github.com/modelcontextprotocol/swift-sdk.git` 精确版本 `0.12.1`，产品 `MCP` 只链接 `PasteraAgentAdapter`/两个 MCP Helper，不链接现有 App Target。
 
@@ -1402,11 +1402,11 @@ Run：统一命令追加 `-only-testing:pasteraAgentTests/PasteraMCPServerTests`
 
 Expected：FAIL，缺失 `PasteraMCPServer`；依赖解析记录精确为 `0.12.1`。
 
-- [ ] **Step 3：实现 Broker Client 与一次 App 拉起重试**
+- [x] **Step 3：实现 Broker Client 与一次 App 拉起重试**
 
 `VaultAgentClient` 连接失败时从当前 Helper 真实路径推导包含它的 `Pastera.app`，用 `NSWorkspace.OpenConfiguration` 或 `/usr/bin/open -gj` 后台拉起一次；按 50/100/200/400/800ms 有界等待 socket，总时长不超过 2 秒，不循环重启。连接后执行 Task 5 握手和严格 sequence；每次请求设置 10 秒上限，EOF/SIGTERM 关闭 fd 并释放密钥。
 
-- [ ] **Step 4：按固定 SDK API 实现 MCP Server**
+- [x] **Step 4：按固定 SDK API 实现 MCP Server**
 
 ~~~swift
 let server = Server(
@@ -1425,17 +1425,17 @@ try await server.start(transport: StdioTransport(logger: stderrLogger))
 
 每个 Tool 都给出 `inputSchema` 与 `outputSchema`。read-only 三个工具使用 `readOnlyHint: true, destructiveHint: false, openWorldHint: false`；paste/prepare 使用 `readOnlyHint: false, destructiveHint: false, idempotentHint: false`，paste 的 `openWorldHint: true`。成功与错误都返回 `structuredContent`；文本 content 只包含简短中文状态，不包含秘密或原始错误。
 
-- [ ] **Step 5：增加两个独立入口与 stdout 纯净测试**
+- [x] **Step 5：增加两个独立入口与 stdout 纯净测试**
 
 两个 main 只差固定 `VaultAgentClientKind`；MCP stdin/stdout 不得写诊断。真实 pipe 测试覆盖 `initialize`、`tools/list`、`tools/call`、EOF 和 SIGTERM，捕获 stderr 后扫描哨兵秘密。
 
-- [ ] **Step 6：运行 Adapter/MCP 测试**
+- [x] **Step 6：运行 Adapter/MCP 测试**
 
 Run：统一命令追加 `-only-testing:pasteraAgentTests/VaultAgentClientTests -only-testing:pasteraAgentTests/PasteraMCPServerTests`。
 
 Expected：PASS；`tools/list` 精确返回 5 项，`vault_search.limit = 51` 返回 `INVALID_REQUEST`，未授权返回 `AUTHORIZATION_REQUIRED` 且不崩溃。
 
-- [ ] **Step 7：提交 MCP 产品**
+- [x] **Step 7：提交 MCP 产品**
 
 ~~~bash
 git add pastera-agent/Sources/PasteraAgentAdapter/VaultAgentClient.swift \
@@ -2051,7 +2051,7 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 ## 交付元数据（Delivery Metadata）
 
 - Plan Path：`docs/superpowers/plans/2026-07-19-pastera-vault-cli-skill-mcp.md`
-- Plan Status：`implementation-in-progress-task-6-complete`
+- Plan Status：`implementation-in-progress-task-7-complete`
 - Evidence Profile：`standard`
 - Story ID：未请求、未分配
 - Task IDs：未请求、未分配
@@ -2064,12 +2064,14 @@ git commit -m "test(agent): 验证密码箱集成安全与性能"
 
 ## 交付记录（Delivery Record）
 
-- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer；Task 5 已完成 Helper/Host 双重进程身份、X25519/HKDF/ChaChaPoly 认证通道、fd-relative 私有 Unix Socket，以及 active + closing 合计最多 8 个连接、每连接单 timer/单 in-flight 和有界 partial I/O 的事件驱动生命周期；Task 6 已完成 Broker 全部密码箱 operation、有界 HMAC cursor、稳定出站错误折叠、最近非 Agent 粘贴目标复核、固定 Helper 票据命令、仅成功敏感动作续期、零 Grant 清理，以及容量 8 的 integration running + queued 共用 gate。Task 7–12 尚未实现。
+- Actual Implementation：Task 1 已建立共享协议、稳定错误码、严格载荷上限与 65,536-byte 完整帧边界；Task 2 已建立按 Codex、Claude、CLI 隔离的 Keychain Grant、7 天滑动期、30 天硬上限、首次授权去重/取消冷却、完整 Helper/Host 身份约束，以及复用外部密码箱串行队列的可重入 executor；Task 3 已完成独立自动化 Keychain 密钥、冷态无人值守恢复、Environment/Controller 单实例接线、UI/Agent/session lock 共用可重入 Store executor、可取消 timer 与不可取消系统锁分离，以及线程安全状态快照和主线程变化通知；Task 4 已完成仅存 SHA-256 binding 的 30 秒单次票据、5 秒 receipt、三类有界 outcome tombstone、固定 3×3 滚动限流，以及使用独立 ThisDeviceOnly Keychain HMAC key 的 1,000 条/30 天进程内脱敏审计 Ring Buffer；Task 5 已完成 Helper/Host 双重进程身份、X25519/HKDF/ChaChaPoly 认证通道、fd-relative 私有 Unix Socket，以及 active + closing 合计最多 8 个连接、每连接单 timer/单 in-flight 和有界 partial I/O 的事件驱动生命周期；Task 6 已完成 Broker 全部密码箱 operation、有界 HMAC cursor、稳定出站错误折叠、最近非 Agent 粘贴目标复核、固定 Helper 票据命令、仅成功敏感动作续期、零 Grant 清理，以及容量 8 的 integration running + queued 共用 gate；Task 7 已完成官方 MCP Swift SDK `0.12.1` 精确固定、Adapter-only 链接边界、Codex/Claude 双 Helper、固定五工具 Schema/注解、与 Task 5 逐字节兼容的认证 Client、capacity 1/queue 0 的 MCP admission，以及取消安全的共享冷启动和纯净 stdio 生命周期。Task 8–12 尚未实现。
 - Plan Deviations：由于项目工作流禁止为同一需求创建平行 plan/spec，Superpowers 设计规格与实施计划有意合并到这一份仓库文件中。Task 1 实施前发现原任务只引用了外部错误表，未给出响应 envelope、集成状态载荷和所有字符串/集合上限；已在不改变产品、安全或 Host 行为的前提下补齐精确 Wire Contract，避免实现猜测。Task 2 预检发现 `VaultAgentErrorCode` 作为 `Result.Failure` 缺少 `Error` conformance，并且原任务未固定 Keychain 失败、撤销持久化、并发身份变化与取消冷却语义；已补齐这些实现级契约，wire raw value 和产品授权边界不变。Task 2 独立审查进一步发现 Host 元组完整性、Coordinator in-flight 生命周期和“复用唯一密码箱 Store Queue”在原任务中的实现约束不足；已明确 Codex/Claude/CLI 的 Host 完整性规则，并以外部注入且可重入的 `VaultAgentSerialExecutor` 统一 Policy、Keychain 与 Coordinator 执行边界，Task 3 继续接入现有 `PasswordVaultUIController.storeQueue`。Task 3 预检发现自动化 Keychain 更新/错误映射、KDBX 原始 key 长度、Environment 构造依赖和交互续期触发矩阵仍可能由实现者猜测；已固定查询/更新规则、非 32 字节安全失败、共享 Controller/executor 构造方式与只在成功 UI 敏感动作触发的边界，未扩大产品授权范围。Task 3 首轮独立审查发现 Environment 切换时 lazy MenuManager 会缓存旧 Controller、session auto-lock 绕过共享 queue，以及 automation unlock 失败后可能残留旧敏感会话；已要求当前 Environment provider、session executor 绑定、timer 状态同步和失败前后清除敏感材料，并补 `onChange` 同步。Task 3 第二轮独立审查发现系统锁仍可能被队列前方活动取消，且 Controller `state` 仍跨队列读取 Store；已区分不可取消系统锁与可取消 timer 锁，并改为 executor 内状态回调更新受锁 snapshot，不改变外部授权时长或秘密暴露范围。Task 4 预检发现票据 command 生成、随机/碰撞失败、重放错误、容量边界、限流 retry-after 和审计密钥/记录 Schema 尚未固定；已明确 command builder 只生成响应且不落 Store、三类有界票据状态、严格滑动窗口、独立 Keychain HMAC key 和进程内 1,000 条 Ring Buffer，未改变 30 秒票据、5 秒 receipt 或外部操作范围。Task 4 首轮独立审查发现审计 key 读取未强制 ThisDeviceOnly，主流程复核同时发现票据/receipt 被其他访问惰性清理后会把 expired 漂移成 used；已把 accessibility 纳入全部 Keychain 匹配查询，并用单个 256 条 outcome tombstone 保持过期/重放语义。复审一度建议为成功 receipt 也保存 used tombstone；按原契约复核后撤回，因为未知与已完成 receipt 对外均为 used，额外状态不会改善安全行为且可能阻断秘密已写入后的 complete/续期。Task 5 预检发现原任务未固定 Helper identifier、进程 snapshot/PID 复用检查、HKDF/AAD 字节 transcript、socket stale/active 冲突处理、partial I/O 和异步 handler 生命周期，并且重放示例引用了尚不存在的协议错误 case；已补齐三个签名 identifier、双次 snapshot、固定加密向量、fd-relative no-follow 文件系统规则、事件驱动有界连接状态机和本地 transport errors，因此 Task 5 允许窄改协议错误枚举但不改变 wire error raw value 或业务操作。Task 5 首轮独立审查发现 source cancel 前关闭 fd、idle 闭包无界累积、默认目录临时回退、目录 TOCTOU、响应在加密后限长，以及最终进程/签名窗口不完整；已改为 cancel handler 完成后释放、每连接单 timer、默认路径 fail closed、生命周期持有 dirfd、seal 前限长和最终完整复读。第二轮复审发现 closing 连接未计入容量，已补 active + closing 合计上限和确定性峰值测试；不改变 wire 或授权语义。
 - Task 6 Preflight：原任务未固定 status 的 Grant 快照来源、cursor 密钥与 snapshot revision、完整 error/rate/audit 映射、目标代码身份复核、Helper 命令模板、零 Grant 清理的串行原子性，以及 Task 9 安装器尚不存在时的 integration 边界；已明确进程内随机 HMAC cursor、确定性 metadata revision、稳定错误折叠、activation/paste 双次进程与签名验证、固定 stdin/fd3 模板、共享 executor 清理和窄 integration service 注入，不扩大 V1 操作集合或秘密返回面。
 - Task 6 Review：实现提交为 `2a949b1`，首轮复审修复提交为 `4091c1f`，容量 gate 修复提交为 `f1f2c2d`；两轮复审依次补齐统一出站 wire 上限、paste target generation/fail-closed、integration worker 非阻塞、完整负向策略矩阵、canonical cursor，以及断连后仍限制 running + queued 的固定容量 gate。其间 `4299f86` 等 README/社区文档提交属于独立需求，不计入 Task 6 实现范围。
+- Task 7 Preflight：固定官方 `modelcontextprotocol/swift-sdk` exact `0.12.1` 与 resolved revision `a0ae212e`，并明确 MCP 依赖只进入 Adapter、两个 Helper 和 Agent tests；Client 必须复用 Task 5 固定加密 transcript，stdio production logger 为 no-op，App 拉起和请求 deadline 均有界。
+- Task 7 Review：初始提交 `d5dd02d`，并发/启动加固提交 `f6f5e4b`，取消边界提交 `d112217`，稳定性测试提交 `e7875c4`。三轮独立复审依次补齐 connect timeout/cancel 终止、共享冷启动、capacity 1/queue 0 admission、launcher 标准流隔离、最后 waiter 取消后禁止 launch/retry、连接成功后取消时 discard fd、32/33 waiter 上限，以及以 socket peer EOF 取代可复用裸 fd 号断言；最终复审为 Approved，Critical/Important/Minor 均为 0。
 - Impact：计划影响仅限 macOS Pastera 应用、三个内置 Helper、本地 Agent Skill 资源、用户自己的 Codex/Claude MCP 配置和新增本机 Keychain 授权材料；不计划修改 KDBX Schema 或 OneDrive 路径。
-- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites，strict SwiftLint、范围化 `git diff --check` 与 `plutil` 均通过。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder、Thread Performance Checker 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
+- Verification：基线默认回归 682 tests / 75 suites 通过。Task 1 独立验证为 9 个协议测试与 15 个 Store 回归通过；Task 2 经修复复审批准，主流程重新运行 22 个授权测试与 9 个协议测试，共 31 tests / 2 suites，`xcodebuild` 退出码 0；Task 3 经两轮修复复审批准，主流程重新运行自动化 Keychain、Agent 访问、Store、菜单和 Task 2 授权回归，共 87 tests / 5 suites，`xcodebuild` 退出码 0；Task 4 经修复和技术复核批准，主流程重新运行 23 个票据/限流/审计测试、22 个授权测试和 9 个协议测试，共 54 tests / 3 suites，`xcodebuild` 退出码 0；Task 5 经两轮安全修复与最终独立复审批准，主流程重新运行 peer verifier、Broker、授权和协议回归，共 58 tests、0 failed、0 skipped，`xcodebuild` 退出码 0；Task 6 经两轮安全修复与最终独立复审批准，主流程重新运行 100 tests / 3 suites 聚焦测试，并运行 App 162 tests / 7 suites 与协议 9 tests / 1 suite，共 171 tests / 8 suites；Task 7 经三轮加固与最终独立复审批准，focused 为 36 tests / 2 suites，Agent/协议为 45 tests / 3 suites，Broker 为 51 tests / 1 suite，Client suite 连续 10 轮共 250 tests 全通过，两个 Helper 均 `BUILD SUCCEEDED`，Codex/Claude initialize/list/call/EOF/SIGTERM smoke 均 exit 0、stderr 0；strict SwiftLint、范围化 `git diff --check`、`plutil` 与 `xmllint` 均通过。CoreSimulator、pkg-config/zlib、linkd、AppKit first-responder、Thread Performance Checker 与 SwiftLint recorder 告警与基线一致，不影响 macOS 测试结果。
 - Remaining Risks：真实 Developer ID/ad-hoc Helper 身份、Host 父进程链、安装态默认 socket 路径、目标命令泄漏和 MCP SDK 1.0 前兼容性仍待 Task 11/12 实机验收，均已映射到验收与回滚。
-- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 7–12，并持续更新本文件复选框与 Delivery Record；Task 7 在已验证 Broker 上实现 Codex/Claude MCP Adapter 与固定五工具边界。
+- Follow-ups：继续按已选择的 Subagent-Driven 流程顺序实施 Task 8–12，并持续更新本文件复选框与 Delivery Record；Task 8 在已验证 Client 上实现人工 CLI、稳定 JSON envelope 和受控 stdin/fd 注入。
 - ZenTao Closeout：不适用；用户未要求禅道操作。
