@@ -5,8 +5,6 @@ import PasteraAgentProtocol
 // swiftlint:disable file_length
 // swiftlint:disable:next type_name type_body_length
 final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageViewController {
-    private static let metadataTools = ["vault_status", "vault_search", "vault_get"]
-
     struct RowSnapshot: Equatable {
         let showsIdleExpiry: Bool
         let showsHardExpiry: Bool
@@ -132,6 +130,9 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
     private var pageError: Error?
     private var metadataPreview: VaultAgentPermissionSnippet?
     private var stateObserver: NSObjectProtocol?
+    private var isPageVisible = false
+    private var snapshotRefreshInFlight = false
+    private var snapshotRefreshDirty = true
     private var clientGroup: PasteraPreferenceGroupView?
     private let permissionStatusLabel = NSTextField(wrappingLabelWithString: "")
     private let previewReadOnlyButton = NSButton(title: Text.previewReadOnly, target: nil, action: nil)
@@ -160,7 +161,7 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refresh()
+            self?.snapshotStateDidChange()
         }
     }
 
@@ -177,12 +178,21 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
         clientRows.removeAll()
         super.loadView()
         buildPage()
-        refresh()
+        requestSnapshotRefresh(allowWhileHidden: true)
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        refresh()
+        isPageVisible = true
+        if !snapshotRefreshInFlight {
+            snapshotRefreshDirty = true
+        }
+        requestSnapshotRefresh()
+    }
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        isPageVisible = false
     }
 
     private func buildPage() {
@@ -296,9 +306,26 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
         return container
     }
 
-    private func refresh() {
+    private func snapshotStateDidChange() {
+        snapshotRefreshDirty = true
+        requestSnapshotRefresh()
+    }
+
+    private func requestSnapshotRefresh(allowWhileHidden: Bool = false) {
+        guard snapshotRefreshDirty,
+              !snapshotRefreshInFlight,
+              isPageVisible || allowWhileHidden else { return }
+        snapshotRefreshDirty = false
+        snapshotRefreshInFlight = true
         runtime.loadSnapshot { [weak self] result in
-            self?.onMain { self?.consume(result) }
+            self?.onMain {
+                guard let self else { return }
+                self.snapshotRefreshInFlight = false
+                self.consume(result)
+                if self.isPageVisible, self.snapshotRefreshDirty {
+                    self.requestSnapshotRefresh()
+                }
+            }
         }
     }
 
@@ -324,7 +351,9 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
             row.actionButton.title = busy ? Text.busy : actionTitle(state.primaryAction)
             row.actionButton.isEnabled = !busy
             row.actionButton.setAccessibilityLabel(row.actionButton.title)
-            row.uninstallButton.isHidden = !state.installed || state.primaryAction == .uninstall
+            row.uninstallButton.isHidden = !state.installed ||
+                state.authorization == .authorized ||
+                state.primaryAction == .uninstall
             row.uninstallButton.isEnabled = !busy
         }
         updatePermissionControls()
@@ -335,11 +364,11 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
     private func updatePermissionControls() {
         let permission = snapshot.claudePermission
         let claudeInstalled = snapshot.clients[.claude]?.installed == true
-        let hasExactMetadataPreview = metadataPreview?.allowedTools == Self.metadataTools
+        let hasMetadataPreview = metadataPreview?.exactlyMatches(scope: .metadataOnly) == true
         previewReadOnlyButton.isEnabled = claudeInstalled && !permissionInFlight
-        copyPermissionButton.isEnabled = claudeInstalled && hasExactMetadataPreview && !permissionInFlight
+        copyPermissionButton.isEnabled = claudeInstalled && hasMetadataPreview && !permissionInFlight
         applyReadOnlyButton.isEnabled = claudeInstalled &&
-            hasExactMetadataPreview && permission.canApplyAutomatically && !permissionInFlight
+            hasMetadataPreview && permission.canApplyAutomatically && !permissionInFlight
         applySensitiveButton.isEnabled = claudeInstalled && permission.canApplyAutomatically && !permissionInFlight
         removePermissionButton.isEnabled = permission.canRemoveOwnedRules && !permissionInFlight
         if let error = permissionError {
@@ -393,6 +422,7 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
     @objc private func uninstallActionTapped(_ sender: NSButton) {
         guard let client = client(for: sender.tag),
               snapshot.clients[client]?.installed == true,
+              snapshot.clients[client]?.authorization != .authorized,
               !inFlightClients.contains(client) else { return }
         performClientAction(.uninstall(client), client: client)
     }
@@ -425,7 +455,7 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
         permissionError = nil
         requestSnippet(.metadataOnly) { [weak self] snippet in
             guard let self else { return }
-            guard snippet.allowedTools == Self.metadataTools else {
+            guard snippet.exactlyMatches(scope: .metadataOnly) else {
                 permissionError = VaultAgentErrorCode.invalidRequest
                 metadataPreview = nil
                 updatePermissionControls()
@@ -442,7 +472,7 @@ final class CPYAgentIntegrationPreferenceViewController: PasteraPreferencePageVi
     }
 
     @objc private func applyClaudeReadOnlyPermission() {
-        guard metadataPreview?.allowedTools == Self.metadataTools else { return }
+        guard metadataPreview?.exactlyMatches(scope: .metadataOnly) == true else { return }
         performPermission(.applyClaudePermission(.metadataOnly))
     }
 
@@ -614,7 +644,9 @@ extension CPYAgentIntegrationPreferenceViewController {
             showsLastSensitiveUse: state.lastSensitiveUseAt != nil,
             primaryAction: state.primaryAction,
             primaryActionCount: 1,
-            showsSecondaryUninstall: state.installed && state.primaryAction != .uninstall
+            showsSecondaryUninstall: state.installed &&
+                state.authorization != .authorized &&
+                state.primaryAction != .uninstall
         )
     }
 

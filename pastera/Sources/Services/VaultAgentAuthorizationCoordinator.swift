@@ -84,7 +84,29 @@ final class VaultAgentAuthorizationCoordinator {
     typealias AuthenticationAction = (@escaping (Result<Void, Error>) -> Void) -> Void
     typealias PrepareAction = () throws -> Void
 
+    enum LifecycleMutationKind: Hashable {
+        case install
+        case uninstall
+    }
+
+    struct LifecycleMutationToken: Hashable {
+        fileprivate let client: VaultAgentClientKind
+        fileprivate let ownerID: UUID
+        fileprivate let kind: LifecycleMutationKind
+    }
+
+    private struct ActiveLifecycleMutation {
+        let token: LifecycleMutationToken
+        let restoresSuspendedStateOnAbort: Bool
+    }
+
+    private enum ClientLifecycleState {
+        case suspended
+        case mutating(ActiveLifecycleMutation)
+    }
+
     private struct PendingAuthorization {
+        let id: UUID
         let identity: VaultAgentPeerIdentity
         let trigger: Trigger
         let prepare: PrepareAction?
@@ -109,12 +131,14 @@ final class VaultAgentAuthorizationCoordinator {
     private let defaults: UserDefaults
     private let now: () -> Date
     private var pending: [VaultAgentClientKind: PendingAuthorization] = [:]
+    private var lifecycleStates = [VaultAgentClientKind: ClientLifecycleState]()
 
     init(
         executor: VaultAgentSerialExecutor,
         policy: VaultAgentAuthorizationPolicy,
         authenticator: VaultAgentIdentityAuthenticating = SystemVaultAgentIdentityAuthenticator(),
         defaults: UserDefaults = .standard,
+        initiallySuspendedClients: Set<VaultAgentClientKind> = [],
         now: @escaping () -> Date = Date.init
     ) {
         self.executor = executor
@@ -122,6 +146,62 @@ final class VaultAgentAuthorizationCoordinator {
         self.authenticator = authenticator
         self.defaults = defaults
         self.now = now
+        lifecycleStates = Dictionary(uniqueKeysWithValues: initiallySuspendedClients.map {
+            ($0, .suspended)
+        })
+    }
+
+    func beginLifecycleMutation(
+        for client: VaultAgentClientKind,
+        kind: LifecycleMutationKind
+    ) -> Result<LifecycleMutationToken, VaultAgentErrorCode> {
+        let result = executor.sync { () -> (LifecycleMutationToken?, PendingAuthorization?) in
+            if case .some(.mutating) = lifecycleStates[client] { return (nil, nil) }
+            let token = LifecycleMutationToken(client: client, ownerID: UUID(), kind: kind)
+            let active = ActiveLifecycleMutation(
+                token: token,
+                restoresSuspendedStateOnAbort: lifecycleStates[client] != nil
+            )
+            lifecycleStates[client] = .mutating(active)
+            return (token, pending.removeValue(forKey: client))
+        }
+        guard let token = result.0 else { return .failure(.vaultBusy) }
+        if let cancelled = result.1 {
+            deliver(.failure(.authorizationRequired), to: cancelled.completions)
+        }
+        return .success(token)
+    }
+
+    func commitLifecycleMutation(_ token: LifecycleMutationToken) {
+        resolveLifecycleMutation(
+            token,
+            authorizationEligible: token.kind == .install
+        )
+    }
+
+    @discardableResult
+    func resolveLifecycleMutation(
+        _ token: LifecycleMutationToken,
+        authorizationEligible: Bool
+    ) -> Bool {
+        executor.sync {
+            guard case let .some(.mutating(active)) = lifecycleStates[token.client],
+                  active.token == token else { return false }
+            lifecycleStates[token.client] = authorizationEligible ? nil : .suspended
+            return true
+        }
+    }
+
+    func abortLifecycleMutation(_ token: LifecycleMutationToken) {
+        executor.sync {
+            guard case let .some(.mutating(active)) = lifecycleStates[token.client],
+                  active.token == token else { return }
+            lifecycleStates[token.client] = active.restoresSuspendedStateOnAbort ? .suspended : nil
+        }
+    }
+
+    func isAuthorizationBlocked(for client: VaultAgentClientKind) -> Bool {
+        executor.sync { lifecycleStates[client] != nil }
     }
 
     func authorize(
@@ -134,6 +214,10 @@ final class VaultAgentAuthorizationCoordinator {
     ) {
         executor.async { [self] in
             guard VaultAgentAuthorizationPolicy.isValid(identity) else {
+                deliver(.failure(.authorizationRequired), to: [completion])
+                return
+            }
+            guard lifecycleStates[identity.client] == nil else {
                 deliver(.failure(.authorizationRequired), to: [completion])
                 return
             }
@@ -153,7 +237,9 @@ final class VaultAgentAuthorizationCoordinator {
                 return
             }
 
+            let pendingID = UUID()
             pending[identity.client] = PendingAuthorization(
+                id: pendingID,
                 identity: identity,
                 trigger: trigger,
                 prepare: prepare,
@@ -167,7 +253,11 @@ final class VaultAgentAuthorizationCoordinator {
             authenticate { [executor] result in
                 executor.async {
                     guard let coordinator = lifetime.coordinator else { return }
-                    coordinator.finishAuthentication(for: identity.client, result: result)
+                    coordinator.finishAuthentication(
+                        for: identity.client,
+                        pendingID: pendingID,
+                        result: result
+                    )
                     lifetime.coordinator = nil
                 }
             }
@@ -176,9 +266,11 @@ final class VaultAgentAuthorizationCoordinator {
 
     private func finishAuthentication(
         for client: VaultAgentClientKind,
+        pendingID: UUID,
         result: Result<Void, Error>
     ) {
-        guard let current = pending.removeValue(forKey: client) else { return }
+        guard pending[client]?.id == pendingID,
+              let current = pending.removeValue(forKey: client) else { return }
         let authorizationResult: Result<VaultAgentGrant, VaultAgentErrorCode>
         switch result {
         case .success:

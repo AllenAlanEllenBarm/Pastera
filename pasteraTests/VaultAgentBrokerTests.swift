@@ -209,6 +209,76 @@ private extension VaultAgentBrokerTests {
         }
     }
 
+    @Test("integration mutations fail closed when no lifecycle gate is wired")
+    func integrationMutationsRequireLifecycleGate() async throws {
+        let fixture = try RuntimeFixture(
+            client: .cli,
+            usesIntegrationLifecycleGate: false
+        )
+
+        let install = try await fixture.call(.integrationInstall(host: .codex))
+        let uninstall = try await fixture.call(.integrationUninstall(host: .claude))
+
+        #expect(install.body.failureCode == .brokerUnavailable)
+        #expect(uninstall.body.failureCode == .brokerUnavailable)
+    }
+
+    @Test("a gate-only runtime blocks same-client requests during integration mutation")
+    func lifecycleGateAloneBlocksAuthorizationWindow() async throws {
+        let mutationStarted = DispatchSemaphore(value: 0)
+        let releaseMutation = DispatchSemaphore(value: 0)
+        let integration = RuntimeIntegrationService()
+        integration.installOperation = { _ in
+            mutationStarted.signal()
+            _ = releaseMutation.wait(timeout: .now() + 2)
+            return integration.statusResult
+        }
+        let fixture = try RuntimeFixture(client: .cli, integrationService: integration)
+        let codexIdentity = try fixture.authorizeAdditionalClient(.codex)
+        let prepared = try await fixture.call(
+            .prepareExec(entryID: fixture.entryID, field: .password, mode: .stdin),
+            identity: codexIdentity
+        )
+        guard case let .success(.ticket(ticket)) = prepared.body else {
+            Issue.record("preflight must produce a same-client ticket")
+            return
+        }
+        let readyCountBeforeMutation = fixture.vault.ensureReadyCount
+        let metadataCountBeforeMutation = fixture.vault.metadataCount
+        defer { releaseMutation.signal() }
+
+        async let install = fixture.call(.integrationInstall(host: .codex))
+        #expect(mutationStarted.wait(timeout: .now() + 1) == .success)
+
+        let blocked = try await fixture.call(
+            .redeemTicket(token: ticket.token, mode: .stdin),
+            identity: codexIdentity
+        )
+        #expect(blocked.body.failureCode == .authorizationRequired)
+        #expect(fixture.vault.ensureReadyCount == readyCountBeforeMutation)
+        #expect(fixture.vault.metadataCount == metadataCountBeforeMutation)
+        #expect(fixture.vault.secretCount == 0)
+
+        let status = try await fixture.call(.status, identity: codexIdentity)
+        guard case let .success(.status(value)) = status.body else {
+            Issue.record("blocked client status must remain available")
+            releaseMutation.signal()
+            _ = try await install
+            return
+        }
+        #expect(!value.authorized)
+
+        releaseMutation.signal()
+        #expect(try await install.body.failureCode == nil)
+        let recovered = try await fixture.call(
+            .search(.init(query: nil, folderID: nil, limit: 20, cursor: nil)),
+            identity: codexIdentity
+        )
+        #expect(recovered.body.failureCode == nil)
+        #expect(fixture.vault.ensureReadyCount == readyCountBeforeMutation + 1)
+        #expect(fixture.vault.metadataCount == metadataCountBeforeMutation + 1)
+    }
+
     @Test("authorization then rate limit then vault readiness is the fixed check order")
     func authorizationRateLimitReadinessOrder() async throws {
         let fixture = try RuntimeFixture(client: .cli, authorized: false)
@@ -1839,6 +1909,8 @@ private final class RuntimeFixture {
     let integrationService: RuntimeIntegrationService
     let executor: VaultAgentSerialExecutor
     let authorizationPolicy: VaultAgentAuthorizationPolicy
+    let authorizationCoordinator: VaultAgentAuthorizationCoordinator
+    let integrationLifecycleGate: VaultAgentIntegrationLifecycleGate
     let ticketStore: VaultAgentTicketStore
     let runtime: VaultAgentRuntime
     private let nowBox = RuntimeDateBox(Date(timeIntervalSince1970: 1_000_000))
@@ -1849,6 +1921,7 @@ private final class RuntimeFixture {
         cursorKey: Data = Data(repeating: 0x55, count: 32),
         integrationService: RuntimeIntegrationService = RuntimeIntegrationService(),
         integrationWorkGate: VaultAgentIntegrationWorkGate = VaultAgentIntegrationWorkGate(),
+        usesIntegrationLifecycleGate: Bool = true,
         ticketCommandBuilder: ((VaultAgentClientKind, VaultAgentInjectionMode, String) -> [String])? = nil
     ) throws {
         self.integrationService = integrationService
@@ -1865,6 +1938,15 @@ private final class RuntimeFixture {
         )
         executor = VaultAgentSerialExecutor(queue: DispatchQueue(label: "RuntimeFixture.store"))
         authorizationPolicy = try VaultAgentAuthorizationPolicy(store: grantStore, executor: executor)
+        authorizationCoordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: authorizationPolicy
+        )
+        integrationLifecycleGate = VaultAgentIntegrationLifecycleGate(
+            authorizationCoordinator: authorizationCoordinator,
+            authorizationPolicy: authorizationPolicy,
+            now: { [nowBox] in nowBox.value }
+        )
         if authorized {
             try authorizationPolicy.authorize(identity: identity, authenticatedAt: nowBox.value)
         }
@@ -1890,6 +1972,7 @@ private final class RuntimeFixture {
             vault: vault,
             pasteTargetTracker: RuntimeTargetTracker(),
             integrationService: integrationService,
+            integrationLifecycleGate: usesIntegrationLifecycleGate ? integrationLifecycleGate : nil,
             integrationWorkGate: integrationWorkGate,
             rateLimiter: VaultAgentRateLimiter(),
             ticketStore: ticketStore,
@@ -2128,6 +2211,7 @@ private final class RuntimeIntegrationService: VaultAgentIntegrationServicing {
     private var storedStatusCallCount = 0
     var statusResult: VaultAgentIntegrationStatus
     var statusOperation: ((VaultAgentHostKind?) throws -> VaultAgentIntegrationStatus)?
+    var installOperation: ((VaultAgentHostKind) throws -> VaultAgentIntegrationStatus)?
 
     var statusCallCount: Int {
         lock.withLock { storedStatusCallCount }
@@ -2146,7 +2230,10 @@ private final class RuntimeIntegrationService: VaultAgentIntegrationServicing {
         guard let host else { return statusResult }
         return .init(hosts: statusResult.hosts.filter { $0.host == host })
     }
-    func install(host _: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus { .init(hosts: []) }
+    func install(host: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus {
+        if let installOperation { return try installOperation(host) }
+        return .init(hosts: [])
+    }
     func uninstall(host _: VaultAgentHostKind) throws -> VaultAgentIntegrationStatus { .init(hosts: []) }
 }
 

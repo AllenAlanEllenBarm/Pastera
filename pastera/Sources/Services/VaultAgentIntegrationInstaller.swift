@@ -563,6 +563,49 @@ enum VaultAgentHostPermissionScope: String, Codable, CaseIterable {
 struct VaultAgentPermissionSnippet: Equatable {
     let allowedTools: [String]
     let serialized: String
+
+    static func canonicalAllowedTools(for scope: VaultAgentHostPermissionScope) -> [String] {
+        let names: [String]
+        switch scope {
+        case .metadataOnly:
+            names = ["vault_get", "vault_search", "vault_status"]
+        case .allCurrentPasteraTools:
+            names = [
+                "vault_get",
+                "vault_paste",
+                "vault_prepare_exec",
+                "vault_search",
+                "vault_status"
+            ]
+        }
+        return names.map { "mcp__pastera-vault__\($0)" }
+    }
+
+    static func canonical(for scope: VaultAgentHostPermissionScope) throws -> Self {
+        let allowedTools = canonicalAllowedTools(for: scope)
+        let data = try JSONSerialization.data(
+            withJSONObject: ["permissions": ["allow": allowedTools]],
+            options: [.sortedKeys]
+        )
+        guard let serialized = String(data: data, encoding: .utf8) else {
+            throw VaultAgentInstallerError.installationConflict
+        }
+        return .init(allowedTools: allowedTools, serialized: serialized)
+    }
+
+    func exactlyMatches(scope: VaultAgentHostPermissionScope) -> Bool {
+        let canonical = Self.canonicalAllowedTools(for: scope)
+        guard allowedTools == canonical,
+              let data = serialized.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == ["permissions"],
+              let permissions = root["permissions"] as? [String: Any],
+              Set(permissions.keys) == ["allow"],
+              let serializedTools = permissions["allow"] as? [String] else {
+            return false
+        }
+        return serializedTools == canonical
+    }
 }
 
 struct VaultAgentHostConfigurationMutation: Equatable {
@@ -715,19 +758,6 @@ final class VaultAgentIntegrationInstaller:
         "references/security-boundary.md",
         "agents/openai.yaml"
     ]
-    private static let metadataTools = [
-        "vault_get",
-        "vault_search",
-        "vault_status"
-    ]
-    private static let allTools = [
-        "vault_get",
-        "vault_paste",
-        "vault_prepare_exec",
-        "vault_search",
-        "vault_status"
-    ]
-
     private let sourceSkillURL: URL
     private let applicationURL: URL
     private let userRootURL: URL
@@ -1118,16 +1148,7 @@ final class VaultAgentIntegrationInstaller:
         guard host == .claude else {
             throw VaultAgentInstallerError.hostManagedUnsupported
         }
-        let names = scope == .metadataOnly ? Self.metadataTools : Self.allTools
-        let allowedTools = names.map { "mcp__pastera-vault__\($0)" }
-        let data = try JSONSerialization.data(
-            withJSONObject: ["permissions": ["allow": allowedTools]],
-            options: [.sortedKeys]
-        )
-        guard let serialized = String(data: data, encoding: .utf8) else {
-            throw VaultAgentInstallerError.installationConflict
-        }
-        return .init(allowedTools: allowedTools, serialized: serialized)
+        return try VaultAgentPermissionSnippet.canonical(for: scope)
     }
 
     func claudePermissionStatus() throws -> VaultAgentClaudePermissionStatus {

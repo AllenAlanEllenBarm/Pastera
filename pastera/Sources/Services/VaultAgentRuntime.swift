@@ -104,6 +104,7 @@ struct VaultAgentPreferenceClientSnapshot: Equatable {
 
     var primaryAction: VaultAgentPreferencePrimaryAction {
         if installationNeedsUpdate { return .update }
+        if authorization == .authorized { return .revoke }
         if installed, client != .cli, !hostDetected { return .uninstall }
         if !installed { return .install }
         switch authorization {
@@ -370,6 +371,122 @@ protocol VaultAgentGrantLifecycleReconciling: AnyObject {
 
 extension VaultAgentRuntime: VaultAgentGrantLifecycleReconciling {}
 
+final class VaultAgentIntegrationLifecycleGate {
+    private let authorizationCoordinator: VaultAgentAuthorizationCoordinator
+    private let authorizationPolicy: VaultAgentAuthorizationPolicy
+    private let now: () -> Date
+
+    init(
+        authorizationCoordinator: VaultAgentAuthorizationCoordinator,
+        authorizationPolicy: VaultAgentAuthorizationPolicy,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.authorizationCoordinator = authorizationCoordinator
+        self.authorizationPolicy = authorizationPolicy
+        self.now = now
+    }
+
+    func install<T>(
+        client: VaultAgentClientKind,
+        mutation: () throws -> T,
+        authorizationEligibility: () throws -> Bool
+    ) throws -> T {
+        try perform(
+            client: client,
+            kind: .install,
+            mutation: mutation,
+            authorizationEligibility: authorizationEligibility
+        )
+    }
+
+    func uninstall<T>(
+        client: VaultAgentClientKind,
+        authorizationIdentity: (() throws -> VaultAgentPeerIdentity)? = nil,
+        mutation: () throws -> T,
+        authorizationEligibility: () throws -> Bool
+    ) throws -> T {
+        try perform(
+            client: client,
+            kind: .uninstall,
+            authorizationIdentity: authorizationIdentity,
+            mutation: mutation,
+            authorizationEligibility: authorizationEligibility
+        )
+    }
+
+    func isAuthorizationBlocked(for client: VaultAgentClientKind) -> Bool {
+        authorizationCoordinator.isAuthorizationBlocked(for: client)
+    }
+
+    private func perform<T>(
+        client: VaultAgentClientKind,
+        kind: VaultAgentAuthorizationCoordinator.LifecycleMutationKind,
+        authorizationIdentity: (() throws -> VaultAgentPeerIdentity)? = nil,
+        mutation: () throws -> T,
+        authorizationEligibility: () throws -> Bool
+    ) throws -> T {
+        let token = try authorizationCoordinator
+            .beginLifecycleMutation(for: client, kind: kind)
+            .get()
+        if kind == .uninstall {
+            do {
+                if try prepareAuthorizationForUninstall(
+                    for: client,
+                    authorizationIdentity: authorizationIdentity
+                ) {
+                    authorizationCoordinator.abortLifecycleMutation(token)
+                    throw VaultAgentErrorCode.invalidRequest
+                }
+            } catch {
+                authorizationCoordinator.abortLifecycleMutation(token)
+                throw error
+            }
+        }
+
+        let value: T
+        do {
+            value = try mutation()
+        } catch {
+            let eligible = (try? authorizationEligibility()) ?? false
+            authorizationCoordinator.resolveLifecycleMutation(
+                token,
+                authorizationEligible: eligible
+            )
+            throw error
+        }
+
+        guard let eligible = try? authorizationEligibility() else {
+            authorizationCoordinator.resolveLifecycleMutation(
+                token,
+                authorizationEligible: false
+            )
+            throw VaultAgentErrorCode.brokerUnavailable
+        }
+        authorizationCoordinator.resolveLifecycleMutation(
+            token,
+            authorizationEligible: eligible
+        )
+        let expectedEligibility = kind == .install
+        guard eligible == expectedEligibility else {
+            throw VaultAgentErrorCode.brokerUnavailable
+        }
+        return value
+    }
+
+    private func prepareAuthorizationForUninstall(
+        for client: VaultAgentClientKind,
+        authorizationIdentity: (() throws -> VaultAgentPeerIdentity)?
+    ) throws -> Bool {
+        guard let grant = authorizationPolicy.grantSnapshot(for: client) else { return false }
+        let identity = (try? authorizationIdentity?()) ?? grant.identity
+        if case .allowed = authorizationPolicy.decision(for: identity, at: now()) {
+            return true
+        }
+        try authorizationPolicy.revoke(client, at: now())
+        return false
+    }
+}
+
 // The preference facade serializes bounded integration work away from AppKit's main thread.
 // swiftlint:disable:next type_body_length
 final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServicing {
@@ -389,6 +506,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
     private let vault: VaultAgentPreferenceVaultServicing
     private let identityResolver: VaultAgentPreferenceIdentityResolving
     private let lifecycleReconciler: VaultAgentGrantLifecycleReconciling
+    private let integrationLifecycleGate: VaultAgentIntegrationLifecycleGate
     private weak var auditSource: VaultAgentAuditSnapshotProviding?
     private let worker: DispatchQueue
     private let workGate: VaultAgentIntegrationWorkGate
@@ -404,6 +522,7 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         identityResolver: VaultAgentPreferenceIdentityResolving,
         lifecycleReconciler: VaultAgentGrantLifecycleReconciling,
         auditSource: VaultAgentAuditSnapshotProviding? = nil,
+        integrationLifecycleGate: VaultAgentIntegrationLifecycleGate? = nil,
         worker: DispatchQueue,
         workGate: VaultAgentIntegrationWorkGate,
         now: @escaping () -> Date = Date.init
@@ -414,6 +533,11 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         self.vault = vault
         self.identityResolver = identityResolver
         self.lifecycleReconciler = lifecycleReconciler
+        self.integrationLifecycleGate = integrationLifecycleGate ?? VaultAgentIntegrationLifecycleGate(
+            authorizationCoordinator: authorizationCoordinator,
+            authorizationPolicy: authorizationPolicy,
+            now: now
+        )
         self.auditSource = auditSource
         self.worker = worker
         self.workGate = workGate
@@ -559,9 +683,24 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
         switch action {
         case let .install(client):
             switch client {
-            case .codex: _ = try integration.install(host: .codex)
-            case .claude: _ = try integration.install(host: .claude)
-            case .cli: _ = try integration.installCLI()
+            case .codex:
+                _ = try integrationLifecycleGate.install(
+                    client: .codex,
+                    mutation: { try integration.install(host: .codex) },
+                    authorizationEligibility: { try hostAuthorizationEligibility(.codex) }
+                )
+            case .claude:
+                _ = try integrationLifecycleGate.install(
+                    client: .claude,
+                    mutation: { try integration.install(host: .claude) },
+                    authorizationEligibility: { try hostAuthorizationEligibility(.claude) }
+                )
+            case .cli:
+                _ = try integrationLifecycleGate.install(
+                    client: .cli,
+                    mutation: { try integration.installCLI() },
+                    authorizationEligibility: { try integration.cliStatus().installed }
+                )
             }
         case .authorize:
             preconditionFailure("Authorization is asynchronous")
@@ -569,11 +708,35 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
             try authorizationPolicy.revoke(client, at: now())
             try lifecycleReconciler.authorizationStateDidChange()
         case let .uninstall(client):
-            switch client {
-            case .codex: _ = try integration.uninstall(host: .codex)
-            case .claude: _ = try integration.uninstall(host: .claude)
-            case .cli: _ = try integration.uninstallCLI()
+            do {
+                switch client {
+                case .codex:
+                    _ = try integrationLifecycleGate.uninstall(
+                        client: .codex,
+                        authorizationIdentity: { try self.identityResolver.resolveIdentity(for: .codex) },
+                        mutation: { try integration.uninstall(host: .codex) },
+                        authorizationEligibility: { try hostAuthorizationEligibility(.codex) }
+                    )
+                case .claude:
+                    _ = try integrationLifecycleGate.uninstall(
+                        client: .claude,
+                        authorizationIdentity: { try self.identityResolver.resolveIdentity(for: .claude) },
+                        mutation: { try integration.uninstall(host: .claude) },
+                        authorizationEligibility: { try hostAuthorizationEligibility(.claude) }
+                    )
+                case .cli:
+                    _ = try integrationLifecycleGate.uninstall(
+                        client: .cli,
+                        authorizationIdentity: { try self.identityResolver.resolveIdentity(for: .cli) },
+                        mutation: { try integration.uninstallCLI() },
+                        authorizationEligibility: { try integration.cliStatus().installed }
+                    )
+                }
+            } catch let mutationError {
+                try lifecycleReconciler.authorizationStateDidChange()
+                throw mutationError
             }
+            try lifecycleReconciler.authorizationStateDidChange()
         case let .applyClaudePermission(scope):
             _ = try integration.applyClaudePermissionScope(scope)
         case .removeClaudePermission:
@@ -647,6 +810,14 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
             case .idleExpired, .hardExpired: authorization = .expired
             case .revoked: authorization = .revoked
             }
+        } else if let grant {
+            switch authorizationPolicy.decision(for: grant.identity, at: now()) {
+            case .allowed: authorization = .authorized
+            case .missing: authorization = .missing
+            case .identityChanged: authorization = .identityChanged
+            case .idleExpired, .hardExpired: authorization = .expired
+            case .revoked: authorization = .revoked
+            }
         } else {
             authorization = .unavailable
         }
@@ -678,6 +849,13 @@ final class DefaultVaultAgentPreferenceRuntime: VaultAgentPreferenceRuntimeServi
             self.workGate.release()
             self.deliver(result, completion: completion)
         }
+    }
+
+    private func hostAuthorizationEligibility(_ host: VaultAgentHostKind) throws -> Bool {
+        guard let state = try integration.status(host: host).hosts.first(where: { $0.host == host }) else {
+            throw VaultAgentErrorCode.brokerUnavailable
+        }
+        return state.mcpInstalled && state.skillInstalled
     }
 
     private func workKey(for action: VaultAgentPreferenceAction) -> WorkKey {
@@ -777,6 +955,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
     private let vault: PasswordVaultAgentAccess
     private let pasteTargetTracker: VaultAgentPasteTargetTracking
     private let integrationService: VaultAgentIntegrationServicing
+    private let integrationLifecycleGate: VaultAgentIntegrationLifecycleGate?
     private let integrationWorker: DispatchQueue
     private let integrationWorkGate: VaultAgentIntegrationWorkGate
     private let rateLimiter: VaultAgentRateLimiter
@@ -800,6 +979,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         vault: PasswordVaultAgentAccess,
         pasteTargetTracker: VaultAgentPasteTargetTracking,
         integrationService: VaultAgentIntegrationServicing = UnavailableVaultAgentIntegrationService(),
+        integrationLifecycleGate: VaultAgentIntegrationLifecycleGate? = nil,
         integrationWorker: DispatchQueue = DispatchQueue(
             label: "com.pastera.agent.integration-worker",
             qos: .utility
@@ -823,6 +1003,13 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         self.vault = vault
         self.pasteTargetTracker = pasteTargetTracker
         self.integrationService = integrationService
+        self.integrationLifecycleGate = integrationLifecycleGate ?? authorizationCoordinator.map {
+            VaultAgentIntegrationLifecycleGate(
+                authorizationCoordinator: $0,
+                authorizationPolicy: authorizationPolicy,
+                now: now
+            )
+        }
         self.integrationWorker = integrationWorker
         self.integrationWorkGate = integrationWorkGate
         self.rateLimiter = rateLimiter
@@ -847,6 +1034,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
         vault: PasswordVaultAgentAccess,
         pasteTargetTracker: VaultAgentPasteTargetTracking,
         integrationService: VaultAgentIntegrationServicing = UnavailableVaultAgentIntegrationService(),
+        integrationLifecycleGate: VaultAgentIntegrationLifecycleGate? = nil,
         integrationWorker: DispatchQueue = DispatchQueue(
             label: "com.pastera.agent.integration-worker",
             qos: .utility
@@ -874,6 +1062,7 @@ final class VaultAgentRuntime: VaultAgentSocketRequestHandling {
             vault: vault,
             pasteTargetTracker: pasteTargetTracker,
             integrationService: integrationService,
+            integrationLifecycleGate: integrationLifecycleGate,
             integrationWorker: integrationWorker,
             integrationWorkGate: integrationWorkGate,
             rateLimiter: rateLimiter,
@@ -1042,7 +1231,19 @@ private extension VaultAgentRuntime {
             }
             performIntegration(finish: finish) {
                 self.resultBody {
-                    .integrationStatus(try self.integrationService.install(host: host))
+                    let status: VaultAgentIntegrationStatus
+                    if let lifecycle = self.integrationLifecycleGate {
+                        status = try lifecycle.install(
+                            client: Self.client(for: host),
+                            mutation: { try self.integrationService.install(host: host) },
+                            authorizationEligibility: {
+                                try self.hostAuthorizationEligibility(host)
+                            }
+                        )
+                    } else {
+                        throw VaultAgentErrorCode.brokerUnavailable
+                    }
+                    return .integrationStatus(status)
                 }
             }
         case let .integrationUninstall(host):
@@ -1052,7 +1253,19 @@ private extension VaultAgentRuntime {
             }
             performIntegration(finish: finish) {
                 self.resultBody {
-                    .integrationStatus(try self.integrationService.uninstall(host: host))
+                    let status: VaultAgentIntegrationStatus
+                    if let lifecycle = self.integrationLifecycleGate {
+                        status = try lifecycle.uninstall(
+                            client: Self.client(for: host),
+                            mutation: { try self.integrationService.uninstall(host: host) },
+                            authorizationEligibility: {
+                                try self.hostAuthorizationEligibility(host)
+                            }
+                        )
+                    } else {
+                        throw VaultAgentErrorCode.brokerUnavailable
+                    }
+                    return .integrationStatus(status)
                 }
             }
         case let .search(request):
@@ -1199,6 +1412,11 @@ private extension VaultAgentRuntime {
         finish: @escaping (VaultAgentResponseBody) -> Void,
         operation: @escaping () -> Void
     ) {
+        if authorizationIsBlocked(for: identity.client) {
+            observeAuthorizationDecision(.missing, client: identity.client)
+            finish(.failure(Self.failure(.authorizationRequired)))
+            return
+        }
         let decision = authorizationPolicy.decision(for: identity, at: now())
         observeAuthorizationDecision(decision, client: identity.client)
         if let code = Self.authorizationFailure(decision) {
@@ -1230,6 +1448,27 @@ private extension VaultAgentRuntime {
         }
     }
 
+    private func hostAuthorizationEligibility(_ host: VaultAgentHostKind) throws -> Bool {
+        guard let state = try integrationService.status(host: host).hosts.first(where: {
+            $0.host == host
+        }) else {
+            throw VaultAgentErrorCode.brokerUnavailable
+        }
+        return state.mcpInstalled && state.skillInstalled
+    }
+
+    private func authorizationIsBlocked(for client: VaultAgentClientKind) -> Bool {
+        integrationLifecycleGate?.isAuthorizationBlocked(for: client) == true ||
+            authorizationCoordinator?.isAuthorizationBlocked(for: client) == true
+    }
+
+    private static func client(for host: VaultAgentHostKind) -> VaultAgentClientKind {
+        switch host {
+        case .codex: .codex
+        case .claude: .claude
+        }
+    }
+
     private func observeAuthorizationDecision(
         _ decision: VaultAgentGrantDecision,
         client: VaultAgentClientKind
@@ -1256,6 +1495,10 @@ private extension VaultAgentRuntime {
         identity: VaultAgentPeerIdentity,
         finish: @escaping (VaultAgentResponseBody) -> Void
     ) {
+        if authorizationIsBlocked(for: identity.client) {
+            finish(statusBody(identity: identity, installed: identity.client == .cli))
+            return
+        }
         if identity.client == .cli {
             finish(statusBody(identity: identity, installed: true))
             return
@@ -1278,7 +1521,12 @@ private extension VaultAgentRuntime {
         let decision = authorizationPolicy.decision(for: identity, at: date)
         let grant = authorizationPolicy.grantSnapshot(for: identity.client)
         let authorized: Bool
-        if case .allowed = decision { authorized = true } else { authorized = false }
+        if case .allowed = decision,
+           !authorizationIsBlocked(for: identity.client) {
+            authorized = true
+        } else {
+            authorized = false
+        }
         return .success(.status(.init(
             client: identity.client,
             installed: installed,

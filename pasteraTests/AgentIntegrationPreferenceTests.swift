@@ -40,7 +40,8 @@ struct AgentIntegrationPreferenceTests {
                     idleExpiresAt: start.addingTimeInterval(60),
                     hardExpiresAt: start.addingTimeInterval(120),
                     lastSensitiveUseAt: start
-                )
+                ),
+                .cli: .testValue(client: .cli, installed: false, authorization: .authorized)
             ],
             claudePermission: .unavailable,
             audit: []
@@ -55,6 +56,10 @@ struct AgentIntegrationPreferenceTests {
         #expect(row.showsLastSensitiveUse)
         #expect(row.primaryAction == .revoke)
         #expect(row.primaryActionCount == 1)
+        #expect(!row.showsSecondaryUninstall)
+        let cli = try #require(controller.rowSnapshotForTesting(.cli))
+        #expect(cli.primaryAction == .revoke)
+        #expect(!cli.showsSecondaryUninstall)
     }
 
     @Test("three clients share one compact group and fit the minimum pane width")
@@ -73,16 +78,54 @@ struct AgentIntegrationPreferenceTests {
         #expect(controller.permissionControlsFitForTesting(width: 444))
     }
 
+    @Test("the real preference shell renders the Agent page at default and minimum sizes")
+    func realPreferenceShellRendersAgentPage() throws {
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .installedAll)
+        VaultAgentPreferenceRuntimeProvider.install(runtime)
+        defer { VaultAgentPreferenceRuntimeProvider.install(UnavailableVaultAgentPreferenceRuntime()) }
+        let controller = CPYPreferencesWindowController(
+            frameAutosaveName: "PasteraAgentVisual-\(UUID().uuidString)",
+            reduceMotion: { true },
+            deactivateApplication: {}
+        )
+        controller.showPreferencePaneForTesting(paneID: .agentIntegrations)
+        let window = try #require(controller.window)
+        let outputDirectory = ProcessInfo.processInfo.environment["PASTERA_AGENT_VISUAL_DIR"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }
+
+        for size in [NSSize(width: 760, height: 600), NSSize(width: 680, height: 480)] {
+            window.setFrame(NSRect(origin: .zero, size: size), display: false)
+            let contentView = try #require(window.contentView)
+            contentView.layoutSubtreeIfNeeded()
+            let paneFrame = controller.selectedPaneFrameInContentViewForTesting
+            #expect(paneFrame.minX >= contentView.bounds.minX - 1)
+            #expect(paneFrame.maxX <= contentView.bounds.maxX + 1)
+            #expect(controller.preferencePaneViewportWidthForTesting > 0)
+            #expect(controller.preferencePaneViewportHeightForTesting > 0)
+            if let outputDirectory {
+                try FileManager.default.createDirectory(
+                    at: outputDirectory,
+                    withIntermediateDirectories: true
+                )
+                let url = outputDirectory.appendingPathComponent(
+                    "agent-integrations-\(Int(size.width))x\(Int(size.height)).png"
+                )
+                try renderPNG(contentView, to: url)
+            }
+        }
+    }
+
     @Test("partial installs update first and installed clients retain a secondary uninstall route")
     func updateAndSecondaryUninstallRouting() async throws {
         let runtime = AgentPreferenceRuntimeProbe(snapshot: .init(
             clients: [
-                .codex: .testValue(client: .codex, installed: true, authorization: .authorized),
+                .codex: .testValue(client: .codex, installed: true, authorization: .revoked),
                 .claude: .testValue(
                     client: .claude,
                     installed: false,
                     needsUpdate: true,
-                    authorization: .missing
+                    authorization: .authorized
                 )
             ],
             claudePermission: .unavailable,
@@ -93,10 +136,11 @@ struct AgentIntegrationPreferenceTests {
 
         let codex = try #require(controller.rowSnapshotForTesting(.codex))
         let claude = try #require(controller.rowSnapshotForTesting(.claude))
-        #expect(codex.primaryAction == .revoke)
+        #expect(codex.primaryAction == .reauthorize)
         #expect(codex.primaryActionCount == 1)
         #expect(codex.showsSecondaryUninstall)
         #expect(claude.primaryAction == .update)
+        #expect(!claude.showsSecondaryUninstall)
 
         controller.triggerSecondaryUninstallForTesting(.codex)
         controller.triggerPrimaryActionForTesting(.claude)
@@ -139,6 +183,7 @@ struct AgentIntegrationPreferenceTests {
     @Test("Claude metadata preview exposes the exact tools before copy and apply become available")
     func metadataPermissionRequiresExactPreview() async throws {
         let runtime = AgentPreferenceRuntimeProbe(snapshot: .installedClaude)
+        let expectedSnippet = try VaultAgentPermissionSnippet.canonical(for: .metadataOnly)
         var copied = ""
         let controller = CPYAgentIntegrationPreferenceViewController(runtime: runtime)
         let copiedController = CPYAgentIntegrationPreferenceViewController(
@@ -152,15 +197,31 @@ struct AgentIntegrationPreferenceTests {
         copiedController.previewClaudeMetadataForTesting()
         try await waitUntil { copiedController.metadataApplyEnabledForTesting }
 
-        #expect(copiedController.permissionPreviewForTesting == "vault_status, vault_search, vault_get")
+        #expect(copiedController.permissionPreviewForTesting == [
+            "mcp__pastera-vault__vault_get",
+            "mcp__pastera-vault__vault_search",
+            "mcp__pastera-vault__vault_status"
+        ].joined(separator: ", "))
         #expect(copiedController.copyPermissionEnabledForTesting)
         copiedController.copyClaudePermissionForTesting()
         copiedController.applyClaudeMetadataPermissionForTesting()
         try await waitUntil { runtime.actions.count == 1 }
 
-        #expect(copied == "{metadata}")
+        #expect(copied == expectedSnippet.serialized)
         #expect(runtime.actions == [.applyClaudePermission(.metadataOnly)])
         #expect(runtime.snippetScopes == [.metadataOnly])
+
+        let invalidRuntime = AgentPreferenceRuntimeProbe(snapshot: .installedClaude)
+        invalidRuntime.snippetOverride = .init(
+            allowedTools: expectedSnippet.allowedTools,
+            serialized: "{}"
+        )
+        let invalidController = CPYAgentIntegrationPreferenceViewController(runtime: invalidRuntime)
+        invalidController.loadView()
+        invalidController.previewClaudeMetadataForTesting()
+        try await waitUntil { !invalidController.permissionErrorForTesting.isEmpty }
+        #expect(!invalidController.metadataApplyEnabledForTesting)
+        #expect(!invalidController.copyPermissionEnabledForTesting)
 
         // Keep the original controller alive to prove previews are controller-local.
         controller.loadView()
@@ -410,6 +471,72 @@ struct AgentIntegrationPreferenceTests {
         #expect(defaultAuthenticator.callCount == 0)
     }
 
+    @Test("an old authentication completion cannot consume a new pending authorization")
+    func staleAuthenticationCannotConsumeNewPendingAuthorization() async throws {
+        let store = AgentGrantStoreProbe()
+        let executor = VaultAgentSerialExecutor(
+            queue: DispatchQueue(label: "test.agent-preference.stale-authentication")
+        )
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let authenticator = AgentIdentityAuthenticatorProbe(result: nil)
+        let coordinator = VaultAgentAuthorizationCoordinator(
+            executor: executor,
+            policy: policy,
+            authenticator: authenticator,
+            defaults: try #require(UserDefaults(suiteName: UUID().uuidString))
+        )
+        let identity = VaultAgentPeerIdentity.preferenceTestValue(client: .cli)
+        var first: Result<VaultAgentGrant, VaultAgentErrorCode>?
+        var second: Result<VaultAgentGrant, VaultAgentErrorCode>?
+
+        coordinator.authorize(
+            identity: identity,
+            trigger: .automaticFirstRequest,
+            completion: { first = $0 }
+        )
+        try await waitUntil { authenticator.callCount == 1 }
+        let mutation = try coordinator.beginLifecycleMutation(for: .cli, kind: .uninstall).get()
+        try await waitUntil { first == .failure(.authorizationRequired) }
+        coordinator.abortLifecycleMutation(mutation)
+        coordinator.authorize(
+            identity: identity,
+            trigger: .automaticFirstRequest,
+            completion: { second = $0 }
+        )
+        try await waitUntil { authenticator.callCount == 2 }
+
+        try authenticator.completeNext(.success(()))
+        #expect(policy.grantSnapshot(for: .cli) == nil)
+        #expect(second == nil)
+
+        try authenticator.completeNext(.success(()))
+        try await waitUntil { second?.isSuccess == true }
+        #expect(policy.grantSnapshot(for: .cli)?.identity == identity)
+    }
+
+    @Test("lifecycle mutations are single-owner and stale tokens cannot release a newer owner")
+    func lifecycleMutationOwnershipIsTokenBound() throws {
+        let store = AgentGrantStoreProbe()
+        let executor = VaultAgentSerialExecutor(
+            queue: DispatchQueue(label: "test.agent-preference.lifecycle-owner")
+        )
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let coordinator = VaultAgentAuthorizationCoordinator(executor: executor, policy: policy)
+
+        let first = try coordinator.beginLifecycleMutation(for: .cli, kind: .install).get()
+        #expect(
+            coordinator.beginLifecycleMutation(for: .cli, kind: .uninstall) ==
+                .failure(.vaultBusy)
+        )
+        coordinator.abortLifecycleMutation(first)
+
+        let second = try coordinator.beginLifecycleMutation(for: .cli, kind: .uninstall).get()
+        #expect(!coordinator.resolveLifecycleMutation(first, authorizationEligible: true))
+        #expect(coordinator.isAuthorizationBlocked(for: .cli))
+        #expect(coordinator.resolveLifecycleMutation(second, authorizationEligible: false))
+        #expect(coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
     @Test("automatic first request is merged while status never prompts")
     func automaticFirstRequestIsMergedAndStatusDoesNotPrompt() async throws {
         let harness = try AutomaticAuthorizationRuntimeHarness()
@@ -536,6 +663,57 @@ struct AgentIntegrationPreferenceTests {
         #expect(runtime.loadCount == initialLoads + 2)
     }
 
+    @Test("hidden state notifications stay dirty and refresh exactly once when shown")
+    func hiddenStateNotificationsCoalesceUntilShown() async throws {
+        let center = NotificationCenter()
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .allUnavailable)
+        let controller = CPYAgentIntegrationPreferenceViewController(
+            runtime: runtime,
+            notificationCenter: center
+        )
+        controller.loadView()
+        controller.viewDidDisappear()
+        let hiddenLoads = runtime.loadCount
+
+        for _ in 0..<20 {
+            center.post(name: .vaultAgentPreferenceStateDidChange, object: nil)
+        }
+        #expect(runtime.loadCount == hiddenLoads)
+
+        controller.viewWillAppear()
+        try await waitUntil { runtime.loadCount == hiddenLoads + 1 }
+        #expect(runtime.loadCount == hiddenLoads + 1)
+    }
+
+    @Test("visible notification bursts allow one snapshot load and one dirty follow-up")
+    func visibleStateNotificationsCoalesceWhileLoading() throws {
+        let center = NotificationCenter()
+        let runtime = AgentPreferenceRuntimeProbe(snapshot: .allUnavailable)
+        let controller = CPYAgentIntegrationPreferenceViewController(
+            runtime: runtime,
+            notificationCenter: center
+        )
+        controller.loadView()
+        controller.viewWillAppear()
+        runtime.defersSnapshotLoads = true
+        let visibleLoads = runtime.loadCount
+
+        for _ in 0..<20 {
+            center.post(name: .vaultAgentPreferenceStateDidChange, object: nil)
+        }
+        #expect(runtime.loadCount == visibleLoads + 1)
+        #expect(runtime.maximumConcurrentLoadCount == 1)
+
+        try runtime.completeNextSnapshotLoad()
+        #expect(runtime.loadCount == visibleLoads + 2)
+        #expect(runtime.maximumConcurrentLoadCount == 1)
+        #expect(runtime.pendingSnapshotLoadCount == 1)
+
+        try runtime.completeNextSnapshotLoad()
+        #expect(runtime.loadCount == visibleLoads + 2)
+        #expect(runtime.maximumConcurrentLoadCount == 1)
+    }
+
     @Test("CLI PATH guidance is visible and snapshot refresh failures are not silent")
     func cliPathHintAndRefreshFailureAreVisible() {
         let runtime = AgentPreferenceRuntimeProbe(snapshot: .init(
@@ -645,6 +823,196 @@ struct AgentIntegrationPreferenceTests {
         #expect(harness.vault.disableCount == 1)
         #expect(harness.integration.permissionMutationCount == 0)
     }
+
+    @Test("an authorized CLI must be revoked before uninstall can touch integration")
+    func authorizedCLIRequiresRevokeBeforeUninstall() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(useProductionLifecycle: true)
+
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect((await perform(harness.runtime, .authorize(.cli))).isSuccess)
+        let grantBeforeUpdate = try #require(harness.policy.grantSnapshot(for: .cli))
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect(harness.policy.grantSnapshot(for: .cli) == grantBeforeUpdate)
+        let rejected = await perform(harness.runtime, .uninstall(.cli))
+
+        #expect(rejected.errorCode == .invalidRequest)
+        #expect(harness.integration.cliUninstallCount == 0)
+        #expect(harness.policy.validGrantCount(at: harness.now) == 1)
+        #expect(harness.vault.disableCount == 0)
+
+        #expect((await perform(harness.runtime, .revoke(.cli))).isSuccess)
+        #expect(harness.policy.validGrantCount(at: harness.now) == 0)
+        #expect(harness.vault.disableCount == 1)
+        #expect((await perform(harness.runtime, .uninstall(.cli))).isSuccess)
+        #expect(harness.integration.cliUninstallCount == 1)
+        #expect(harness.vault.disableCount == 1)
+        #expect(harness.integration.permissionMutationCount == 0)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect(!harness.coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
+    @Test("an identity-changed client revokes the old grant before uninstall and reinstall")
+    func identityChangedClientCanUninstall() async throws {
+        let currentIdentity = VaultAgentPeerIdentity.preferenceChangedTestValue(client: .cli)
+        let harness = try DefaultPreferenceRuntimeHarness(
+            identityResolver: FixedIdentityResolverProbe(identity: currentIdentity)
+        )
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        let oldIdentity = VaultAgentPeerIdentity.preferenceTestValue(client: .cli)
+        try harness.policy.authorize(identity: oldIdentity, authenticatedAt: harness.now)
+
+        let result = await perform(harness.runtime, .uninstall(.cli))
+
+        #expect(result.isSuccess)
+        #expect(harness.integration.cliUninstallCount == 1)
+        #expect(harness.policy.grantSnapshot(for: .cli)?.identity == oldIdentity)
+        #expect(harness.policy.grantSnapshot(for: .cli)?.revokedAt == harness.now)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect(!harness.coordinator.isAuthorizationBlocked(for: .cli))
+        #expect(harness.policy.decision(for: oldIdentity, at: harness.now) == .revoked)
+    }
+
+    @Test("identity-change cleanup failures are surfaced after the old grant is revoked")
+    func identityChangedCleanupFailureIsSurfaced() async throws {
+        let lifecycle = PreferenceLifecycleProbe(error: .invalidRequest)
+        let currentIdentity = VaultAgentPeerIdentity.preferenceChangedTestValue(client: .cli)
+        let harness = try DefaultPreferenceRuntimeHarness(
+            identityResolver: FixedIdentityResolverProbe(identity: currentIdentity),
+            lifecycleReconciler: lifecycle
+        )
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        let oldIdentity = VaultAgentPeerIdentity.preferenceTestValue(client: .cli)
+        try harness.policy.authorize(identity: oldIdentity, authenticatedAt: harness.now)
+        harness.integration.cliUninstallFailure = VaultAgentErrorCode.brokerUnavailable
+
+        let result = await perform(harness.runtime, .uninstall(.cli))
+
+        #expect(result.errorCode == .invalidRequest)
+        #expect(lifecycle.callCount == 1)
+        #expect(harness.policy.decision(for: oldIdentity, at: harness.now) == .revoked)
+    }
+
+    @Test("an uninstall failure preserves the revoked grant and lifecycle state")
+    func uninstallFailurePreservesGrant() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(useProductionLifecycle: true)
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect((await perform(harness.runtime, .authorize(.cli))).isSuccess)
+        #expect((await perform(harness.runtime, .revoke(.cli))).isSuccess)
+        let grantBeforeFailure = try #require(harness.policy.grantSnapshot(for: .cli))
+        let lifecycleCount = harness.vault.disableCount
+        harness.integration.cliUninstallFailure = VaultAgentErrorCode.brokerUnavailable
+
+        let failed = await perform(harness.runtime, .uninstall(.cli))
+
+        #expect(failed.errorCode == .brokerUnavailable)
+        #expect(harness.integration.cliUninstallCount == 1)
+        #expect(harness.policy.grantSnapshot(for: .cli) == grantBeforeFailure)
+        #expect(harness.vault.disableCount == lifecycleCount)
+        #expect(harness.integration.permissionMutationCount == 0)
+        #expect(!harness.coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
+    @Test("post-commit uninstall failure keeps authorization suspended when readback is uninstalled")
+    func postCommitUninstallFailureStaysSuspended() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness()
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        harness.integration.cliUninstallBehavior = .failAfterMutation
+
+        let failed = await perform(harness.runtime, .uninstall(.cli))
+
+        #expect(failed.errorCode == .brokerUnavailable)
+        #expect(!harness.integration.cliIsInstalled)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
+    @Test("unknown uninstall readback fails closed and keeps authorization suspended")
+    func unknownUninstallReadbackStaysSuspended() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness()
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        harness.integration.cliUninstallBehavior = .failBeforeMutation
+        harness.integration.cliStatusFailure = VaultAgentErrorCode.brokerUnavailable
+
+        let failed = await perform(harness.runtime, .uninstall(.cli))
+
+        #expect(failed.errorCode == .brokerUnavailable)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
+    @Test("unknown install readback fails closed until a durable install succeeds")
+    func unknownInstallReadbackStaysSuspended() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness()
+        harness.integration.cliStatusFailure = VaultAgentErrorCode.brokerUnavailable
+
+        let failed = await perform(harness.runtime, .install(.cli))
+
+        #expect(failed.errorCode == .brokerUnavailable)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+
+        harness.integration.cliStatusFailure = nil
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect(!harness.coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
+    @Test("pending automatic authorization is cancelled by uninstall and stale LA success commits nothing")
+    func pendingAutomaticAuthorizationCannotSurviveUninstall() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(
+            authenticatorResult: nil,
+            useProductionLifecycle: true
+        )
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        #expect(await harness.callBroker(.get(entryID: UUID())) == .authorizationRequired)
+        try await waitUntil { harness.authenticator.callCount == 1 }
+
+        #expect((await perform(harness.runtime, .uninstall(.cli))).isSuccess)
+        try harness.authenticator.completeNext(.success(()))
+
+        #expect(harness.policy.grantSnapshot(for: .cli) == nil)
+        #expect(!harness.vault.automationUnlockEnabled)
+        #expect(harness.vault.enableCount == 0)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+    }
+
+    @Test("automatic authorization starting during uninstall is rejected by the same client suspension")
+    func automaticAuthorizationCannotEnterUninstallWindow() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(useProductionLifecycle: true)
+        #expect((await perform(harness.runtime, .install(.cli))).isSuccess)
+        harness.integration.holdsCLIUninstall = true
+        let uninstall = Task { await perform(harness.runtime, .uninstall(.cli)) }
+        try await waitUntil { harness.integration.cliUninstallStartedCount == 1 }
+
+        #expect(await harness.callBroker(.get(entryID: UUID())) == .authorizationRequired)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .cli))
+        #expect(harness.authenticator.callCount == 0)
+        harness.integration.continueCLIUninstall()
+        #expect((await uninstall.value).isSuccess)
+
+        #expect(await harness.callBroker(.get(entryID: UUID())) == .authorizationRequired)
+        #expect(harness.authenticator.callCount == 0)
+        #expect(harness.policy.grantSnapshot(for: .cli) == nil)
+    }
+
+    @Test("Broker host integration mutations use the shared authorization lifecycle gate")
+    func brokerHostMutationsUseSharedLifecycleGate() async throws {
+        let harness = try DefaultPreferenceRuntimeHarness(useProductionLifecycle: true)
+        #expect(await harness.callBroker(.integrationInstall(host: .codex)) == nil)
+        let identity = VaultAgentPeerIdentity.preferenceTestValue(client: .codex)
+        try harness.policy.authorize(identity: identity, authenticatedAt: harness.now)
+
+        #expect(await harness.callBroker(.integrationUninstall(host: .codex)) == .invalidRequest)
+        #expect(harness.integration.hostUninstallCount(.codex) == 0)
+        #expect(!harness.coordinator.isAuthorizationBlocked(for: .codex))
+
+        try harness.policy.revoke(.codex, at: harness.now)
+        #expect(await harness.callBroker(.integrationUninstall(host: .codex)) == nil)
+        #expect(harness.integration.hostUninstallCount(.codex) == 1)
+        #expect(harness.coordinator.isAuthorizationBlocked(for: .codex))
+        #expect(await harness.callBroker(.integrationInstall(host: .codex)) == nil)
+        #expect(!harness.coordinator.isAuthorizationBlocked(for: .codex))
+    }
 }
 
 private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServicing {
@@ -652,9 +1020,18 @@ private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServ
     var loadFailure: Error?
     var actionFailure: (action: VaultAgentPreferenceAction, error: Error)?
     var snippetFailure: Error?
+    var snippetOverride: VaultAgentPermissionSnippet?
+    var defersSnapshotLoads = false
     private(set) var actions: [VaultAgentPreferenceAction] = []
     private(set) var snippetScopes: [VaultAgentHostPermissionScope] = []
     private(set) var loadCount = 0
+    private(set) var maximumConcurrentLoadCount = 0
+    private var activeLoadCount = 0
+    private var pendingSnapshotLoads = [
+        (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
+    ]()
+
+    var pendingSnapshotLoadCount: Int { pendingSnapshotLoads.count }
 
     init(snapshot: VaultAgentPreferenceSnapshot) {
         self.snapshot = snapshot
@@ -662,11 +1039,29 @@ private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServ
 
     func loadSnapshot(completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void) {
         loadCount += 1
-        if let loadFailure {
-            completion(.failure(loadFailure))
+        activeLoadCount += 1
+        maximumConcurrentLoadCount = max(maximumConcurrentLoadCount, activeLoadCount)
+        if defersSnapshotLoads {
+            pendingSnapshotLoads.append(completion)
             return
         }
-        completion(.success(snapshot))
+        completeSnapshotLoad(completion)
+    }
+
+    func completeNextSnapshotLoad() throws {
+        guard !pendingSnapshotLoads.isEmpty else { throw VaultAgentErrorCode.invalidRequest }
+        completeSnapshotLoad(pendingSnapshotLoads.removeFirst())
+    }
+
+    private func completeSnapshotLoad(
+        _ completion: @escaping (Result<VaultAgentPreferenceSnapshot, Error>) -> Void
+    ) {
+        activeLoadCount -= 1
+        if let loadFailure {
+            completion(.failure(loadFailure))
+        } else {
+            completion(.success(snapshot))
+        }
     }
 
     func perform(
@@ -690,11 +1085,11 @@ private final class AgentPreferenceRuntimeProbe: VaultAgentPreferenceRuntimeServ
             completion(.failure(snippetFailure))
             return
         }
-        let tools = scope == .metadataOnly
-            ? ["vault_status", "vault_search", "vault_get"]
-            : ["vault_status", "vault_search", "vault_get", "vault_paste", "vault_prepare_exec"]
-        let serialized = scope == .metadataOnly ? "{metadata}" : "{sensitive}"
-        completion(.success(.init(allowedTools: tools, serialized: serialized)))
+        if let snippetOverride {
+            completion(.success(snippetOverride))
+            return
+        }
+        completion(Result { try VaultAgentPermissionSnippet.canonical(for: scope) })
     }
 }
 
@@ -741,6 +1136,14 @@ private final class AgentIdentityAuthenticatorProbe: VaultAgentIdentityAuthentic
 
     func completeAll(_ result: Result<Void, Error>) {
         lock.withLock { completions }.forEach { $0(result) }
+    }
+
+    func completeNext(_ result: Result<Void, Error>) throws {
+        let completion = try lock.withLock {
+            guard !completions.isEmpty else { throw VaultAgentErrorCode.invalidRequest }
+            return completions.removeFirst()
+        }
+        completion(result)
     }
 }
 
@@ -942,6 +1345,8 @@ private final class DefaultPreferenceRuntimeHarness {
     let vault = PreferenceVaultProbe()
     let authenticator: AgentIdentityAuthenticatorProbe
     let policy: VaultAgentAuthorizationPolicy
+    let coordinator: VaultAgentAuthorizationCoordinator
+    let lifecycleGate: VaultAgentIntegrationLifecycleGate
     let runtime: DefaultVaultAgentPreferenceRuntime
     private var productionLifecycle: VaultAgentRuntime?
 
@@ -949,7 +1354,8 @@ private final class DefaultPreferenceRuntimeHarness {
         authenticatorResult: Result<Void, Error>? = .success(()),
         workGate: VaultAgentIntegrationWorkGate = VaultAgentIntegrationWorkGate(capacity: 4),
         useProductionLifecycle: Bool = false,
-        identityResolver: VaultAgentPreferenceIdentityResolving = PreferenceIdentityResolverProbe()
+        identityResolver: VaultAgentPreferenceIdentityResolving = PreferenceIdentityResolverProbe(),
+        lifecycleReconciler: VaultAgentGrantLifecycleReconciling? = nil
     ) throws {
         let executor = VaultAgentSerialExecutor(
             queue: DispatchQueue(label: "test.agent-preference.default-runtime.store")
@@ -957,11 +1363,16 @@ private final class DefaultPreferenceRuntimeHarness {
         let store = AgentGrantStoreProbe()
         policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
         authenticator = AgentIdentityAuthenticatorProbe(result: authenticatorResult)
-        let coordinator = VaultAgentAuthorizationCoordinator(
+        coordinator = VaultAgentAuthorizationCoordinator(
             executor: executor,
             policy: policy,
             authenticator: authenticator,
             defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { [now] in now }
+        )
+        lifecycleGate = VaultAgentIntegrationLifecycleGate(
+            authorizationCoordinator: coordinator,
+            authorizationPolicy: policy,
             now: { [now] in now }
         )
         let lifecycle: VaultAgentGrantLifecycleReconciling
@@ -969,8 +1380,14 @@ private final class DefaultPreferenceRuntimeHarness {
             let runtime = try VaultAgentRuntime(
                 executor: executor,
                 authorizationPolicy: policy,
+                authorizationCoordinator: coordinator,
+                automaticAuthorizationPrepare: { [vault] in
+                    try vault.enableAutomationUnlockForAgent()
+                },
                 vault: vault,
                 pasteTargetTracker: AutomaticAuthorizationTargetProbe(),
+                integrationService: integration,
+                integrationLifecycleGate: lifecycleGate,
                 ticketStore: VaultAgentTicketStore(commandBuilder: { _, _, _ in ["/usr/bin/false"] }),
                 auditLogger: AutomaticAuthorizationAuditProbe(),
                 now: { [now] in now },
@@ -979,7 +1396,7 @@ private final class DefaultPreferenceRuntimeHarness {
             productionLifecycle = runtime
             lifecycle = runtime
         } else {
-            lifecycle = PreferenceLifecycleProbe()
+            lifecycle = lifecycleReconciler ?? PreferenceLifecycleProbe()
         }
         runtime = DefaultVaultAgentPreferenceRuntime(
             integration: integration,
@@ -988,20 +1405,85 @@ private final class DefaultPreferenceRuntimeHarness {
             vault: vault,
             identityResolver: identityResolver,
             lifecycleReconciler: lifecycle,
+            integrationLifecycleGate: lifecycleGate,
             worker: DispatchQueue(label: "test.agent-preference.default-runtime.worker"),
             workGate: workGate,
             now: { [now] in now }
         )
     }
+
+    func callBroker(_ operation: VaultAgentOperation) async -> VaultAgentErrorCode? {
+        guard let productionLifecycle else { return .brokerUnavailable }
+        let request = VaultAgentRequestEnvelope(
+            protocolVersion: VaultAgentLimits.protocolVersion,
+            connectionID: UUID(),
+            sequence: 1,
+            requestID: UUID(),
+            operation: operation
+        )
+        let data = try! JSONEncoder().encode(request)
+        let responseData = await withCheckedContinuation { continuation in
+            productionLifecycle.handle(
+                identity: .preferenceTestValue(client: .cli),
+                request: data
+            ) { result in
+                continuation.resume(returning: try! result.get())
+            }
+        }
+        let response = try! JSONDecoder().decode(VaultAgentResponseEnvelope.self, from: responseData)
+        guard case let .failure(failure) = response.body else { return nil }
+        return failure.code
+    }
 }
 
 private final class PreferenceIntegrationProbe: VaultAgentPreferenceIntegrationServicing {
+    enum CLIUninstallBehavior {
+        case succeeds
+        case failBeforeMutation
+        case failAfterMutation
+    }
+
     private let lock = NSLock()
     private var installedHosts = Set<VaultAgentHostKind>()
     private var cliInstalled = false
     private var permissionMutations = 0
+    private var cliUninstallAttempts = 0
+    private var storedCLIUninstallFailure: Error?
+    private var storedCLIUninstallBehavior = CLIUninstallBehavior.succeeds
+    private var storedCLIStatusFailure: Error?
+    private var storedHoldsCLIUninstall = false
+    private var cliUninstallStarted = 0
+    private var hostUninstallAttempts = [VaultAgentHostKind: Int]()
+    private let cliUninstallContinuation = DispatchSemaphore(value: 0)
 
     var permissionMutationCount: Int { lock.withLock { permissionMutations } }
+    var cliUninstallCount: Int { lock.withLock { cliUninstallAttempts } }
+    var cliUninstallFailure: Error? {
+        get { lock.withLock { storedCLIUninstallFailure } }
+        set { lock.withLock { storedCLIUninstallFailure = newValue } }
+    }
+    var cliUninstallBehavior: CLIUninstallBehavior {
+        get { lock.withLock { storedCLIUninstallBehavior } }
+        set { lock.withLock { storedCLIUninstallBehavior = newValue } }
+    }
+    var cliStatusFailure: Error? {
+        get { lock.withLock { storedCLIStatusFailure } }
+        set { lock.withLock { storedCLIStatusFailure = newValue } }
+    }
+    var holdsCLIUninstall: Bool {
+        get { lock.withLock { storedHoldsCLIUninstall } }
+        set { lock.withLock { storedHoldsCLIUninstall = newValue } }
+    }
+    var cliUninstallStartedCount: Int { lock.withLock { cliUninstallStarted } }
+    var cliIsInstalled: Bool { lock.withLock { cliInstalled } }
+
+    func hostUninstallCount(_ host: VaultAgentHostKind) -> Int {
+        lock.withLock { hostUninstallAttempts[host, default: 0] }
+    }
+
+    func continueCLIUninstall() {
+        cliUninstallContinuation.signal()
+    }
 
     func status(host: VaultAgentHostKind?) -> VaultAgentIntegrationStatus {
         lock.withLock {
@@ -1029,34 +1511,54 @@ private final class PreferenceIntegrationProbe: VaultAgentPreferenceIntegrationS
     }
 
     func uninstall(host: VaultAgentHostKind) -> VaultAgentIntegrationStatus {
-        lock.withLock { _ = installedHosts.remove(host) }
+        lock.withLock {
+            hostUninstallAttempts[host, default: 0] += 1
+            _ = installedHosts.remove(host)
+        }
         return status(host: host)
     }
 
-    func cliStatus() -> VaultAgentCLIInstallationStatus {
-        lock.withLock {
-            .init(installed: cliInstalled, executablePath: "/usr/local/bin/pastera", pathHint: nil)
+    func cliStatus() throws -> VaultAgentCLIInstallationStatus {
+        try lock.withLock {
+            if let storedCLIStatusFailure { throw storedCLIStatusFailure }
+            return VaultAgentCLIInstallationStatus(
+                installed: cliInstalled,
+                executablePath: "/usr/local/bin/pastera",
+                pathHint: nil
+            )
         }
     }
 
-    func installCLI() -> VaultAgentCLIInstallationStatus {
+    func installCLI() throws -> VaultAgentCLIInstallationStatus {
         lock.withLock { cliInstalled = true }
-        return cliStatus()
+        return try cliStatus()
     }
 
-    func uninstallCLI() -> VaultAgentCLIInstallationStatus {
-        lock.withLock { cliInstalled = false }
-        return cliStatus()
+    func uninstallCLI() throws -> VaultAgentCLIInstallationStatus {
+        let state = try lock.withLock { () -> (CLIUninstallBehavior, Bool) in
+            cliUninstallAttempts += 1
+            if let storedCLIUninstallFailure { throw storedCLIUninstallFailure }
+            if storedCLIUninstallBehavior == .failBeforeMutation {
+                throw VaultAgentErrorCode.brokerUnavailable
+            }
+            cliUninstallStarted += 1
+            return (storedCLIUninstallBehavior, storedHoldsCLIUninstall)
+        }
+        if state.1, cliUninstallContinuation.wait(timeout: .now() + 2) == .timedOut {
+            throw VaultAgentErrorCode.brokerUnavailable
+        }
+        try lock.withLock {
+            cliInstalled = false
+            if state.0 == .failAfterMutation { throw VaultAgentErrorCode.brokerUnavailable }
+        }
+        return try cliStatus()
     }
 
     func permissionSnippet(
         for _: VaultAgentHostKind,
         scope: VaultAgentHostPermissionScope
-    ) -> VaultAgentPermissionSnippet {
-        let tools = scope == .metadataOnly
-            ? ["vault_status", "vault_search", "vault_get"]
-            : ["vault_status", "vault_search", "vault_get", "vault_paste", "vault_prepare_exec"]
-        return .init(allowedTools: tools, serialized: "{}")
+    ) throws -> VaultAgentPermissionSnippet {
+        try VaultAgentPermissionSnippet.canonical(for: scope)
     }
 
     func claudePermissionStatus() -> VaultAgentClaudePermissionStatus {
@@ -1091,6 +1593,7 @@ private final class PreferenceVaultProbe: PasswordVaultAgentAccess, VaultAgentPr
     var agentVaultReady = true
     private(set) var enableCount = 0
     private(set) var disableCount = 0
+    var automationUnlockEnabled: Bool { enableCount > disableCount }
 
     func checkQuickUnlockAvailability(completion: @escaping (Bool) -> Void) { completion(true) }
     func unlockWithQuickKey(completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
@@ -1128,6 +1631,12 @@ private struct PreferenceIdentityResolverProbe: VaultAgentPreferenceIdentityReso
     }
 }
 
+private struct FixedIdentityResolverProbe: VaultAgentPreferenceIdentityResolving {
+    let identity: VaultAgentPeerIdentity
+
+    func resolveIdentity(for _: VaultAgentClientKind) -> VaultAgentPeerIdentity { identity }
+}
+
 private final class SequencedIdentityResolverProbe: VaultAgentPreferenceIdentityResolving {
     private let lock = NSLock()
     private var results: [Result<VaultAgentPeerIdentity, Error>]
@@ -1145,7 +1654,17 @@ private final class SequencedIdentityResolverProbe: VaultAgentPreferenceIdentity
 }
 
 private final class PreferenceLifecycleProbe: VaultAgentGrantLifecycleReconciling {
-    func authorizationStateDidChange() throws {}
+    private(set) var callCount = 0
+    let error: VaultAgentErrorCode?
+
+    init(error: VaultAgentErrorCode? = nil) {
+        self.error = error
+    }
+
+    func authorizationStateDidChange() throws {
+        callCount += 1
+        if let error { throw error }
+    }
 }
 
 private extension VaultAgentPreferenceSnapshot {
@@ -1230,6 +1749,20 @@ private extension VaultAgentPeerIdentity {
             hostPath: client == .cli ? nil : "/Applications/Host.app/Contents/MacOS/Host"
         )
     }
+
+    static func preferenceChangedTestValue(client: VaultAgentClientKind) -> VaultAgentPeerIdentity {
+        VaultAgentPeerIdentity(
+            client: client,
+            helperRequirement: "identifier com.pastera.agent.helper.changed",
+            helperCDHash: Data([9]),
+            helperIsAdHoc: false,
+            helperPath: "/Applications/Pastera.app/Contents/Helpers/helper",
+            hostRequirement: client == .cli ? nil : "identifier com.example.host.changed",
+            hostCDHash: client == .cli ? nil : Data([8]),
+            hostIsAdHoc: client == .cli ? nil : false,
+            hostPath: client == .cli ? nil : "/Applications/Host.app/Contents/MacOS/Host"
+        )
+    }
 }
 
 private extension Result {
@@ -1291,6 +1824,16 @@ private func perform(
     }
 }
 
+@MainActor
+private func renderPNG(_ view: NSView, to url: URL) throws {
+    view.layoutSubtreeIfNeeded()
+    let representation = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: representation)
+    let data = try #require(representation.representation(using: .png, properties: [:]))
+    try data.write(to: url, options: .atomic)
+}
+
+@MainActor
 private func waitUntil(_ condition: @escaping () -> Bool) async throws {
     for _ in 0..<1_000 {
         if condition() { return }
