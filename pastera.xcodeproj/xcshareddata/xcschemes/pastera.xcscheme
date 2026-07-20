@@ -48,6 +48,34 @@
                ReferencedContainer = "container:pastera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A6700000000000000000002C"
+               BuildableName = "PasteraCodexMCP"
+               BlueprintName = "PasteraCodexMCP"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A6700000000000000000002D"
+               BuildableName = "PasteraClaudeMCP"
+               BlueprintName = "PasteraClaudeMCP"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
