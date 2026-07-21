@@ -28,6 +28,21 @@ struct PreferenceSearchTests {
     }
 
     @Test
+    func preferenceSearchFindsPromptOptimization() throws {
+        let item = try #require(catalog.pages.flatMap(\.searchItems).first {
+            $0.id == "scripts.promptOptimization"
+        })
+
+        #expect(item.paneID == .scripts)
+        #expect(item.anchorID == "scripts.promptOptimization")
+        #expect(item.keywords.contains("OpenAI"))
+        #expect(item.keywords.contains("Ollama"))
+        #expect(PasteraPreferenceSearch(catalog: catalog).search("美化").contains { page in
+            page.paneID == .scripts && page.searchItems.contains(item)
+        })
+    }
+
+    @Test
     func paneIDDefinesExactFixedCases() {
         #expect(PasteraPreferencePaneID.allCases == [
             .general,

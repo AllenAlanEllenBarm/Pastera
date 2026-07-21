@@ -26,6 +26,7 @@ struct Environment {
     let passwordVaultUIController: PasswordVaultUIController
     let vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing
     let clipboardScriptCoordinator: ClipboardScriptCoordinating
+    let promptOptimizationService: PromptOptimizationServicing
     let menuManager: MenuManager
 
     let defaults: UserDefaults
@@ -47,6 +48,7 @@ struct Environment {
              repository: ScriptRepository(),
              executor: ScriptExecutionService()
          ),
+         promptOptimizationService: PromptOptimizationServicing? = nil,
          menuManager: MenuManager = MenuManager(),
          defaults: UserDefaults = .standard) {
 
@@ -77,6 +79,10 @@ struct Environment {
             vaultAgentApplicationRuntimeFactory?(resolvedPasswordVaultUIController) ??
             UnavailableVaultAgentApplicationRuntime()
         self.clipboardScriptCoordinator = clipboardScriptCoordinator
+        self.promptOptimizationService = promptOptimizationService ?? PromptOptimizationService(
+            settingsStore: PromptOptimizationSettingsStore(defaults: defaults),
+            apiKeyStore: PromptOptimizationAPIKeyStore()
+        )
         self.menuManager = menuManager
         self.defaults = defaults
     }

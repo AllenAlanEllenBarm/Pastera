@@ -13,6 +13,7 @@ struct PasteraConfirmationOptions: Equatable {
     let cancelTitle: String
     let isDestructive: Bool
     let suppressionTitle: String?
+    let symbolName: String?
 
     init(
         title: String,
@@ -20,7 +21,8 @@ struct PasteraConfirmationOptions: Equatable {
         confirmTitle: String,
         cancelTitle: String,
         isDestructive: Bool = false,
-        suppressionTitle: String? = nil
+        suppressionTitle: String? = nil,
+        symbolName: String? = nil
     ) {
         self.title = title
         self.message = message
@@ -28,6 +30,7 @@ struct PasteraConfirmationOptions: Equatable {
         self.cancelTitle = cancelTitle
         self.isDestructive = isDestructive
         self.suppressionTitle = suppressionTitle
+        self.symbolName = symbolName
     }
 }
 
@@ -290,8 +293,10 @@ final class PasteraConfirmationController: NSWindowController {
             .cgColor
 
         let iconView = NSImageView()
+        let symbolName = options.symbolName
+            ?? (options.isDestructive ? "trash.fill" : "checkmark.circle.fill")
         iconView.image = NSImage(
-            systemSymbolName: options.isDestructive ? "trash.fill" : "checkmark.circle.fill",
+            systemSymbolName: symbolName,
             accessibilityDescription: nil
         )
         iconView.contentTintColor = options.isDestructive ? tokens.destructive : tokens.accent
@@ -412,6 +417,7 @@ struct PasteraConfirmationLayoutForTesting {
     let cancelButtonFrame: NSRect
     let confirmButtonFrame: NSRect
     let confirmButtonUsesDestructiveStyle: Bool
+    let symbolName: String
 }
 
 extension PasteraConfirmationController {
@@ -434,7 +440,9 @@ extension PasteraConfirmationController {
             messageFrame: messageLabel.frame,
             cancelButtonFrame: cancelButton.frame,
             confirmButtonFrame: confirmButton.frame,
-            confirmButtonUsesDestructiveStyle: options.isDestructive
+            confirmButtonUsesDestructiveStyle: options.isDestructive,
+            symbolName: options.symbolName
+                ?? (options.isDestructive ? "trash.fill" : "checkmark.circle.fill")
         )
     }
 }

@@ -1,4 +1,10 @@
 import AppKit
+// swiftlint:disable file_length
+
+enum HistoryTextTransformationAction: Equatable {
+    case promptOptimization
+    case script(UUID)
+}
 
 final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate, NSTextViewDelegate {
     private enum Mode {
@@ -7,9 +13,11 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private let repository: any PasteboardHistoryRepositoryProtocol
-    private let ocrIndexer: any PasteboardHistoryOCRIndexing
-    private let scriptCoordinator: any ClipboardScriptCoordinating
+    nonisolated(unsafe) private let ocrIndexer: any PasteboardHistoryOCRIndexing
+    nonisolated(unsafe) private let scriptCoordinator: any ClipboardScriptCoordinating
+    nonisolated(unsafe) private let promptOptimizationService: any PromptOptimizationServicing
     private let onSaved: () -> Void
+    private let confirmationRunner: (PasteraConfirmationOptions, NSWindow?) -> PasteraConfirmationResult
 
     private let metadataLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
@@ -31,17 +39,25 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
     private var originalText = ""
     private var operationID = UUID()
     private var isRunning = false
+    private var transformationTask: Task<Void, Never>?
+    private var loadingFeedbackWorkItem: DispatchWorkItem?
 
     init(
         repository: any PasteboardHistoryRepositoryProtocol,
         ocrIndexer: any PasteboardHistoryOCRIndexing,
         scriptCoordinator: any ClipboardScriptCoordinating,
-        onSaved: @escaping () -> Void
+        promptOptimizationService: any PromptOptimizationServicing,
+        onSaved: @escaping () -> Void,
+        confirmationRunner: @escaping (PasteraConfirmationOptions, NSWindow?) -> PasteraConfirmationResult = {
+            PasteraConfirmationController.runModal(options: $0, sourceWindow: $1)
+        }
     ) {
         self.repository = repository
         self.ocrIndexer = ocrIndexer
         self.scriptCoordinator = scriptCoordinator
+        self.promptOptimizationService = promptOptimizationService
         self.onSaved = onSaved
+        self.confirmationRunner = confirmationRunner
         super.init(window: nil)
         configureWindow()
     }
@@ -63,6 +79,7 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
     }
 
     func windowWillClose(_ notification: Notification) {
+        cancelTransformation()
         operationID = UUID()
         isRunning = false
         historyID = nil
@@ -78,10 +95,7 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
             statusLabel.stringValue = mode == .image && !textView.string.isEmpty
                 ? historyEditorString("OCR draft edited", "OCR 草稿已编辑")
                 : ""
-            configureRunButton(
-                symbol: "play.fill",
-                label: historyEditorString("Run script", "运行脚本")
-            )
+            configureRunButtonForSelectedTransformation()
         }
         updateControls()
     }
@@ -107,6 +121,7 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
             showError(historyEditorString("Unable to load this history item.", "无法加载此历史条目。"))
             return
         }
+        cancelTransformation()
         operationID = UUID()
         isRunning = false
         self.historyID = historyID
@@ -132,7 +147,7 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
             imageView.image = nil
             buildContent(showsImage: false)
         }
-        reloadScripts()
+        reloadTransformations()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(textView)
@@ -360,17 +375,16 @@ private extension HistoryEditorWindowController {
 
     private func makeFooter() -> NSView {
         let footer = NSView()
-        scriptPopup.setAccessibilityLabel(historyEditorString("Script", "脚本"))
+        scriptPopup.setAccessibilityLabel(historyEditorString("Text transformation", "文本转换"))
+        scriptPopup.target = self
+        scriptPopup.action = #selector(transformationSelectionChanged(_:))
 
-        configureRunButton(
-            symbol: "play.fill",
-            label: historyEditorString("Run script", "运行脚本")
-        )
+        configureRunButtonForSelectedTransformation()
         runButton.imagePosition = .imageOnly
         runButton.bezelStyle = .circular
         runButton.bezelColor = .controlAccentColor
         runButton.target = self
-        runButton.action = #selector(runScript)
+        runButton.action = #selector(runSelectedTransformation)
         runButton.keyEquivalent = "\r"
         runButton.keyEquivalentModifierMask = [.command]
 
@@ -443,26 +457,26 @@ private extension HistoryEditorWindowController {
         return footer
     }
 
-    private func reloadScripts() {
-        configureRunButton(
-            symbol: "play.fill",
-            label: historyEditorString("Run script", "运行脚本")
-        )
+    private func reloadTransformations() {
         scriptPopup.removeAllItems()
+        scriptPopup.addItem(withTitle: promptOptimizationService.availability.displayName)
+        scriptPopup.lastItem?.representedObject = HistoryTextTransformationAction.promptOptimization
+
         let scripts = scriptCoordinator.availableHistoryScripts()
-        if scripts.isEmpty {
-            scriptPopup.addItem(withTitle: historyEditorString("No scripts available", "没有可用脚本"))
-            scriptPopup.lastItem?.representedObject = nil
-        } else {
+        if !scripts.isEmpty {
+            scriptPopup.menu?.addItem(.separator())
             scripts.forEach { script in
                 scriptPopup.addItem(withTitle: script.name)
-                scriptPopup.lastItem?.representedObject = script.id.uuidString
+                scriptPopup.lastItem?.representedObject = HistoryTextTransformationAction.script(script.id)
             }
         }
+        scriptPopup.selectItem(at: 0)
+        configureRunButtonForSelectedTransformation()
     }
 
     private func recognize(content: PasteboardContent) {
         guard let historyID else { return }
+        cancelTransformation()
         let requestID = UUID()
         operationID = requestID
         isRunning = true
@@ -474,7 +488,7 @@ private extension HistoryEditorWindowController {
         updateControls()
         Task { [weak self] in
             guard let self else { return }
-            let result = await ocrIndexer.recognizeText(historyID: historyID, content: content)
+            let result = await recognizeText(historyID: historyID, content: content)
             guard operationID == requestID, self.historyID == historyID else { return }
             isRunning = false
             switch result {
@@ -494,11 +508,24 @@ private extension HistoryEditorWindowController {
         }
     }
 
-    @objc private func runScript() {
+    @objc private func transformationSelectionChanged(_ sender: NSPopUpButton) {
+        configureRunButtonForSelectedTransformation()
+        updateControls()
+    }
+
+    @objc private func runSelectedTransformation() {
         guard !isRunning,
               !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let scriptIDText = scriptPopup.selectedItem?.representedObject as? String,
-              let scriptID = UUID(uuidString: scriptIDText) else { return }
+              let action = selectedTransformation else { return }
+        switch action {
+        case .promptOptimization:
+            runPromptOptimization()
+        case let .script(scriptID):
+            runScript(scriptID: scriptID)
+        }
+    }
+
+    private func runScript(scriptID: UUID) {
         let input = textView.string
         let requestID = UUID()
         operationID = requestID
@@ -506,18 +533,23 @@ private extension HistoryEditorWindowController {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.stringValue = historyEditorString("Running script...", "正在执行脚本...")
         updateControls()
-        Task { [weak self] in
+        transformationTask = Task { [weak self] in
             guard let self else { return }
-            let outcome = await scriptCoordinator.transformHistoryText(
+            let outcome = await transformHistoryText(
                 input,
                 using: scriptID,
                 sourceAppBundleIdentifier: nil
             )
             guard operationID == requestID else { return }
+            transformationTask = nil
             isRunning = false
             switch outcome {
             case let .transformed(output):
-                replaceDraft(with: output, undoText: input)
+                replaceDraft(
+                    with: output,
+                    undoText: input,
+                    actionName: historyEditorString("Run Script", "运行脚本")
+                )
                 configureRunButton(
                     symbol: "arrow.clockwise",
                     label: historyEditorString("Run again", "再次运行")
@@ -541,13 +573,208 @@ private extension HistoryEditorWindowController {
         }
     }
 
-    private func replaceDraft(with text: String, undoText: String) {
-        textView.undoManager?.registerUndo(withTarget: self) { target in
-            target.replaceDraft(with: undoText, undoText: text)
+    private func runPromptOptimization() {
+        let input = textView.string
+        let requestID = UUID()
+        operationID = requestID
+        isRunning = true
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = ""
+        schedulePromptLoadingFeedback(for: requestID)
+        updateControls()
+        transformationTask = Task { [weak self] in
+            guard let self else { return }
+            await executePromptOptimization(
+                input: input,
+                requestID: requestID,
+                allowsConsentRetry: true
+            )
         }
-        textView.undoManager?.setActionName(historyEditorString("Run Script", "运行脚本"))
+    }
+
+    private func executePromptOptimization(
+        input: String,
+        requestID: UUID,
+        allowsConsentRetry: Bool
+    ) async {
+        let outcome = await optimizePrompt(input)
+        guard operationID == requestID, !Task.isCancelled else { return }
+
+        switch outcome {
+        case let .optimized(output, source):
+            finishPromptOptimization(requestID: requestID)
+            replaceDraft(
+                with: output,
+                undoText: input,
+                actionName: historyEditorString("Improve Prompt", "美化提示词")
+            )
+            configureRunButton(
+                symbol: "arrow.clockwise",
+                label: historyEditorString("Improve again", "再次美化")
+            )
+            if source == .localFormatter {
+                setStatus(
+                    historyEditorString(
+                        "Improved with local formatting. You can undo this change.",
+                        "已使用本地整理，可撤销。"
+                    ),
+                    announces: true
+                )
+            } else {
+                setStatus(
+                    historyEditorString(
+                        "Prompt improved. You can undo this change.",
+                        "提示词已优化，可撤销。"
+                    ),
+                    announces: true
+                )
+            }
+        case .unchanged:
+            finishPromptOptimization(requestID: requestID)
+            configureRunButton(
+                symbol: "arrow.clockwise",
+                label: historyEditorString("Check again", "再次检查")
+            )
+            setStatus(
+                historyEditorString(
+                    "This prompt does not need adjustment.",
+                    "当前提示词无需调整。"
+                ),
+                announces: true
+            )
+        case let .consentRequired(origin):
+            guard allowsConsentRetry else {
+                finishPromptOptimization(requestID: requestID)
+                showPromptOptimizationFailure(.originNotConfirmed(origin: origin))
+                return
+            }
+            let result = confirmationRunner(
+                PasteraConfirmationOptions(
+                    title: historyEditorString(
+                        "Send prompt to \(origin)?",
+                        "将提示词发送到 \(origin)？"
+                    ),
+                    message: historyEditorString(
+                        "The current draft will be sent to this provider for optimization.",
+                        "当前草稿将发送到此服务以进行提示词优化。"
+                    ),
+                    confirmTitle: historyEditorString("Continue", "继续"),
+                    cancelTitle: historyEditorString("Cancel", "取消"),
+                    symbolName: "network"
+                ),
+                window
+            )
+            guard operationID == requestID, !Task.isCancelled else { return }
+            guard result.confirmed else {
+                finishPromptOptimization(requestID: requestID)
+                setStatus(
+                    historyEditorString(
+                        "Remote optimization cancelled. The draft was not changed.",
+                        "已取消远端优化，原文未更改。"
+                    ),
+                    announces: true
+                )
+                return
+            }
+            promptOptimizationService.confirmRemoteOrigin(origin)
+            await executePromptOptimization(
+                input: input,
+                requestID: requestID,
+                allowsConsentRetry: false
+            )
+        case let .failed(error):
+            finishPromptOptimization(requestID: requestID)
+            if error == .cancelled {
+                setStatus(
+                    historyEditorString(
+                        "Prompt optimization cancelled.",
+                        "已取消提示词优化。"
+                    ),
+                    announces: true
+                )
+            } else {
+                showPromptOptimizationFailure(error)
+            }
+        }
+    }
+
+    private func finishPromptOptimization(requestID: UUID) {
+        guard operationID == requestID else { return }
+        loadingFeedbackWorkItem?.cancel()
+        loadingFeedbackWorkItem = nil
+        transformationTask = nil
+        isRunning = false
+        updateControls()
+    }
+
+    private func schedulePromptLoadingFeedback(for requestID: UUID) {
+        loadingFeedbackWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.operationID == requestID, self.isRunning else { return }
+            self.configureRunButton(
+                symbol: "hourglass",
+                label: historyEditorString("Improving prompt", "正在美化提示词")
+            )
+            self.statusLabel.stringValue = historyEditorString(
+                "Improving prompt...",
+                "正在美化提示词..."
+            )
+        }
+        loadingFeedbackWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+    }
+
+    private func showPromptOptimizationFailure(_ error: PromptOptimizationError) {
+        configureRunButton(
+            symbol: "exclamationmark.arrow.triangle.2.circlepath",
+            label: historyEditorString("Retry prompt optimization", "重试提示词美化")
+        )
+        statusLabel.textColor = .systemRed
+        setStatus(
+            promptOptimizationFailureMessage(for: error),
+            announces: true
+        )
+    }
+
+    private func replaceDraft(with text: String, undoText: String, actionName: String) {
+        textView.undoManager?.registerUndo(withTarget: self) { target in
+            target.replaceDraft(with: undoText, undoText: text, actionName: actionName)
+        }
+        textView.undoManager?.setActionName(actionName)
         textView.string = text
         updateControls()
+    }
+
+    private func cancelTransformation() {
+        loadingFeedbackWorkItem?.cancel()
+        loadingFeedbackWorkItem = nil
+        transformationTask?.cancel()
+        transformationTask = nil
+        operationID = UUID()
+        isRunning = false
+    }
+
+    nonisolated private func recognizeText(
+        historyID: PasteboardHistory.ID,
+        content: PasteboardContent
+    ) async -> Result<String, PasteboardHistoryOCRRecognitionError> {
+        await ocrIndexer.recognizeText(historyID: historyID, content: content)
+    }
+
+    nonisolated private func transformHistoryText(
+        _ text: String,
+        using scriptID: UUID,
+        sourceAppBundleIdentifier: String?
+    ) async -> ScriptTransformOutcome {
+        await scriptCoordinator.transformHistoryText(
+            text,
+            using: scriptID,
+            sourceAppBundleIdentifier: sourceAppBundleIdentifier
+        )
+    }
+
+    nonisolated private func optimizePrompt(_ text: String) async -> PromptOptimizationOutcome {
+        await promptOptimizationService.optimize(text)
     }
 
     private func configureRunButton(symbol: String, label: String) {
@@ -555,6 +782,30 @@ private extension HistoryEditorWindowController {
         runButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         runButton.toolTip = label
         runButton.setAccessibilityLabel(label)
+    }
+
+    private func configureRunButtonForSelectedTransformation() {
+        switch selectedTransformation {
+        case .promptOptimization:
+            configureRunButton(
+                symbol: "wand.and.stars",
+                label: historyEditorString("Improve Prompt", "美化提示词")
+            )
+        case .script:
+            configureRunButton(
+                symbol: "play.fill",
+                label: historyEditorString("Run script", "运行脚本")
+            )
+        case nil:
+            configureRunButton(
+                symbol: "wand.and.stars",
+                label: historyEditorString("Improve Prompt", "美化提示词")
+            )
+        }
+    }
+
+    private var selectedTransformation: HistoryTextTransformationAction? {
+        scriptPopup.selectedItem?.representedObject as? HistoryTextTransformationAction
     }
 
     @objc private func save() {
@@ -615,12 +866,12 @@ private extension HistoryEditorWindowController {
 
     private func updateControls() {
         let hasText = !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasScript = scriptPopup.selectedItem?.representedObject != nil
-        scriptPopup.isEnabled = !isRunning && hasScript
-        runButton.isEnabled = !isRunning && hasText && hasScript
+        let hasTransformation = selectedTransformation != nil
+        scriptPopup.isEnabled = !isRunning && hasTransformation
+        runButton.isEnabled = !isRunning && hasText && hasTransformation
         runButton.bezelColor = runButton.isEnabled ? .controlAccentColor : nil
         runButton.contentTintColor = runButton.isEnabled ? .white : .tertiaryLabelColor
-        automationIconView.contentTintColor = hasScript ? .controlAccentColor : .tertiaryLabelColor
+        automationIconView.contentTintColor = hasTransformation ? .controlAccentColor : .tertiaryLabelColor
         saveButton.isEnabled = !isRunning && hasText
         countLabel.stringValue = historyEditorString(
             "\(textView.string.count) characters",
@@ -653,7 +904,124 @@ private extension HistoryEditorWindowController {
         statusLabel.stringValue = message
         updateControls()
     }
+
+    private func setStatus(_ message: String, announces: Bool) {
+        statusLabel.stringValue = message
+        updateControls()
+        guard announces else { return }
+        NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested, userInfo: [
+            .announcement: message,
+            .priority: NSAccessibilityPriorityLevel.medium.rawValue
+        ])
+    }
+
+    private func promptOptimizationFailureMessage(for error: PromptOptimizationError) -> String {
+        switch error {
+        case .missingModel, .invalidEndpoint, .insecureEndpoint,
+             .unavailable(.remoteNotConfigured):
+            return historyEditorString(
+                "Configure the model provider in Settings. The draft was not changed.",
+                "请先在设置中配置模型服务，原文未更改。"
+            )
+        case .missingAPIKey, .unauthorized, .keychainUnavailable:
+            return historyEditorString(
+                "Check the provider credential in Settings. The draft was not changed.",
+                "请检查设置中的服务凭据，原文未更改。"
+            )
+        case .rateLimited:
+            return historyEditorString(
+                "The provider is rate limited. Try again later; the draft was not changed.",
+                "服务请求过于频繁，请稍后重试；原文未更改。"
+            )
+        case .requestTimedOut:
+            return historyEditorString(
+                "The provider timed out. The draft was not changed.",
+                "服务响应超时，原文未更改。"
+            )
+        case .inputTooLong:
+            return historyEditorString(
+                "This prompt is too long to optimize. The draft was not changed.",
+                "提示词过长，无法优化；原文未更改。"
+            )
+        case .cancelled:
+            return historyEditorString("Prompt optimization cancelled.", "已取消提示词优化。")
+        case .emptyInput, .outputTooLong, .originNotConfirmed, .requestFailed,
+             .invalidResponse, .serverRejected, .unavailable:
+            return historyEditorString(
+                "Unable to improve the prompt. The draft was not changed.",
+                "无法优化，原文未更改。"
+            )
+        }
+    }
 }
+
+private extension PromptOptimizationAvailability {
+    var displayName: String {
+        switch self {
+        case .available:
+            return historyEditorString("Improve Prompt — Ready", "美化提示词 — 已就绪")
+        case .unavailable(.remoteNotConfigured):
+            return historyEditorString("Improve Prompt — Configure in Settings", "美化提示词 — 请前往设置配置")
+        case .unavailable:
+            return historyEditorString("Improve Prompt — Local fallback", "美化提示词 — 本地兼容模式")
+        }
+    }
+}
+
+#if DEBUG
+extension HistoryEditorWindowController {
+    var draftForTesting: String { textView.string }
+    var statusForTesting: String { statusLabel.stringValue }
+    var isRunningForTesting: Bool { isRunning }
+    var transformationActionsForTesting: [HistoryTextTransformationAction?] {
+        scriptPopup.itemArray.map { item in
+            item.isSeparatorItem
+                ? nil
+                : item.representedObject as? HistoryTextTransformationAction
+        }
+    }
+
+    func runPromptOptimizationForTesting() async {
+        scriptPopup.selectItem(at: 0)
+        runPromptOptimization()
+        let task = transformationTask
+        await task?.value
+    }
+
+    func selectTransformationForTesting(_ action: HistoryTextTransformationAction) {
+        guard let index = scriptPopup.itemArray.firstIndex(where: {
+            ($0.representedObject as? HistoryTextTransformationAction) == action
+        }) else { return }
+        scriptPopup.selectItem(at: index)
+        configureRunButtonForSelectedTransformation()
+        updateControls()
+    }
+
+    func runSelectedTransformationForTesting() async {
+        runSelectedTransformation()
+        let task = transformationTask
+        await task?.value
+    }
+
+    func startSelectedTransformationForTesting() {
+        runSelectedTransformation()
+    }
+
+    func undoForTesting() {
+        textView.undoManager?.undo()
+    }
+
+    @discardableResult
+    func saveDraftForTesting() -> Bool {
+        saveDraft()
+    }
+
+    func cancelTransformationForTesting() {
+        cancelTransformation()
+        updateControls()
+    }
+}
+#endif
 
 private func historyEditorString(_ english: String, _ chinese: String) -> String {
     Locale.preferredLanguages.first?.hasPrefix("zh") == true ? chinese : english

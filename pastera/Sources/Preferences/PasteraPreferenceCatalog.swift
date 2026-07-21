@@ -31,6 +31,7 @@ struct PasteraPreferenceSearchItem: Hashable {
 
 protocol PasteraPreferencePage: AnyObject {
     var paneID: PasteraPreferencePaneID { get }
+
     func revealSetting(anchorID: String, animated: Bool) -> Bool
 }
 
@@ -202,6 +203,21 @@ struct PasteraPreferenceCatalog: Equatable {
                 title: Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "脚本" : pasteraPreferenceString("Scripts"),
                 symbolName: "curlybraces.square",
                 searchItems: [
+                    PasteraPreferenceSearchItem(
+                        id: "scripts.promptOptimization",
+                        paneID: .scripts,
+                        sectionID: "scripts.promptOptimization",
+                        anchorID: "scripts.promptOptimization",
+                        title: pasteraScriptString("Prompt Optimization", "提示词优化"),
+                        subtitle: pasteraScriptString(
+                            "Improve history prompts locally or with your own compatible model.",
+                            "在本机或通过自备兼容模型美化历史提示词。"
+                        ),
+                        keywords: [
+                            "prompt", "optimization", "优化", "美化", "model",
+                            "OpenAI", "Gemini", "Ollama", "LM Studio"
+                        ]
+                    ),
                     PasteraPreferenceSearchItem(
                         id: "scripts.list",
                         paneID: .scripts,

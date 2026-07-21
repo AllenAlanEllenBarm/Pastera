@@ -48,6 +48,7 @@ struct AppEnvironment {
                      vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
                          current.vaultAgentApplicationRuntime,
                      clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
+                     promptOptimizationService: PromptOptimizationServicing = current.promptOptimizationService,
                      menuManager: MenuManager = current.menuManager,
                      defaults: UserDefaults = current.defaults) {
         push(environment: Environment(clipService: clipService,
@@ -61,6 +62,7 @@ struct AppEnvironment {
                                       passwordVaultUIController: passwordVaultUIController,
                                       vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
                                       clipboardScriptCoordinator: clipboardScriptCoordinator,
+                                      promptOptimizationService: promptOptimizationService,
                                       menuManager: menuManager,
                                       defaults: defaults))
     }
@@ -77,6 +79,7 @@ struct AppEnvironment {
                                vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
                                    current.vaultAgentApplicationRuntime,
                                clipboardScriptCoordinator: ClipboardScriptCoordinating = current.clipboardScriptCoordinator,
+                               promptOptimizationService: PromptOptimizationServicing = current.promptOptimizationService,
                                menuManager: MenuManager = current.menuManager,
                                defaults: UserDefaults = current.defaults) {
         replaceCurrent(environment: Environment(clipService: clipService,
@@ -90,6 +93,7 @@ struct AppEnvironment {
                                                 passwordVaultUIController: passwordVaultUIController,
                                                 vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
                                                 clipboardScriptCoordinator: clipboardScriptCoordinator,
+                                                promptOptimizationService: promptOptimizationService,
                                                 menuManager: menuManager,
                                                 defaults: defaults))
     }

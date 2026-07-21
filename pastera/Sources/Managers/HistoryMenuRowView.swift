@@ -240,6 +240,8 @@ final class HistoryMenuRowView: NSControl {
     private var textPreviewWorkItem: DispatchWorkItem?
     private var isMouseInside = false
     private var isFocused = false
+    private let editButtonSymbolName = "wand.and.stars"
+    private let editButtonAccessibilityLabel = pasteraScriptString("Improve Prompt", "美化提示词")
     var onLogicalFocusChange: (() -> Void)?
     var onKeyboardEvent: ((NSEvent) -> Bool)?
 
@@ -291,7 +293,11 @@ final class HistoryMenuRowView: NSControl {
 
     override func resignFirstResponder() -> Bool {
         isFocused = false
-        isMouseInside ? scheduleTextPreview() : cancelTextPreview()
+        if isMouseInside {
+            scheduleTextPreview()
+        } else {
+            cancelTextPreview()
+        }
         updateAppearance()
         return true
     }
@@ -437,11 +443,11 @@ final class HistoryMenuRowView: NSControl {
         editButton.setButtonType(.momentaryPushIn)
         editButton.bezelStyle = .inline
         editButton.isBordered = false
-        editButton.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        editButton.image = NSImage(systemSymbolName: editButtonSymbolName, accessibilityDescription: nil)
         editButton.imagePosition = .imageOnly
         editButton.contentTintColor = .tertiaryLabelColor
-        editButton.toolTip = String(localized: "Edit")
-        editButton.setAccessibilityLabel(String(localized: "Edit"))
+        editButton.toolTip = editButtonAccessibilityLabel
+        editButton.setAccessibilityLabel(editButtonAccessibilityLabel)
         editButton.target = self
         editButton.action = #selector(editButtonClicked(_:))
         editButton.isHidden = true
@@ -687,6 +693,14 @@ private extension HistoryMenuRowView {
 extension HistoryMenuRowView {
     var isEditButtonVisibleForTesting: Bool {
         !editButton.isHidden
+    }
+
+    var editButtonSymbolNameForTesting: String {
+        editButtonSymbolName
+    }
+
+    var editButtonAccessibilityLabelForTesting: String {
+        editButtonAccessibilityLabel
     }
 
     func clickEditButtonForTesting() {
