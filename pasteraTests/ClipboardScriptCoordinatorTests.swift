@@ -8,6 +8,7 @@ struct ClipboardScriptCoordinatorTests {
         let environment = Environment()
 
         #expect(environment.clipboardScriptCoordinator is ClipboardScriptCoordinator)
+        #expect(environment.promptOptimizationService is PromptOptimizationService)
     }
 
     @Test

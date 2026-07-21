@@ -179,6 +179,20 @@
 		C5F400092FF4000000B7C0DE /* ScriptExecutionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F4000A2FF4000000B7C0DE /* ScriptExecutionService.swift */; };
 		C5F4000B2FF4000000B7C0DE /* ClipboardScriptCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F4000C2FF4000000B7C0DE /* ClipboardScriptCoordinatorTests.swift */; };
 		C5F4000D2FF4000000B7C0DE /* ClipboardScriptCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F4000E2FF4000000B7C0DE /* ClipboardScriptCoordinator.swift */; };
+		C5F700012FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700022FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift */; };
+		C5F700032FFF000000B7C0DE /* PromptOptimization.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700042FFF000000B7C0DE /* PromptOptimization.swift */; };
+		C5F700052FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700062FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift */; };
+		C5F700072FFF000000B7C0DE /* PromptOptimizationAPIKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700082FFF000000B7C0DE /* PromptOptimizationAPIKeyStore.swift */; };
+		C5F710012FFF100000B7C0DE /* PromptOptimizationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F710022FFF100000B7C0DE /* PromptOptimizationServiceTests.swift */; };
+		C5F710032FFF100000B7C0DE /* LocalPromptFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F710042FFF100000B7C0DE /* LocalPromptFormatter.swift */; };
+		C5F710052FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F710062FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift */; };
+		C5F710072FFF100000B7C0DE /* PromptOptimizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F710082FFF100000B7C0DE /* PromptOptimizationService.swift */; };
+		C5F720012FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720022FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift */; };
+		C5F720032FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */; };
+		C5F720052FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */; };
+		C5F730012FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */; };
+		C5F730032FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730042FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift */; };
+		C5F730052FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730062FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift */; };
 		C57100032FCEB00000C8F965 /* PasteboardHistoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57100022FCEB00000C8F965 /* PasteboardHistoryRepository.swift */; };
 		C57100052FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57100042FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift */; };
 		C57100072FCEB02000C8F965 /* PasteboardContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57100062FCEB02000C8F965 /* PasteboardContent.swift */; };
@@ -293,6 +307,20 @@
 		C5F400082FF4000000B7C0DE /* ScriptExecutionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptExecutionServiceTests.swift; sourceTree = "<group>"; };
 		C5F4000A2FF4000000B7C0DE /* ScriptExecutionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptExecutionService.swift; sourceTree = "<group>"; };
 		C5F4000C2FF4000000B7C0DE /* ClipboardScriptCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardScriptCoordinatorTests.swift; sourceTree = "<group>"; };
+		C5F700022FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationSettingsTests.swift; sourceTree = "<group>"; };
+		C5F700042FFF000000B7C0DE /* PromptOptimization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimization.swift; sourceTree = "<group>"; };
+		C5F700062FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationSettingsStore.swift; sourceTree = "<group>"; };
+		C5F700082FFF000000B7C0DE /* PromptOptimizationAPIKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationAPIKeyStore.swift; sourceTree = "<group>"; };
+		C5F710022FFF100000B7C0DE /* PromptOptimizationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationServiceTests.swift; sourceTree = "<group>"; };
+		C5F710042FFF100000B7C0DE /* LocalPromptFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPromptFormatter.swift; sourceTree = "<group>"; };
+		C5F710062FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleFoundationModelPromptOptimizer.swift; sourceTree = "<group>"; };
+		C5F710082FFF100000B7C0DE /* PromptOptimizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationService.swift; sourceTree = "<group>"; };
+		C5F720022FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatiblePromptOptimizerTests.swift; sourceTree = "<group>"; };
+		C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationEndpointPolicy.swift; sourceTree = "<group>"; };
+		C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatiblePromptOptimizer.swift; sourceTree = "<group>"; };
+		C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationPreferenceSection.swift; sourceTree = "<group>"; };
+		C5F730042FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationPreferenceTests.swift; sourceTree = "<group>"; };
+		C5F730062FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryEditorWindowControllerTests.swift; sourceTree = "<group>"; };
 		C5F4000E2FF4000000B7C0DE /* ClipboardScriptCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardScriptCoordinator.swift; sourceTree = "<group>"; };
 		C57100022FCEB00000C8F965 /* PasteboardHistoryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardHistoryRepository.swift; sourceTree = "<group>"; };
 		C57100042FCEB01000C8F965 /* PasteboardHistoryRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardHistoryRepositoryTests.swift; sourceTree = "<group>"; };
@@ -647,6 +675,13 @@
 		FA0D5CE61DDCC5D000AC9052 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				C5F700062FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift */,
+				C5F700082FFF000000B7C0DE /* PromptOptimizationAPIKeyStore.swift */,
+				C5F710042FFF100000B7C0DE /* LocalPromptFormatter.swift */,
+				C5F710062FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift */,
+				C5F710082FFF100000B7C0DE /* PromptOptimizationService.swift */,
+				C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */,
+				C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */,
 				A69000000000000000000004 /* VaultAgentIntegrationInstaller.swift */,
 				A65000000000000000000004 /* VaultAgentPeerVerifier.swift */,
 				A65000000000000000000008 /* VaultAgentBroker.swift */,
@@ -773,6 +808,7 @@
 		FA1DB4CB1DDCB479007F95C8 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				C5F700042FFF000000B7C0DE /* PromptOptimization.swift */,
 				FA1DB4CC1DDCB479007F95C8 /* PasteraAppInfo.swift */,
 				C57100062FCEB02000C8F965 /* PasteboardContent.swift */,
 				C522FB942FCBD69A00E61800 /* PasteboardAvailableType.swift */,
@@ -867,6 +903,7 @@
 					C5A930032FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift */,
 					FEE500000000000000000002 /* CPYAboutPreferenceViewController.swift */,
 					C5F500000000000000000002 /* CPYScriptsPreferenceViewController.swift */,
+					C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */,
 					C5F500000000000000000004 /* ScriptEditorViewController.swift */,
 					C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */,
 					C5F530000000000000000002 /* ScriptTestViewController.swift */,
@@ -951,6 +988,11 @@
 				C5700B4F2FC5C8C800C8F965 /* Repositories */,
 				C5F400082FF4000000B7C0DE /* ScriptExecutionServiceTests.swift */,
 				C5F4000C2FF4000000B7C0DE /* ClipboardScriptCoordinatorTests.swift */,
+				C5F700022FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift */,
+				C5F710022FFF100000B7C0DE /* PromptOptimizationServiceTests.swift */,
+				C5F720022FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift */,
+				C5F730042FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift */,
+				C5F730062FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift */,
 				C5F510000000000000000002 /* ScriptTemplateCatalogTests.swift */,
 				C5F520000000000000000002 /* ScriptPreferenceTests.swift */,
 				C5A900052FD0A10000B7C0DE /* CPYWindowAppearanceTests.swift */,
@@ -1455,6 +1497,15 @@
 			isa = PBXSourcesBuildPhase;
 			files = (
 				A6A000000000000000000003 /* CPYAgentIntegrationPreferenceViewController.swift in Sources */,
+				C5F700032FFF000000B7C0DE /* PromptOptimization.swift in Sources */,
+				C5F700052FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift in Sources */,
+				C5F700072FFF000000B7C0DE /* PromptOptimizationAPIKeyStore.swift in Sources */,
+				C5F710032FFF100000B7C0DE /* LocalPromptFormatter.swift in Sources */,
+				C5F710052FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift in Sources */,
+				C5F710072FFF100000B7C0DE /* PromptOptimizationService.swift in Sources */,
+				C5F720032FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift in Sources */,
+				C5F720052FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift in Sources */,
+				C5F730012FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift in Sources */,
 				A69000000000000000000003 /* VaultAgentIntegrationInstaller.swift in Sources */,
 				A65000000000000000000003 /* VaultAgentPeerVerifier.swift in Sources */,
 				A65000000000000000000007 /* VaultAgentBroker.swift in Sources */,
@@ -1630,6 +1681,11 @@
 				C5F400012FF4000000B7C0DE /* ScriptRepositoryTests.swift in Sources */,
 				C5F400072FF4000000B7C0DE /* ScriptExecutionServiceTests.swift in Sources */,
 				C5F4000B2FF4000000B7C0DE /* ClipboardScriptCoordinatorTests.swift in Sources */,
+				C5F700012FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift in Sources */,
+				C5F710012FFF100000B7C0DE /* PromptOptimizationServiceTests.swift in Sources */,
+				C5F720012FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift in Sources */,
+				C5F730032FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift in Sources */,
+				C5F730052FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift in Sources */,
 				C5F510000000000000000001 /* ScriptTemplateCatalogTests.swift in Sources */,
 				C5F520000000000000000001 /* ScriptPreferenceTests.swift in Sources */,
 			);

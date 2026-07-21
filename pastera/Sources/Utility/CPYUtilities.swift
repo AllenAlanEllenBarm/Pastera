@@ -112,6 +112,24 @@ final class CPYUtilities {
         defaultValues.updateValue(syncFileTypes, forKey: Constants.UserDefaults.syncFileTypes)
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.syncPollInterval)
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
+        defaultValues.updateValue(
+            PromptOptimizationProviderSelection.automaticFree.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationProvider
+        )
+        defaultValues.updateValue(
+            OpenAICompatiblePreset.openAI.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationPreset
+        )
+        defaultValues.updateValue("", forKey: Constants.UserDefaults.promptOptimizationBaseURL)
+        defaultValues.updateValue("", forKey: Constants.UserDefaults.promptOptimizationModel)
+        defaultValues.updateValue(
+            NSNumber(value: false),
+            forKey: Constants.UserDefaults.promptOptimizationAllowsInsecureHTTP
+        )
+        defaultValues.updateValue(
+            [String](),
+            forKey: Constants.UserDefaults.promptOptimizationConfirmedOrigins
+        )
 
         /* Updates */
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Update.enableAutomaticCheck)

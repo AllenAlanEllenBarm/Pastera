@@ -12,6 +12,19 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct HistoryMenuPreviewInteractionTests {
+    @Test @MainActor
+    func editableHistoryRowUsesPromptBeautificationWand() {
+        let row = HistoryMenuRowView(
+            title: "Prompt",
+            image: nil,
+            onEdit: {},
+            onConfirm: {}
+        )
+
+        #expect(row.editButtonSymbolNameForTesting == "wand.and.stars")
+        #expect(row.editButtonAccessibilityLabelForTesting == pasteraScriptString("Improve Prompt", "美化提示词"))
+    }
+
     @Test
     func imagePreviewPanelIncludesPointerTowardSourceRow() throws {
         let controller = HistoryMenuImagePreviewController()
@@ -105,8 +118,9 @@ struct HistoryMenuPreviewInteractionTests {
         let row = HistoryMenuRowView(
             title: "Editable text",
             image: nil,
-            onEdit: {}
-        ) {}
+            onEdit: {},
+            onConfirm: {}
+        )
 
         #expect(row.isEditButtonVisibleForTesting)
     }
@@ -117,8 +131,9 @@ struct HistoryMenuPreviewInteractionTests {
         let row = HistoryMenuRowView(
             title: "Editable text",
             image: nil,
-            onEdit: { editCount += 1 }
-        ) {}
+            onEdit: { editCount += 1 },
+            onConfirm: {}
+        )
 
         row.clickEditButtonForTesting()
 

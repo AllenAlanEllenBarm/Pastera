@@ -3,15 +3,19 @@ import KeyHolder
 import Magnet
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewController {
     private enum Metrics {
         static let emptyStateHeight: CGFloat = 108
-        static let initialLayoutHeight: CGFloat = 620
+        static let initialLayoutHeight: CGFloat = 760
     }
 
     private let repository: ScriptRepositoryProtocol
     private let executor: ScriptExecuting
     private let hotKeyService: HotKeyService
+    private let promptSettingsStore: any PromptOptimizationSettingsStoring
+    private let promptAPIKeyStore: any PromptOptimizationAPIKeyStoring
+    private let promptOptimizationService: any PromptOptimizationServicing
     private let listStack = NSStackView()
     private let scriptSummaryLabel = NSTextField(labelWithString: "")
     private let shortcutRecordView = RecordView(frame: .zero)
@@ -21,17 +25,24 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         action: #selector(showScriptTest)
     )
     private weak var shortcutCard: NSView?
+    private weak var promptOptimizationSection: PromptOptimizationPreferenceSection?
     private var emptyStateMinimumHeight: CGFloat = 0
     private var usesNonForcingBottomConstraint = false
 
     init(
         repository: ScriptRepositoryProtocol = ScriptRepository(),
         executor: ScriptExecuting = ScriptExecutionService(),
-        hotKeyService: HotKeyService = AppEnvironment.current.hotKeyService
+        hotKeyService: HotKeyService = AppEnvironment.current.hotKeyService,
+        promptSettingsStore: any PromptOptimizationSettingsStoring = PromptOptimizationSettingsStore(),
+        promptAPIKeyStore: any PromptOptimizationAPIKeyStoring = PromptOptimizationAPIKeyStore(),
+        promptOptimizationService: any PromptOptimizationServicing = AppEnvironment.current.promptOptimizationService
     ) {
         self.repository = repository
         self.executor = executor
         self.hotKeyService = hotKeyService
+        self.promptSettingsStore = promptSettingsStore
+        self.promptAPIKeyStore = promptAPIKeyStore
+        self.promptOptimizationService = promptOptimizationService
         super.init(paneID: .scripts, title: pasteraScriptString("Transform Scripts", "转换脚本"))
     }
 
@@ -41,9 +52,17 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
         super.loadView()
         replacePageBottomConstraintForCompactContent()
         view.frame.size.height = Metrics.initialLayoutHeight
+        let promptOptimizationSection = PromptOptimizationPreferenceSection(
+            settingsStore: promptSettingsStore,
+            apiKeyStore: promptAPIKeyStore,
+            optimizationService: promptOptimizationService
+        )
         let scriptsCard = makeScriptsCard()
         let shortcutCard = makeShortcutCard()
+        self.promptOptimizationSection = promptOptimizationSection
         self.shortcutCard = shortcutCard
+        addAdaptiveContent(promptOptimizationSection)
+        registerAnchor("scripts.promptOptimization", view: promptOptimizationSection)
         addAdaptiveContent(scriptsCard)
         addAdaptiveContent(shortcutCard)
         reloadScripts()
@@ -222,6 +241,12 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
     var isTestActionEnabledForTesting: Bool { testScriptButton.isEnabled }
     var usesNonForcingBottomConstraintForTesting: Bool { usesNonForcingBottomConstraint }
     var initialLayoutHeightForTesting: CGFloat { Metrics.initialLayoutHeight }
+    var orderedSectionIDsForTesting: [String] {
+        ["scripts.promptOptimization", "scripts.list", "scripts.shortcut"]
+    }
+    var promptOptimizationSectionForTesting: PromptOptimizationPreferenceSection? {
+        promptOptimizationSection
+    }
 
     private func makeScriptRow(_ script: ScriptTransform) -> NSView {
         let row = NSStackView()

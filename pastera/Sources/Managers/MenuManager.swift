@@ -78,6 +78,7 @@ final class MenuManager: NSObject {
         repository: pasteboardHistoryRepository,
         ocrIndexer: pasteboardHistoryOCRIndexer,
         scriptCoordinator: AppEnvironment.current.clipboardScriptCoordinator,
+        promptOptimizationService: AppEnvironment.current.promptOptimizationService,
         onSaved: { [weak self] in
             self?.refreshHistorySurfacesIfVisible()
             if let menu = self?.historyMenu {

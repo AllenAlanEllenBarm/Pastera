@@ -7005,6 +7005,69 @@
     "Metadata, paste, copy, and controlled injection" : { "localizations" : {
       "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata, paste, copy, and controlled injection" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Metadaten, Einfügen, Kopieren und kontrollierte Eingabe" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Metadati, incolla, copia e inserimento controllato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "メタデータ、ペースト、コピー、制御された入力" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据、粘贴、复制和受控注入" } }
     } },
+    "Prompt Optimization" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Prompt Optimization" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "提示词优化" } }
+    } },
+    "Improve Prompt" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Improve Prompt" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "美化提示词" } }
+    } },
+    "Improve history drafts locally for free, or use your own compatible model." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Improve history drafts locally for free, or use your own compatible model." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "默认在本机免费处理，也可使用你自己的兼容模型。" } }
+    } },
+    "Improve history prompts locally or with your own compatible model." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Improve history prompts locally or with your own compatible model." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在本机或通过自备兼容模型美化历史提示词。" } }
+    } },
+    "Processing" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Processing" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "处理方式" } }
+    } },
+    "Automatic — Free" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic — Free" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "免费自动" } }
+    } },
+    "OpenAI-compatible — Custom provider" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OpenAI-compatible — Custom provider" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OpenAI 兼容 — 自备服务" } }
+    } },
+    "Provider preset" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Provider preset" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务预设" } }
+    } },
+    "Base URL" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Base URL" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "基础地址" } }
+    } },
+    "Model" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Model" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "模型" } }
+    } },
+    "API Key — stored in Keychain" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "API Key — stored in Keychain" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "API Key — 存储于钥匙串" } }
+    } },
+    "Save Settings" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Save Settings" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存设置" } }
+    } },
+    "Save Key" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Save Key" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存密钥" } }
+    } },
+    "Remove" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除" } }
+    } },
+    "Test Connection" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Test Connection" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "测试连接" } }
+    } },
+    "Connection testing sends only fixed probe text and may incur provider charges." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection testing sends only fixed probe text and may incur provider charges." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接测试只发送固定探针文本，但仍可能产生服务费用。" } }
+    } },
+    "Allow non-loopback HTTP. Prompt text and credentials may be exposed." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow non-loopback HTTP. Prompt text and credentials may be exposed." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "允许非回环 HTTP；提示词和凭据可能被暴露。" } }
+    } },
+    "Free. Uses Apple on-device intelligence when available, with local formatting fallback." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Free. Uses Apple on-device intelligence when available, with local formatting fallback." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "免费；可用时使用 Apple 设备端智能，否则自动使用本地整理。" } }
+    } },
+    "Uses your configured provider. Prompt text leaves this Mac only after confirmation." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Uses your configured provider. Prompt text leaves this Mac only after confirmation." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用你配置的服务；确认后提示词才会离开本机。" } }
+    } },
+    "Saved in Keychain" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved in Keychain" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存至钥匙串" } }
+    } },
+    "No key saved" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "No key saved" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未保存密钥" } }
+    } },
     "items" : {
       "localizations" : {
         "en" : {

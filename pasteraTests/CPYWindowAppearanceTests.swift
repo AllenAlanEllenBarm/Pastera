@@ -36,13 +36,31 @@ struct CPYWindowAppearanceTests {
             confirmTitle: "Clear History",
             cancelTitle: "Cancel",
             isDestructive: true,
-            suppressionTitle: "Don't ask again"
+            suppressionTitle: "Don't ask again",
+            symbolName: "lock.shield"
         )
 
         #expect(options.isDestructive)
         #expect(options.confirmTitle == "Clear History")
         #expect(options.cancelTitle == "Cancel")
         #expect(options.suppressionTitle == "Don't ask again")
+        #expect(options.symbolName == "lock.shield")
+    }
+
+    @Test @MainActor
+    func nonDestructiveConfirmationSupportsContextualSymbol() throws {
+        let controller = PasteraConfirmationController(options: PasteraConfirmationOptions(
+            title: "Send Prompt?",
+            message: "The prompt will be sent to the configured provider.",
+            confirmTitle: "Continue",
+            cancelTitle: "Cancel",
+            symbolName: "network"
+        ))
+        defer { controller.close() }
+
+        let layout = try #require(controller.confirmationLayoutForTesting)
+        #expect(layout.symbolName == "network")
+        #expect(!layout.confirmButtonUsesDestructiveStyle)
     }
 
     @Test @MainActor
