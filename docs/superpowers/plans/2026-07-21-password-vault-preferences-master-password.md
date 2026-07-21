@@ -566,10 +566,10 @@ git commit -m "docs(vault): record password vault preferences delivery"
 
 ## Delivery Record
 
-- Actual Implementation: Pending
-- Plan Deviations: None yet
-- Impact: Pending
-- Verification: Pending
-- Remaining Risks: Pending
-- Follow-ups: Pending
-- ZenTao Closeout: Not applicable unless a repository ZenTao contract is added and explicitly confirmed
+- Actual Implementation: 已交付密码箱安全设置闭环。KDBX store 支持在校验当前主密码后，对主文件、备份、同目录冲突文件和 `conflicts/resolved` 工件执行带冲突复核与失败回滚的统一换密；Preferences 新增垂直平衡的“密码箱”页面，展示未配置/已锁定/已解锁状态，并提供自动锁定、快速解锁和修改主密码入口；原生 Sheet 覆盖当前/新/确认密码、显示隐藏、键盘操作、busy、防重复提交、错误聚焦和 secret 清理；首次设置和换密流程均明确显示“忘记后无法通过其他方式找回”。
+- Plan Deviations: 用户界面的“重置主密码”按已确认安全语义实现为“验证当前密码后修改”，未提供绕过、找回或清空密码箱的恢复路径。未对唯一真实密码箱执行破坏性人工换密，数据保留与旧/新密码行为使用临时 KDBX、故障注入和自动化测试验证。默认并行 `clean test` 受仓库既有共享状态/时序竞争及 Xcode result-bundle `writerNotOpen` 影响出现 6 项失败；同产物定向复跑和单 worker 全量复跑通过。Release scheme 的 Build Action 会连带编译使用 `@testable import` 的测试 target，因此 scheme Release 以 65 退出；改为仅构建 `pastera` 应用 target 后通过。
+- Impact: 触达密码箱 store/API、KDBX 多工件换密事务、Keychain 快速解锁意图、Agent 串行执行边界、Preferences catalog/搜索/布局、5 种本地化和本机应用安装。未改变 KDBX 文件格式；成功换密后当前数据保留，旧密码失效，新密码生效；Keychain 刷新失败时保留已安全提交的 KDBX，并返回需要重新授权的 partial-success warning。
+- Verification: 密码换密与安全设置聚焦套件通过；`KeyboardAccessibilityTests`、`PasswordVaultMenuTests`、`PreferencePaneAlignmentTests`、`PreferenceSearchTests` 组合 70 项通过；默认并行全量失败所在的 `PasteboardHistorySyncRepositoryTests`、`VaultAgentPerformanceTests`、`VaultAgentBrokerTests`、`VaultAgentIntegrationInstallerTests` 定向复跑退出码 0；隔离 DerivedData 下 `test-without-building -parallel-testing-enabled NO -maximum-parallel-testing-workers 1` 全量退出码 0（193.478 秒）；`xcodebuild -target pastera -configuration Release ... build` 退出码 0；`jq empty pastera/Resources/Localizable.xcstrings`、5 语言偏好文案覆盖检查、`git diff --check 532508a..ecefadc` 和新增日志扫描通过；`./script/install_local.sh` 构建、ad-hoc 签名、替换和启动成功，`/Applications/Pastera.app` 回读为 3.0.1 (301)、`com.pastera-app.Pastera.debug`，运行路径为 `/Applications/Pastera.app/Contents/MacOS/Pastera`。
+- Remaining Risks: OneDrive 在多工件暂存/提交窗口内并发写入、Keychain 被拒绝后的重新授权、真实用户大体量密码箱换密耗时仍需上线观察；默认并行测试仍可能受全局状态竞争影响；Xcode 26.5 当前报告 CoreSimulator 1051.54 低于 1051.55；Release scheme 的测试 target 配置尚未修正。未在唯一真实密码箱上执行人工换密，也未完成全量 VoiceOver、深色模式和各窗口宽度的人工遍历。
+- Follow-ups: 后续可独立修正 Release scheme，避免应用 Release 构建连带编译测试 target；隔离并发测试的全局状态并升级匹配的 CoreSimulator。功能范围内无阻断性待办；人工验收应继续使用临时/测试同步根。
+- ZenTao Closeout: 未执行；仓库没有本需求已确认的 ZenTao Story/Task ID，用户也未授权 ZenTao 写操作。
