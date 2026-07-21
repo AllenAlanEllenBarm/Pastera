@@ -18,5 +18,6 @@ PROVISIONING_PROFILE_SPECIFIER[config=Debug] = ClipyDevelopment
 PROVISIONING_PROFILE_SPECIFIER[config=Release] =
 ENABLE_HARDENED_RUNTIME[config=Release] = YES
 OTHER_CODE_SIGN_FLAGS[config=Release] = --timestamp
+CODE_SIGN_ENTITLEMENTS[config=Release] = pastera/Pastera.entitlements
 
 #include "Configurations/CodeSigning-AdHoc.xcconfig"

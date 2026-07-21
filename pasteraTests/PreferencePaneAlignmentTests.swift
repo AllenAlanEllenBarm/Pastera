@@ -4,6 +4,8 @@
 //  Pastera
 //
 
+// swiftlint:disable file_length
+
 import AppKit
 import Testing
 @testable import Pastera
@@ -35,9 +37,20 @@ struct PreferenceSidebarTests {
         let titles = controller.preferenceSidebarTitlesForTesting
         let symbolNames = controller.preferenceSidebarSymbolNamesForTesting
         let syncIndex = try #require(titles.firstIndex(of: "云同步"))
+        let updateIndex = try #require(titles.firstIndex(of: "软件更新"))
         let aboutIndex = try #require(titles.firstIndex(of: "关于"))
 
-        #expect(titles == ["基础设置", "历史记录", "脚本", "快捷键", "忽略应用", "云同步", "关于"])
+        #expect(titles == [
+            "基础设置",
+            "历史记录",
+            "脚本",
+            "快捷键",
+            "忽略应用",
+            "Agent 集成",
+            "云同步",
+            "软件更新",
+            "关于"
+        ])
         #expect(!titles.contains("Types"))
         #expect(!titles.contains("Exclude"))
         #expect(!titles.contains("Update"))
@@ -45,6 +58,8 @@ struct PreferenceSidebarTests {
         #expect(!titles.contains("测试"))
         #expect(symbolNames.count == titles.count)
         #expect(symbolNames[syncIndex] != symbolNames[aboutIndex])
+        #expect(symbolNames[updateIndex] != symbolNames[syncIndex])
+        #expect(symbolNames[updateIndex] != symbolNames[aboutIndex])
     }
 }
 
@@ -84,7 +99,12 @@ struct PreferencePaneAlignmentTests {
 
         let anchors: [(PasteraPreferencePaneID, [String])] = [
             (.sync, ["sync.oneDriveStatus", "sync.rootFolder", "sync.fileTypes", "sync.actions"]),
-            (.about, ["about.version", "about.github", "about.license", "about.sparkle"])
+            (.softwareUpdate, [
+                "softwareUpdate.currentVersion",
+                "softwareUpdate.automaticCheck",
+                "softwareUpdate.lastCheck"
+            ]),
+            (.about, ["about.version", "about.github", "about.license"])
         ]
         for (paneID, anchorIDs) in anchors {
             controller.showPreferencePaneForTesting(paneID: paneID)

@@ -1,124 +1,94 @@
 <p align="center">
-  <img src="docs/assets/readme-hero.svg" alt="Pastera macOS clipboard manager" width="100%" />
+  <img src="docs/assets/readme-hero.svg" alt="Pastera macOS 剪贴板效率工具" width="100%" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/pastera-app/Pastera/releases/tag/v2.0.1-beta"><strong>Download 2.0.1-beta</strong></a>
-  ·
-  <a href="#latest-beta-201-beta">更新说明</a>
-  ·
-  <a href="#project-status">Status</a>
-  ·
-  <a href="#build">Build</a>
-  ·
-  <a href="#community-and-governance">Governance</a>
-  ·
-  <a href="#license">License</a>
+  <a href="#下载">下载</a>&nbsp;&nbsp;
+  <a href="#核心能力">功能</a>&nbsp;&nbsp;
+  <a href="#安装">安装</a>&nbsp;&nbsp;
+  <a href="#构建与本地开发">构建</a>&nbsp;&nbsp;
+  <a href="#参与贡献">贡献</a>&nbsp;&nbsp;
+  <a href="#安全与隐私">安全</a>
 </p>
 
 # Pastera
 
-Pastera is an independent, open-source clipboard productivity product. The
-current macOS app combines searchable history, snippet folders, script
-transforms, KDBX password-vault workflows, OneDrive folder sync, rich pasteboard
-compatibility, and a keyboard-first operating model for fast pasteback. A native
-Windows client is planned in the same repository against shared product
-contracts rather than a shared UI framework.
+Pastera 是一款独立、开源、键盘优先的 macOS 剪贴板效率工具。它把历史搜索、片段复用、脚本转换、图片 OCR、KDBX 密码箱和 OneDrive 文件夹同步集中在轻量菜单中，让复制、查找和粘贴保持连续。
 
-## Project Status
+macOS 应用是当前可运行的产品基线。原生 Windows 客户端将在同一仓库中遵循共同的数据与产品契约，但不会复制 AppKit 界面。
 
-Pastera is an active beta maintained in the `pastera-app/Pastera` GitHub
-organization. The repository is standalone and does not track a product
-upstream. macOS is the current executable baseline; Windows will use native
-Windows APIs while preserving the same product capabilities and cross-platform
-data contracts.
+## 下载
 
-Current public beta builds are unsigned and not notarized yet. macOS may show a
-Gatekeeper warning on first launch. The project is working toward a compliant
-Developer ID signing and notarization path so users can install releases without
-manual trust bypass steps.
+[下载当前 Beta](https://github.com/pastera-app/Pastera/releases/tag/v3.0.0-beta) 或 [查看全部 Releases](https://github.com/pastera-app/Pastera/releases)。
 
-## Highlights
+### 当前版本：3.0.0-beta
 
-- **Searchable history**: filter clipboard records quickly without leaving the
-  compact history panel.
-- **Snippet folders**: organize reusable prompts and text snippets with folder
-  shortcuts and numeric item selection.
-- **Image pasteboard support**: improves compatibility with screenshots from
-  tools that use custom image pasteboard types.
-- **Keyboard-first workflow**: navigate panels, settings, snippets, and history
-  with shortcuts, arrows, Tab, and Return.
-- **Native macOS feel**: lightweight menu-bar app, semantic colors, translucent
-  surfaces, and no heavy background effects.
+- 限制启动 OCR 回填的内存占用，避免一次载入大量图片历史。
+- 使用持久化实时 OCR 队列，降低后台任务的常驻资源占用。
+- 优化历史清理路径，并按需启停 OneDrive 文件监听。
+- 增加用户可感知的 OCR 延迟和处理状态反馈。
+- 修复非 Debug 配置下的 Release 构建问题。
 
-## Product Direction
+系统要求：macOS 13 Ventura 或更高版本。
 
-Pastera began from Clipy source history but is now developed as an independent
-product with its own architecture, interaction design, data model, and release
-direction:
+> [!WARNING]
+> 当前公开 DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。首次打开若被 macOS 阻止，请前往“系统设置 > 隐私与安全性”，确认应用来源后选择“仍要打开”。
 
-- Search and storage behavior separated from the compact menu display limit.
-- Snippet folders and item shortcuts for prompt and text reuse.
-- Optional OneDrive folder sync that keeps local data non-destructive.
-- Opt-in automatic paste, with Accessibility permission requested only when the
-  user enables that behavior.
-- Distribution work for DMG packaging, Homebrew Cask metadata, and future
-  notarized releases.
+## 核心能力
 
-See `docs/development/PASTERA_FORK_PLAN.md` for the independent product roadmap
-and historical migration boundary.
+### 历史记录与搜索
 
-## Requirements
+- 保存并检索文本、图片、文件、URL 和富文本剪贴板内容。
+- 按内容类型和文件类别筛选，快速定位需要再次使用的记录。
+- 从紧凑菜单中完成键盘导航、数字选择和粘贴回目标应用。
 
-- macOS 13 Ventura or later
-- Xcode 26.5 for local development
+### 复用与自动化
 
-## Latest Beta: 2.0.1-beta
+- 使用片段文件夹整理提示词、模板和常用文本。
+- 通过本地 JavaScript 脚本转换纯文本剪贴板内容。
+- 为主菜单、历史、片段、脚本和密码箱配置独立快捷键。
 
-- 新增 OneDrive 本地文件夹同步：默认使用
-  `~/Library/CloudStorage/OneDrive*/Pastera/sync`，自动同步默认关闭，也可手动立即同步。
-- 同步协议简化为明文 JSON beta 格式，方便排查 OneDrive 冲突副本；旧加密同步记录会被跳过。
-- 修正同步正确性：按更新时间做 LWW 导入、导入计数只统计实际写入，并在片段导出时补齐父文件夹上下文。
-- 精简设置页：移除失效菜单项、同步口令和自定义同步目录，清空历史警告迁回通用页。
-- 自动粘贴默认关闭；需要自动发送 Command+V 时可在通用设置里开启，并由系统引导授权辅助功能。
-- 增加 DMG 发布脚本、GitHub Release workflow 和启动位置提示，降低从临时目录运行带来的权限问题。
+### OCR 与资源控制
 
-## Install
+- 为图片历史生成可搜索文字，并显示识别延迟和处理状态。
+- 使用持久化任务队列处理后台 OCR，避免一次载入全部图片历史。
+- 对历史清理、文件监听和后台工作采用有界资源策略。
 
-Download the unsigned beta DMG from the
-[2.0.1-beta release](https://github.com/pastera-app/Pastera/releases/tag/v2.0.1-beta),
-or install through the repository-local Homebrew Cask once the release DMG asset
-is uploaded:
+### 隐私与同步
+
+- 使用 KDBX 文件保存密码箱内容，并支持文件夹和条目管理。
+- 按需同步 OneDrive 本地文件夹，由 OneDrive 桌面客户端负责云端传输。
+- 自动粘贴默认关闭，只有用户主动启用时才请求 macOS 辅助功能权限。
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/windows-reference/preferences/01-general-dark.jpg" alt="Pastera 深色模式基础设置页面" width="62%" />
+</p>
+
+<p align="center">
+  <img src="docs/windows-reference/main-panel/03-snippets-empty-dark.jpg" alt="Pastera 深色模式片段空状态" width="28%" />
+  <img src="docs/windows-reference/main-panel/04-vault-locked-dark.jpg" alt="Pastera 深色模式密码箱锁定状态" width="28%" />
+</p>
+
+以上界面使用脱敏合成内容，不包含真实剪贴板数据。
+
+## 安装
+
+1. 从 [GitHub Releases](https://github.com/pastera-app/Pastera/releases) 下载最新 DMG。
+2. 打开 DMG，将 `Pastera.app` 拖入“应用程序”。
+3. 首次启动时按上方安全提示确认应用来源。
+4. 只有需要自动发送 Command+V 时，才在 Pastera 设置中开启自动粘贴并授予辅助功能权限。
+
+仓库保留 `Casks/pastera.rb` 供发布维护。使用本地 Homebrew Cask 前，请先确认其中的版本、SHA-256 和 GitHub DMG 完全一致：
 
 ```bash
 brew install --cask ./Casks/pastera.rb
 ```
 
-Maintainers can refresh the cask after building a DMG:
+## 构建与本地开发
 
-```bash
-./script/update_homebrew_cask.sh \
-  --version "2.0.1-beta" \
-  --dmg ".build/release-artifacts/Pastera-2.0.1-beta-macOS.dmg"
-```
-
-For local unsigned beta preparation before the DMG exists on GitHub, pass
-`--no-check-url`. The resulting cask still requires the matching DMG to be
-uploaded before other users can install it from the release URL.
-
-## Funding
-
-Pastera has applied to Open Source Collective fiscal hosting. If accepted,
-project funds will be used transparently for open-source maintenance needs such
-as Apple Developer Program membership, Developer ID signing, notarization,
-release infrastructure, and testing hardware or services.
-
-See `docs/funding/OPEN_COLLECTIVE.md` for the intended funding policy.
-
-## Build
-
-The Xcode project, scheme, and source directory use lowercase `pastera`.
-The built app product is `Pastera.app`.
+本地开发需要 Xcode 26.5。Xcode 工程、scheme 和源码目录使用小写 `pastera`，构建产物为 `Pastera.app`。
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
@@ -131,43 +101,41 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
   build
 ```
 
-Local builds may use ad-hoc signing through
-`Configurations/CodeSigning.xcconfig`; public releases require Pastera-owned
-Developer ID signing and notarization credentials.
-
-## Local Install
-
-For manual testing, build and replace the local app with:
+构建并替换本机 `/Applications/Pastera.app`：
 
 ```bash
 ./script/install_local.sh
 ```
 
-The script installs to `/Applications/Pastera.app` by default and launches the
-fresh build. Set `PASTERA_INSTALL_DIR="$HOME/Applications"` if `/Applications`
-is not writable.
+本地构建可通过 `Configurations/CodeSigning.xcconfig` 使用 ad-hoc 签名。公开可信分发仍需要 Pastera 自有的 Developer ID 和 Apple 公证凭据。
 
-Codex local development also uses `.codex/hooks.json`: the Stop hook runs
-`script/codex_stop_install_if_changed.sh`, which reinstalls only when
-build-relevant app paths changed since the last local install.
+完整测试命令、Pull Request 检查清单和代码入口见[参与贡献](.github/CONTRIBUTING.md)。
 
-## Historical Attribution
+## 项目状态
 
-Pastera preserves the Git history, copyright notices, and MIT terms of source
-originally derived from [Clipy](https://github.com/Clipy/Clipy). This attribution
-does not imply an active fork relationship or upstream tracking workflow.
+Pastera 由 `pastera-app/Pastera` 公开维护。仓库已经脱离 fork 网络，是不跟踪产品 upstream 的独立产品仓库。
 
-## Community And Governance
+macOS 是当前可执行基线。Windows 客户端采用原生 Windows API 和 WinUI 3，并复用仓库内已经冻结的数据契约与脱敏测试样本。详细方向见[独立产品路线图](docs/development/PASTERA_FORK_PLAN.md)和 [Windows 移植指南](docs/development/WINDOWS_PORTING_GUIDE.md)。
 
-Pastera is maintained in public on GitHub. Contributions are welcome through
-issues and pull requests, with a focus on small, reviewable changes that keep
-clipboard behavior reliable and privacy-conscious.
+## 参与贡献
 
-- Contributing guide: `.github/CONTRIBUTING.md`
-- Code of conduct: `CODE_OF_CONDUCT.md`
-- Governance: `GOVERNANCE.md`
-- Security reporting: `SECURITY.md`
+欢迎提交聚焦、可验证并尊重用户隐私的改进：
 
-## License
+- [参与贡献](.github/CONTRIBUTING.md)
+- [社区行为准则](CODE_OF_CONDUCT.md)
+- [项目治理](GOVERNANCE.md)
+- [验证矩阵](docs/verification/VERIFICATION.md)
 
-MIT. See `LICENSE` for details.
+项目资金仅用于公开、可说明的开源维护需求。详细边界见[资金政策](docs/funding/OPEN_COLLECTIVE.md)。
+
+## 安全与隐私
+
+Pastera 默认在本机处理剪贴板数据，不提供托管的 Pastera 剪贴板上传服务，也不会在没有明确用户同意时收集剪贴板遥测。
+
+- 普通缺陷可以通过 [GitHub Issues](https://github.com/pastera-app/Pastera/issues/new) 提交。
+- 敏感漏洞请按照[安全政策](SECURITY.md)使用私密报告入口。
+- OneDrive 同步协议和数据范围见 [ONEDRIVE_SYNC.md](docs/sync/ONEDRIVE_SYNC.md)。
+
+## 历史归属与许可证
+
+Pastera 保留源自 [Clipy](https://github.com/Clipy/Clipy) 的 Git 历史、版权声明和 MIT 条款，但这不表示当前存在产品上下游关系。详细归属见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。

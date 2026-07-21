@@ -1,34 +1,49 @@
-# Code of Conduct
+# 社区行为准则
 
-Pastera is an open-source project for people building and using macOS clipboard
-tools. We want the project space to stay useful, respectful, and focused.
+## 我们的承诺
 
-## Expected Behavior
+Pastera 是一个公开开发的开源项目。我们希望使用者、贡献者和维护者都能在尊重、务实且重视隐私的环境中讨论问题、提出改进并完成协作。
 
-- Be respectful and direct when discussing bugs, design choices, and tradeoffs.
-- Assume contributors are acting in good faith unless behavior shows otherwise.
-- Keep feedback specific to the code, documentation, issue, or release process.
-- Make room for maintainers and users with different macOS versions, languages,
-  accessibility needs, and technical backgrounds.
-- Disclose conflicts of interest when they affect a contribution or decision.
+无论经验、身份、语言、所在地区、macOS 版本或辅助功能需求如何，每位参与者都应获得公平、专业的对待。
 
-## Unacceptable Behavior
+## 期待的行为
 
-- Harassment, threats, personal attacks, or discriminatory language.
-- Publishing private information without explicit permission.
-- Repeatedly derailing issues or pull requests after maintainers set scope.
-- Pressuring maintainers to bypass macOS security, privacy, signing, or
-  permission requirements.
-- Submitting malicious code, credential leaks, telemetry surprises, or changes
-  that hide user-visible clipboard behavior.
+- 围绕代码、文档、产品行为和用户影响提供具体反馈。
+- 讨论分歧时保持直接和尊重，并说明事实、复现步骤或权衡依据。
+- 默认他人出于善意参与，除非实际行为证明并非如此。
+- 尊重维护者已经明确的需求范围、评审结论和发布边界。
+- 主动保护剪贴板内容、日志、截图、凭据和其他可能识别用户的信息。
+- 在利益关系可能影响贡献或决策时主动披露。
+- 为不同语言、技术背景和辅助功能需求的参与者保留表达空间。
 
-## Reporting
+## 不可接受的行为
 
-If you see a conduct issue, open a GitHub issue if it can be handled publicly.
-For sensitive reports, contact a maintainer privately through GitHub before
-posting details.
+- 骚扰、威胁、人身攻击、歧视性语言或持续贬低他人。
+- 未经明确允许公开他人的私人信息、剪贴板内容、凭据或安全报告细节。
+- 在维护者已经收敛范围后反复干扰 Issue、Pull Request 或讨论。
+- 施压要求绕过 macOS 安全、隐私、签名、公证或权限机制。
+- 提交恶意代码、凭据泄漏、隐藏遥测或刻意掩盖用户可见剪贴板行为的变更。
+- 伪造测试、发布、漏洞、作者或贡献记录。
 
-Maintainers may remove comments, close issues, block users, or decline
-contributions that violate this code of conduct. Enforcement decisions should be
-proportional, documented when appropriate, and focused on keeping the project
-safe and usable.
+## 适用范围
+
+本准则适用于 Pastera 仓库中的 Issue、Pull Request、代码评审、讨论、发布协作和其他由项目维护者代表 Pastera 参与的公开空间。
+
+项目外的私人争议不自动属于本准则范围，但针对项目参与者的持续骚扰、威胁或隐私侵犯可能影响其参与资格。
+
+## 报告与处理
+
+如果问题可以在不公开个人信息的前提下处理，请通过 [GitHub Issues](https://github.com/pastera-app/Pastera/issues/new) 提供最小必要事实，并明确标记为社区行为问题。
+
+如果报告涉及私人信息、持续骚扰或人身威胁，请不要公开细节。可以使用 [GitHub 举报滥用入口](https://support.github.com/contact/report-abuse)处理平台级问题。
+
+安全漏洞不属于普通行为报告。请按照[安全政策](SECURITY.md)使用私密漏洞报告入口。
+
+## 执行原则
+
+维护者可以编辑或删除不当内容、关闭讨论、拒绝贡献、限制互动或屏蔽持续违规者。处理措施应与行为严重程度和重复情况相称，并遵循以下原则：
+
+- 只收集和保留处理问题所需的最少信息。
+- 在适当情况下说明处理理由，但不公开敏感细节。
+- 存在利益冲突的维护者应退出相关判断。
+- 优先恢复安全、可用和聚焦的协作环境，而不是扩大公开冲突。

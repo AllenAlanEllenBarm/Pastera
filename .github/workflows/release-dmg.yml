@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Git tag to publish, for example v2.0.1-beta
+        description: Git tag to publish, for example v3.0.1-beta
         required: true
       version:
-        description: App version used in the DMG name, for example 2.0.1-beta
+        description: Release label used in the DMG name, for example 3.0.1-beta
         required: true
       appcast_branch:
         description: Branch that hosts appcast.xml
@@ -79,11 +79,11 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          [[ -n "$SPARKLE_PRIVATE_KEY" ]] || { echo "SPARKLE_PRIVATE_KEY is required" >&2; exit 2; }
           git fetch origin "${{ inputs.appcast_branch }}"
           git checkout "${{ inputs.appcast_branch }}"
           chmod +x script/update_appcast_for_dmg.sh
           script/update_appcast_for_dmg.sh \
-            --version "${{ inputs.version }}" \
             --tag "${{ inputs.tag }}" \
             --dmg ".build/release-artifacts/Pastera-${{ inputs.version }}-macOS.dmg"
           git config user.name "github-actions[bot]"

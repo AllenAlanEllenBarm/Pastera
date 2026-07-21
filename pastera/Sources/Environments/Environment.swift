@@ -23,6 +23,8 @@ struct Environment {
     let oneDriveProcessStatusService: OneDriveProcessStatusServicing
     let passwordVaultStore: PasswordVaultStore
     let secureClipboard: SecureClipboardWriting
+    let passwordVaultUIController: PasswordVaultUIController
+    let vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing
     let clipboardScriptCoordinator: ClipboardScriptCoordinating
     let menuManager: MenuManager
 
@@ -37,6 +39,10 @@ struct Environment {
          oneDriveProcessStatusService: OneDriveProcessStatusServicing = OneDriveProcessStatusService(),
          passwordVaultStore: PasswordVaultStore = KDBXPasswordVaultStore(),
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
+         passwordVaultUIController: PasswordVaultUIController? = nil,
+         vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing? = nil,
+         vaultAgentApplicationRuntimeFactory: ((PasswordVaultUIController) ->
+             VaultAgentApplicationRuntimeServicing)? = nil,
          clipboardScriptCoordinator: ClipboardScriptCoordinating = ClipboardScriptCoordinator(
              repository: ScriptRepository(),
              executor: ScriptExecutionService()
@@ -48,14 +54,24 @@ struct Environment {
             clipboardScriptCoordinatorProvider: { clipboardScriptCoordinator }
         )
         self.hotKeyService = hotKeyService
-        self.pasteService = pasteService ?? PasteService(
+        let resolvedPasteService = pasteService ?? PasteService(
             clipboardScriptCoordinatorProvider: { clipboardScriptCoordinator }
         )
+        self.pasteService = resolvedPasteService
         self.excludeAppService = excludeAppService
         self.accessibilityService = accessibilityService
         self.oneDriveProcessStatusService = oneDriveProcessStatusService
         self.passwordVaultStore = passwordVaultStore
         self.secureClipboard = secureClipboard
+        let resolvedPasswordVaultUIController = passwordVaultUIController ?? PasswordVaultUIController(
+            store: passwordVaultStore,
+            clipboard: secureClipboard,
+            pasteService: resolvedPasteService
+        )
+        self.passwordVaultUIController = resolvedPasswordVaultUIController
+        self.vaultAgentApplicationRuntime = vaultAgentApplicationRuntime ??
+            vaultAgentApplicationRuntimeFactory?(resolvedPasswordVaultUIController) ??
+            UnavailableVaultAgentApplicationRuntime()
         self.clipboardScriptCoordinator = clipboardScriptCoordinator
         self.menuManager = menuManager
         self.defaults = defaults

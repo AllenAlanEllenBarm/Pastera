@@ -1,6 +1,48 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Automatic Updates" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic Updates" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Automatische Updates" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiornamenti automatici" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "自動アップデート" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动更新" } }
+    } },
+    "Checking for Updates…" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Checking for Updates…" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Suche nach Updates…" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Verifica aggiornamenti…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデートを確認中…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在检查更新…" } }
+    } },
+    "Choose whether and how often Pastera checks for updates." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose whether and how often Pastera checks for updates." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Lege fest, ob und wie oft Pastera nach Updates sucht." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Scegli se e con quale frequenza Pastera verifica gli aggiornamenti." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Pastera がアップデートを確認するかどうかと頻度を選択します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择 Pastera 是否以及多久检查一次更新。" } }
+    } },
+    "Current Version" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Current Version" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Aktuelle Version" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Versione attuale" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在のバージョン" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本" } }
+    } },
+    "Notify you when a new version is available." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Notify you when a new version is available." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Benachrichtigt dich, wenn eine neue Version verfügbar ist." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Ti avvisa quando è disponibile una nuova versione." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "新しいバージョンが利用可能になると通知します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有新版本时通知你。" } }
+    } },
+    "Ready to Check for Updates" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready to Check for Updates" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Bereit zur Update-Suche" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Pronto per verificare gli aggiornamenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデートを確認できます" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可以检查更新" } }
+    } },
+    "Release Notes" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Release Notes" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Versionshinweise" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Note di rilascio" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "リリースノート" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本说明" } }
+    } },
+    "Review an available update before downloading and installing it." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Review an available update before downloading and installing it." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Prüfe ein verfügbares Update vor dem Herunterladen und Installieren." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Controlla un aggiornamento disponibile prima di scaricarlo e installarlo." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "利用可能なアップデートを確認してからダウンロードしてインストールします。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载并安装前先确认可用更新。" } }
+    } },
+    "Review the last check time and release history." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Review the last check time and release history." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Zeigt die letzte Prüfung und den Versionsverlauf." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Consulta l'ultima verifica e la cronologia delle versioni." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "前回の確認日時とリリース履歴を表示します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看上次检查时间和版本历史。" } }
+    } },
+    "Show the installed version and check for updates." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Show the installed version and check for updates." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Zeigt die installierte Version und sucht nach Updates." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Mostra la versione installata e verifica gli aggiornamenti." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "インストール済みバージョンを表示してアップデートを確認します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示已安装版本并检查更新。" } }
+    } },
+    "Software Update" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Software Update" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Softwareupdate" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiornamento software" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ソフトウェアアップデート" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "软件更新" } }
+    } },
+    "Temporarily Unable to Check for Updates" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Temporarily Unable to Check for Updates" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Updates können vorübergehend nicht geprüft werden" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile verificare temporaneamente gli aggiornamenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在アップデートを確認できません" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂时无法检查更新" } }
+    } },
+    "Update History" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Update History" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Updateverlauf" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Cronologia aggiornamenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデート履歴" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更新记录" } }
+    } },
+    "View Release History" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "View Release History" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Versionsverlauf anzeigen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Visualizza cronologia versioni" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "リリース履歴を表示" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看版本历史" } }
+    } },
     "About Pastera" : {
       "localizations" : {
         "en" : {
@@ -535,6 +577,12 @@
     },
     "Cancel" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
@@ -6800,6 +6848,162 @@
       "it" : { "stringUnit" : { "state" : "translated", "value" : "Alcune immagini non sono state riconosciute" } },
       "ja" : { "stringUnit" : { "state" : "translated", "value" : "一部の画像を認識できませんでした" } },
       "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "部分图片无法识别" } }
+    } },
+    "Agent Integrations" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent Integrations" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Agent-Integrationen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Integrazioni agent" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "エージェント連携" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Agent 集成" } }
+    } },
+    "Codex Integration" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Codex Integration" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Codex-Integration" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Integrazione Codex" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Codex 連携" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Codex 集成" } }
+    } },
+    "Install and authorize the password vault tools for Codex." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Install and authorize the password vault tools for Codex." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor-Werkzeuge für Codex installieren und autorisieren." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Installa e autorizza gli strumenti cassaforte per Codex." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Codex 用のパスワード保管庫ツールをインストールして許可します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "安装并授权 Codex 使用密码箱工具。" } }
+    } },
+    "Claude Code Integration" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code Integration" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Claude-Code-Integration" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Integrazione Claude Code" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code 連携" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code 集成" } }
+    } },
+    "Install and authorize the password vault tools for Claude Code." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Install and authorize the password vault tools for Claude Code." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor-Werkzeuge für Claude Code installieren und autorisieren." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Installa e autorizza gli strumenti cassaforte per Claude Code." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code 用のパスワード保管庫ツールをインストールして許可します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "安装并授权 Claude Code 使用密码箱工具。" } }
+    } },
+    "Pastera CLI" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Pastera CLI" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Pastera-CLI" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "CLI Pastera" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Pastera CLI" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Pastera CLI" } }
+    } },
+    "Install and authorize the local password vault command line tool." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Install and authorize the local password vault command line tool." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Lokales Passworttresor-Befehlszeilenwerkzeug installieren und autorisieren." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Installa e autorizza lo strumento locale da riga di comando della cassaforte." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ローカルのパスワード保管庫コマンドラインツールをインストールして許可します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "安装并授权本地密码箱命令行工具。" } }
+    } },
+    "Agent Authorization" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent Authorization" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Agent-Autorisierung" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Autorizzazione agent" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "エージェント認証" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Agent 授权" } }
+    } },
+    "Review the idle and hard expiration boundaries for each client." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Review the idle and hard expiration boundaries for each client." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Leerlauf- und feste Ablaufgrenzen jedes Clients prüfen." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Controlla le scadenze di inattività e assoluta di ogni client." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "各クライアントのアイドル期限と絶対期限を確認します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看每个客户端的闲置过期和硬过期时间。" } }
+    } },
+    "Password Vault Clients" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Password Vault Clients" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor-Clients" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Client cassaforte password" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫クライアント" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱客户端" } }
+    } },
+    "Codex" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Codex" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Codex" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Codex" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Codex" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Codex" } }
+    } },
+    "Claude Code" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } }
+    } },
+    "Recent Agent Activity" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Recent Agent Activity" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Letzte Agent-Aktivität" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Attività agent recente" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "最近のエージェント操作" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近 Agent 活动" } }
+    } },
+    "Claude Tool Approvals" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Tool Approvals" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Claude-Werkzeugfreigaben" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Approvazioni strumenti Claude" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Claude ツール承認" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Claude 工具审批" } }
+    } },
+    "Install" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Install" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Installieren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Installa" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "インストール" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "安装" } }
+    } },
+    "Update" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Update" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Aktualisieren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiorna" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "更新" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更新" } }
+    } },
+    "Authorize" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Authorize" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Autorisieren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Autorizza" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "許可" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "授权" } }
+    } },
+    "Reauthorize" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Reauthorize" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Neu autorisieren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Riautorizza" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "再認証" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新授权" } }
+    } },
+    "Revoke" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Revoke" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Widerrufen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Revoca" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "取り消す" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "撤销" } }
+    } },
+    "Uninstall" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Uninstall" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Deinstallieren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Disinstalla" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アンインストール" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "卸载" } }
+    } },
+    "Copy Config" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Config" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Konfiguration kopieren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Copia config" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "設定をコピー" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制配置" } }
+    } },
+    "Allow Read-only" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow Read-only" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nur Lesen erlauben" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Consenti sola lettura" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "読み取りのみ許可" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "允许只读" } }
+    } },
+    "Allow Sensitive" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow Sensitive" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Vertrauliche erlauben" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Consenti sensibili" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "機密操作を許可" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "允许敏感操作" } }
+    } },
+    "Remove Rules" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove Rules" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Regeln entfernen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Rimuovi regole" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ルールを削除" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除规则" } }
+    } },
+    "Working…" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Working…" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Wird ausgeführt…" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Operazione in corso…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "処理中…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "处理中…" } }
+    } },
+    "Unavailable" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Unavailable" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nicht verfügbar" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Non disponibile" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "利用不可" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不可用" } }
+    } },
+    "Installed" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Installed" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Installiert" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Installato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "インストール済み" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已安装" } }
+    } },
+    "Not Installed" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Installed" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nicht installiert" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Non installato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "未インストール" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未安装" } }
+    } },
+    "Authorized" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Authorized" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Autorisiert" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Autorizzato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "認証済み" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已授权" } }
+    } },
+    "Not Authorized" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Authorized" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nicht autorisiert" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Non autorizzato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "未認証" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未授权" } }
+    } },
+    "Expired" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Expired" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Abgelaufen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Scaduto" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "期限切れ" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已过期" } }
+    } },
+    "Revoked" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Revoked" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Widerrufen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Revocato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "取り消し済み" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已撤销" } }
+    } },
+    "Identity Changed" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Identity Changed" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Identität geändert" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Identità modificata" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ID が変更されました" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "身份已变化" } }
+    } },
+    "Never" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Never" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nie" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Mai" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "なし" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从未" } }
+    } },
+    "No recent agent activity." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "No recent agent activity." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Keine kürzliche Agent-Aktivität." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Nessuna attività agent recente." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "最近のエージェント操作はありません。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无最近的 Agent 活动。" } }
+    } },
+    "Tool approvals are managed by Codex." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Tool approvals are managed by Codex." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Werkzeugfreigaben werden von Codex verwaltet." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Le approvazioni degli strumenti sono gestite da Codex." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ツールの承認は Codex が管理します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "工具审批由 Codex 管理。" } }
+    } },
+    "Automatic apply is unavailable; copying remains available." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic apply is unavailable; copying remains available." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Automatisches Anwenden ist nicht verfügbar; Kopieren bleibt möglich." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "L'applicazione automatica non è disponibile; la copia resta disponibile." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "自動適用は利用できませんが、コピーはできます。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法自动应用，但仍可复制配置。" } }
+    } },
+    "No Pastera-owned approval rules." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "No Pastera-owned approval rules." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Keine von Pastera verwalteten Freigaberegeln." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Nessuna regola di approvazione gestita da Pastera." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Pastera が所有する承認ルールはありません。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有 Pastera 所有的审批规则。" } }
+    } },
+    "%d Pastera-owned approval rules." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "%d Pastera-owned approval rules." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "%d von Pastera verwaltete Freigaberegeln." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "%d regole di approvazione gestite da Pastera." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Pastera 所有の承認ルール: %d 件。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%d 条 Pastera 所有的审批规则。" } }
+    } },
+    "Allow sensitive password actions?" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow sensitive password actions?" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Vertrauliche Passwortaktionen erlauben?" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Consentire azioni sensibili sulle password?" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "機密性の高いパスワード操作を許可しますか？" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "允许敏感密码操作？" } }
+    } },
+    "Claude will be allowed to call these tools without another tool prompt: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude will be allowed to call these tools without another tool prompt: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Claude darf diese Werkzeuge ohne weitere Werkzeugabfrage aufrufen: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Claude potrà chiamare questi strumenti senza un'altra richiesta: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Claude は追加の確認なしで次のツールを呼び出せます: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Claude 可在不再次提示工具审批的情况下调用：%@" } }
+    } },
+    "Allow" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Erlauben" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Consenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "許可" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "允许" } }
+    } },
+    "Host: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Host: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Host: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Host: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ホスト: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Host：%@" } }
+    } },
+    "Idle: %@ · Hard: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Idle: %@ · Hard: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Leerlauf: %@ · Fest: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Inattività: %@ · Assoluta: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アイドル: %@ · 絶対: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "闲置：%@ · 硬过期：%@" } }
+    } },
+    "Last sensitive use: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Last sensitive use: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Letzte vertrauliche Nutzung: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Ultimo uso sensibile: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "最後の機密操作: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近敏感操作：%@" } }
+    } },
+    "Preview Read-only" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview Read-only" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Nur-Lesen prüfen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Anteprima sola lettura" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "読み取り専用を確認" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预览只读权限" } }
+    } },
+    "7 idle days · 30 days total" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "7 idle days · 30 days total" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "7 Leerlauftage · insgesamt 30 Tage" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "7 giorni inattivi · 30 giorni totali" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アイドル 7 日 · 合計 30 日" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "闲置 7 天 · 最长 30 天" } }
+    } },
+    "Unattended automation can expose secrets to client commands." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Unattended automation can expose secrets to client commands." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Unbeaufsichtigte Automatisierung kann Geheimnisse an Client-Befehle weitergeben." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "L'automazione non presidiata può esporre segreti ai comandi del client." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "無人実行ではクライアントのコマンドに機密情報が渡る可能性があります。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无人值守自动化可能向客户端命令暴露密码。" } }
+    } },
+    "PATH: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "PATH: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PATH：%@" } }
+    } },
+    "Unable to refresh: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to refresh: %@" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Aktualisierung nicht möglich: %@" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile aggiornare: %@" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "更新できません: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法刷新：%@" } }
+    } },
+    "Metadata, paste, and controlled injection" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata, paste, and controlled injection" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Metadaten, Einfügen und kontrollierte Eingabe" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Metadati, incolla e inserimento controllato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "メタデータ、ペースト、制御された入力" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据、粘贴和受控注入" } }
+    } },
+    "Metadata, paste, copy, and controlled injection" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata, paste, copy, and controlled injection" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Metadaten, Einfügen, Kopieren und kontrollierte Eingabe" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Metadati, incolla, copia e inserimento controllato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "メタデータ、ペースト、コピー、制御された入力" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据、粘贴、复制和受控注入" } }
     } },
     "items" : {
       "localizations" : {

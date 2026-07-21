@@ -138,6 +138,23 @@ refresh_app_registration() {
     /usr/bin/killall iconservicesd >/dev/null 2>&1 || true
 }
 
+sign_local_app() {
+    local helpers_dir="${DEST_APP}/Contents/Helpers"
+
+    /usr/bin/codesign --force --deep --sign - "${DEST_APP}"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.PasteraCodexMCP \
+        "${helpers_dir}/PasteraCodexMCP"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.PasteraClaudeMCP \
+        "${helpers_dir}/PasteraClaudeMCP"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.pastera \
+        "${helpers_dir}/pastera"
+    /usr/bin/codesign --force --sign - "${DEST_APP}"
+    /usr/bin/codesign --verify --deep --strict --verbose=2 "${DEST_APP}"
+}
+
 verify_launched_app() {
     local expected_executable="${DEST_APP}/Contents/MacOS/${APP_NAME}"
 
@@ -177,7 +194,7 @@ install_app() {
     quit_running_pastera
     rm -rf "${DEST_APP}"
     /usr/bin/ditto "${BUILT_APP}" "${DEST_APP}"
-    /usr/bin/codesign --force --deep --sign - "${DEST_APP}"
+    sign_local_app
     refresh_app_registration
 }
 

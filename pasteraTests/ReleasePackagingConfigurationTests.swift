@@ -53,6 +53,79 @@ struct ReleasePackagingConfigurationTests {
     }
 
     @Test
+    func releaseProjectEmbedsExactlyThreeSignedAgentHelpersAndSkill() throws {
+        let project = try projectText("pastera.xcodeproj/project.pbxproj")
+        let localInstall = try projectText("script/install_local.sh")
+        let releaseDMG = try projectText("script/package_release_dmg.sh")
+        let helperNames = ["PasteraClaudeMCP", "PasteraCodexMCP", "pastera"]
+
+        let appTargetStart = try #require(project.range(
+            of: "FAC43DC51B35D8B100C06102 /* pastera */ = {\n\t\t\tisa = PBXNativeTarget;"
+        ))
+        let appTargetEnd = try #require(project.range(
+            of: "\t\t\tproductType = \"com.apple.product-type.application\";\n\t\t};",
+            range: appTargetStart.lowerBound..<project.endIndex
+        ))
+        let appTarget = String(project[appTargetStart.lowerBound..<appTargetEnd.upperBound])
+
+        #expect(project.contains("/* Embed Agent Helpers */ = {"))
+        #expect(project.contains("dstPath = Contents/Helpers;"))
+        #expect(project.contains("dstSubfolderSpec = 1;"))
+        for name in helperNames {
+            #expect(project.components(separatedBy: "/* \(name) in Embed Agent Helpers */").count - 1 == 2)
+            #expect(project.contains(
+                "/* \(name) in Embed Agent Helpers */ = {isa = PBXBuildFile; " +
+                    "fileRef ="
+            ))
+        }
+        #expect(project.components(
+            separatedBy: "settings = {ATTRIBUTES = (CodeSignOnCopy, ); };"
+        ).count - 1 == 3)
+        #expect(appTarget.contains("/* PasteraCodexMCP */"))
+        #expect(appTarget.contains("/* PasteraClaudeMCP */"))
+        #expect(appTarget.contains("/* PasteraCLI */"))
+        #expect(project.components(separatedBy: "/* pastera-vault in Resources */").count - 1 == 2)
+        #expect(project.components(separatedBy: "path = integrations/pastera-vault;").count - 1 == 1)
+        #expect(project.components(
+            separatedBy: "OTHER_CODE_SIGN_FLAGS = \"--identifier $(PRODUCT_BUNDLE_IDENTIFIER)\";"
+        ).count - 1 == 6)
+        #expect(project.components(
+            separatedBy: "PRODUCT_BUNDLE_IDENTIFIER = \"com.pastera-app.PasteraCodexMCP\";"
+        ).count - 1 == 2)
+        #expect(project.components(
+            separatedBy: "PRODUCT_BUNDLE_IDENTIFIER = \"com.pastera-app.PasteraClaudeMCP\";"
+        ).count - 1 == 2)
+        #expect(project.components(
+            separatedBy: "PRODUCT_BUNDLE_IDENTIFIER = \"com.pastera-app.pastera\";"
+        ).count - 1 == 2)
+        #expect(localInstall.contains("--identifier com.pastera-app.PasteraCodexMCP"))
+        #expect(localInstall.contains("--identifier com.pastera-app.PasteraClaudeMCP"))
+        #expect(localInstall.contains("--identifier com.pastera-app.pastera"))
+        #expect(localInstall.contains("codesign --verify --deep --strict"))
+        #expect(releaseDMG.contains(
+            "OTHER_CODE_SIGN_FLAGS=\"--timestamp --identifier \\$(PRODUCT_BUNDLE_IDENTIFIER)\""
+        ))
+        #expect(!releaseDMG.contains("\n        OTHER_CODE_SIGN_FLAGS=--timestamp\n"))
+        #expect(releaseDMG.contains("--identifier com.pastera-app.PasteraCodexMCP"))
+        #expect(releaseDMG.contains("--identifier com.pastera-app.PasteraClaudeMCP"))
+        #expect(releaseDMG.contains("--identifier com.pastera-app.pastera"))
+        #expect(releaseDMG.contains("sign_ad_hoc_app"))
+    }
+
+    @Test
+    func releaseUsesAnAppScopedDataProtectionKeychainGroup() throws {
+        let signing = try projectText("Configurations/CodeSigning.xcconfig")
+        let entitlements = try projectText("pastera/Pastera.entitlements")
+
+        #expect(signing.contains(
+            "CODE_SIGN_ENTITLEMENTS[config=Release] = pastera/Pastera.entitlements"
+        ))
+        #expect(!signing.contains("CODE_SIGN_ENTITLEMENTS[config=Debug]"))
+        #expect(entitlements.contains("<key>keychain-access-groups</key>"))
+        #expect(entitlements.contains("<string>BBCHAJ584H.com.pastera-app.Pastera</string>"))
+    }
+
+    @Test
     func releasePackagingScriptCreatesSignedNotarizedDmg() throws {
         let script = try projectText("script/package_release_dmg.sh")
 
@@ -63,6 +136,11 @@ struct ReleasePackagingConfigurationTests {
         #expect(script.contains("spctl -a -vv"))
         #expect(script.contains("ln -s /Applications"))
         #expect(script.contains("-target \"${APP_TARGET}\""))
+        #expect(script.contains("CFBundleShortVersionString"))
+        #expect(script.contains("CFBundleVersion"))
+        #expect(script.contains("EXPECTED_MARKETING_VERSION=\"${VERSION%%-*}\""))
+        #expect(script.contains("BUNDLE_SHORT_VERSION"))
+        #expect(script.contains("BUNDLE_BUILD_VERSION"))
     }
 
     @Test
@@ -131,7 +209,7 @@ struct ReleasePackagingConfigurationTests {
 
         #expect(script.contains("DEVELOPER_ID_APPLICATION is required unless --skip-notarization is passed."))
         #expect(script.contains("CODE_SIGNING_ALLOWED=NO"))
-        #expect(script.contains("/usr/bin/codesign --force --deep --sign -"))
+        #expect(script.contains("sign_ad_hoc_app"))
     }
 
     @Test
@@ -147,12 +225,35 @@ struct ReleasePackagingConfigurationTests {
     }
 
     @Test
-    func appcastUpdateScriptSignsDmgForSparkle() throws {
+    func appcastUpdateScriptGeneratesAndVerifiesArtifactDrivenFeed() throws {
         let script = try projectText("script/update_appcast_for_dmg.sh")
+        let verifier = try projectText("script/verify_sparkle_ed_signature.swift")
 
-        #expect(script.contains("sign_update"))
+        #expect(script.contains("generate_appcast"))
+        #expect(script.contains("--ed-key-file -"))
+        #expect(script.contains("--download-url-prefix"))
+        #expect(script.contains("--link"))
+        #expect(script.contains("--versions"))
+        #expect(script.contains("--maximum-versions"))
+        #expect(script.contains("hdiutil attach"))
+        #expect(script.contains("SUPublicEDKey"))
+        #expect(script.contains("verify_sparkle_ed_signature.swift"))
         #expect(script.contains("sparkle:edSignature"))
         #expect(script.contains("application/x-apple-diskimage"))
+        #expect(!script.contains("sign_update"))
+        #expect(!script.contains("perl -0pi"))
+        #expect(verifier.contains("Curve25519.Signing.PublicKey"))
+        #expect(verifier.contains("isValidSignature"))
+    }
+
+    @Test
+    func releaseEntrypointsKeepLabelSeparateFromArtifactVersions() throws {
+        let package = try projectText("script/package_release.sh")
+        let workflow = try projectText(".github/workflows/release-dmg.yml")
+
+        #expect(!package.contains("--version \"${VERSION}\" \\\n        --tag \"${TAG}\""))
+        #expect(workflow.contains("SPARKLE_PRIVATE_KEY is required"))
+        #expect(!workflow.contains("--version \"${{ inputs.version }}\" \\\n            --tag \"${{ inputs.tag }}\""))
     }
 
     @Test

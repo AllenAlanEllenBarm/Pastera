@@ -22,10 +22,10 @@ Real public release:
   DEVELOPMENT_TEAM="TEAMID" \\
   NOTARY_KEYCHAIN_PROFILE="PasteraNotary" \\
   SPARKLE_PRIVATE_KEY="<from secrets>" \\
-  $0 --version "2.0.1-beta" --tag "v2.0.1-beta" --update-appcast
+  $0 --version "3.0.1-beta" --tag "v3.0.1-beta" --update-appcast
 
 Local dry run without notarization:
-  $0 --version "2.0.1-beta" --skip-notarization
+  $0 --version "3.0.1-beta" --skip-notarization
 EOF
 }
 
@@ -107,7 +107,6 @@ fi
 
 if [[ "${UPDATE_APPCAST}" == "1" ]]; then
     "${ROOT_DIR}/script/update_appcast_for_dmg.sh" \
-        --version "${VERSION}" \
         --tag "${TAG}" \
         --dmg "${dmg_path}"
     printf 'Updated appcast: %s\n' "${ROOT_DIR}/appcast.xml"

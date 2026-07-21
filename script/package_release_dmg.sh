@@ -104,6 +104,22 @@ end tell
 EOF
 }
 
+sign_ad_hoc_app() {
+    local helpers_dir="${APP_PATH}/Contents/Helpers"
+
+    /usr/bin/codesign --force --deep --sign - "${APP_PATH}"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.PasteraCodexMCP \
+        "${helpers_dir}/PasteraCodexMCP"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.PasteraClaudeMCP \
+        "${helpers_dir}/PasteraClaudeMCP"
+    /usr/bin/codesign --force --sign - \
+        --identifier com.pastera-app.pastera \
+        "${helpers_dir}/pastera"
+    /usr/bin/codesign --force --sign - "${APP_PATH}"
+}
+
 while (($#)); do
     case "$1" in
         --version)
@@ -137,6 +153,7 @@ done
 if [[ -z "${VERSION}" ]]; then
     VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${ROOT_DIR}/pastera/Supporting Files/Info.plist")"
 fi
+EXPECTED_MARKETING_VERSION="${VERSION%%-*}"
 
 if [[ "${SKIP_NOTARIZATION}" != "1" ]]; then
     if [[ -z "${DEVELOPER_ID_APPLICATION}" ]]; then
@@ -181,7 +198,7 @@ else
         CODE_SIGNING_ALLOWED=YES
         CODE_SIGNING_REQUIRED=YES
         CODE_SIGN_IDENTITY="${DEVELOPER_ID_APPLICATION}"
-        OTHER_CODE_SIGN_FLAGS=--timestamp
+        OTHER_CODE_SIGN_FLAGS="--timestamp --identifier \$(PRODUCT_BUNDLE_IDENTIFIER)"
     )
 fi
 
@@ -198,8 +215,28 @@ if [[ ! -d "${APP_PATH}" ]]; then
     exit 1
 fi
 
+APP_INFO_PLIST="${APP_PATH}/Contents/Info.plist"
+BUNDLE_SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP_INFO_PLIST}")"
+BUNDLE_BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${APP_INFO_PLIST}")"
+
+if [[ ! "${BUNDLE_SHORT_VERSION}" =~ ^[0-9]+([.][0-9]+)*$ ]]; then
+    echo "CFBundleShortVersionString must be dot-separated numeric: ${BUNDLE_SHORT_VERSION}" >&2
+    exit 1
+fi
+if [[ ! "${BUNDLE_BUILD_VERSION}" =~ ^[0-9]+$ ]]; then
+    echo "CFBundleVersion must be a numeric, monotonically increasing build: ${BUNDLE_BUILD_VERSION}" >&2
+    exit 1
+fi
+if [[ "${BUNDLE_SHORT_VERSION}" != "${EXPECTED_MARKETING_VERSION}" ]]; then
+    echo "Release label ${VERSION} does not match bundle marketing version ${BUNDLE_SHORT_VERSION}." >&2
+    exit 1
+fi
+
+printf 'Bundle marketing version: %s\n' "${BUNDLE_SHORT_VERSION}"
+printf 'Bundle build version: %s\n' "${BUNDLE_BUILD_VERSION}"
+
 if [[ "${SKIP_NOTARIZATION}" == "1" ]]; then
-    /usr/bin/codesign --force --deep --sign - "${APP_PATH}"
+    sign_ad_hoc_app
 fi
 
 /usr/bin/codesign --verify --deep --strict --verbose=4 "${APP_PATH}"

@@ -1,7 +1,11 @@
 import AppKit
 import Foundation
+import PasteraAgentProtocol
 import Testing
 @testable import Pastera
+
+// Runtime integration coverage stays beside the real AppKit password-vault action matrix.
+// swiftlint:disable file_length
 
 @MainActor
 @Suite("Password vault menu", .serialized)
@@ -192,6 +196,31 @@ struct PasswordVaultMenuTests {
         #expect(vaultController.state == .unlocked)
     }
 
+    @Test("environment and MenuManager share one password vault controller")
+    func environmentAndMenuShareController() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let controller = PasswordVaultUIController(
+            store: store,
+            clipboard: PasswordVaultClipboardProbe(),
+            pasteService: PasteService()
+        )
+        let menuManager = MenuManager()
+        let environment = Environment(
+            passwordVaultStore: store,
+            passwordVaultUIController: controller,
+            menuManager: menuManager
+        )
+        AppEnvironment.push(environment: environment)
+        defer { AppEnvironment.popLast() }
+
+        #expect(environment.passwordVaultUIController === controller)
+        #expect(menuManager.passwordVaultUIController === controller)
+        #expect(AppEnvironment.current.passwordVaultUIController === controller)
+    }
+
     @Test("an unlocked empty vault exposes folder creation in edit mode")
     func emptyVaultShowsFolderCreation() {
         let controller = makeVaultController(folders: [], entries: [])
@@ -277,6 +306,7 @@ struct PasswordVaultMenuTests {
     }
 
     @Test("the AppKit flow writes and copies a real KDBX password entry")
+    // swiftlint:disable:next function_body_length
     func appKitFlowUsesRealKDBXStore() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -298,24 +328,31 @@ struct PasswordVaultMenuTests {
             pasteboardProvider: { usernamePasteboard },
             scheduleAfter: { _, work in work() }
         )
-        let ui = PasswordVaultUIController(
+        let vaultController = PasswordVaultUIController(
             store: store, clipboard: clipboard, authorizer: AllowPasswordVaultAuthorizer(), pasteService: pasteService
         )
         let controller = MainMenuPanelController(
             historyTitle: "History", historyImage: nil, snippetTitle: "Snippet", snippetImage: nil,
             itemsProvider: { [] }, onOpenHistory: {}, onOpenSnippets: {},
             passwordVaultDataSource: MainMenuPasswordVaultDataSource(
-                state: { ui.state }, checkQuickUnlockAvailability: ui.checkQuickUnlockAvailability,
-                createDatabase: ui.createDatabase, unlock: ui.unlock, unlockWithQuickKey: ui.unlockWithQuickKey,
-                fetchFolders: ui.folders, fetchEntries: ui.entries,
-                copyPassword: ui.copyPassword, loadDraft: ui.loadDraft,
-                createEntry: ui.createEntry, updateEntry: ui.updateEntry, deleteEntry: ui.deleteEntry,
+                state: { vaultController.state },
+                checkQuickUnlockAvailability: vaultController.checkQuickUnlockAvailability,
+                createDatabase: vaultController.createDatabase,
+                unlock: vaultController.unlock,
+                unlockWithQuickKey: vaultController.unlockWithQuickKey,
+                fetchFolders: vaultController.folders,
+                fetchEntries: vaultController.entries,
+                copyPassword: vaultController.copyPassword,
+                loadDraft: vaultController.loadDraft,
+                createEntry: vaultController.createEntry,
+                updateEntry: vaultController.updateEntry,
+                deleteEntry: vaultController.deleteEntry,
                 createFolder: { _ in throw PasswordVaultError.saveFailed },
                 renameFolder: { _, _ in throw PasswordVaultError.saveFailed },
                 deleteFolder: { _ in throw PasswordVaultError.saveFailed },
-                createFolderAsync: ui.createFolder,
-                renameFolderAsync: ui.renameFolder,
-                deleteFolderAsync: ui.deleteFolder
+                createFolderAsync: vaultController.createFolder,
+                renameFolderAsync: vaultController.renameFolder,
+                deleteFolderAsync: vaultController.deleteFolder
             )
         )
         controller.openPasswordVaultFromMainMenu()
@@ -339,14 +376,14 @@ struct PasswordVaultMenuTests {
         let entry = try #require(store.listEntries().first)
         #expect(entry.title == "Mail")
         let usernamePasteResult = await withCheckedContinuation { continuation in
-            ui.pasteUsername(id: entry.id, targetContext: nil) { continuation.resume(returning: $0) }
+            vaultController.pasteUsername(id: entry.id, targetContext: nil) { continuation.resume(returning: $0) }
         }
         try usernamePasteResult.get()
         await waitUntil("username paste command sent") { pasteCommands == 1 }
         #expect(usernamePasteboard.string(forType: .string) == "alice")
 
         let passwordPasteResult = await withCheckedContinuation { continuation in
-            ui.pastePassword(id: entry.id, targetContext: nil) { continuation.resume(returning: $0) }
+            vaultController.pastePassword(id: entry.id, targetContext: nil) { continuation.resume(returning: $0) }
         }
         try passwordPasteResult.get()
         await waitUntil("password paste command sent") { pasteCommands == 2 }
@@ -371,7 +408,7 @@ struct PasswordVaultMenuTests {
         #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 1)
         controller.setPasswordVaultAccessValuesForTesting(password: "ui-flow-password")
         controller.submitPasswordVaultAccessForTesting()
-        await waitUntil("vault unlocked") { ui.state == .unlocked }
+        await waitUntil("vault unlocked") { vaultController.state == .unlocked }
         await waitUntil("folder visible after unlock") { controller.mainMenuVisibleRowTitlesForTesting.contains("Work") }
         #expect(controller.mainMenuVisibleRowTitlesForTesting.contains("Work"))
         #expect(try store.listEntries().map(\.title) == ["Mail Updated"])
@@ -841,6 +878,171 @@ struct PasswordVaultMenuTests {
         _ = controller.close()
     }
 
+    @Test("runtime composes interactive renewal ownership and excludes every Agent action")
+    // swiftlint:disable:next function_body_length
+    func runtimeInteractiveRenewalLifecycle() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        try store.createDatabase(masterPassword: "runtime-renewal", rememberQuickUnlock: false)
+        let folder = try store.createFolder(name: "Work")
+        let originalEntry = try store.create(.init(
+            folderID: folder.id,
+            title: "Original",
+            website: "https://example.test",
+            username: "alice",
+            note: "",
+            password: "secret"
+        ))
+        let pasteService = PasteService(
+            inputPasteCommandEnabledProvider: { false },
+            accessibilityEnabledProvider: { false },
+            pasteCommandSender: {},
+            secureEventInputEnabledProvider: { false },
+            clipboardScriptCoordinatorProvider: { nil },
+            scheduleAfter: { _, work in work() }
+        )
+        let controller = PasswordVaultUIController(
+            store: store,
+            clipboard: PasswordVaultClipboardProbe(),
+            authorizer: AllowPasswordVaultAuthorizer(),
+            pasteService: pasteService,
+            storeQueue: DispatchQueue(label: "PasswordVaultMenuTests.runtime-renewal")
+        )
+        let callbackCount = LockedInt()
+        controller.onInteractiveSensitiveUse = { callbackCount.increment() }
+
+        let dateBox = MenuRuntimeDateBox(Date(timeIntervalSince1970: 2_000_000))
+        let grantStore = MenuRuntimeGrantStore()
+        let policy = try VaultAgentAuthorizationPolicy(
+            store: grantStore,
+            executor: controller.vaultAgentExecutor
+        )
+        for client in VaultAgentClientKind.allCases {
+            try policy.authorize(identity: menuIdentity(client), authenticatedAt: dateBox.value)
+        }
+        let tickets = VaultAgentTicketStore(
+            randomBytes: { Data(repeating: 0x33, count: 32) },
+            commandBuilder: { client, mode, token in
+                VaultAgentRuntime.helperCommand(
+                    applicationURL: URL(fileURLWithPath: "/Applications/Pastera.app"),
+                    client: client,
+                    mode: mode,
+                    token: token
+                )
+            }
+        )
+        var runtime: VaultAgentRuntime? = try VaultAgentRuntime(
+            executor: controller.vaultAgentExecutor,
+            authorizationPolicy: policy,
+            vault: controller,
+            pasteTargetTracker: MenuRuntimeTargetTracker(),
+            ticketStore: tickets,
+            auditLogger: MenuRuntimeAuditLogger(),
+            now: { dateBox.value },
+            cursorKey: Data(repeating: 0x44, count: 32)
+        )
+        #expect(runtime != nil)
+        #expect(controller.sensitiveObserverCountForTesting == 1)
+
+        func assertAllRenewed(after previous: [VaultAgentClientKind: Date]) {
+            for client in VaultAgentClientKind.allCases {
+                let expiry = policy.grantSnapshot(for: client)?.idleExpiresAt
+                #expect(expiry != nil)
+                #expect(expiry.map { $0 > previous[client]! } == true)
+            }
+        }
+
+        func snapshotExpiries() -> [VaultAgentClientKind: Date] {
+            Dictionary(uniqueKeysWithValues: VaultAgentClientKind.allCases.compactMap { client in
+                policy.grantSnapshot(for: client).map { (client, $0.idleExpiresAt) }
+            })
+        }
+
+        var expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { completion in
+            controller.createEntry(.init(
+                folderID: folder.id,
+                title: "Created",
+                website: "https://created.test",
+                username: "bob",
+                note: "",
+                password: "created-secret"
+            ), completion: completion)
+        }
+        assertAllRenewed(after: expiries)
+        #expect(callbackCount.value == 1)
+        let createdEntry = try #require(try store.listEntries().first { $0.title == "Created" })
+
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { completion in
+            controller.updateEntry(id: createdEntry.id, draft: .init(
+                folderID: folder.id,
+                title: "Updated",
+                website: "https://updated.test",
+                username: "bob",
+                note: "",
+                password: "updated-secret"
+            ), completion: completion)
+        }
+        assertAllRenewed(after: expiries)
+        #expect(callbackCount.value == 2)
+
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { controller.copyPassword(id: createdEntry.id, completion: $0) }
+        assertAllRenewed(after: expiries)
+        #expect(callbackCount.value == 3)
+
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { controller.pasteUsername(id: createdEntry.id, targetContext: nil, completion: $0) }
+        assertAllRenewed(after: expiries)
+        #expect(callbackCount.value == 4)
+
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { controller.pastePassword(id: createdEntry.id, targetContext: nil, completion: $0) }
+        assertAllRenewed(after: expiries)
+        #expect(callbackCount.value == 5)
+
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { controller.deleteEntry(id: createdEntry.id, completion: $0) }
+        assertAllRenewed(after: expiries)
+        #expect(callbackCount.value == 6)
+
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { controller.agentCopy(entryID: originalEntry.id, field: .password, completion: $0) }
+        try await awaitVaultAction {
+            controller.agentPaste(
+                entryID: originalEntry.id,
+                field: .username,
+                target: .init(
+                    processIdentifier: 42,
+                    bundleIdentifier: "com.example.target",
+                    application: nil,
+                    focusedElement: nil
+                ),
+                completion: $0
+            )
+        }
+        #expect(snapshotExpiries() == expiries)
+        #expect(callbackCount.value == 6)
+
+        runtime = nil
+        #expect(controller.sensitiveObserverCountForTesting == 0)
+        expiries = snapshotExpiries()
+        dateBox.advance(by: 60)
+        try await awaitVaultAction { controller.copyPassword(id: originalEntry.id, completion: $0) }
+        #expect(snapshotExpiries() == expiries)
+        #expect(callbackCount.value == 7)
+    }
+
     private func keyEvent(
         keyCode: UInt16,
         characters: String,
@@ -857,6 +1059,28 @@ struct PasswordVaultMenuTests {
             charactersIgnoringModifiers: characters,
             isARepeat: false,
             keyCode: keyCode
+        )
+    }
+
+    private func awaitVaultAction(
+        _ operation: (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    ) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            operation { continuation.resume(with: $0) }
+        }
+    }
+
+    private func menuIdentity(_ client: VaultAgentClientKind) -> VaultAgentPeerIdentity {
+        VaultAgentPeerIdentity(
+            client: client,
+            helperRequirement: "identifier com.pastera.helper",
+            helperCDHash: Data([1]),
+            helperIsAdHoc: false,
+            helperPath: "/Applications/Pastera.app/Contents/Helpers/helper",
+            hostRequirement: client == .cli ? nil : "identifier com.example.host",
+            hostCDHash: client == .cli ? nil : Data([2]),
+            hostIsAdHoc: client == .cli ? nil : false,
+            hostPath: client == .cli ? nil : "/Applications/Host.app/Contents/MacOS/Host"
         )
     }
 
@@ -964,5 +1188,53 @@ private final class AllowPasswordVaultAuthorizer: PasswordVaultAuthorizing {
 
 private final class PasswordVaultClipboardProbe: SecureClipboardWriting {
     var value: String?
+
     func copySecret(_ secret: String, clearAfter: Duration) { value = secret }
+}
+
+private final class LockedInt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
+}
+
+private final class MenuRuntimeDateBox: @unchecked Sendable {
+    var value: Date
+
+    init(_ value: Date) { self.value = value }
+    func advance(by interval: TimeInterval) { value = value.addingTimeInterval(interval) }
+}
+
+private final class MenuRuntimeGrantStore: VaultAgentGrantStoring {
+    private var grants: [VaultAgentClientKind: VaultAgentGrant] = [:]
+
+    func load() -> [VaultAgentClientKind: VaultAgentGrant] { grants }
+    func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) { self.grants = grants }
+}
+
+private final class MenuRuntimeTargetTracker: VaultAgentPasteTargetTracking {
+    func resolve() throws -> PasteTargetContext { throw VaultAgentPasteTargetError.unavailable }
+}
+
+private final class MenuRuntimeAuditLogger: VaultAgentAuditLogging {
+    // swiftlint:disable:next function_parameter_count
+    func record(
+        client _: VaultAgentClientKind,
+        action _: VaultAgentAuditAction,
+        entryID _: UUID?,
+        result _: VaultAgentErrorCode?,
+        latencyBucket _: VaultAgentLatencyBucket,
+        at _: Date
+    ) {}
 }

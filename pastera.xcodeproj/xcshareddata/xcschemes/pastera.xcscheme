@@ -22,6 +22,20 @@
          </BuildActionEntry>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A61000000000000000000006"
+               BuildableName = "pasteraAgentTests.xctest"
+               BlueprintName = "pasteraAgentTests"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "NO"
             buildForArchiving = "NO"
@@ -31,6 +45,62 @@
                BlueprintIdentifier = "FAC43DD71B35D8B100C06102"
                BuildableName = "pasteraTests.xctest"
                BlueprintName = "pasteraTests"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A6700000000000000000002C"
+               BuildableName = "PasteraCodexMCP"
+               BlueprintName = "PasteraCodexMCP"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A6700000000000000000002D"
+               BuildableName = "PasteraClaudeMCP"
+               BlueprintName = "PasteraClaudeMCP"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A68000000000000000000016"
+               BuildableName = "pastera"
+               BlueprintName = "PasteraCLI"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A68000000000000000000017"
+               BuildableName = "PasteraSecretConsumerFixture"
+               BlueprintName = "PasteraSecretConsumerFixture"
                ReferencedContainer = "container:pastera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -51,6 +121,16 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A61000000000000000000006"
+               BuildableName = "pasteraAgentTests.xctest"
+               BlueprintName = "pasteraAgentTests"
+               ReferencedContainer = "container:pastera.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
          <TestableReference
             skipped = "NO">
             <BuildableReference
