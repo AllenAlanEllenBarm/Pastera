@@ -57,6 +57,9 @@ final class CPYScriptsPreferenceViewController: PasteraPreferencePageViewControl
             apiKeyStore: promptAPIKeyStore,
             optimizationService: promptOptimizationService
         )
+        promptOptimizationSection.onContentSizeChange = { [weak self] in
+            self?.invalidateContentSize()
+        }
         let scriptsCard = makeScriptsCard()
         let shortcutCard = makeShortcutCard()
         self.promptOptimizationSection = promptOptimizationSection

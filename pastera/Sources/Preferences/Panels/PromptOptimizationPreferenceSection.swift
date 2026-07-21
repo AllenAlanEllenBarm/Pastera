@@ -31,6 +31,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     private var connectionTask: Task<Void, Never>?
     private var progressWorkItem: DispatchWorkItem?
     private var isTestingConnection = false
+    var onContentSizeChange: (() -> Void)?
 
     init(
         settingsStore: any PromptOptimizationSettingsStoring,
@@ -463,6 +464,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
                 "Free. Uses Apple on-device intelligence when available, with local formatting fallback.",
                 "免费；可用时使用 Apple 设备端智能，否则自动使用本地整理。"
             )
+        onContentSizeChange?()
     }
 
     private func refreshCredentialStatus() {

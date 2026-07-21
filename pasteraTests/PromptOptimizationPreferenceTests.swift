@@ -110,6 +110,27 @@ struct PromptOptimizationPreferenceTests {
         #expect(page.promptOptimizationSectionForTesting != nil)
     }
 
+    @Test
+    func scriptsPaneRelayoutsAfterRevealingRemoteProviderFields() throws {
+        let fixture = makeFixture()
+        let page = CPYScriptsPreferenceViewController(
+            repository: PreferenceScriptRepository(),
+            executor: ScriptExecutionService(),
+            hotKeyService: HotKeyService(),
+            promptSettingsStore: fixture.settingsStore,
+            promptAPIKeyStore: fixture.apiKeyStore,
+            promptOptimizationService: fixture.service
+        )
+        _ = page.view
+        let freeHeight = page.view.frame.height
+
+        let section = try #require(page.promptOptimizationSectionForTesting)
+        section.selectProviderForTesting(.openAICompatible)
+
+        #expect(page.view.frame.height > freeHeight)
+        #expect(page.view.frame.height >= page.view.fittingSize.height - 1)
+    }
+
     private func makeFixture(
         hasAPIKey: Bool = false,
         service: PreferencePromptService = PreferencePromptService()

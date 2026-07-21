@@ -137,6 +137,7 @@ V1 采用一次重写调用，不做多候选、评分、自动评测或循环�
 | AC-07 | 首次远端发送显示来源确认，失败不改原文 | 服务确认与编辑器确认 | 确认存储与错误路径测试 | 云端首次、取消、再次运行验证 |
 | AC-08 | 设置 UI 紧凑、原生、浅色深色可读、键盘和 VoiceOver 标签完整 | 偏好设置区块与设计令牌 | 偏好布局和可访问性测试 | 浅色、深色、键盘导航截图 |
 | AC-09 | 无回归并安装最新本地构建 | 工程与测试文件 | 聚焦测试、完整清理测试、Release 构建 | `/Applications/Pastera.app` 进程和功能回读 |
+| AC-10 | 在已打开的脚本设置页从免费模式切换到自备服务时，远端字段立即展开且页面滚动高度同步增长 | `PromptOptimizationPreferenceSection.swift`、`CPYScriptsPreferenceViewController.swift` | 页面真实布局高度回归测试 | 已安装应用切换处理方式并检查服务预设、基础地址、模型、API Key 和操作按钮 |
 
 ## 数据流
 
@@ -801,6 +802,101 @@ pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
 
 在本计划中记录实际文件、测试数量、构建结果、截图、偏差、残余风险和已安装进程证据。然后只提交范围内实现和交付记录更新。
 
+## 任务 8：修复自备服务表单在运行时切换后的折叠
+
+**文件：**
+
+- 修改：`pastera/Sources/Preferences/Panels/PromptOptimizationPreferenceSection.swift`
+- 修改：`pastera/Sources/Preferences/Panels/CPYScriptsPreferenceViewController.swift`
+- 修改：`pasteraTests/PromptOptimizationPreferenceTests.swift`
+- 实现完成后修改：本计划的交付记录
+
+**接口：**
+
+- `PromptOptimizationPreferenceSection` 在远端字段显隐变化后发出一次内容尺寸变化回调，不保存设置、不触发网络请求。
+- `CPYScriptsPreferenceViewController` 复用 `PasteraPreferencePageViewController.invalidateContentSize()`，重新测量文档视图并通知偏好设置窗口更新滚动区域。
+- 保留免费模式默认值、远端字段内容、Keychain 行为和既有设置页结构。
+
+- [x] **步骤 1：添加预期失败的真实页面布局测试**
+
+```swift
+@Test
+func scriptsPaneRelayoutsAfterRevealingRemoteProviderFields() throws {
+    let fixture = makeFixture()
+    let page = CPYScriptsPreferenceViewController(
+        repository: PreferenceScriptRepository(),
+        executor: ScriptExecutionService(),
+        hotKeyService: HotKeyService(),
+        promptSettingsStore: fixture.settingsStore,
+        promptAPIKeyStore: fixture.apiKeyStore,
+        promptOptimizationService: fixture.service
+    )
+    _ = page.view
+    let freeHeight = page.view.frame.height
+
+    let section = try #require(page.promptOptimizationSectionForTesting)
+    section.selectProviderForTesting(.openAICompatible)
+
+    #expect(page.view.frame.height > freeHeight)
+    #expect(page.view.frame.height >= page.view.fittingSize.height - 1)
+}
+```
+
+- [x] **步骤 2：运行聚焦测试并确认红灯**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation \
+  -only-testing:pasteraTests/PromptOptimizationPreferenceTests test
+```
+
+预期：`scriptsPaneRelayoutsAfterRevealingRemoteProviderFields` 失败，页面 `frame.height` 仍停留在免费模式高度；这与已安装应用中标签和文本框被压成细线的现象一致。
+
+- [x] **步骤 3：实现最小内容尺寸失效通知**
+
+在 `PromptOptimizationPreferenceSection` 增加无参数回调，并在 `refreshProviderVisibility()` 完成字段显隐和说明文案更新后调用：
+
+```swift
+var onContentSizeChange: (() -> Void)?
+
+private func refreshProviderVisibility() {
+    let usesRemote = selectedProvider == .openAICompatible
+    remoteStack.isHidden = !usesRemote
+    testButton.isHidden = !usesRemote
+    availabilityLabel.stringValue = usesRemote ? remoteDescription : freeDescription
+    onContentSizeChange?()
+}
+```
+
+在 `CPYScriptsPreferenceViewController.loadView()` 中把回调接到既有页面测量入口：
+
+```swift
+promptOptimizationSection.onContentSizeChange = { [weak self] in
+    self?.invalidateContentSize()
+}
+```
+
+- [x] **步骤 4：运行聚焦测试并确认绿灯**
+
+重复步骤 2 的命令。预期：`PromptOptimizationPreferenceTests` 全部通过，新增测试证明页面实际 frame 与展开后的 fitting size 对齐。
+
+- [x] **步骤 5：运行回归、重新安装并做真实 UI 回读**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation \
+  -parallel-testing-enabled NO clean test
+./script/install_local.sh --verify
+```
+
+安装后打开“设置 → 脚本”，从“免费自动”切换到“OpenAI 兼容 — 自备服务”，确认服务预设、基础地址、模型、API Key、不安全 HTTP 开关、保存设置和测试连接均完整可见；切回免费模式后页面恢复紧凑高度，且没有保存草稿设置或发起网络请求。
+
 ## 风险、回滚与观察
 
 ### 风险
@@ -833,7 +929,7 @@ pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
 - 计划状态：`已实施并验证；已合并 develop，随本次收尾提交推送`
 - 证据档位：`standard`
 - 需求 ID：`未请求`
-- 任务 ID：`未请求；Superpowers 任务 1-7 组成一个业务闭环`
+- 任务 ID：`未请求；Superpowers 任务 1-8 组成一个业务闭环`
 - 禅道同步状态：`未请求`
 - 禅道回读：`不适用`
 - 最后更新：`2026-07-21`
@@ -846,6 +942,10 @@ pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
 - 验证：8 个聚焦套件共 72 个测试通过。功能分支使用 `-parallel-testing-enabled NO clean test` 完成 950 个测试、91 个套件；合并后的 `develop` 使用同一串行口径完成 969 个测试、93 个套件，两次均输出 `** TEST SUCCEEDED **`。并发全量测试曾触发既有 1 秒等待和脚本/数据库资源争抢超时，对应 Vault broker 套件在功能分支和未合并主干均复跑 56/56 通过，因此最终以无跨套件资源争抢的串行全量结果为准。`jq empty`、`plutil -lint project.pbxproj`、`git diff --check` 和 SwiftLint 构建插件均通过。
 - 发布与安装：Release Archive 首次因本机磁盘只剩 116 MB，在第三方 Swift 宏链接阶段报告 `errno=28`；清理本轮约 8 GB 可重建的临时日志和 Pastera DerivedData 后重试，输出 `** ARCHIVE SUCCEEDED **`。合并后的 `./script/install_local.sh --verify` 输出 `** BUILD SUCCEEDED **`，完成 ad-hoc 签名并确认 Pastera 正从 `/Applications/Pastera.app/Contents/MacOS/Pastera` 运行。
 - 视觉证据：使用实际 `PromptOptimizationPreferenceSection` 渲染并检查免费模式 `460×239` 和远端模式 `460×536`，确认原生语义色、单层卡片、无横向裁切，且远端字段和保存/测试动作可见。真实应用已安装，但历史行悬停、深色外观、VoiceOver 播报、OCR 等待态和真实首发确认仍未完成全矩阵截图验收。
+- 真实应用补验与修复：在 `/Applications/Pastera.app` 中实际执行历史行魔法棒、编辑器免费优化、`Cmd+Z` 撤销、保存和重新打开持久化；默认免费本地整理将 55 字符含尾随空格和连续空行的合成文本整理为 48 字符，未点击前原文保持不变。随后在“设置 → 脚本”运行时切换到“OpenAI 兼容 — 自备服务”时发现远端表单被压缩。根因为区块切换显隐后只更新了自身 `fittingSize`，父页面仍保持免费模式的 `622` 点高度；新增页面布局测试先以 `622 < 927` 失败，再通过内容尺寸变化回调复用 `invalidateContentSize()` 修复，聚焦套件 9/9 通过。
+- 修复后回归与安装：串行 `clean test` 输出 970 个测试、93 个套件全部通过并以 `** TEST SUCCEEDED **` 结束；`./script/install_local.sh --verify` 输出 `** BUILD SUCCEEDED **`，完成签名校验。最终重启后进程 PID `73284` 正从 `/Applications/Pastera.app/Contents/MacOS/Pastera` 运行。Xcode 在写入本次全量测试结果包摘要时给出既有 `writerNotOpen` 警告，因此测试数量以完整逐套件日志和最终通过行回读，不以损坏的摘要计数。
+- 真实 UI 截图：修复后的自备服务模式完整显示服务预设、基础地址、模型、API Key、HTTP 开关、保存设置和测试连接，滚动到底部后转换脚本与全局快捷键区域仍完整；切回“免费自动”后远端字段收起且页面恢复紧凑。证据为 `/Users/feeyo/.codex/visualizations/2026/07/21/019f8208-cf47-77d0-9ec1-5e20f97aa61c/pastera-prompt-remote-expanded.jpeg`、`pastera-prompt-remote-scrolled.jpeg` 和 `pastera-prompt-free-restored.jpeg`。先前只渲染独立区块的视觉检查没有覆盖父页面动态失效，这是本次补充真实整页切换和页面高度回归测试的原因。
+- 数据与网络边界：本轮未填写、保存或读取真实 API Key，未点击连接测试，也未向付费或私有模型发起请求。只删除了本轮创建、以 `Pastera 功能验收 20260721` 开头的 2 条合成历史并回读剩余 0；测试便笺经系统确认框删除，用户原有“目标功能…”便笺保持不变。
 - 剩余风险：Apple 模型质量、可用性和降级仍需在符合条件的真实硬件上验证；至少一个真实 OpenAI 兼容或私有端点、Keychain 重启持久化、401/429/超时真机状态以及完整 UI/VoiceOver 手工矩阵仍待验证。
 - 后续动作：本次提交推送后，按需要在真实 Apple Intelligence 设备和一个用户自配兼容端点上补充手工矩阵；不阻塞当前默认免费模式、自动化回归和本地安装交付。
 - 禅道收尾：未请求。
