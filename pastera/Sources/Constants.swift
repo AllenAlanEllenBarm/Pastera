@@ -95,6 +95,7 @@ struct Constants {
         static let syncFileTypes = "kCPYSyncFileTypes"
         static let syncPollInterval = "kCPYSyncPollInterval"
         static let passwordVaultAutoLockInterval = "kPasteraPasswordVaultAutoLockInterval"
+        static let passwordVaultQuickUnlockEnabled = "kPasteraPasswordVaultQuickUnlockEnabled"
         static let passwordVaultQuickActionsCoachmarkShown = "kPasteraPasswordVaultQuickActionsCoachmarkShown"
         static let thumbnailCompactionVersion = "kCPYThumbnailCompactionVersion"
     }

@@ -65,10 +65,13 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
     private let authorizer: PasswordVaultAuthorizing
     private let pasteService: PasteService
     private let storeQueue: DispatchQueue
+    private let defaults: UserDefaults
     private let snapshotLock = NSLock()
+    private let stateChangeObserverLock = NSLock()
     private let interactiveSensitiveUseLock = NSLock()
     private var snapshot: PasswordVaultViewState
     private var interactiveSensitiveUseObservers = [UUID: () -> Void]()
+    private var stateChangeObservers = [UUID: () -> Void]()
     let vaultAgentExecutor: VaultAgentSerialExecutor
     var onChange: (() -> Void)?
     var onInteractiveSensitiveUse: (() -> Void)?
@@ -78,6 +81,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         clipboard: SecureClipboardWriting = SecureClipboardService(),
         authorizer: PasswordVaultAuthorizing = SystemPasswordVaultAuthorizer(),
         pasteService: PasteService = PasteService(),
+        defaults: UserDefaults = .standard,
         storeQueue: DispatchQueue = DispatchQueue(
             label: "com.pastera.password-vault.store",
             qos: .userInitiated
@@ -87,6 +91,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         self.clipboard = clipboard
         self.authorizer = authorizer
         self.pasteService = pasteService
+        self.defaults = defaults
         self.storeQueue = storeQueue
         vaultAgentExecutor = VaultAgentSerialExecutor(queue: storeQueue)
         snapshot = PasswordVaultViewState(state: .locked)
@@ -117,12 +122,87 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         }
     }
 
+    func loadSecuritySettings(completion: @escaping (PasswordVaultSecuritySettingsState) -> Void) {
+        vaultAgentExecutor.async { [weak self] in
+            guard let self else { return }
+            let snapshot = self.currentSnapshot
+            let state = PasswordVaultSecuritySettingsState(
+                vaultState: snapshot.state,
+                isBusy: snapshot.isBusy,
+                autoLockInterval: VaultSessionController.resolvedTimeout(defaults: self.defaults),
+                quickUnlockEnabled: self.quickUnlockIntent,
+                quickUnlockAvailable: self.store.canQuickUnlock
+            )
+            DispatchQueue.main.async { completion(state) }
+        }
+    }
+
+    func setAutoLockInterval(
+        _ interval: TimeInterval,
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    ) {
+        perform(completion: completion) {
+            guard VaultSessionController.allowedTimeouts.contains(interval) else {
+                throw PasswordVaultError.invalidAutoLockInterval
+            }
+            self.defaults.set(interval, forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
+            self.store.refreshAutoLockSchedule()
+        }
+    }
+
+    func setQuickUnlockEnabled(
+        _ enabled: Bool,
+        completion: @escaping (Result<Void, PasswordVaultError>) -> Void
+    ) {
+        perform(completion: completion) {
+            if enabled {
+                try self.store.enableQuickUnlock()
+            } else {
+                try self.store.disableQuickUnlock()
+            }
+            self.defaults.set(enabled, forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
+        }
+    }
+
+    func changeMasterPassword(
+        currentPassword: String,
+        newPassword: String,
+        completion: @escaping (Result<PasswordVaultMasterPasswordChangeResult, PasswordVaultError>) -> Void
+    ) {
+        perform(completion: completion) {
+            let result = try self.store.changeMasterPassword(
+                currentPassword: currentPassword,
+                newPassword: newPassword,
+                keepQuickUnlockEnabled: self.quickUnlockIntent
+            )
+            if result.warnings.contains(.quickUnlockDisabled) {
+                self.defaults.set(false, forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
+            }
+            return result
+        }
+    }
+
+    @discardableResult
+    func addStateChangeObserver(_ observer: @escaping () -> Void) -> UUID {
+        let identifier = UUID()
+        stateChangeObserverLock.lock()
+        stateChangeObservers[identifier] = observer
+        stateChangeObserverLock.unlock()
+        return identifier
+    }
+
+    func removeStateChangeObserver(_ identifier: UUID) {
+        stateChangeObserverLock.lock()
+        stateChangeObservers.removeValue(forKey: identifier)
+        stateChangeObserverLock.unlock()
+    }
+
     func createDatabase(
         masterPassword: String, // swiftlint:disable:this inclusive_language
         completion: @escaping (Result<Void, PasswordVaultError>) -> Void
     ) {
         performLifecycle(completion: completion) {
-            try self.store.createDatabase(masterPassword: masterPassword, rememberQuickUnlock: true)
+            try self.store.createDatabase(masterPassword: masterPassword, rememberQuickUnlock: self.quickUnlockIntent)
         }
     }
 
@@ -131,7 +211,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         completion: @escaping (Result<Void, PasswordVaultError>) -> Void
     ) {
         performLifecycle(completion: completion) {
-            try self.store.unlock(masterPassword: masterPassword, rememberQuickUnlock: true)
+            try self.store.unlock(masterPassword: masterPassword, rememberQuickUnlock: self.quickUnlockIntent)
         }
     }
 
@@ -442,7 +522,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
             }
             DispatchQueue.main.async { [weak self] in
                 if refreshSnapshot {
-                    self?.onChange?()
+                    self?.notifyStateChange()
                 }
                 completion(result)
             }
@@ -464,7 +544,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
             isBusy: true,
             error: nil
         ))
-        DispatchQueue.main.async { [weak self] in self?.onChange?() }
+        DispatchQueue.main.async { [weak self] in self?.notifyStateChange() }
     }
 
     private func refreshSnapshotFromStore(error: PasswordVaultError? = nil) {
@@ -476,7 +556,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
 
     private func storeStateDidChange() {
         refreshSnapshotFromStore()
-        DispatchQueue.main.async { [weak self] in self?.onChange?() }
+        DispatchQueue.main.async { [weak self] in self?.notifyStateChange() }
     }
 
     private func setSnapshot(_ value: PasswordVaultViewState) {
@@ -492,7 +572,24 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         let error: PasswordVaultError?
         if case let .failure(value) = result { error = value } else { error = nil }
         refreshSnapshotFromStore(error: error)
-        DispatchQueue.main.async { completion(result) }
+        DispatchQueue.main.async { [weak self] in
+            self?.notifyStateChange()
+            completion(result)
+        }
+    }
+
+    private var quickUnlockIntent: Bool {
+        let key = Constants.UserDefaults.passwordVaultQuickUnlockEnabled
+        guard defaults.object(forKey: key) != nil else { return true }
+        return defaults.bool(forKey: key)
+    }
+
+    private func notifyStateChange() {
+        onChange?()
+        stateChangeObserverLock.lock()
+        let observers = Array(stateChangeObservers.values)
+        stateChangeObserverLock.unlock()
+        observers.forEach { $0() }
     }
 }
 

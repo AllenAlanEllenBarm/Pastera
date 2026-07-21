@@ -39,13 +39,14 @@ final class VaultFileCoordinator {
 
     func conflictFiles(alongside url: URL) throws -> [URL] {
         let directory = url.deletingLastPathComponent()
+        let vaultPath = url.standardizedFileURL.path
         guard fileManager.fileExists(atPath: directory.path) else { return [] }
         return try fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ).filter {
-            $0 != url && $0.pathExtension.lowercased() == "kdbx"
+            $0.standardizedFileURL.path != vaultPath && $0.pathExtension.lowercased() == "kdbx"
         }
     }
 
@@ -67,8 +68,10 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     private let coordinator: VaultFileCoordinator
     private let unlockKeyStore: VaultUnlockKeyStoring
     private let automationUnlockKeyStore: VaultAutomationUnlockKeyStoring
+    private let rekeyTransaction: VaultArtifactRekeyTransaction
     private let merger = KDBXVaultMerger()
     private let now: () -> Date
+    private let autoLockTimeoutProvider: () -> TimeInterval
     private var content: KDBXContent?
     private var unlockData: UnlockData?
     private var lastRevision: Data?
@@ -80,6 +83,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     var canQuickUnlock: Bool { unlockKeyStore.containsKey }
     var canAutomationUnlock: Bool { automationUnlockKeyStore.containsKey }
     private lazy var sessionController = VaultSessionController(
+        timeoutProvider: autoLockTimeoutProvider,
         notificationCenter: sessionNotificationCenter,
         lockRequestAction: { [weak self] request in self?.enqueueSessionLock(request) }
     )
@@ -91,14 +95,20 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         fileManager: FileManager = .default,
         unlockKeyStore: VaultUnlockKeyStoring = VaultUnlockKeyStore(),
         automationUnlockKeyStore: VaultAutomationUnlockKeyStoring = VaultAutomationUnlockKeyStore(),
+        rekeyTransaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction(),
         sessionNotificationCenter: NotificationCenter? = nil,
+        autoLockTimeoutProvider: @escaping () -> TimeInterval = {
+            VaultSessionController.resolvedTimeout(defaults: .standard)
+        },
         now: @escaping () -> Date = Date.init
     ) {
         self.syncRootProvider = syncRootProvider
         coordinator = VaultFileCoordinator(fileManager: fileManager)
         self.unlockKeyStore = unlockKeyStore
         self.automationUnlockKeyStore = automationUnlockKeyStore
+        self.rekeyTransaction = rekeyTransaction
         self.sessionNotificationCenter = sessionNotificationCenter
+        self.autoLockTimeoutProvider = autoLockTimeoutProvider
         self.now = now
         if let root = syncRootProvider(), fileManager.fileExists(atPath: VaultFileCoordinator.vaultURL(for: root).path) {
             state = .locked
@@ -333,13 +343,6 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         try save(content)
     }
 
-    private func vaultURL() throws -> URL {
-        guard let root = syncRootProvider(), FileManager.default.fileExists(atPath: root.path) else {
-            throw PasswordVaultError.cloudUnavailable
-        }
-        return VaultFileCoordinator.vaultURL(for: root)
-    }
-
     private func requiredContent() throws -> KDBXContent {
         sessionController.touch()
         guard let content else {
@@ -427,11 +430,6 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         return data
     }
 
-    private func remember(_ unlock: UnlockData) throws {
-        let data = unlock.keyDataBytes.withUnsafeBytes { Data($0) }
-        try unlockKeyStore.save(data)
-    }
-
     private func normalized(_ draft: PasswordVaultDraft) throws -> PasswordVaultDraft {
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { throw PasswordVaultError.invalidTitle }
@@ -491,6 +489,195 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
 
     private func value(_ key: String, in entry: KDBX.Entry) -> String? {
         entry.strings.first(where: { $0.key == key })?.value.revealedString
+    }
+}
+
+extension KDBXPasswordVaultStore {
+    private func vaultURL() throws -> URL {
+        guard let root = syncRootProvider(), FileManager.default.fileExists(atPath: root.path) else {
+            throw PasswordVaultError.cloudUnavailable
+        }
+        return VaultFileCoordinator.vaultURL(for: root)
+    }
+
+    func enableQuickUnlock() throws {
+        guard state == .unlocked || state.isReadableWarning, content != nil, let unlockData else {
+            throw PasswordVaultError.vaultLocked
+        }
+        try remember(unlockData)
+    }
+
+    func disableQuickUnlock() throws {
+        try unlockKeyStore.delete()
+    }
+
+    func refreshAutoLockSchedule() {
+        guard state == .unlocked || state.isReadableWarning, content != nil else { return }
+        sessionController.touch()
+    }
+
+    private func remember(_ unlock: UnlockData) throws {
+        let data = unlock.keyDataBytes.withUnsafeBytes { Data($0) }
+        try unlockKeyStore.save(data)
+    }
+
+    func changeMasterPassword(
+        currentPassword: String,
+        newPassword: String,
+        keepQuickUnlockEnabled: Bool
+    ) throws -> PasswordVaultMasterPasswordChangeResult {
+        guard !currentPassword.isEmpty, !newPassword.isEmpty else {
+            throw PasswordVaultError.invalidPassword
+        }
+        let originalState = state
+        let originalContent = content
+        let originalUnlockData = unlockData
+        let originalRevision = lastRevision
+        let mainURL = try vaultURL()
+        let oldUnlock = UnlockData(masterPassword: currentPassword)
+        let diskData = try coordinator.read(from: mainURL)
+        let diskContent: KDBXContent
+        do {
+            diskContent = try KDBXReader.parse(diskData, unlockData: oldUnlock)
+        } catch KDBXReader.Error.wrongCredentials {
+            throw PasswordVaultError.wrongMasterPassword
+        } catch {
+            throw PasswordVaultError.corruptedData
+        }
+
+        do {
+            var merged = originalContent.map { merger.merge(local: $0, remote: diskContent) }
+                ?? KDBXVaultMergeResult(content: diskContent, hasConflictCopies: false)
+            let immediateConflicts = try coordinator.conflictFiles(alongside: mainURL)
+            var parsedContents = [URL: KDBXContent]()
+            for url in try rekeyTransaction.managedArtifactURLs(alongside: mainURL) where url != mainURL {
+                let artifact = try KDBXReader.parse(try coordinator.read(from: url), unlockData: oldUnlock)
+                parsedContents[url] = artifact
+                guard immediateConflicts.contains(url),
+                      artifact.database.meta.databaseName == "Pastera"
+                        || artifact.database.root.group.name == "Pastera" else { continue }
+                let result = merger.merge(local: merged.content, remote: artifact)
+                merged = KDBXVaultMergeResult(
+                    content: result.content,
+                    hasConflictCopies: merged.hasConflictCopies || result.hasConflictCopies
+                )
+            }
+
+            let newUnlock = UnlockData(masterPassword: newPassword)
+            let artifacts = try rekeyTransaction.managedArtifactURLs(alongside: mainURL)
+            let replacements = try artifacts.map { url -> VaultArtifactRekeyReplacement in
+                let artifactContent = url == mainURL
+                    ? merged.content
+                    : try requiredArtifactContent(url, from: parsedContents)
+                return VaultArtifactRekeyReplacement(
+                    url: url,
+                    data: try encoded(artifactContent, unlockData: newUnlock)
+                )
+            }
+            try rekeyTransaction.replace(replacements) { _, data in
+                _ = try KDBXReader.parse(data, unlockData: newUnlock)
+            }
+
+            var warnings = refreshCredentials(
+                with: newUnlock,
+                keepQuickUnlockEnabled: keepQuickUnlockEnabled
+            )
+            for conflictURL in immediateConflicts {
+                do {
+                    try coordinator.archiveResolvedConflict(conflictURL, alongside: mainURL)
+                } catch {
+                    warnings.append(.conflictArchivePending)
+                }
+            }
+
+            if originalContent != nil, originalUnlockData != nil {
+                content = merged.content
+                unlockData = newUnlock
+                lastRevision = coordinator.revision(of: replacements[0].data)
+                if case .readOnlyWarning = originalState {
+                    state = originalState
+                } else {
+                    state = merged.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+                }
+                sessionController.touch()
+            } else {
+                sessionController.cancel()
+                content = nil
+                unlockData = nil
+                lastRevision = nil
+                state = .locked
+            }
+            let uniqueWarnings = Array(Set(warnings)).sorted { $0.rawValue < $1.rawValue }
+            return PasswordVaultMasterPasswordChangeResult(warnings: uniqueWarnings)
+        } catch let error as PasswordVaultError {
+            restoreRekeyState(originalState, content: originalContent, unlockData: originalUnlockData, revision: originalRevision)
+            throw error
+        } catch KDBXReader.Error.wrongCredentials {
+            restoreRekeyState(originalState, content: originalContent, unlockData: originalUnlockData, revision: originalRevision)
+            throw PasswordVaultError.externalConflict
+        } catch {
+            restoreRekeyState(originalState, content: originalContent, unlockData: originalUnlockData, revision: originalRevision)
+            throw PasswordVaultError.saveFailed
+        }
+    }
+
+    private func requiredArtifactContent(_ url: URL, from contents: [URL: KDBXContent]) throws -> KDBXContent {
+        guard let content = contents[url] else { throw PasswordVaultError.externalConflict }
+        return content
+    }
+
+    private func restoreRekeyState(
+        _ originalState: PasswordVaultState,
+        content originalContent: KDBXContent?,
+        unlockData originalUnlockData: UnlockData?,
+        revision originalRevision: Data?
+    ) {
+        state = originalState
+        content = originalContent
+        unlockData = originalUnlockData
+        lastRevision = originalRevision
+    }
+
+    private func refreshCredentials(
+        with unlock: UnlockData,
+        keepQuickUnlockEnabled: Bool
+    ) -> [PasswordVaultMasterPasswordChangeWarning] {
+        let rawKey = unlock.keyDataBytes.withUnsafeBytes { Data($0) }
+        let hadAutomationUnlock = automationUnlockKeyStore.containsKey
+        var warnings = [PasswordVaultMasterPasswordChangeWarning]()
+
+        if keepQuickUnlockEnabled {
+            do {
+                try unlockKeyStore.save(rawKey)
+            } catch {
+                warnings.append(.quickUnlockDisabled)
+                do {
+                    try unlockKeyStore.delete()
+                } catch {
+                    warnings.append(.credentialCleanupFailed)
+                }
+            }
+        } else if unlockKeyStore.containsKey {
+            do {
+                try unlockKeyStore.delete()
+            } catch {
+                warnings.append(.credentialCleanupFailed)
+            }
+        }
+
+        if hadAutomationUnlock {
+            do {
+                try automationUnlockKeyStore.save(rawKey)
+            } catch {
+                warnings.append(.automationUnlockDisabled)
+                do {
+                    try automationUnlockKeyStore.delete()
+                } catch {
+                    warnings.append(.credentialCleanupFailed)
+                }
+            }
+        }
+        return warnings
     }
 }
 

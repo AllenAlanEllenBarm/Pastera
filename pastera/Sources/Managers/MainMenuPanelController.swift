@@ -2344,6 +2344,7 @@ extension MainMenuPanelController {
         case .cloudUnavailable: return String(localized: "The configured OneDrive folder is unavailable.")
         case .externalConflict: return String(localized: "Password database changes need conflict recovery.")
         case .saveFailed: return String(localized: "The password database could not be saved.")
+        case .invalidAutoLockInterval: return String(localized: "Choose a supported automatic lock time.")
         case .userCancelled: return ""
         }
     }

@@ -164,9 +164,12 @@ final class VaultSessionController {
         cancellation?()
         return true
     }
-    private static func defaultTimeout() -> TimeInterval {
-        let value = UserDefaults.standard.double(forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
+    static func resolvedTimeout(defaults: UserDefaults) -> TimeInterval {
+        let value = defaults.double(forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
         return allowedTimeouts.contains(value) ? value : 300
+    }
+    private static func defaultTimeout() -> TimeInterval {
+        resolvedTimeout(defaults: .standard)
     }
     private static func scheduleOnMain(timeout: TimeInterval, action: @escaping () -> Void) -> () -> Void {
         let item = DispatchWorkItem(block: action)
@@ -397,6 +400,18 @@ enum PasswordVaultError: Error, Equatable {
     case cloudUnavailable
     case externalConflict
     case saveFailed
+    case invalidAutoLockInterval
+}
+
+enum PasswordVaultMasterPasswordChangeWarning: String, Hashable {
+    case quickUnlockDisabled
+    case automationUnlockDisabled
+    case credentialCleanupFailed
+    case conflictArchivePending
+}
+
+struct PasswordVaultMasterPasswordChangeResult: Equatable {
+    let warnings: [PasswordVaultMasterPasswordChangeWarning]
 }
 
 protocol PasswordVaultStore {
@@ -407,6 +422,14 @@ protocol PasswordVaultStore {
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws
     func unlockWithQuickKey(reason: String) throws
+    func enableQuickUnlock() throws
+    func disableQuickUnlock() throws
+    func refreshAutoLockSchedule()
+    func changeMasterPassword(
+        currentPassword: String,
+        newPassword: String,
+        keepQuickUnlockEnabled: Bool
+    ) throws -> PasswordVaultMasterPasswordChangeResult
     func enableAutomationUnlock() throws
     func unlockForAutomation() throws
     func disableAutomationUnlock() throws
@@ -434,6 +457,16 @@ extension PasswordVaultStore {
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlockWithQuickKey(reason: String) throws { throw PasswordVaultError.keychainUnavailable }
+    func enableQuickUnlock() throws { throw PasswordVaultError.keychainUnavailable }
+    func disableQuickUnlock() throws {}
+    func refreshAutoLockSchedule() {}
+    func changeMasterPassword(
+        currentPassword: String,
+        newPassword: String,
+        keepQuickUnlockEnabled: Bool
+    ) throws -> PasswordVaultMasterPasswordChangeResult {
+        throw PasswordVaultError.unsupportedFormat
+    }
     func enableAutomationUnlock() throws { throw PasswordVaultError.keychainUnavailable }
     func unlockForAutomation() throws { throw PasswordVaultError.keychainUnavailable }
     func disableAutomationUnlock() throws {}

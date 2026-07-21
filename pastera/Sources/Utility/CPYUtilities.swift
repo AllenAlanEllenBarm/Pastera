@@ -112,6 +112,7 @@ final class CPYUtilities {
         defaultValues.updateValue(syncFileTypes, forKey: Constants.UserDefaults.syncFileTypes)
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.syncPollInterval)
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
+        defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
 
         /* Updates */
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.Update.enableAutomaticCheck)

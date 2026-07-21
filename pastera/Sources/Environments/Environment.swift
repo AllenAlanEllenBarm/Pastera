@@ -37,7 +37,7 @@ struct Environment {
          excludeAppService: ExcludeAppService = ExcludeAppService(applications: []),
          accessibilityService: AccessibilityService = AccessibilityService(),
          oneDriveProcessStatusService: OneDriveProcessStatusServicing = OneDriveProcessStatusService(),
-         passwordVaultStore: PasswordVaultStore = KDBXPasswordVaultStore(),
+         passwordVaultStore: PasswordVaultStore? = nil,
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
          passwordVaultUIController: PasswordVaultUIController? = nil,
          vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing? = nil,
@@ -61,12 +61,16 @@ struct Environment {
         self.excludeAppService = excludeAppService
         self.accessibilityService = accessibilityService
         self.oneDriveProcessStatusService = oneDriveProcessStatusService
-        self.passwordVaultStore = passwordVaultStore
+        let resolvedPasswordVaultStore = passwordVaultStore ?? KDBXPasswordVaultStore(
+            autoLockTimeoutProvider: { VaultSessionController.resolvedTimeout(defaults: defaults) }
+        )
+        self.passwordVaultStore = resolvedPasswordVaultStore
         self.secureClipboard = secureClipboard
         let resolvedPasswordVaultUIController = passwordVaultUIController ?? PasswordVaultUIController(
-            store: passwordVaultStore,
+            store: resolvedPasswordVaultStore,
             clipboard: secureClipboard,
-            pasteService: resolvedPasteService
+            pasteService: resolvedPasteService,
+            defaults: defaults
         )
         self.passwordVaultUIController = resolvedPasswordVaultUIController
         self.vaultAgentApplicationRuntime = vaultAgentApplicationRuntime ??
