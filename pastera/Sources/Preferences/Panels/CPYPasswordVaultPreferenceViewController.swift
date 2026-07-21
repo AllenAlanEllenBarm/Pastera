@@ -11,6 +11,7 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
     private let passwordVaultController: PasswordVaultUIController
     private let openPasswordVault: () -> Void
     private var stateObserverToken: UUID?
+    private var masterPasswordSheetController: PasswordVaultMasterPasswordSheetController?
     private var latestState: PasswordVaultSecuritySettingsState?
 
     private let statusBadge = PasteraVaultStatusBadge()
@@ -29,8 +30,6 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
         target: nil,
         action: nil
     )
-
-    var onMasterPasswordChangeRequested: ((NSWindow?) -> Void)?
 
     init(
         controller: PasswordVaultUIController = AppEnvironment.current.passwordVaultUIController,
@@ -360,7 +359,38 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
     }
 
     @objc private func changeMasterPassword(_ sender: Any?) {
-        onMasterPasswordChangeRequested?(view.window)
+        guard let parentWindow = view.window else { return }
+        let sheetController = PasswordVaultMasterPasswordSheetController(
+            controller: passwordVaultController
+        ) { [weak self] result in
+            self?.handleMasterPasswordChangeSuccess(result)
+        }
+        masterPasswordSheetController = sheetController
+        sheetController.beginSheet(for: parentWindow)
+    }
+
+    private func handleMasterPasswordChangeSuccess(_ result: PasswordVaultMasterPasswordChangeResult) {
+        let warningMessages = result.warnings.compactMap { warning -> String? in
+            switch warning {
+            case .quickUnlockDisabled:
+                return pasteraPreferenceString("Quick unlock was turned off. Unlock the vault and enable it again.")
+            case .automationUnlockDisabled:
+                return pasteraPreferenceString("Agent automatic unlock needs to be authorized again.")
+            case .credentialCleanupFailed:
+                return pasteraPreferenceString("An old unlock credential could not be removed. Review Keychain access.")
+            case .conflictArchivePending:
+                return pasteraPreferenceString("A resolved conflict archive still needs attention.")
+            }
+        }
+        if warningMessages.isEmpty {
+            showFeedback(pasteraPreferenceString("Master password changed."), isError: false)
+        } else {
+            showFeedback(
+                ([pasteraPreferenceString("Master password changed.")] + warningMessages).joined(separator: " ")
+            )
+        }
+        masterPasswordSheetController = nil
+        refreshSecuritySettings()
     }
 
     private func message(for error: PasswordVaultError) -> String {

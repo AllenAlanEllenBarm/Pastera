@@ -79,6 +79,18 @@ struct PasswordVaultMenuTests {
         #expect(layout?.controlsFitBounds == true)
     }
 
+    @Test("first-time setup permanently warns that the master password cannot be recovered elsewhere")
+    func createFormShowsNoRecoveryWarningBeforeInput() {
+        let controller = makeVaultController(state: { .notConfigured }, folders: { [] })
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.passwordVaultAccessLayoutForTesting?.explanation == String(
+            localized: "The master password encrypts your password vault. If forgotten, it cannot be recovered by any other means."
+        ))
+    }
+
     @Test("master password visibility toggle preserves the entered value")
     func accessPasswordVisibilityTogglePreservesValue() {
         let controller = makeVaultController(state: { .locked }, folders: { [] })

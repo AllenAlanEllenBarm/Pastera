@@ -451,6 +451,8 @@ struct PreferenceSearchTests {
             "pastera/Sources/Preferences/Panels/CPYGeneralPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYHistoryPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYShortcutsPreferenceViewController.swift",
+            "pastera/Sources/Preferences/Panels/CPYPasswordVaultPreferenceViewController.swift",
+            "pastera/Sources/Preferences/Panels/PasswordVaultMasterPasswordSheetController.swift",
             "pastera/Sources/Preferences/Panels/CPYExcludeAppPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYAgentIntegrationPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift",

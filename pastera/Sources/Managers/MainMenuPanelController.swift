@@ -4106,6 +4106,7 @@ private final class MainMenuActionButton: NSButton {
 struct PasswordVaultAccessLayoutSnapshot {
     let title: String
     let fieldLabel: String
+    let explanation: String
     let titleFontSize: CGFloat
     let verticalGapFromFieldToButton: CGFloat
     let primaryButtonWidth: CGFloat
@@ -4147,7 +4148,7 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         titleLabel = NSTextField(labelWithString: mode == .create
             ? String(localized: "Set Master Password") : String(localized: "Unlock Vault"))
         explanationLabel = NSTextField(labelWithString: mode == .create
-            ? String(localized: "Your master password encrypts the vault and cannot be recovered if forgotten.")
+            ? String(localized: "The master password encrypts your password vault. If forgotten, it cannot be recovered by any other means.")
             : String(localized: "Enter your master password to view and use saved passwords."))
         primaryButton = NSButton(title: isBusy
             ? (mode == .create ? String(localized: "Creating…") : String(localized: "Unlocking…"))
@@ -4346,6 +4347,7 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         return PasswordVaultAccessLayoutSnapshot(
             title: titleLabel.stringValue,
             fieldLabel: passwordLabel.stringValue,
+            explanation: explanationLabel.stringValue,
             titleFontSize: titleLabel.font?.pointSize ?? 0,
             verticalGapFromFieldToButton: activeField.frame.minY - primaryButton.frame.maxY,
             primaryButtonWidth: primaryButton.frame.width,

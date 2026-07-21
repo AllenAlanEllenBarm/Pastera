@@ -11,9 +11,117 @@ import KeyHolder
 import Testing
 @testable import Pastera
 
+extension KeyboardAccessibilityTests {
+    @Test
+    func masterPasswordSheetUsesThreeSecureFieldsPermanentRecoveryWarningAndCompactLayout() throws {
+        let controller = PasswordVaultMasterPasswordSheetController { _, _, completion in
+            completion(.success(PasswordVaultMasterPasswordChangeResult(warnings: [])))
+        }
+        let window = try #require(controller.window)
+
+        #expect(controller.secureFieldCountForTesting == 3)
+        #expect(controller.visiblePasswordFieldCountForTesting == 0)
+        #expect(controller.fieldLabelsForTesting == [
+            pasteraPreferenceString("Current Master Password"),
+            pasteraPreferenceString("New Master Password"),
+            pasteraPreferenceString("Confirm New Master Password")
+        ])
+        #expect(controller.recoveryWarningForTesting == pasteraPreferenceString(
+            "The new master password encrypts your password vault. If forgotten, it cannot be recovered by any other means."
+        ))
+        #expect(controller.keyViewOrderForTesting == [
+            "masterPassword.current",
+            "masterPassword.new",
+            "masterPassword.confirmation",
+            "masterPassword.cancel",
+            "masterPassword.submit"
+        ])
+
+        window.setContentSize(NSSize(width: 360, height: window.contentLayoutRect.height))
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(controller.controlsFitBoundsForTesting)
+    }
+
+    @Test
+    func masterPasswordSheetValidatesConfirmationAndVisibilityTogglePreservesValueAndFocus() throws {
+        var submissionCount = 0
+        let controller = PasswordVaultMasterPasswordSheetController { _, _, _ in
+            submissionCount += 1
+        }
+        let window = try #require(controller.window)
+        controller.setValuesForTesting(current: "current", new: "new-password", confirmation: "different")
+
+        controller.submitForTesting()
+        #expect(submissionCount == 0)
+        #expect(!controller.confirmationErrorForTesting.isEmpty)
+        #expect(!controller.primaryButtonEnabledForTesting)
+
+        controller.setValuesForTesting(current: "current", new: "new-password", confirmation: "new-password")
+        #expect(controller.primaryButtonEnabledForTesting)
+        controller.focusFieldForTesting(index: 1)
+        let focusedIdentifier = controller.focusedFieldIdentifierForTesting
+        controller.toggleVisibilityForTesting(index: 1)
+
+        #expect(controller.valuesForTesting.new == "new-password")
+        #expect(controller.passwordIsVisibleForTesting(index: 1))
+        #expect(controller.focusedFieldIdentifierForTesting == focusedIdentifier)
+        #expect(window.firstResponder != nil)
+    }
+
+    @Test
+    func wrongCurrentMasterPasswordClearsOnlyCurrentFieldAndRestoresFocus() {
+        let controller = PasswordVaultMasterPasswordSheetController { _, _, completion in
+            completion(.failure(.wrongMasterPassword))
+        }
+        controller.setValuesForTesting(current: "wrong", new: "new-password", confirmation: "new-password")
+
+        controller.submitForTesting()
+
+        #expect(controller.valuesForTesting.current.isEmpty)
+        #expect(controller.valuesForTesting.new == "new-password")
+        #expect(controller.valuesForTesting.confirmation == "new-password")
+        #expect(!controller.currentPasswordErrorForTesting.isEmpty)
+        #expect(controller.focusedFieldIdentifierForTesting == "masterPassword.current")
+        #expect(!controller.isBusyForTesting)
+    }
+
+    @Test
+    func masterPasswordSheetBusyStatePreventsDuplicateSubmitAndEscapeUntilSuccess() {
+        var submissionCount = 0
+        var pendingCompletion: ((Result<PasswordVaultMasterPasswordChangeResult, PasswordVaultError>) -> Void)?
+        var successResult: PasswordVaultMasterPasswordChangeResult?
+        let controller = PasswordVaultMasterPasswordSheetController(
+            changePassword: { _, _, completion in
+                submissionCount += 1
+                pendingCompletion = completion
+            },
+            onSuccess: { successResult = $0 }
+        )
+        controller.setValuesForTesting(current: "current", new: "new-password", confirmation: "new-password")
+
+        controller.submitForTesting()
+        controller.submitForTesting()
+        controller.cancelForTesting()
+
+        #expect(submissionCount == 1)
+        #expect(controller.isBusyForTesting)
+        #expect(controller.allInteractiveControlsDisabledForTesting)
+        #expect(!controller.didCancelForTesting)
+
+        pendingCompletion?(.success(PasswordVaultMasterPasswordChangeResult(warnings: [.quickUnlockDisabled])))
+
+        #expect(successResult?.warnings == [.quickUnlockDisabled])
+        #expect(controller.valuesForTesting.current.isEmpty)
+        #expect(controller.valuesForTesting.new.isEmpty)
+        #expect(controller.valuesForTesting.confirmation.isEmpty)
+    }
+
+}
+
 @MainActor
 @Suite(.serialized)
 struct KeyboardAccessibilityTests {
+
     @Test
     func pasteShortcutResolverUsesCurrentLayoutMapping() {
         let resolver = PasteShortcutKeyCodeResolver { keyCode, _ in
