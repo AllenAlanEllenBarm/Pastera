@@ -14,6 +14,7 @@ enum PasteraPreferencePaneID: String, CaseIterable {
     case excludedApps
     case agentIntegrations
     case sync
+    case softwareUpdate
     case about
 }
 
@@ -40,6 +41,7 @@ struct PasteraPreferenceCatalogPage: Equatable {
     let searchItems: [PasteraPreferenceSearchItem]
 }
 
+// swiftlint:disable:next type_body_length
 struct PasteraPreferenceCatalog: Equatable {
     let pages: [PasteraPreferenceCatalogPage]
 
@@ -374,6 +376,46 @@ struct PasteraPreferenceCatalog: Equatable {
                 ]
             ),
             PasteraPreferenceCatalogPage(
+                paneID: .softwareUpdate,
+                groupTitle: pasteraPreferenceString("Services & Support"),
+                title: pasteraPreferenceString("Software Update"),
+                symbolName: "arrow.triangle.2.circlepath",
+                searchItems: [
+                    PasteraPreferenceSearchItem(
+                        id: "softwareUpdate.checkNow",
+                        paneID: .softwareUpdate,
+                        sectionID: "softwareUpdate.currentVersion",
+                        anchorID: "softwareUpdate.currentVersion",
+                        title: pasteraPreferenceString("Current Version"),
+                        subtitle: pasteraPreferenceString("Show the installed version and check for updates."),
+                        keywords: [
+                            "version", "build", "update", "software update",
+                            "check for updates", "更新", "检查更新"
+                        ]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "softwareUpdate.automaticCheck",
+                        paneID: .softwareUpdate,
+                        sectionID: "softwareUpdate.automaticCheck",
+                        anchorID: "softwareUpdate.automaticCheck",
+                        title: pasteraPreferenceString("Automatically Check for Updates"),
+                        subtitle: pasteraPreferenceString("Choose whether and how often Pastera checks for updates."),
+                        keywords: [
+                            "automatic update", "frequency", "daily", "自动更新", "自动检查更新"
+                        ]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "softwareUpdate.lastCheck",
+                        paneID: .softwareUpdate,
+                        sectionID: "softwareUpdate.lastCheck",
+                        anchorID: "softwareUpdate.lastCheck",
+                        title: pasteraPreferenceString("Last Check"),
+                        subtitle: pasteraPreferenceString("Review the last check time and release history."),
+                        keywords: ["last check", "release notes", "update history"]
+                    )
+                ]
+            ),
+            PasteraPreferenceCatalogPage(
                 paneID: .about,
                 groupTitle: pasteraPreferenceString("Services & Support"),
                 title: pasteraPreferenceString("About Pastera"),
@@ -407,17 +449,6 @@ struct PasteraPreferenceCatalog: Equatable {
                         title: pasteraPreferenceString("MIT License"),
                         subtitle: pasteraPreferenceString("View application license information."),
                         keywords: ["license", "legal"]
-                    ),
-                    PasteraPreferenceSearchItem(
-                        id: "about.sparkle",
-                        paneID: .about,
-                        sectionID: "about.updates",
-                        anchorID: "about.sparkle",
-                        title: pasteraPreferenceString("Sparkle Update Settings"),
-                        subtitle: pasteraPreferenceString(
-                            "Configure automatic checks, frequency, and check now."
-                        ),
-                        keywords: ["sparkle", "update", "check for updates"]
                     )
                 ]
             )

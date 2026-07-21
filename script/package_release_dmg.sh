@@ -153,6 +153,7 @@ done
 if [[ -z "${VERSION}" ]]; then
     VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${ROOT_DIR}/pastera/Supporting Files/Info.plist")"
 fi
+EXPECTED_MARKETING_VERSION="${VERSION%%-*}"
 
 if [[ "${SKIP_NOTARIZATION}" != "1" ]]; then
     if [[ -z "${DEVELOPER_ID_APPLICATION}" ]]; then
@@ -213,6 +214,26 @@ if [[ ! -d "${APP_PATH}" ]]; then
     echo "Built app not found: ${APP_PATH}" >&2
     exit 1
 fi
+
+APP_INFO_PLIST="${APP_PATH}/Contents/Info.plist"
+BUNDLE_SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP_INFO_PLIST}")"
+BUNDLE_BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${APP_INFO_PLIST}")"
+
+if [[ ! "${BUNDLE_SHORT_VERSION}" =~ ^[0-9]+([.][0-9]+)*$ ]]; then
+    echo "CFBundleShortVersionString must be dot-separated numeric: ${BUNDLE_SHORT_VERSION}" >&2
+    exit 1
+fi
+if [[ ! "${BUNDLE_BUILD_VERSION}" =~ ^[0-9]+$ ]]; then
+    echo "CFBundleVersion must be a numeric, monotonically increasing build: ${BUNDLE_BUILD_VERSION}" >&2
+    exit 1
+fi
+if [[ "${BUNDLE_SHORT_VERSION}" != "${EXPECTED_MARKETING_VERSION}" ]]; then
+    echo "Release label ${VERSION} does not match bundle marketing version ${BUNDLE_SHORT_VERSION}." >&2
+    exit 1
+fi
+
+printf 'Bundle marketing version: %s\n' "${BUNDLE_SHORT_VERSION}"
+printf 'Bundle build version: %s\n' "${BUNDLE_BUILD_VERSION}"
 
 if [[ "${SKIP_NOTARIZATION}" == "1" ]]; then
     sign_ad_hoc_app

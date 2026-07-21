@@ -233,6 +233,8 @@ private extension CPYPreferencesWindowController {
             return CPYAgentIntegrationPreferenceViewController()
         case .sync:
             return CPYSyncPreferenceViewController()
+        case .softwareUpdate:
+            return CPYSoftwareUpdatePreferenceViewController()
         case .about:
             return CPYAboutPreferenceViewController()
         }
@@ -1147,7 +1149,9 @@ extension CPYPreferencesWindowController {
             return .agentIntegrations
         case "sync":
             return .sync
-        case "about pastera", "about", "update":
+        case "software update", "update":
+            return .softwareUpdate
+        case "about pastera", "about":
             return .about
         default:
             return catalog.pages.first { $0.title == title }?.paneID
@@ -1163,6 +1167,7 @@ extension CPYPreferencesWindowController {
         case .excludedApps: return "Excluded Apps"
         case .agentIntegrations: return "Agent Integrations"
         case .sync: return "Sync"
+        case .softwareUpdate: return "Software Update"
         case .about: return "About Pastera"
         }
     }

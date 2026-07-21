@@ -41,6 +41,7 @@ struct PreferenceWindowShellTests {
             "忽略应用",
             "Agent 集成",
             "云同步",
+            "软件更新",
             "关于"
         ])
         #expect(controller.preferenceSidebarSymbolNamesForTesting == [
@@ -51,6 +52,7 @@ struct PreferenceWindowShellTests {
             "app.badge.checkmark",
             "terminal",
             "icloud",
+            "arrow.triangle.2.circlepath",
             "info.circle"
         ])
         #expect(controller.preferenceSidebarGroupTitlesForTesting.isEmpty)
@@ -91,9 +93,13 @@ struct PreferenceWindowShellTests {
         let aboutFrame = try #require(
             controller.preferenceSidebarButtonFrameForTesting(paneID: .about)
         )
+        let softwareUpdateFrame = try #require(
+            controller.preferenceSidebarButtonFrameForTesting(paneID: .softwareUpdate)
+        )
 
         #expect(aboutFrame.minY > 16)
-        #expect(syncFrame.minY > aboutFrame.maxY)
+        #expect(softwareUpdateFrame.minY > aboutFrame.maxY)
+        #expect(syncFrame.minY > softwareUpdateFrame.maxY)
         #expect(agentIntegrationsFrame.minY > syncFrame.maxY)
         #expect(excludedAppsFrame.minY - agentIntegrationsFrame.maxY >= 8)
         #expect(excludedAppsFrame.minY - agentIntegrationsFrame.maxY <= 14)
@@ -195,6 +201,7 @@ struct PreferenceWindowShellTests {
             #expect(controller.cachedPreferencePageForTesting(paneID: .excludedApps) is CPYExcludeAppPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .agentIntegrations) is CPYAgentIntegrationPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .sync) is CPYSyncPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .softwareUpdate) is CPYSoftwareUpdatePreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .about) is CPYAboutPreferenceViewController)
         }
     }

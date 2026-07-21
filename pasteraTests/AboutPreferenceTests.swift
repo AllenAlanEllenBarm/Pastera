@@ -5,7 +5,6 @@
 //
 
 import AppKit
-import Combine
 import Foundation
 import Testing
 @testable import Pastera
@@ -16,13 +15,10 @@ struct AboutPreferenceTests {
     @Test
     func aboutPaneShowsBundleMetadataApplicationIconAndMITLicense() throws {
         let bundle = try makeBundle(version: "9.8.7", build: "654")
-        let defaults = makeDefaults()
         let icon = NSImage(size: NSSize(width: 96, height: 96))
         var iconBundle: Bundle?
         let controller = CPYAboutPreferenceViewController(
             bundle: bundle,
-            defaults: defaults,
-            updaterProvider: { FakeUpdater() },
             applicationIconProvider: {
                 iconBundle = $0
                 return icon
@@ -44,16 +40,15 @@ struct AboutPreferenceTests {
         #expect(controller.revealSetting(anchorID: "about.version", animated: false))
         #expect(controller.revealSetting(anchorID: "about.github", animated: false))
         #expect(controller.revealSetting(anchorID: "about.license", animated: false))
-        #expect(controller.revealSetting(anchorID: "about.sparkle", animated: false))
+        #expect(!controller.revealSetting(anchorID: "about.sparkle", animated: false))
+        #expect(view(in: controller.view, identifier: "softwareUpdate.checkNow") == nil)
+        #expect(view(in: controller.view, identifier: "softwareUpdate.automaticChecks") == nil)
     }
 
     @Test
     func aboutLinksOpenOnlyTheApprovedExactURLs() throws {
-        let defaults = makeDefaults()
         var openedURLs = [URL]()
         let controller = CPYAboutPreferenceViewController(
-            defaults: defaults,
-            updaterProvider: { FakeUpdater() },
             openURL: { openedURLs.append($0) }
         )
         _ = controller.view
@@ -129,124 +124,6 @@ struct AboutPreferenceTests {
         }
     }
 
-    @Test
-    func updateControlsUseExistingDefaultsAndMutateTheLiveUpdaterImmediately() throws {
-        let defaults = makeDefaults()
-        defaults.set(false, forKey: Constants.Update.enableAutomaticCheck)
-        defaults.set(86_400, forKey: Constants.Update.checkInterval)
-        let updater = FakeUpdater(
-            automaticallyChecksForUpdates: true,
-            updateCheckInterval: 2_592_000,
-            canCheckForUpdates: true
-        )
-        let controller = CPYAboutPreferenceViewController(
-            defaults: defaults,
-            updaterProvider: { updater },
-            openURL: { _ in }
-        )
-        _ = controller.view
-
-        let automaticButton = try #require(
-            view(in: controller.view, identifier: "about.automaticUpdates") as? NSButton
-        )
-        let intervalButton = try #require(
-            view(in: controller.view, identifier: "about.updateInterval") as? NSPopUpButton
-        )
-        let checkNowButton = try #require(
-            view(in: controller.view, identifier: "about.checkNow") as? NSButton
-        )
-
-        #expect(automaticButton.state == .off)
-        #expect(intervalButton.selectedTag() == 86_400)
-        #expect(updater.automaticallyChecksForUpdates == false)
-        #expect(updater.updateCheckInterval == 86_400)
-
-        automaticButton.performClick(nil)
-        #expect(defaults.bool(forKey: Constants.Update.enableAutomaticCheck))
-        #expect(updater.automaticallyChecksForUpdates)
-
-        intervalButton.selectItem(withTag: 604_800)
-        intervalButton.sendAction(intervalButton.action, to: intervalButton.target)
-        #expect(defaults.integer(forKey: Constants.Update.checkInterval) == 604_800)
-        #expect(updater.updateCheckInterval == 604_800)
-
-        checkNowButton.performClick(nil)
-        #expect(updater.checkForUpdatesCount == 1)
-    }
-
-    @Test
-    func updaterStateRefreshesLastCheckAndDisablesControlsWhenCheckingBecomesUnavailable() throws {
-        let defaults = makeDefaults()
-        defaults.set(true, forKey: Constants.Update.enableAutomaticCheck)
-        defaults.set(604_800, forKey: Constants.Update.checkInterval)
-        let updater = FakeUpdater(canCheckForUpdates: true)
-        let controller = CPYAboutPreferenceViewController(
-            defaults: defaults,
-            updaterProvider: { updater },
-            openURL: { _ in }
-        )
-        _ = controller.view
-
-        let date = Date(timeIntervalSince1970: 1_750_000_000)
-        updater.lastUpdateCheckDate = date
-        updater.canCheckForUpdates = false
-        updater.sendStateChange()
-
-        let status = try #require(
-            view(in: controller.view, identifier: "about.updaterStatus") as? PasteraPreferenceStatusView
-        )
-        let lastCheck = try #require(
-            view(in: controller.view, identifier: "about.lastCheck") as? NSTextField
-        )
-        #expect(status.accessibilityLabel() == pasteraPreferenceString("Sparkle Cannot Check for Updates"))
-        #expect(lastCheck.objectValue as? Date == date)
-        #expect(updateControls(in: controller.view).allSatisfy { !$0.isEnabled })
-    }
-
-    @Test
-    func missingUpdaterDisablesControlsAndShowsVisibleStatus() throws {
-        let controller = CPYAboutPreferenceViewController(
-            defaults: makeDefaults(),
-            updaterProvider: { nil },
-            openURL: { _ in }
-        )
-        _ = controller.view
-
-        let status = try #require(
-            view(in: controller.view, identifier: "about.updaterStatus") as? PasteraPreferenceStatusView
-        )
-        #expect(status.accessibilityLabel() == pasteraPreferenceString("Sparkle Update Service Unavailable"))
-        #expect(updateControls(in: controller.view).allSatisfy { !$0.isEnabled })
-    }
-
-    @Test
-    func reloadingViewKeepsOneUpdaterObservationAndOneControlSet() {
-        let updater = FakeUpdater(canCheckForUpdates: true)
-        let controller = CPYAboutPreferenceViewController(
-            defaults: makeDefaults(),
-            updaterProvider: { updater },
-            openURL: { _ in }
-        )
-
-        controller.loadView()
-        controller.loadView()
-
-        #expect(updater.activeSubscriptionCount == 1)
-        #expect(updateControls(in: controller.view).count == 3)
-        #expect(views(in: controller.view, identifier: "about.updaterStatus").count == 1)
-    }
-
-    private func makeDefaults() -> UserDefaults {
-        let suiteName = "AboutPreferenceTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults.register(defaults: [
-            Constants.Update.enableAutomaticCheck: true,
-            Constants.Update.checkInterval: 86_400
-        ])
-        return defaults
-    }
-
     private func makeBundle(version: String, build: String) throws -> Bundle {
         let bundleURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("AboutPreferenceTests-\(UUID().uuidString).bundle", isDirectory: true)
@@ -264,12 +141,6 @@ struct AboutPreferenceTests {
         return try #require(Bundle(url: bundleURL))
     }
 
-    private func updateControls(in root: NSView) -> [NSControl] {
-        ["about.automaticUpdates", "about.updateInterval", "about.checkNow"].compactMap {
-            view(in: root, identifier: $0) as? NSControl
-        }
-    }
-
     private func view(in root: NSView, identifier: String) -> NSView? {
         views(in: root, identifier: identifier).first
     }
@@ -284,46 +155,5 @@ struct AboutPreferenceTests {
         var fields = root.subviews.compactMap { $0 as? NSTextField }
         root.subviews.forEach { fields.append(contentsOf: textFields(in: $0)) }
         return fields
-    }
-}
-
-@MainActor
-private final class FakeUpdater: PasteraUpdaterFacade {
-    var automaticallyChecksForUpdates: Bool
-    var updateCheckInterval: TimeInterval
-    var lastUpdateCheckDate: Date?
-    var canCheckForUpdates: Bool
-    private(set) var checkForUpdatesCount = 0
-    private(set) var activeSubscriptionCount = 0
-
-    private let stateSubject = PassthroughSubject<Void, Never>()
-
-    var stateChanges: AnyPublisher<Void, Never> {
-        stateSubject
-            .handleEvents(
-                receiveSubscription: { [weak self] _ in self?.activeSubscriptionCount += 1 },
-                receiveCancel: { [weak self] in self?.activeSubscriptionCount -= 1 }
-            )
-            .eraseToAnyPublisher()
-    }
-
-    init(
-        automaticallyChecksForUpdates: Bool = true,
-        updateCheckInterval: TimeInterval = 86_400,
-        lastUpdateCheckDate: Date? = nil,
-        canCheckForUpdates: Bool = true
-    ) {
-        self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
-        self.updateCheckInterval = updateCheckInterval
-        self.lastUpdateCheckDate = lastUpdateCheckDate
-        self.canCheckForUpdates = canCheckForUpdates
-    }
-
-    func checkForUpdates() {
-        checkForUpdatesCount += 1
-    }
-
-    func sendStateChange() {
-        stateSubject.send()
     }
 }

@@ -460,12 +460,18 @@ extension AppDelegate: NSApplicationDelegate {
         }
 
         // Sparkle
+        let automaticallyChecksForUpdates = AppEnvironment.current.defaults.bool(
+            forKey: Constants.Update.enableAutomaticCheck
+        )
         self.updaterController = SPUStandardUpdaterController(
-            startingUpdater: AppEnvironment.current.defaults.bool(forKey: Constants.Update.enableAutomaticCheck),
+            startingUpdater: true,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
-        updaterController?.updater.updateCheckInterval = TimeInterval(AppEnvironment.current.defaults.integer(forKey: Constants.Update.checkInterval))
+        updaterController?.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+        updaterController?.updater.updateCheckInterval = TimeInterval(
+            AppEnvironment.current.defaults.integer(forKey: Constants.Update.checkInterval)
+        )
         updaterController?.updater.clearFeedURLFromUserDefaults()
 
         // Binding Events

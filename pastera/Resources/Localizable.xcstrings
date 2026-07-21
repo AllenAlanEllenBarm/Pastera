@@ -1,6 +1,48 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Automatic Updates" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic Updates" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Automatische Updates" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiornamenti automatici" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "自動アップデート" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动更新" } }
+    } },
+    "Checking for Updates…" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Checking for Updates…" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Suche nach Updates…" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Verifica aggiornamenti…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデートを確認中…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在检查更新…" } }
+    } },
+    "Choose whether and how often Pastera checks for updates." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose whether and how often Pastera checks for updates." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Lege fest, ob und wie oft Pastera nach Updates sucht." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Scegli se e con quale frequenza Pastera verifica gli aggiornamenti." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Pastera がアップデートを確認するかどうかと頻度を選択します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择 Pastera 是否以及多久检查一次更新。" } }
+    } },
+    "Current Version" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Current Version" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Aktuelle Version" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Versione attuale" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在のバージョン" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本" } }
+    } },
+    "Notify you when a new version is available." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Notify you when a new version is available." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Benachrichtigt dich, wenn eine neue Version verfügbar ist." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Ti avvisa quando è disponibile una nuova versione." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "新しいバージョンが利用可能になると通知します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有新版本时通知你。" } }
+    } },
+    "Ready to Check for Updates" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready to Check for Updates" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Bereit zur Update-Suche" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Pronto per verificare gli aggiornamenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデートを確認できます" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可以检查更新" } }
+    } },
+    "Release Notes" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Release Notes" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Versionshinweise" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Note di rilascio" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "リリースノート" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本说明" } }
+    } },
+    "Review an available update before downloading and installing it." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Review an available update before downloading and installing it." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Prüfe ein verfügbares Update vor dem Herunterladen und Installieren." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Controlla un aggiornamento disponibile prima di scaricarlo e installarlo." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "利用可能なアップデートを確認してからダウンロードしてインストールします。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载并安装前先确认可用更新。" } }
+    } },
+    "Review the last check time and release history." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Review the last check time and release history." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Zeigt die letzte Prüfung und den Versionsverlauf." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Consulta l'ultima verifica e la cronologia delle versioni." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "前回の確認日時とリリース履歴を表示します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看上次检查时间和版本历史。" } }
+    } },
+    "Show the installed version and check for updates." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Show the installed version and check for updates." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Zeigt die installierte Version und sucht nach Updates." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Mostra la versione installata e verifica gli aggiornamenti." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "インストール済みバージョンを表示してアップデートを確認します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示已安装版本并检查更新。" } }
+    } },
+    "Software Update" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Software Update" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Softwareupdate" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiornamento software" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "ソフトウェアアップデート" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "软件更新" } }
+    } },
+    "Temporarily Unable to Check for Updates" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Temporarily Unable to Check for Updates" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Updates können vorübergehend nicht geprüft werden" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile verificare temporaneamente gli aggiornamenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在アップデートを確認できません" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂时无法检查更新" } }
+    } },
+    "Update History" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Update History" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Updateverlauf" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Cronologia aggiornamenti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデート履歴" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更新记录" } }
+    } },
+    "View Release History" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "View Release History" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Versionsverlauf anzeigen" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Visualizza cronologia versioni" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "リリース履歴を表示" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看版本历史" } }
+    } },
     "About Pastera" : {
       "localizations" : {
         "en" : {

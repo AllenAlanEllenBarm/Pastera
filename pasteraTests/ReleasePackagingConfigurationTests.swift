@@ -136,6 +136,11 @@ struct ReleasePackagingConfigurationTests {
         #expect(script.contains("spctl -a -vv"))
         #expect(script.contains("ln -s /Applications"))
         #expect(script.contains("-target \"${APP_TARGET}\""))
+        #expect(script.contains("CFBundleShortVersionString"))
+        #expect(script.contains("CFBundleVersion"))
+        #expect(script.contains("EXPECTED_MARKETING_VERSION=\"${VERSION%%-*}\""))
+        #expect(script.contains("BUNDLE_SHORT_VERSION"))
+        #expect(script.contains("BUNDLE_BUILD_VERSION"))
     }
 
     @Test
@@ -220,12 +225,35 @@ struct ReleasePackagingConfigurationTests {
     }
 
     @Test
-    func appcastUpdateScriptSignsDmgForSparkle() throws {
+    func appcastUpdateScriptGeneratesAndVerifiesArtifactDrivenFeed() throws {
         let script = try projectText("script/update_appcast_for_dmg.sh")
+        let verifier = try projectText("script/verify_sparkle_ed_signature.swift")
 
-        #expect(script.contains("sign_update"))
+        #expect(script.contains("generate_appcast"))
+        #expect(script.contains("--ed-key-file -"))
+        #expect(script.contains("--download-url-prefix"))
+        #expect(script.contains("--link"))
+        #expect(script.contains("--versions"))
+        #expect(script.contains("--maximum-versions"))
+        #expect(script.contains("hdiutil attach"))
+        #expect(script.contains("SUPublicEDKey"))
+        #expect(script.contains("verify_sparkle_ed_signature.swift"))
         #expect(script.contains("sparkle:edSignature"))
         #expect(script.contains("application/x-apple-diskimage"))
+        #expect(!script.contains("sign_update"))
+        #expect(!script.contains("perl -0pi"))
+        #expect(verifier.contains("Curve25519.Signing.PublicKey"))
+        #expect(verifier.contains("isValidSignature"))
+    }
+
+    @Test
+    func releaseEntrypointsKeepLabelSeparateFromArtifactVersions() throws {
+        let package = try projectText("script/package_release.sh")
+        let workflow = try projectText(".github/workflows/release-dmg.yml")
+
+        #expect(!package.contains("--version \"${VERSION}\" \\\n        --tag \"${TAG}\""))
+        #expect(workflow.contains("SPARKLE_PRIVATE_KEY is required"))
+        #expect(!workflow.contains("--version \"${{ inputs.version }}\" \\\n            --tag \"${{ inputs.tag }}\""))
     }
 
     @Test

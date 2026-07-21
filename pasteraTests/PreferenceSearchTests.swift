@@ -37,6 +37,7 @@ struct PreferenceSearchTests {
             .excludedApps,
             .agentIntegrations,
             .sync,
+            .softwareUpdate,
             .about
         ])
         #expect(PasteraPreferencePaneID.allCases.map(\.rawValue) == [
@@ -47,6 +48,7 @@ struct PreferenceSearchTests {
             "excludedApps",
             "agentIntegrations",
             "sync",
+            "softwareUpdate",
             "about"
         ])
     }
@@ -73,6 +75,7 @@ struct PreferenceSearchTests {
             .excludedApps,
             .agentIntegrations,
             .sync,
+            .softwareUpdate,
             .about
         ])
         #expect(pages.map(\.groupTitle) == [
@@ -81,6 +84,7 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
+            pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support")
@@ -93,6 +97,7 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("Excluded Apps"),
             pasteraPreferenceString("Agent Integrations"),
             pasteraPreferenceString("Sync"),
+            pasteraPreferenceString("Software Update"),
             pasteraPreferenceString("About Pastera")
         ])
         #expect(pages.map(\.symbolName) == [
@@ -103,6 +108,7 @@ struct PreferenceSearchTests {
             "app.badge.checkmark",
             "terminal",
             "icloud",
+            "arrow.triangle.2.circlepath",
             "info.circle"
         ])
 
@@ -427,6 +433,7 @@ struct PreferenceSearchTests {
             "pastera/Sources/Preferences/Panels/CPYExcludeAppPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYAgentIntegrationPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift",
+            "pastera/Sources/Preferences/Panels/CPYSoftwareUpdatePreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/CPYAboutPreferenceViewController.swift",
             "pastera/Sources/Preferences/Panels/PasteraOneDriveStatusBadge.swift"
         ]

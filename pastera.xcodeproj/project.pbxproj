@@ -133,6 +133,8 @@
 		C5E208002FF3000000B7C0DE /* ShortcutPreferenceResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E208012FF3000000B7C0DE /* ShortcutPreferenceResetTests.swift */; };
 		C5E209002FF3000000B7C0DE /* ExcludeAppPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E209012FF3000000B7C0DE /* ExcludeAppPreferenceTests.swift */; };
 		FEE500000000000000000001 /* CPYAboutPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEE500000000000000000002 /* CPYAboutPreferenceViewController.swift */; };
+		C5A930002FD300000B7C0DE /* PasteraUpdaterFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A930012FD300000B7C0DE /* PasteraUpdaterFacade.swift */; };
+		C5A930022FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A930032FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift */; };
 		C5F500000000000000000001 /* CPYScriptsPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F500000000000000000002 /* CPYScriptsPreferenceViewController.swift */; };
 		C5F500000000000000000003 /* ScriptEditorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F500000000000000000004 /* ScriptEditorViewController.swift */; };
 		C5F510000000000000000001 /* ScriptTemplateCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F510000000000000000002 /* ScriptTemplateCatalogTests.swift */; };
@@ -142,6 +144,7 @@
 		C5F520000000000000000003 /* ScriptTemplateMarketViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */; };
 		C5F530000000000000000001 /* ScriptTestViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F530000000000000000002 /* ScriptTestViewController.swift */; };
 		FEE500000000000000000003 /* AboutPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEE500000000000000000004 /* AboutPreferenceTests.swift */; };
+		C5A930042FD300000B7C0DE /* SoftwareUpdatePreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A930052FD300000B7C0DE /* SoftwareUpdatePreferenceTests.swift */; };
 		C5D100022FE010000B7C0DE /* PasteraSetupGuideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */; };
 		C5D100042FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */; };
 		C5D2A0002FEA000000B7C0DE /* OneDriveProcessStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A0012FEA000000B7C0DE /* OneDriveProcessStatusService.swift */; };
@@ -366,6 +369,8 @@
 		C5E208012FF3000000B7C0DE /* ShortcutPreferenceResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPreferenceResetTests.swift; sourceTree = "<group>"; };
 		C5E209012FF3000000B7C0DE /* ExcludeAppPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExcludeAppPreferenceTests.swift; sourceTree = "<group>"; };
 		FEE500000000000000000002 /* CPYAboutPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYAboutPreferenceViewController.swift; sourceTree = "<group>"; };
+		C5A930012FD300000B7C0DE /* PasteraUpdaterFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraUpdaterFacade.swift; sourceTree = "<group>"; };
+		C5A930032FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYSoftwareUpdatePreferenceViewController.swift; sourceTree = "<group>"; };
 		C5F500000000000000000002 /* CPYScriptsPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYScriptsPreferenceViewController.swift; sourceTree = "<group>"; };
 		C5F500000000000000000004 /* ScriptEditorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptEditorViewController.swift; sourceTree = "<group>"; };
 		C5F510000000000000000002 /* ScriptTemplateCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptTemplateCatalogTests.swift; sourceTree = "<group>"; };
@@ -375,6 +380,7 @@
 		C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptTemplateMarketViewController.swift; sourceTree = "<group>"; };
 		C5F530000000000000000002 /* ScriptTestViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptTestViewController.swift; sourceTree = "<group>"; };
 		FEE500000000000000000004 /* AboutPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutPreferenceTests.swift; sourceTree = "<group>"; };
+		C5A930052FD300000B7C0DE /* SoftwareUpdatePreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdatePreferenceTests.swift; sourceTree = "<group>"; };
 		C5D100032FE010000B7C0DE /* PasteraSetupGuideService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideService.swift; sourceTree = "<group>"; };
 		C5D100052FE010000B7C0DE /* PasteraSetupGuideStepRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraSetupGuideStepRowView.swift; sourceTree = "<group>"; };
 		C5D2A0012FEA000000B7C0DE /* OneDriveProcessStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneDriveProcessStatusService.swift; sourceTree = "<group>"; };
@@ -842,6 +848,7 @@
 					C5E202012FF1000000B7C0DE /* PasteraPreferenceSearch.swift */,
 					C5E204012FF1000000B7C0DE /* PasteraPreferenceComponents.swift */,
 					C5E205012FF1000000B7C0DE /* PasteraPreferenceSearchResultsViewController.swift */,
+					C5A930012FD300000B7C0DE /* PasteraUpdaterFacade.swift */,
 					FA1DB4F11DDCB4C0007F95C8 /* Panels */,
 			);
 			path = Preferences;
@@ -857,6 +864,7 @@
 					FA1DB4F41DDCB4C0007F95C8 /* CPYShortcutsPreferenceViewController.swift */,
 					C5C000052FD870000B7C0DE /* CPYSyncPreferenceViewController.swift */,
 					C5C000072FD870000B7C0DE /* PasteraOneDriveStatusBadge.swift */,
+					C5A930032FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift */,
 					FEE500000000000000000002 /* CPYAboutPreferenceViewController.swift */,
 					C5F500000000000000000002 /* CPYScriptsPreferenceViewController.swift */,
 					C5F500000000000000000004 /* ScriptEditorViewController.swift */,
@@ -971,6 +979,7 @@
 				C5E208012FF3000000B7C0DE /* ShortcutPreferenceResetTests.swift */,
 				C5E209012FF3000000B7C0DE /* ExcludeAppPreferenceTests.swift */,
 				FEE500000000000000000004 /* AboutPreferenceTests.swift */,
+				C5A930052FD300000B7C0DE /* SoftwareUpdatePreferenceTests.swift */,
 				C5A923012FD260000B7C0DE /* ShortcutPreferenceLayoutDensityTests.swift */,
 				C5A924012FD270000B7C0DE /* DeleteShortcutTests.swift */,
 				C5A925012FD280000B7C0DE /* SnippetRepositoryDeletionSyncTests.swift */,
@@ -1491,6 +1500,8 @@
 				FA1DB4A31DDCB433007F95C8 /* Constants.swift in Sources */,
 				FA1DB4B41DDCB452007F95C8 /* NSBundle+Version.swift in Sources */,
 				C5C000042FD870000B7C0DE /* CPYSyncPreferenceViewController.swift in Sources */,
+				C5A930002FD300000B7C0DE /* PasteraUpdaterFacade.swift in Sources */,
+				C5A930022FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift in Sources */,
 				FEE500000000000000000001 /* CPYAboutPreferenceViewController.swift in Sources */,
 				C5F500000000000000000001 /* CPYScriptsPreferenceViewController.swift in Sources */,
 				C5F500000000000000000003 /* ScriptEditorViewController.swift in Sources */,
@@ -1595,6 +1606,7 @@
 						C5E208002FF3000000B7C0DE /* ShortcutPreferenceResetTests.swift in Sources */,
 						C5E209002FF3000000B7C0DE /* ExcludeAppPreferenceTests.swift in Sources */,
 						FEE500000000000000000003 /* AboutPreferenceTests.swift in Sources */,
+						C5A930042FD300000B7C0DE /* SoftwareUpdatePreferenceTests.swift in Sources */,
 						C5A923002FD260000B7C0DE /* ShortcutPreferenceLayoutDensityTests.swift in Sources */,
 						C5A924002FD270000B7C0DE /* DeleteShortcutTests.swift in Sources */,
 						C5A925002FD280000B7C0DE /* SnippetRepositoryDeletionSyncTests.swift in Sources */,

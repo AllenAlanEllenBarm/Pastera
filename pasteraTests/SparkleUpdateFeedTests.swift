@@ -20,6 +20,28 @@ struct SparkleUpdateFeedTests {
     }
 
     @Test
+    func sourceBundleVersionsUseNumericSparkleComparableValues() throws {
+        let shortVersion = try infoPlistValue(forKey: "CFBundleShortVersionString")
+        let buildVersion = try infoPlistValue(forKey: "CFBundleVersion")
+
+        #expect(shortVersion == "3.0.1")
+        #expect(buildVersion == "301")
+        #expect(shortVersion.wholeMatch(of: /[0-9]+(?:\.[0-9]+)*/) != nil)
+        #expect(buildVersion.wholeMatch(of: /[0-9]+/) != nil)
+    }
+
+    @Test
+    func updaterStartsEvenWhenAutomaticChecksAreDisabled() throws {
+        let source = try String(
+            contentsOf: projectRoot().appendingPathComponent("pastera/Sources/AppDelegate.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("startingUpdater: true"))
+        #expect(source.contains("updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates"))
+    }
+
+    @Test
     func sourceInfoPlistDeclaresAppIcon() throws {
         #expect(try infoPlistValue(forKey: "CFBundleIconFile") == "AppIcon")
         #expect(try infoPlistValue(forKey: "CFBundleIconName") == "AppIcon")
@@ -69,7 +91,9 @@ struct SparkleUpdateFeedTests {
     func manualUpdateCheckUsesSparkleWithoutGitHubDownloadFallback() throws {
         let source = try String(
             contentsOf: projectRoot()
-                .appendingPathComponent("pastera/Sources/Preferences/Panels/CPYAboutPreferenceViewController.swift"),
+                .appendingPathComponent(
+                    "pastera/Sources/Preferences/Panels/CPYSoftwareUpdatePreferenceViewController.swift"
+                ),
             encoding: .utf8
         )
 

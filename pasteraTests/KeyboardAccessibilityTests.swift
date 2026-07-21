@@ -270,23 +270,28 @@ struct KeyboardAccessibilityTests {
     }
 
     @Test
-    func preferenceTabAndShiftTabCycleBetweenSidebarAndPane() throws {
+    func softwareUpdateSidebarParticipatesInTabAndShiftTabNavigation() throws {
         let controller = makePreferencesController()
         defer { controller.close() }
 
         controller.showWindow(nil)
-        controller.focusPreferenceSidebarForTesting(title: "About Pastera")
+        controller.focusPreferenceSidebarForTesting(title: "Software Update")
 
-        #expect(controller.cachedPreferencePageForTesting(paneID: .about) is CPYAboutPreferenceViewController)
+        #expect(
+            controller.cachedPreferencePageForTesting(paneID: .softwareUpdate)
+                is CPYSoftwareUpdatePreferenceViewController
+        )
 
         let tabEvent = try makeKeyEvent(keyCode: 48, characters: "\t")
         let shiftTabEvent = try makeKeyEvent(keyCode: 48, characters: "\t", modifierFlags: [.shift])
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(tabEvent))
-        #expect(controller.focusedPreferencePaneControlTitleForTesting != nil)
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "About Pastera")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "About Pastera")
 
         #expect(controller.handlePreferenceKeyboardEventForTesting(shiftTabEvent))
-        #expect(controller.focusedPreferenceSidebarTitleForTesting == "About Pastera")
+        #expect(controller.focusedPreferenceSidebarTitleForTesting == "Software Update")
+        #expect(controller.selectedPreferencePaneTitleForTesting == "Software Update")
     }
 
     @Test
