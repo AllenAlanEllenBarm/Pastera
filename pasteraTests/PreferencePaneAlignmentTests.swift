@@ -45,6 +45,7 @@ struct PreferenceSidebarTests {
             "历史记录",
             "脚本",
             "快捷键",
+            "密码箱",
             "忽略应用",
             "Agent 集成",
             "云同步",
@@ -66,6 +67,33 @@ struct PreferenceSidebarTests {
 @MainActor
 @Suite(.serialized)
 struct PreferencePaneAlignmentTests {
+    @Test
+    func passwordVaultPaneStacksNarrowAndUsesWeightedColumnsWhenWide() throws {
+        let page = CPYPasswordVaultPreferenceViewController()
+        page.loadView()
+
+        page.view.frame = NSRect(x: 0, y: 0, width: 600, height: 900)
+        page.view.layoutSubtreeIfNeeded()
+        #expect(page.adaptiveColumnCountForTesting == 1)
+        #expect(page.adaptiveRowCountForTesting == 2)
+
+        page.view.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
+        page.view.needsLayout = true
+        page.view.layoutSubtreeIfNeeded()
+        #expect(page.adaptiveColumnCountForTesting == 2)
+        #expect(page.adaptiveRowCountForTesting == 1)
+        let widths = page.adaptiveItemWidthsForTesting
+        #expect(widths.count == 2)
+        let firstWidth = try #require(widths.first)
+        let lastWidth = try #require(widths.last)
+        let ratio = firstWidth / lastWidth
+        #expect(abs(ratio - 1.18 / 0.82) < 0.03)
+
+        for anchorID in ["vault.autoLock", "vault.quickUnlock", "vault.masterPassword"] {
+            #expect(page.revealSetting(anchorID: anchorID, animated: false))
+        }
+    }
+
     @Test
     func generalGroupsUseSemanticHeaderIconsAndStableRowRhythm() throws {
         let page = CPYGeneralPreferenceViewController()

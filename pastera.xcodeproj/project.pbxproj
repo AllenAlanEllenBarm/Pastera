@@ -198,6 +198,7 @@
 		C5D76DA82FBA9C150083839F /* PINCache in Frameworks */ = {isa = PBXBuildFile; productRef = C5D76DA72FBA9C150083839F /* PINCache */; };
 		C5D76DAB2FBA9D2E0083839F /* SwiftHEXColors in Frameworks */ = {isa = PBXBuildFile; productRef = C5D76DAA2FBA9D2E0083839F /* SwiftHEXColors */; };
 		C5F1B7331FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F1B7321FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift */; };
+		C5F700082FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700092FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift */; };
 		FA08EDF81D1FED7D000D1D13 /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */; };
 		FA0D5CE81DDCC61600AC9052 /* ClipService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0D5CE71DDCC61600AC9052 /* ClipService.swift */; };
 		FA1189331E4CD58C00244F12 /* ExcludeAppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1189321E4CD58C00244F12 /* ExcludeAppService.swift */; };
@@ -403,6 +404,7 @@
 		C5AA10032FD1200000B7C0DE /* PasteraConfirmationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraConfirmationController.swift; sourceTree = "<group>"; };
 		C5F1B7321FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSPasteboard+Deprecated.swift"; sourceTree = "<group>"; };
 		FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
+		C5F700092FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYPasswordVaultPreferenceViewController.swift; sourceTree = "<group>"; };
 		FA0D5CE71DDCC61600AC9052 /* ClipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ClipService.swift; sourceTree = "<group>"; };
 		FA1189321E4CD58C00244F12 /* ExcludeAppService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ExcludeAppService.swift; sourceTree = "<group>"; };
 		FA1DB48F1DDCA5D9007F95C8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -868,6 +870,7 @@
 			isa = PBXGroup;
 			children = (
 				A6A000000000000000000004 /* CPYAgentIntegrationPreferenceViewController.swift */,
+				C5F700092FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift */,
 				C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */,
 				C5E207012FF2000000B7C0DE /* CPYHistoryPreferenceViewController.swift */,
 				FA1DB4F31DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.swift */,
@@ -1545,6 +1548,7 @@
 					C5D2A1022FEA100000B7C0DE /* MainMenuOCRActivityView.swift in Sources */,
 					C5D2A1022FEA110000B7C0DE /* MainMenuModeIcons.swift in Sources */,
 					C5F3000A2FF3000000B7C0DE /* PasswordVaultUIController.swift in Sources */,
+					C5F700082FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift in Sources */,
 					C5F3000C2FF3000000B7C0DE /* PasswordVaultEditorView.swift in Sources */,
 					C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */,
 				C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */,

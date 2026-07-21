@@ -123,12 +123,18 @@ private final class PasteraPreferenceAnchorRevealer {
 }
 
 final class PasteraPreferenceAdaptiveGridView: NSView {
+    private struct Item {
+        let view: NSView
+        let weight: CGFloat
+    }
+
     static let breakpoint: CGFloat = 760
     static let columnSpacing: CGFloat = 16
     static let rowSpacing: CGFloat = 12
 
     private let stack = NSStackView()
-    private var items = [NSView]()
+    private var items = [Item]()
+    private var itemWidthConstraints = [NSLayoutConstraint]()
     private(set) var columnCount = 1
 
     override init(frame frameRect: NSRect) {
@@ -150,8 +156,8 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
         nil
     }
 
-    func addItem(_ item: NSView) {
-        items.append(item)
+    func addItem(_ item: NSView, weight: CGFloat = 1) {
+        items.append(Item(view: item, weight: max(0.01, weight)))
         rebuild(columns: preferredColumnCount(for: bounds.width))
     }
 
@@ -178,6 +184,8 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
 
     private func rebuild(columns: Int) {
         columnCount = columns
+        NSLayoutConstraint.deactivate(itemWidthConstraints)
+        itemWidthConstraints.removeAll()
         stack.arrangedSubviews.forEach { row in
             stack.removeArrangedSubview(row)
             row.removeFromSuperview()
@@ -185,13 +193,28 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
 
         for startIndex in stride(from: 0, to: items.count, by: columns) {
             let endIndex = min(startIndex + columns, items.count)
-            let row = NSStackView(views: Array(items[startIndex..<endIndex]))
+            let rowItems = Array(items[startIndex..<endIndex])
+            let row = NSStackView(views: rowItems.map(\.view))
             row.orientation = .horizontal
             row.alignment = .top
-            row.distribution = .fillEqually
+            row.distribution = .fill
             row.spacing = Self.columnSpacing
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            if rowItems.count == 1 {
+                let constraint = rowItems[0].view.widthAnchor.constraint(equalTo: row.widthAnchor)
+                constraint.isActive = true
+                itemWidthConstraints.append(constraint)
+            } else if rowItems.count == 2 {
+                let first = rowItems[0]
+                let second = rowItems[1]
+                let constraint = first.view.widthAnchor.constraint(
+                    equalTo: second.view.widthAnchor,
+                    multiplier: first.weight / second.weight
+                )
+                constraint.isActive = true
+                itemWidthConstraints.append(constraint)
+            }
         }
         invalidateIntrinsicContentSize()
     }
@@ -255,18 +278,22 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
         invalidateContentSize()
     }
 
-    func addGroup(_ group: PasteraPreferenceGroupView, anchorID: String? = nil) {
+    func addGroup(
+        _ group: PasteraPreferenceGroupView,
+        anchorID: String? = nil,
+        weight: CGFloat = 1
+    ) {
         _ = view
-        addAdaptiveContent(group)
+        addAdaptiveContent(group, weight: weight)
         if let anchorID {
             registerAnchor(anchorID, view: group)
         }
         invalidateContentSize()
     }
 
-    func addAdaptiveContent(_ content: NSView) {
+    func addAdaptiveContent(_ content: NSView, weight: CGFloat = 1) {
         _ = view
-        adaptiveGrid.addItem(content)
+        adaptiveGrid.addItem(content, weight: weight)
         invalidateContentSize()
     }
 
@@ -316,9 +343,16 @@ private final class PasteraPreferencePageDocumentView: NSView {
 }
 
 #if DEBUG
+extension PasteraPreferenceAdaptiveGridView {
+    var itemWidthsForTesting: [CGFloat] {
+        items.map { $0.view.frame.width }
+    }
+}
+
 extension PasteraPreferencePageViewController {
     var adaptiveColumnCountForTesting: Int { adaptiveGrid.columnCount }
     var adaptiveRowCountForTesting: Int { adaptiveGrid.rowCount }
+    var adaptiveItemWidthsForTesting: [CGFloat] { adaptiveGrid.itemWidthsForTesting }
     var preferencePageHorizontalInsetForTesting: CGFloat { Self.pageHorizontalInset }
     var preferencePageColumnSpacingForTesting: CGFloat { PasteraPreferenceAdaptiveGridView.columnSpacing }
 

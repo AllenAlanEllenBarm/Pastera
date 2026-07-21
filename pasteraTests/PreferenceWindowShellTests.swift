@@ -38,6 +38,7 @@ struct PreferenceWindowShellTests {
             "历史记录",
             "脚本",
             "快捷键",
+            "密码箱",
             "忽略应用",
             "Agent 集成",
             "云同步",
@@ -49,6 +50,7 @@ struct PreferenceWindowShellTests {
             "clock.arrow.circlepath",
             "curlybraces.square",
             "keyboard",
+            "lock.shield",
             "app.badge.checkmark",
             "terminal",
             "icloud",
@@ -198,6 +200,7 @@ struct PreferenceWindowShellTests {
             #expect(controller.cachedPreferencePageForTesting(paneID: .history) is CPYHistoryPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .scripts) is CPYScriptsPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .shortcuts) is CPYShortcutsPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .passwordVault) is CPYPasswordVaultPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .excludedApps) is CPYExcludeAppPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .agentIntegrations) is CPYAgentIntegrationPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .sync) is CPYSyncPreferenceViewController)
@@ -270,7 +273,7 @@ struct PreferenceWindowShellTests {
     }
 
     @Test
-    func everyPreferencePaneUsesTheSameTopAlignedDocumentOrigin() {
+    func onlyPasswordVaultUsesBalancedVerticalPositioning() {
         withDependencies {
             $0.pasteboardHistoryRepository = PreferenceWindowEmptyHistoryRepository()
         } operation: {
@@ -280,7 +283,17 @@ struct PreferenceWindowShellTests {
 
             for paneID in PasteraPreferencePaneID.allCases {
                 controller.showPreferencePaneForTesting(paneID: paneID)
-                #expect(controller.selectedPaneDocumentOriginForTesting.y == 16)
+                if paneID == .passwordVault,
+                   controller.selectedPaneDocumentHeightForTesting + 32
+                    < controller.preferencePaneViewportHeightForTesting {
+                    #expect(controller.selectedPaneDocumentOriginForTesting.y > 16)
+                    #expect(abs(
+                        controller.selectedPaneDocumentOriginForTesting.y
+                            - controller.preferencePaneVisibleBottomGapForTesting
+                    ) <= 1)
+                } else {
+                    #expect(controller.selectedPaneDocumentOriginForTesting.y == 16)
+                }
             }
         }
     }

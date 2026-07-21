@@ -16,6 +16,19 @@ import QuartzCore
 
 // swiftlint:disable file_length
 
+private final class PasteraPreferenceSidebarClipView: NSClipView {
+    override func scrollWheel(with event: NSEvent) {
+        guard let documentView, documentView.bounds.height > bounds.height else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let maximumY = documentView.bounds.height - bounds.height
+        let proposedY = bounds.origin.y + event.scrollingDeltaY
+        scroll(to: NSPoint(x: 0, y: min(max(0, proposedY), maximumY)))
+        superview?.setNeedsDisplay(bounds)
+    }
+}
+
 private final class PasteraPreferencesWindow: NSWindow {
     var onKeyDown: ((NSEvent) -> Bool)?
     var onRestoreDefaultFrameSize: (() -> Bool)?
@@ -73,6 +86,8 @@ final class CPYPreferencesWindowController: NSWindowController {
 
     private let rootView = NSView()
     private let sidebarView = NSView()
+    private let sidebarClipView = PasteraPreferenceSidebarClipView()
+    private let sidebarDocumentView = PasteraPreferenceFlippedView()
     private let sidebarStack = NSStackView()
     private let searchField = NSSearchField()
     private let separatorView = NSView()
@@ -227,6 +242,8 @@ private extension CPYPreferencesWindowController {
             return CPYScriptsPreferenceViewController()
         case .shortcuts:
             return CPYShortcutsPreferenceViewController()
+        case .passwordVault:
+            return CPYPasswordVaultPreferenceViewController()
         case .excludedApps:
             return CPYExcludeAppPreferenceViewController()
         case .agentIntegrations:
@@ -329,7 +346,15 @@ private extension CPYPreferencesWindowController {
             $0.translatesAutoresizingMaskIntoConstraints = false
             rootView.addSubview($0)
         }
-        sidebarView.addSubview(sidebarStack)
+        sidebarClipView.translatesAutoresizingMaskIntoConstraints = false
+        sidebarClipView.drawsBackground = false
+        sidebarClipView.documentView = sidebarDocumentView
+        sidebarDocumentView.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: Metrics.sidebarWidth, height: 1)
+        )
+        sidebarView.addSubview(sidebarClipView)
+        sidebarDocumentView.addSubview(sidebarStack)
         paneContainerView.addSubview(paneScrollView)
         paneContainerView.addSubview(resultsView)
 
@@ -338,10 +363,19 @@ private extension CPYPreferencesWindowController {
             sidebarView.topAnchor.constraint(equalTo: rootView.topAnchor),
             sidebarView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
             sidebarView.widthAnchor.constraint(equalToConstant: Metrics.sidebarWidth),
-            sidebarStack.leadingAnchor.constraint(equalTo: sidebarView.leadingAnchor, constant: Metrics.sidebarInset),
-            sidebarStack.trailingAnchor.constraint(equalTo: sidebarView.trailingAnchor, constant: -Metrics.sidebarInset),
-            sidebarStack.topAnchor.constraint(equalTo: sidebarView.topAnchor, constant: 12),
-            sidebarStack.bottomAnchor.constraint(equalTo: sidebarView.bottomAnchor, constant: -12),
+            sidebarClipView.leadingAnchor.constraint(equalTo: sidebarView.leadingAnchor),
+            sidebarClipView.trailingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
+            sidebarClipView.topAnchor.constraint(equalTo: sidebarView.topAnchor),
+            sidebarClipView.bottomAnchor.constraint(equalTo: sidebarView.bottomAnchor),
+            sidebarStack.leadingAnchor.constraint(
+                equalTo: sidebarDocumentView.leadingAnchor,
+                constant: Metrics.sidebarInset
+            ),
+            sidebarStack.trailingAnchor.constraint(
+                equalTo: sidebarDocumentView.trailingAnchor,
+                constant: -Metrics.sidebarInset
+            ),
+            sidebarStack.topAnchor.constraint(equalTo: sidebarDocumentView.topAnchor, constant: 12),
             searchField.widthAnchor.constraint(equalTo: sidebarStack.widthAnchor),
 
             separatorView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
@@ -364,6 +398,8 @@ private extension CPYPreferencesWindowController {
             resultsView.topAnchor.constraint(equalTo: paneContainerView.topAnchor),
             resultsView.bottomAnchor.constraint(equalTo: paneContainerView.bottomAnchor)
         ])
+        sidebarDocumentView.layoutSubtreeIfNeeded()
+        sidebarDocumentView.frame.size.height = sidebarStack.fittingSize.height + 24
     }
 
     @objc func sidebarButtonTapped(_ sender: PasteraPreferenceSidebarButton) {
@@ -524,7 +560,11 @@ private extension CPYPreferencesWindowController {
     }
 
     func selectedPaneOriginY(visibleHeight: CGFloat, contentHeight: CGFloat) -> CGFloat {
-        Metrics.paneDocumentInset
+        guard selectedPaneID == .passwordVault,
+              contentHeight + Metrics.paneDocumentInset * 2 < visibleHeight else {
+            return Metrics.paneDocumentInset
+        }
+        return (visibleHeight - contentHeight) / 2
     }
 
     @discardableResult
@@ -1141,6 +1181,8 @@ extension CPYPreferencesWindowController {
             return .history
         case "shortcuts":
             return .shortcuts
+        case "password vault", "vault":
+            return .passwordVault
         case "scripts", "script transforms":
             return .scripts
         case "excluded apps", "exclude":
@@ -1164,6 +1206,7 @@ extension CPYPreferencesWindowController {
         case .history: return "History & Preview"
         case .scripts: return "Scripts"
         case .shortcuts: return "Shortcuts"
+        case .passwordVault: return "Password Vault"
         case .excludedApps: return "Excluded Apps"
         case .agentIntegrations: return "Agent Integrations"
         case .sync: return "Sync"

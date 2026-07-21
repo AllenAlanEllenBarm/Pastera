@@ -7005,6 +7005,24 @@
     "Metadata, paste, copy, and controlled injection" : { "localizations" : {
       "en" : { "stringUnit" : { "state" : "translated", "value" : "Metadata, paste, copy, and controlled injection" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Metadaten, Einfügen, Kopieren und kontrollierte Eingabe" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Metadati, incolla, copia e inserimento controllato" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "メタデータ、ペースト、コピー、制御された入力" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "元数据、粘贴、复制和受控注入" } }
     } },
+    "Automatic Lock" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic Lock" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Automatische Sperre" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Blocco automatico" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "自動ロック" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动锁定" } }
+    } },
+    "Lock the password vault automatically after a period of inactivity." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Lock the password vault automatically after a period of inactivity." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Sperrt den Passworttresor nach einer Zeit der Inaktivität automatisch." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Blocca automaticamente la cassaforte password dopo un periodo di inattività." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "一定時間操作がないとパスワード保管庫を自動的にロックします。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "一段时间未操作后自动锁定密码箱。" } }
+    } },
+    "Quick Unlock" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Quick Unlock" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Schnell entsperren" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Sblocco rapido" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "クイックロック解除" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快速解锁" } }
+    } },
+    "Use this Mac's authentication to unlock the password vault." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Use this Mac's authentication to unlock the password vault." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Verwendet die Authentifizierung dieses Mac zum Entsperren des Passworttresors." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Usa l'autenticazione di questo Mac per sbloccare la cassaforte password." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "このMacの認証でパスワード保管庫をロック解除します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用这台 Mac 的认证解锁密码箱。" } }
+    } },
+    "Change Master Password" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Master Password" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Master-Passwort ändern" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Modifica password principale" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "マスターパスワードを変更" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改主密码" } }
+    } },
+    "Change the master password after verifying the current password." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Change the master password after verifying the current password." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Ändert das Master-Passwort nach Prüfung des aktuellen Passworts." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Modifica la password principale dopo aver verificato quella attuale." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在のパスワードを確認してからマスターパスワードを変更します。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "验证当前密码后修改主密码。" } }
+    } },
     "items" : {
       "localizations" : {
         "en" : {

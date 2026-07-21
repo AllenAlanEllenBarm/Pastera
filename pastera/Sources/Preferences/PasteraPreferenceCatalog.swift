@@ -11,6 +11,7 @@ enum PasteraPreferencePaneID: String, CaseIterable {
     case history
     case scripts
     case shortcuts
+    case passwordVault
     case excludedApps
     case agentIntegrations
     case sync
@@ -259,6 +260,47 @@ struct PasteraPreferenceCatalog: Equatable {
                             "Configure search, paging, and switching shortcuts for the history panel."
                         ),
                         keywords: ["history panel", "shortcut", "keyboard"]
+                    )
+                ]
+            ),
+            PasteraPreferenceCatalogPage(
+                paneID: .passwordVault,
+                groupTitle: pasteraPreferenceString("Usage Preferences"),
+                title: pasteraPreferenceString("Password Vault"),
+                symbolName: "lock.shield",
+                searchItems: [
+                    PasteraPreferenceSearchItem(
+                        id: "vault.autoLock",
+                        paneID: .passwordVault,
+                        sectionID: "vault.locking",
+                        anchorID: "vault.autoLock",
+                        title: pasteraPreferenceString("Automatic Lock"),
+                        subtitle: pasteraPreferenceString(
+                            "Lock the password vault automatically after a period of inactivity."
+                        ),
+                        keywords: ["vault", "password vault", "auto lock", "自动锁定", "密码箱"]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "vault.quickUnlock",
+                        paneID: .passwordVault,
+                        sectionID: "vault.locking",
+                        anchorID: "vault.quickUnlock",
+                        title: pasteraPreferenceString("Quick Unlock"),
+                        subtitle: pasteraPreferenceString(
+                            "Use this Mac's authentication to unlock the password vault."
+                        ),
+                        keywords: ["vault", "quick unlock", "touch id", "快速解锁", "密码箱"]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "vault.masterPassword",
+                        paneID: .passwordVault,
+                        sectionID: "vault.masterPassword",
+                        anchorID: "vault.masterPassword",
+                        title: pasteraPreferenceString("Change Master Password"),
+                        subtitle: pasteraPreferenceString(
+                            "Change the master password after verifying the current password."
+                        ),
+                        keywords: ["vault", "master password", "reset password", "重置密码", "主密码", "密码箱"]
                     )
                 ]
             ),

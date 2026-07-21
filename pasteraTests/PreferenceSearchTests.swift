@@ -34,6 +34,7 @@ struct PreferenceSearchTests {
             .history,
             .scripts,
             .shortcuts,
+            .passwordVault,
             .excludedApps,
             .agentIntegrations,
             .sync,
@@ -45,6 +46,7 @@ struct PreferenceSearchTests {
             "history",
             "scripts",
             "shortcuts",
+            "passwordVault",
             "excludedApps",
             "agentIntegrations",
             "sync",
@@ -72,6 +74,7 @@ struct PreferenceSearchTests {
             .history,
             .scripts,
             .shortcuts,
+            .passwordVault,
             .excludedApps,
             .agentIntegrations,
             .sync,
@@ -79,6 +82,7 @@ struct PreferenceSearchTests {
             .about
         ])
         #expect(pages.map(\.groupTitle) == [
+            pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
@@ -94,6 +98,7 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("History & Preview"),
             pasteraPreferenceString("Scripts"),
             pasteraPreferenceString("Shortcuts"),
+            pasteraPreferenceString("Password Vault"),
             pasteraPreferenceString("Excluded Apps"),
             pasteraPreferenceString("Agent Integrations"),
             pasteraPreferenceString("Sync"),
@@ -105,6 +110,7 @@ struct PreferenceSearchTests {
             "clock.arrow.circlepath",
             "curlybraces.square",
             "keyboard",
+            "lock.shield",
             "app.badge.checkmark",
             "terminal",
             "icloud",
@@ -121,6 +127,21 @@ struct PreferenceSearchTests {
                 #expect(!item.title.isEmpty)
                 #expect(!item.subtitle.isEmpty)
             }
+        }
+    }
+
+    @Test
+    func passwordVaultQueriesOwnTheThreeSecurityAnchors() throws {
+        let page = try #require(catalog.pages.first { $0.paneID == .passwordVault })
+
+        #expect(page.searchItems.map(\.anchorID) == [
+            "vault.autoLock",
+            "vault.quickUnlock",
+            "vault.masterPassword"
+        ])
+        for query in ["密码箱", "自动锁定", "快速解锁", "重置密码", "vault"] {
+            let results = PasteraPreferenceSearch(catalog: catalog).search(query)
+            #expect(results.contains { $0.paneID == .passwordVault })
         }
     }
 
