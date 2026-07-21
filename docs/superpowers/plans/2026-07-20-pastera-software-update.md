@@ -692,6 +692,7 @@ sparkle:version:        301
 - 自动检查默认开启，关闭后仍可手动检查；发现更新后继续由 Sparkle 标准 UI 请求用户确认安装。
 - Bundle 版本升级为 `3.0.1 (301)`；DMG/appcast 脚本改为从产物真实元数据生成并校验 Ed25519 签名。
 - GitHub Release workflow 新增 Sparkle 私钥非空门禁，不再使用 Perl 手工改写 appcast 版本字段。
+- 发布构建固定在 `ecefadcd9d685a1b9368914e7b64792be7239b11`；`v3.0.1-beta` 与 DMG 均对应这一提交。
 
 ### Plan Deviations
 
@@ -712,6 +713,9 @@ sparkle:version:        301
 - Full Debug: 单 worker 完整回归 86 个套件、908 项测试通过。
 - Post-merge: `develop` 合并结果上再次运行单 worker 完整回归，86 个套件、908 项测试通过。
 - Release: arm64 Release Archive 成功，归档内 Pastera.app 回读为 `3.0.1 (301)`。
+- Manual installer DMG: `Pastera-3.0.1-beta-macOS.dmg` 构建成功，回读为 `3.0.1 (301)`、`x86_64 arm64`；大小 `34,013,903` bytes，SHA-256 为 `61288ebab7950de1f0b3a26620cdcdf65c466571fe7ac6e639b48ca4c11a51f0`。
+- Signing: app 与内嵌组件通过 `codesign --verify --deep --strict`；由于没有 Developer ID 与公证凭据，签名为 ad-hoc、`TeamIdentifier` 为空，`spctl` 按预期拒绝。
+- GitHub: `origin/develop` 与 `v3.0.1-beta^{}` 均回读到 `ecefadcd9d685a1b9368914e7b64792be7239b11`；Prerelease 为 `https://github.com/pastera-app/Pastera/releases/tag/v3.0.1-beta`，资产状态 `uploaded`，远端 digest 与本地 SHA-256 一致。
 - Local install: `./script/install_local.sh` 成功；`/Applications/Pastera.app` 为 `3.0.1 (301)` 并已运行。
 - Static: `git diff --check`、Shell 语法、Info.plist、本地化 JSON 和 Swift Ed25519 验证器检查通过。
 
@@ -719,12 +723,13 @@ sparkle:version:        301
 
 - 本机未找到与应用 `SUPublicEDKey` 匹配的 Sparkle 私钥，也没有 Developer ID Application 证书和可用公证 profile。
 - 仓库当前 `appcast.xml` 仍是 `1.2.2beta`；在合法签名、公证和远程 feed 发布前，已发布旧客户端仍不能完成 3.x 可执行自动更新。
+- GitHub 已发布的 `v3.0.1-beta` 是 ad-hoc、未公证的手动安装包，用户首次打开可能需要按 DMG 内说明通过 Gatekeeper；它不是 Sparkle 可验签 enclosure，也尚未完成 Task 6 所要求的新密钥桥接。
 - 未完成旧构建 → 新构建的真实 Sparkle 下载、验签、安装和重启验收。
 
 ### Follow-ups
 
 - 恢复匹配的 Sparkle 私钥或按 Task 6 执行一次性人工桥接。
-- 准备 Developer ID/公证凭据后发布 `v3.0.1-beta` DMG，由 `generate_appcast` 更新 feed，再完成远程和旧版客户端回读。
+- 准备 Developer ID/公证凭据及匹配 Sparkle 私钥后，以更高数字构建发布签名、公证 DMG，由 `generate_appcast` 更新 feed，再完成旧版客户端回读。
 - 补齐软件更新页的浅色/深色、最小窗口、关闭自动检查和检查中状态人工证据。
 
 ### ZenTao Closeout
@@ -733,5 +738,5 @@ sparkle:version:        301
 
 ### Final Delivery Status
 
-- 代码实现、自动测试、Release Archive 和本地安装已完成。
-- 签名/公证 DMG、Git tag/GitHub Release、远程 appcast 与真实旧版自更新仍被发布凭据门禁阻断，不得标记为已完成。
+- 代码实现、自动测试、Release Archive、本地安装、`v3.0.1-beta` tag、手动安装 DMG 和 GitHub Prerelease 已完成。
+- Developer ID 签名/公证 DMG、远程 appcast 与真实旧版自更新仍被发布凭据门禁阻断，不得标记为已完成。
