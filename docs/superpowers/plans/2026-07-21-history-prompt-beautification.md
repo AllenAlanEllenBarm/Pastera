@@ -4,7 +4,7 @@
 
 **目标：** 在每个可编辑历史条目的详情编辑器中提供“美化提示词”，把历史行原有铅笔图标替换成系统魔法棒图标，默认以不收费的本机方式运行，并允许用户配置 OpenAI 兼容的大模型或私有模型。
 
-**架构：** 新增独立的提示词优化领域模型、设置与 Keychain 存储、免费优化器、OpenAI 兼容优化器和统一编排服务。`HistoryEditorWindowController` 继续拥有草稿、撤销和保存生命周期，只把现有脚本下拉扩展成统一文本转换动作。`Environment` 负责注入单例服务，`CPYScriptsPreferenceViewController` 在现有脚本设置页顶部嵌入提示词优化配置，不增加侧栏页面。
+**架构：** 提示词优化领域模型、设置与 Keychain 存储、免费优化器、OpenAI 兼容优化器和统一编排服务保持独立。`HistoryEditorWindowController` 继续拥有草稿、撤销和保存生命周期，只把现有脚本下拉扩展成统一文本转换动作。`Environment` 负责注入单例服务；配置入口从 `CPYScriptsPreferenceViewController` 迁移到独立的 `CPYPromptOptimizationPreferenceViewController`，脚本页恢复为纯脚本管理页面。
 
 **技术栈：** Swift、AppKit、macOS 26+ Foundation Models、URLSession、Security/Keychain、UserDefaults、Swift Testing、Xcode 26.5。
 
@@ -24,7 +24,9 @@
 - 远端失败、取消、超时、空响应、超长响应或无变化都不得覆盖原草稿。
 - 保留现有脚本管理、脚本执行、快捷键、历史右键脚本动作、编辑器 `Cmd+Return` 和 `Cmd+S` 语义。
 - 不改主菜单工作区、片段编辑器和其他位置的铅笔图标。仅替换 `HistoryMenuRowView` 中可编辑历史条目的按钮图标和文案。
-- 使用 AppKit 原生控件、SF Symbols、`PasteraDesignTokens`、系统字体和系统浅色/深色外观，不添加 AI 紫、渐变、发光、玻璃卡片、额外侧栏、向导或装饰动画。
+- 使用 AppKit 原生控件、SF Symbols、`PasteraDesignTokens`、系统字体和系统浅色/深色外观，不添加 AI 紫、渐变、发光、玻璃卡片、向导或装饰动画。
+- 设置侧栏新增且只新增一个“提示词优化”页面，位于“历史记录”和“脚本”之间；不增加独立工作台、窗口或全局快捷键。
+- 迁移配置页面不得修改 UserDefaults 键、Keychain 服务名、已确认来源记录或提示词优化运行链路，不进行数据迁移。
 - 保留当前未跟踪的 `.codex/config.toml`、`.superpowers/` 以及所有无关修改。
 
 ## 调研结论与技术决策
@@ -86,8 +88,10 @@ V1 采用一次重写调用，不做多候选、评分、自动评测或循环�
 
 ### 设置页
 
-- 保留 `.scripts` 设置页、侧栏“脚本”和现有脚本卡片，不新增侧栏项目。
-- 在 `CPYScriptsPreferenceViewController` 顶部增加一张“提示词优化”卡片，下面依次保留脚本列表卡片和快捷键卡片。
+- 在设置侧栏新增 `.promptOptimization` 页面，标题为“提示词优化”，符号使用 `wand.and.stars`，顺序位于“历史记录”和“脚本”之间。
+- 新建 `CPYPromptOptimizationPreferenceViewController`，独立承载提示词优化配置和内容高度更新；现有 `PromptOptimizationPreferenceSection` 保留为可复用配置组件。
+- `CPYScriptsPreferenceViewController` 删除提示词优化依赖、布局、搜索锚点和测试接口，只保留脚本列表、模板、测试和快捷键。
+- 设置搜索中的“美化”“OpenAI”“Ollama”“模型”等结果跳转到 `.promptOptimization`，不在脚本页保留重复入口。
 - 卡片头使用 `wand.and.stars`、系统强调色和现有 12pt 圆角。不得嵌套第二层卡片。
 - 配置项使用有明确标签的原生控件，不把占位文案当标签：
   - 处理方式：`免费自动（推荐）`、`OpenAI 兼容`
@@ -112,6 +116,7 @@ V1 采用一次重写调用，不做多候选、评分、自动评测或循环�
 - OpenAI 兼容远端，包括 OpenAI、Gemini、Ollama、LM Studio 和自定义端点预设。
 - UserDefaults 非敏感配置、Keychain API Key、远端发送确认和 HTTP 安全策略。
 - 设置页、搜索目录、双语文案、键盘和可访问性状态。
+- 独立“提示词优化”设置页，以及脚本页面中的旧配置入口移除。
 - 单元测试、控制器测试、URLSession 桩、完整回归、安装和真实 UI 检查。
 
 ### 不在本期范围
@@ -121,7 +126,7 @@ V1 采用一次重写调用，不做多候选、评分、自动评测或循环�
 - 供应商账户、额度、价格、模型列表的实时推荐或自动模型切换。
 - 内置模型下载、MLX、llama.cpp、Core ML 模型分发和 GPU 调度。
 - 将配置、密钥、原文或优化结果同步到 OneDrive。
-- 新侧栏、新窗口、新向导、订阅 UI、用量统计和远端内容日志。
+- 独立提示词工作台、新窗口、新向导、全局优化快捷键、订阅 UI、用量统计和远端内容日志。
 - Windows 端实现。新增领域协议应保持可移植，但本计划只交付 macOS AppKit。
 
 ## 验收映射
@@ -137,7 +142,8 @@ V1 采用一次重写调用，不做多候选、评分、自动评测或循环�
 | AC-07 | 首次远端发送显示来源确认，失败不改原文 | 服务确认与编辑器确认 | 确认存储与错误路径测试 | 云端首次、取消、再次运行验证 |
 | AC-08 | 设置 UI 紧凑、原生、浅色深色可读、键盘和 VoiceOver 标签完整 | 偏好设置区块与设计令牌 | 偏好布局和可访问性测试 | 浅色、深色、键盘导航截图 |
 | AC-09 | 无回归并安装最新本地构建 | 工程与测试文件 | 聚焦测试、完整清理测试、Release 构建 | `/Applications/Pastera.app` 进程和功能回读 |
-| AC-10 | 在已打开的脚本设置页从免费模式切换到自备服务时，远端字段立即展开且页面滚动高度同步增长 | `PromptOptimizationPreferenceSection.swift`、`CPYScriptsPreferenceViewController.swift` | 页面真实布局高度回归测试 | 已安装应用切换处理方式并检查服务预设、基础地址、模型、API Key 和操作按钮 |
+| AC-10 | 在已打开的提示词优化设置页从免费模式切换到自备服务时，远端字段立即展开且页面滚动高度同步增长 | `PromptOptimizationPreferenceSection.swift`、`CPYPromptOptimizationPreferenceViewController.swift` | 页面真实布局高度回归测试 | 已安装应用切换处理方式并检查服务预设、基础地址、模型、API Key 和操作按钮 |
+| AC-11 | “提示词优化”作为独立侧栏页面位于“历史记录”和“脚本”之间，脚本页不再展示相关配置，设置搜索跳转到新页面 | 设置目录、偏好窗口控制器、两个页面控制器 | 目录、页面工厂、顺序、搜索路由和脚本页边界测试 | 真实设置侧栏、搜索跳转和两个页面截图 |
 
 ## 数据流
 
@@ -158,6 +164,26 @@ HistoryMenuRowView 魔法棒
   -> 用户按下保存
   -> 复用 PasteboardHistoryRepository 更新历史或创建 OCR 派生文本历史
 ```
+
+## 已确认的后续设计：独立设置页
+
+**确认日期：** 2026-07-21
+
+**产品边界：** 只把提示词优化配置从“脚本”设置页剥离为独立侧栏页面。历史行魔法棒、历史编辑器、免费优化、远端模型、存储和安全策略保持原有行为；不增加独立工作台、窗口或全局快捷键。
+
+**页面与组件：**
+
+- `PasteraPreferencePaneID` 新增 `.promptOptimization`。
+- `PasteraPreferenceCatalog` 在 `.history` 与 `.scripts` 之间注册“提示词优化”，使用 `wand.and.stars`。
+- `CPYPromptOptimizationPreferenceViewController` 注入现有设置存储、Keychain 存储和优化服务，承载 `PromptOptimizationPreferenceSection`，并在字段显隐变化后更新页面内容高度。
+- `CPYScriptsPreferenceViewController` 移除所有提示词优化依赖、属性、布局、锚点和测试接口，恢复为纯脚本页面。
+- 搜索项从 `scripts.promptOptimization` 迁移为 `promptOptimization.configuration`，相关关键词只路由到新页面。
+
+**数据与错误边界：** UserDefaults 键、Keychain 服务名、已确认来源记录和 `AppEnvironment.current.promptOptimizationService` 不变，因此不需要数据迁移。保存、连接测试、取消、超时和错误提示继续由现有配置组件处理；页面关闭时仍取消连接测试任务。
+
+**验证设计：** 先用失败测试锁定新 pane 注册与顺序、页面工厂类型、搜索路由、脚本页不再包含提示词配置，以及新页面免费/远端模式的实际高度；实现后运行提示词设置、设置搜索、偏好窗口和脚本设置聚焦套件，再执行完整串行回归、`./script/install_local.sh --verify` 和真实 AppKit 页面复测。
+
+> 以下任务 1-8 记录已经交付的原始实现及修复过程，其中任务 6 的脚本页嵌入方案是待迁移的历史状态。独立设置页的实施步骤将在本设计书面复核通过后追加到同一计划。
 
 ## 任务 1：定义提示词优化契约、设置和 Keychain 存储
 
@@ -781,8 +807,8 @@ pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
 - 主菜单文本历史行的魔法棒、悬停、键盘焦点和删除动作对齐。
 - 历史面板文本行与图片行的一致魔法棒语义。
 - 编辑器空闲、优化中、优化完成、撤销、无变化、失败和等待 OCR 状态。
-- 脚本设置页免费自动模式的浅色与深色外观。
-- 脚本设置页远端配置、校验错误、已保存密钥状态和连接测试状态。
+- 提示词优化设置页免费自动模式的浅色与深色外观。
+- 提示词优化设置页远端配置、校验错误、已保存密钥状态和连接测试状态。
 - 只显示来源的远端首次发送确认。
 
 确认编辑器最小尺寸下没有裁切，偏好设置没有横向溢出，远端字段出现时没有布局跳动，没有低对比度状态，也不会因为脚本不可用而错误隐藏提示词优化动作。
@@ -907,7 +933,7 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 - 提示词注入可能要求优化器直接回答或泄露数据。缓解措施：使用固定高优先级重写指令、明确的来源分隔符、不提供工具、不复用对话记录、只生成一次响应，并严格校验输出。
 - 远端配置可能通过不安全传输暴露文本或凭据。缓解措施：默认 HTTPS、回环地址例外、局域网 HTTP 显式开启、按来源确认和 Keychain 存储。
 - 长提示词可能增加内存、延迟或供应商费用。缓解措施：限制输入和输出长度、设置超时、编辑器只允许一个进行中的任务，并且不累积流式对话记录。
-- 新增设置卡片可能使脚本页过于拥挤。缓解措施：只使用一个外层卡片、收起远端字段、复用当前紧凑间距，并在偏好设置最小宽度下验证。
+- 新增侧栏页面可能增加侧栏纵向密度，并在远端字段展开时超过窗口高度。缓解措施：复用紧凑侧栏行高和单层配置卡片，保留滚动容器，并在偏好设置最小尺寸下验证完整字段与操作区。
 
 ### 回滚
 
@@ -926,10 +952,10 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 ## 交付元数据
 
 - 计划路径：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`
-- 计划状态：`已实施并验证；已合并 develop，随本次收尾提交推送`
+- 计划状态：`既有功能已实施并验证；独立设置页拆分设计已确认，待实施计划`
 - 证据档位：`standard`
 - 需求 ID：`未请求`
-- 任务 ID：`未请求；Superpowers 任务 1-8 组成一个业务闭环`
+- 任务 ID：`未请求；Superpowers 任务 1-8 已交付，独立设置页尚未拆解实施任务`
 - 禅道同步状态：`未请求`
 - 禅道回读：`不适用`
 - 最后更新：`2026-07-21`
@@ -946,6 +972,7 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 - 修复后回归与安装：串行 `clean test` 输出 970 个测试、93 个套件全部通过并以 `** TEST SUCCEEDED **` 结束；`./script/install_local.sh --verify` 输出 `** BUILD SUCCEEDED **`，完成签名校验。最终重启后进程 PID `73284` 正从 `/Applications/Pastera.app/Contents/MacOS/Pastera` 运行。Xcode 在写入本次全量测试结果包摘要时给出既有 `writerNotOpen` 警告，因此测试数量以完整逐套件日志和最终通过行回读，不以损坏的摘要计数。
 - 真实 UI 截图：修复后的自备服务模式完整显示服务预设、基础地址、模型、API Key、HTTP 开关、保存设置和测试连接，滚动到底部后转换脚本与全局快捷键区域仍完整；切回“免费自动”后远端字段收起且页面恢复紧凑。证据为 `/Users/feeyo/.codex/visualizations/2026/07/21/019f8208-cf47-77d0-9ec1-5e20f97aa61c/pastera-prompt-remote-expanded.jpeg`、`pastera-prompt-remote-scrolled.jpeg` 和 `pastera-prompt-free-restored.jpeg`。先前只渲染独立区块的视觉检查没有覆盖父页面动态失效，这是本次补充真实整页切换和页面高度回归测试的原因。
 - 数据与网络边界：本轮未填写、保存或读取真实 API Key，未点击连接测试，也未向付费或私有模型发起请求。只删除了本轮创建、以 `Pastera 功能验收 20260721` 开头的 2 条合成历史并回读剩余 0；测试便笺经系统确认框删除，用户原有“目标功能…”便笺保持不变。
+- 后续设计确认：用户选择仅拆分设置入口的方案 A，并确认“提示词优化”独立侧栏页位于“历史记录”和“脚本”之间；脚本页恢复为纯脚本管理，历史魔法棒、编辑器、服务、UserDefaults、Keychain 和远端安全契约保持不变。未增加第二份规格，确认设计已写回本计划，尚未开始实现。
 - 剩余风险：Apple 模型质量、可用性和降级仍需在符合条件的真实硬件上验证；至少一个真实 OpenAI 兼容或私有端点、Keychain 重启持久化、401/429/超时真机状态以及完整 UI/VoiceOver 手工矩阵仍待验证。
 - 后续动作：本次提交推送后，按需要在真实 Apple Intelligence 设备和一个用户自配兼容端点上补充手工矩阵；不阻塞当前默认免费模式、自动化回归和本地安装交付。
 - 禅道收尾：未请求。
