@@ -687,6 +687,7 @@ sparkle:version:        301
 ### Actual Implementation
 
 - Implementation commit: `94e7389 feat(update): 独立软件更新并升级至 3.0.1`.
+- Integration: `9b01090 Merge branch 'feature/pastera-vault-agent-v1' into develop` 已将功能分支合并到本地默认主分支 `develop`。
 - 新增独立 `.softwareUpdate` pane 和 `PasteraUpdaterFacade`；About 页不再承担 Sparkle 设置与检查逻辑。
 - 自动检查默认开启，关闭后仍可手动检查；发现更新后继续由 Sparkle 标准 UI 请求用户确认安装。
 - Bundle 版本升级为 `3.0.1 (301)`；DMG/appcast 脚本改为从产物真实元数据生成并校验 Ed25519 签名。
@@ -709,6 +710,7 @@ sparkle:version:        301
 
 - Focused: 更新相关 8 个套件、85 项测试通过。
 - Full Debug: 单 worker 完整回归 86 个套件、908 项测试通过。
+- Post-merge: `develop` 合并结果上再次运行单 worker 完整回归，86 个套件、908 项测试通过。
 - Release: arm64 Release Archive 成功，归档内 Pastera.app 回读为 `3.0.1 (301)`。
 - Local install: `./script/install_local.sh` 成功；`/Applications/Pastera.app` 为 `3.0.1 (301)` 并已运行。
 - Static: `git diff --check`、Shell 语法、Info.plist、本地化 JSON 和 Swift Ed25519 验证器检查通过。
