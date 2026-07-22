@@ -6,10 +6,13 @@ import Security
 
 enum PasswordVaultState: Equatable {
     case notConfigured
+    case preparingLocalCopy
+    case localCopyUnavailable(PasswordVaultLocalPreparationFailure)
     case locked
     case unlocking
     case unlocked
     case readOnlyWarning(String)
+    case recoveryRequired(String)
     case failed(String)
 }
 
@@ -312,6 +315,7 @@ protocol PasswordVaultStore {
     func enableAutomationUnlock() throws
     func unlockForAutomation() throws
     func disableAutomationUnlock() throws
+    func prepareLocalCopy(using migrator: PasswordVaultMigrating)
     func bindSessionExecutor(_ executor: VaultAgentSerialExecutor, onStateChange: @escaping () -> Void)
     func lock()
     func reloadAndMerge() throws
@@ -349,6 +353,7 @@ extension PasswordVaultStore {
     func enableAutomationUnlock() throws { throw PasswordVaultError.keychainUnavailable }
     func unlockForAutomation() throws { throw PasswordVaultError.keychainUnavailable }
     func disableAutomationUnlock() throws {}
+    func prepareLocalCopy(using migrator: PasswordVaultMigrating) {}
     func bindSessionExecutor(_ executor: VaultAgentSerialExecutor, onStateChange: @escaping () -> Void) {}
     func lock() {}
     func reloadAndMerge() throws {}

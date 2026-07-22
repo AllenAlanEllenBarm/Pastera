@@ -39,6 +39,7 @@ struct Environment {
          accessibilityService: AccessibilityService = AccessibilityService(),
          oneDriveProcessStatusService: OneDriveProcessStatusServicing = OneDriveProcessStatusService(),
          passwordVaultStore: PasswordVaultStore? = nil,
+         passwordVaultMigrator: PasswordVaultMigrating? = nil,
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
          passwordVaultUIController: PasswordVaultUIController? = nil,
          vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing? = nil,
@@ -75,6 +76,11 @@ struct Environment {
             defaults: defaults
         )
         self.passwordVaultUIController = resolvedPasswordVaultUIController
+        if let passwordVaultMigrator {
+            resolvedPasswordVaultUIController.vaultAgentExecutor.async {
+                resolvedPasswordVaultStore.prepareLocalCopy(using: passwordVaultMigrator)
+            }
+        }
         self.vaultAgentApplicationRuntime = vaultAgentApplicationRuntime ??
             vaultAgentApplicationRuntimeFactory?(resolvedPasswordVaultUIController) ??
             UnavailableVaultAgentApplicationRuntime()

@@ -35,6 +35,7 @@ protocol PasswordVaultLocalStoring {
     func containsVault() -> Bool
     func read() throws -> Data
     func writeAtomically(_ data: Data) throws
+    func removeVaultCreatedByFailedMigration() throws
     func readBackup() throws -> Data
 }
 
@@ -92,6 +93,12 @@ final class FilePasswordVaultLocalStorage: PasswordVaultLocalStoring {
         try validate(current)
         try current.write(to: paths.backupURL, options: .atomic)
         try replaceVault(with: temporaryURL)
+    }
+
+    func removeVaultCreatedByFailedMigration() throws {
+        // Migration calls this only after its entry guard established that no local vault existed.
+        guard containsVault() else { return }
+        try fileManager.removeItem(at: paths.vaultURL)
     }
 
     private func replaceVault(with temporaryURL: URL) throws {

@@ -11,6 +11,45 @@ import Testing
 @Suite("Password vault menu", .serialized)
 // swiftlint:disable:next type_body_length
 struct PasswordVaultMenuTests {
+    @Test("preparing a local copy never presents password controls")
+    func preparingLocalCopyHidesPasswordForm() {
+        var unlockAttempts = 0
+        let controller = makeVaultController(
+            state: { .preparingLocalCopy },
+            folders: { [] },
+            unlock: { _, _ in unlockAttempts += 1 }
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
+        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "Preparing local vault")))
+        #expect(unlockAttempts == 0)
+    }
+
+    @Test("OneDrive migration unavailability is recovery state and never a password error")
+    func unavailableLocalCopyHidesPasswordForm() {
+        var unlockAttempts = 0
+        var quickUnlockAttempts = 0
+        let controller = makeVaultController(
+            state: { .localCopyUnavailable(.oneDriveUnavailable) },
+            canQuickUnlock: { true },
+            folders: { [] },
+            unlock: { _, _ in unlockAttempts += 1 },
+            unlockWithQuickKey: { _ in quickUnlockAttempts += 1 }
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
+        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "Local vault is not ready")))
+        #expect(!controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "The master password is incorrect.")))
+        #expect(unlockAttempts == 0)
+        #expect(quickUnlockAttempts == 0)
+    }
+
     @Test("a locked vault unlocks inside the main content area")
     func lockedVaultUsesEmbeddedUnlockForm() {
         let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)

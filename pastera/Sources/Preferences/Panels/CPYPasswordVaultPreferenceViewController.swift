@@ -238,7 +238,7 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
         let status: (String, String, NSColor)
         let detail: String
 
-        if state.isBusy || state.vaultState == .unlocking {
+        if state.isBusy || state.vaultState == .unlocking || state.vaultState == .preparingLocalCopy {
             isConfigured = true
             allowsGeneralSettings = false
             allowsMasterPasswordChange = false
@@ -252,6 +252,18 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
                 allowsMasterPasswordChange = false
                 status = (pasteraPreferenceString("Not Set Up"), "circle.dashed", .secondaryLabelColor)
                 detail = pasteraPreferenceString("Set up the password vault from the main menu before configuring security options.")
+            case .preparingLocalCopy:
+                isConfigured = true
+                allowsGeneralSettings = false
+                allowsMasterPasswordChange = false
+                status = (pasteraPreferenceString("Processing"), "hourglass", .secondaryLabelColor)
+                detail = pasteraPreferenceString("A password vault security operation is in progress.")
+            case .localCopyUnavailable:
+                isConfigured = true
+                allowsGeneralSettings = false
+                allowsMasterPasswordChange = false
+                status = (pasteraPreferenceString("Unavailable"), "xmark.octagon.fill", .systemRed)
+                detail = pasteraPreferenceString("Restore access to the password vault file before changing security settings.")
             case .locked:
                 isConfigured = true
                 allowsGeneralSettings = true
@@ -275,6 +287,14 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
                 status = (pasteraPreferenceString("Read Only"), "exclamationmark.triangle.fill", .systemOrange)
                 detail = message.isEmpty
                     ? pasteraPreferenceString("Resolve the sync or file access issue before changing the master password.")
+                    : message
+            case let .recoveryRequired(message):
+                isConfigured = true
+                allowsGeneralSettings = false
+                allowsMasterPasswordChange = false
+                status = (pasteraPreferenceString("Unavailable"), "xmark.octagon.fill", .systemRed)
+                detail = message.isEmpty
+                    ? pasteraPreferenceString("Restore access to the password vault file before changing security settings.")
                     : message
             case let .failed(message):
                 isConfigured = true

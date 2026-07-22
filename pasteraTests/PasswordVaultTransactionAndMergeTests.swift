@@ -327,6 +327,10 @@ private final class CoordinatedReviewLocalStorage: PasswordVaultLocalStoring, @u
         try backing.writeAtomically(data)
     }
 
+    func removeVaultCreatedByFailedMigration() throws {
+        try backing.removeVaultCreatedByFailedMigration()
+    }
+
     func readBackup() throws -> Data {
         try backing.readBackup()
     }

@@ -1727,6 +1727,10 @@ extension MainMenuPanelController {
         switch passwordVaultDataSource.state() {
         case .notConfigured:
             return passwordVaultAccessContent(mode: .create, isBusy: false)
+        case .preparingLocalCopy:
+            return passwordVaultFailureContent(message: String(localized: "Preparing local vault"))
+        case .localCopyUnavailable:
+            return passwordVaultFailureContent(message: String(localized: "Local vault is not ready"))
         case .locked:
             return passwordVaultAccessContent(mode: .unlock, isBusy: false)
         case .unlocking:
@@ -1735,6 +1739,9 @@ extension MainMenuPanelController {
             passwordVaultAccessView = nil
             passwordVaultAccessError = nil
             break
+        case let .recoveryRequired(message):
+            return passwordVaultFailureContent(message: message.isEmpty
+                ? String(localized: "Password Vault Unavailable") : message)
         case let .failed(message):
             return passwordVaultFailureContent(message: message.isEmpty
                 ? String(localized: "Password Vault Unavailable") : message)
@@ -1913,7 +1920,9 @@ extension MainMenuPanelController {
     }
 
     private func passwordVaultFailureContent(message: String) -> EmbeddedContent {
-        EmbeddedContent(
+        passwordVaultAccessView = nil
+        passwordVaultAccessError = nil
+        return EmbeddedContent(
             headerTitle: String(localized: "Password Vault"), headerSubtitle: nil,
             showsBackButton: false, canGoToPreviousPage: false, canGoToNextPage: false,
             typeFilter: nil, rows: [emptyRow(title: message)]

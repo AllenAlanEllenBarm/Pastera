@@ -842,6 +842,32 @@ private extension PasswordVaultState {
 }
 
 extension KDBXPasswordVaultStore {
+    func prepareLocalCopy(using migrator: PasswordVaultMigrating) {
+        let onStateChange = sessionBinding().onStateChange
+        state = .preparingLocalCopy
+        onStateChange?()
+        do {
+            switch try migrator.migrateLegacyVaultIfNeeded() {
+            case .notNeeded:
+                state = localStorage.containsVault() ? .locked : .notConfigured
+            case .migrated:
+                if let data = try? localStorage.read() {
+                    state = .locked
+                    publishCommit(data: data, origin: .migration)
+                } else {
+                    state = .localCopyUnavailable(.localWriteFailed)
+                }
+            case .waitingForOneDrive:
+                state = .localCopyUnavailable(.oneDriveUnavailable)
+            case let .failed(failure):
+                state = .localCopyUnavailable(failure)
+            }
+        } catch {
+            state = .localCopyUnavailable(.localWriteFailed)
+        }
+        onStateChange?()
+    }
+
     func enableAutomationUnlock() throws {
         guard state == .unlocked || state.isReadableWarning, content != nil, let unlock = unlockData else {
             throw PasswordVaultError.vaultLocked
