@@ -325,31 +325,6 @@ struct PasswordVaultStoreTests {
         #expect(try store.listEntries().isEmpty)
     }
 
-    @Test("concurrent KDBX writers merge entries instead of overwriting")
-    func concurrentVaultWritersMerge() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let first = KDBXPasswordVaultStore(localStorage: makeLocalStorage(at: root))
-        let second = KDBXPasswordVaultStore(localStorage: makeLocalStorage(at: root))
-        try first.createDatabase(masterPassword: "shared password", rememberQuickUnlock: false)
-        try second.unlock(masterPassword: "shared password", rememberQuickUnlock: false)
-
-        let firstFolder = try first.createFolder(name: "First")
-        _ = try first.create(.init(
-            folderID: firstFolder.id, title: "First Entry", website: "", username: "", note: "", password: "one"
-        ))
-        let secondFolder = try second.createFolder(name: "Second")
-        _ = try second.create(.init(
-            folderID: secondFolder.id, title: "Second Entry", website: "", username: "", note: "", password: "two"
-        ))
-
-        try first.reloadAndMerge()
-        let titles = Set(try first.listEntries().map(\.title))
-        #expect(titles == ["First Entry", "Second Entry"], "Merged titles: \(titles)")
-    }
-
     @Test("encrypted snapshots work while locked and commits expose only origin and digest")
     func encryptedSnapshotsAndAnonymousCommits() throws {
         let root = FileManager.default.temporaryDirectory

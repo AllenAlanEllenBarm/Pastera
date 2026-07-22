@@ -63,8 +63,28 @@ final class VaultFileCoordinator {
     }
 }
 
+private final class PasswordVaultLocalTransactionRegistry: @unchecked Sendable {
+    static let shared = PasswordVaultLocalTransactionRegistry()
+
+    private let registryLock = NSLock()
+    private var pathLocks = [String: NSLock]()
+
+    func lock(for vaultURL: URL) -> NSLock {
+        let path = vaultURL.standardizedFileURL.path
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        if let existing = pathLocks[path] {
+            return existing
+        }
+        let lock = NSLock()
+        pathLocks[path] = lock
+        return lock
+    }
+}
+
 final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess {
     private let localStorage: PasswordVaultLocalStoring
+    private let localTransactionLock: NSLock
     private let coordinator = VaultFileCoordinator()
     private let unlockKeyStore: VaultUnlockKeyStoring
     private let automationUnlockKeyStore: VaultAutomationUnlockKeyStoring
@@ -101,6 +121,9 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         now: @escaping () -> Date = Date.init
     ) {
         self.localStorage = localStorage
+        localTransactionLock = PasswordVaultLocalTransactionRegistry.shared.lock(
+            for: localStorage.paths.vaultURL
+        )
         self.unlockKeyStore = unlockKeyStore
         self.automationUnlockKeyStore = automationUnlockKeyStore
         self.rekeyTransaction = rekeyTransaction
@@ -112,26 +135,32 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws {
         guard !masterPassword.isEmpty else { throw PasswordVaultError.invalidPassword }
-        guard !localStorage.containsVault() else { throw PasswordVaultError.duplicateEntry }
         let unlock = UnlockData(masterPassword: masterPassword)
         var newContent = KDBXContent.makeEmpty(databaseName: "Pastera", generator: "Pastera")
         newContent.database.meta.historyMaxItems = .value(10)
-        let bytes = try encoded(newContent, unlockData: unlock)
+        let persistence: (data: Data, revision: Data)
         do {
-            try localStorage.writeAtomically(bytes)
-            let written = try readLocalData()
-            _ = try KDBXReader.parse(written, unlockData: unlock)
-            lastRevision = coordinator.revision(of: written)
+            persistence = try withLocalTransaction {
+                guard !localStorage.containsVault() else { throw PasswordVaultError.duplicateEntry }
+                let bytes = try encoded(newContent, unlockData: unlock)
+                try localStorage.writeAtomically(bytes)
+                let written = try readLocalDataWithinTransaction()
+                _ = try KDBXReader.parse(written, unlockData: unlock)
+                return (written, coordinator.revision(of: written))
+            }
+        } catch PasswordVaultError.duplicateEntry {
+            throw PasswordVaultError.duplicateEntry
         } catch {
             state = .failed("save")
             throw PasswordVaultError.saveFailed
         }
         content = newContent
         unlockData = unlock
+        lastRevision = persistence.revision
         state = .unlocked
         sessionController.touch()
         if rememberQuickUnlock { try? remember(unlock) }
-        publishCommit(data: bytes, origin: .userMutation)
+        publishCommit(data: persistence.data, origin: .userMutation)
     }
 
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws {
@@ -200,20 +229,29 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
     func reloadAndMerge() throws {
         let unlock = try requiredUnlockData()
         do {
-            let data = try readLocalData()
-            let diskContent = try KDBXReader.parse(data, unlockData: unlock)
-            let merged = content.map { merger.merge(local: $0, remote: diskContent) }
-                ?? KDBXVaultMergeResult(content: diskContent, conflictCopyCount: 0)
-            content = merged.content
-            if coordinator.revision(of: data) != lastRevision {
+            let persistence = try withLocalTransaction { () -> (
+                merge: KDBXVaultMergeResult,
+                revision: Data,
+                committedData: Data?
+            ) in
+                let data = try readLocalDataWithinTransaction()
+                let diskContent = try KDBXReader.parse(data, unlockData: unlock)
+                let merged = content.map { merger.merge(local: $0, remote: diskContent) }
+                    ?? KDBXVaultMergeResult(content: diskContent, conflictCopyCount: 0)
+                let diskRevision = coordinator.revision(of: data)
+                guard diskRevision != lastRevision else {
+                    return (merged, diskRevision, nil)
+                }
                 let bytes = try encoded(merged.content, unlockData: unlock)
                 try localStorage.writeAtomically(bytes)
-                lastRevision = coordinator.revision(of: bytes)
-                publishCommit(data: bytes, origin: .syncMerge)
-            } else {
-                lastRevision = coordinator.revision(of: data)
+                return (merged, coordinator.revision(of: bytes), bytes)
             }
-            state = merged.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+            content = persistence.merge.content
+            lastRevision = persistence.revision
+            state = persistence.merge.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+            if let committedData = persistence.committedData {
+                publishCommit(data: committedData, origin: .syncMerge)
+            }
         } catch {
             state = .readOnlyWarning("external-change")
             throw PasswordVaultError.externalConflict
@@ -361,21 +399,28 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
     private func save(_ newContent: KDBXContent) throws {
         let unlock = try requiredUnlockData()
         do {
-            let diskData = try readLocalData()
-            let diskRevision = coordinator.revision(of: diskData)
-            let mergeResult: KDBXVaultMergeResult
-            if let lastRevision, lastRevision != diskRevision {
-                let diskContent = try KDBXReader.parse(diskData, unlockData: unlock)
-                mergeResult = merger.merge(local: newContent, remote: diskContent)
-            } else {
-                mergeResult = .init(content: newContent, conflictCopyCount: 0)
+            let persistence = try withLocalTransaction { () -> (
+                merge: KDBXVaultMergeResult,
+                data: Data,
+                revision: Data
+            ) in
+                let diskData = try readLocalDataWithinTransaction()
+                let diskRevision = coordinator.revision(of: diskData)
+                let mergeResult: KDBXVaultMergeResult
+                if let lastRevision, lastRevision != diskRevision {
+                    let diskContent = try KDBXReader.parse(diskData, unlockData: unlock)
+                    mergeResult = merger.merge(local: newContent, remote: diskContent)
+                } else {
+                    mergeResult = .init(content: newContent, conflictCopyCount: 0)
+                }
+                let bytes = try encoded(mergeResult.content, unlockData: unlock)
+                try localStorage.writeAtomically(bytes)
+                return (mergeResult, bytes, coordinator.revision(of: bytes))
             }
-            let bytes = try encoded(mergeResult.content, unlockData: unlock)
-            try localStorage.writeAtomically(bytes)
-            content = mergeResult.content
-            lastRevision = coordinator.revision(of: bytes)
-            state = mergeResult.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
-            publishCommit(data: bytes, origin: .userMutation)
+            content = persistence.merge.content
+            lastRevision = persistence.revision
+            state = persistence.merge.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+            publishCommit(data: persistence.data, origin: .userMutation)
         } catch let error as PasswordVaultError {
             throw error
         } catch {
@@ -448,7 +493,10 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         return entry
     }
 
-    private func folder(from group: KDBX.Group) -> PasswordVaultFolder {
+}
+
+private extension KDBXPasswordVaultStore {
+    func folder(from group: KDBX.Group) -> PasswordVaultFolder {
         PasswordVaultFolder(
             id: group.uuid, name: group.name ?? String(localized: "Unfiled"),
             createdAt: group.times?.creationTime ?? .distantPast,
@@ -456,7 +504,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         )
     }
 
-    private func entry(from entry: KDBX.Entry, folderID: UUID) -> PasswordVaultEntry {
+    func entry(from entry: KDBX.Entry, folderID: UUID) -> PasswordVaultEntry {
         PasswordVaultEntry(
             id: entry.uuid, folderID: folderID,
             title: value("Title", in: entry) ?? "",
@@ -468,7 +516,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         )
     }
 
-    private func value(_ key: String, in entry: KDBX.Entry) -> String? {
+    func value(_ key: String, in entry: KDBX.Entry) -> String? {
         entry.strings.first(where: { $0.key == key })?.value.revealedString
     }
 }
@@ -483,7 +531,7 @@ extension KDBXPasswordVaultStore {
         _ remoteData: Data,
         remoteMasterPassword: String?
     ) throws -> PasswordVaultMergeApplication {
-        guard state == .unlocked, let localContent = content, let localUnlock = unlockData else {
+        guard state == .unlocked, content != nil, let localUnlock = unlockData else {
             throw PasswordVaultError.vaultLocked
         }
         let remoteContent = try readRemoteContent(
@@ -491,24 +539,32 @@ extension KDBXPasswordVaultStore {
             localUnlock: localUnlock,
             remoteMasterPassword: remoteMasterPassword
         )
-        let mergeResult = merger.merge(local: localContent, remote: remoteContent)
-        let bytes = try encoded(mergeResult.content, unlockData: localUnlock)
+        let persistence: (merge: KDBXVaultMergeResult, data: Data, revision: Data)
         do {
-            try localStorage.writeAtomically(bytes)
+            persistence = try withLocalTransaction {
+                let diskData = try readLocalDataWithinTransaction()
+                let diskContent = try KDBXReader.parse(diskData, unlockData: localUnlock)
+                let mergeResult = merger.merge(local: diskContent, remote: remoteContent)
+                let bytes = try encoded(mergeResult.content, unlockData: localUnlock)
+                try localStorage.writeAtomically(bytes)
+                return (mergeResult, bytes, coordinator.revision(of: bytes))
+            }
+        } catch let error as PasswordVaultError {
+            throw error
         } catch {
             state = .readOnlyWarning("save")
             throw PasswordVaultError.saveFailed
         }
-        content = mergeResult.content
-        lastRevision = coordinator.revision(of: bytes)
+        content = persistence.merge.content
+        lastRevision = persistence.revision
         state = .unlocked
-        publishCommit(data: bytes, origin: .syncMerge)
+        publishCommit(data: persistence.data, origin: .syncMerge)
         return PasswordVaultMergeApplication(
             encryptedSnapshot: PasswordVaultEncryptedSnapshot(
-                data: bytes,
-                digest: PasswordVaultDigest.hex(bytes)
+                data: persistence.data,
+                digest: PasswordVaultDigest.hex(persistence.data)
             ),
-            conflictCopyCount: mergeResult.conflictCopyCount
+            conflictCopyCount: persistence.merge.conflictCopyCount
         )
     }
 
@@ -541,6 +597,10 @@ extension KDBXPasswordVaultStore {
     }
 
     private func readLocalData() throws -> Data {
+        try withLocalTransaction { try readLocalDataWithinTransaction() }
+    }
+
+    private func readLocalDataWithinTransaction() throws -> Data {
         guard localStorage.containsVault() else {
             throw PasswordVaultError.databaseNotConfigured
         }
@@ -554,6 +614,12 @@ extension KDBXPasswordVaultStore {
             }
             throw PasswordVaultError.corruptedData
         }
+    }
+
+    private func withLocalTransaction<Value>(_ operation: () throws -> Value) rethrows -> Value {
+        localTransactionLock.lock()
+        defer { localTransactionLock.unlock() }
+        return try operation()
     }
 
     private func localReadFailureState(for error: PasswordVaultError) -> PasswordVaultState {
@@ -609,81 +675,90 @@ extension KDBXPasswordVaultStore {
         let originalRevision = lastRevision
         let mainURL = localStorage.paths.vaultURL
         let oldUnlock = UnlockData(masterPassword: currentPassword)
-        let diskData = try readLocalData()
-        let diskContent: KDBXContent
-        do {
-            diskContent = try KDBXReader.parse(diskData, unlockData: oldUnlock)
-        } catch KDBXReader.Error.wrongCredentials {
-            throw PasswordVaultError.wrongMasterPassword
-        } catch {
-            throw PasswordVaultError.corruptedData
-        }
 
         do {
-            var merged = originalContent.map { merger.merge(local: $0, remote: diskContent) }
-                ?? KDBXVaultMergeResult(content: diskContent, conflictCopyCount: 0)
-            let immediateConflicts = try coordinator.conflictFiles(alongside: mainURL)
-            var parsedContents = [URL: KDBXContent]()
-            for url in try rekeyTransaction.managedArtifactURLs(in: localStorage.paths) where url != mainURL {
-                let artifact = try KDBXReader.parse(try coordinator.read(from: url), unlockData: oldUnlock)
-                parsedContents[url] = artifact
-                guard immediateConflicts.contains(url),
-                      artifact.database.meta.databaseName == "Pastera"
-                        || artifact.database.root.group.name == "Pastera" else { continue }
-                let result = merger.merge(local: merged.content, remote: artifact)
-                merged = KDBXVaultMergeResult(
-                    content: result.content,
-                    conflictCopyCount: merged.conflictCopyCount + result.conflictCopyCount
-                )
-            }
-
-            let newUnlock = UnlockData(masterPassword: newPassword)
-            let artifacts = try rekeyTransaction.managedArtifactURLs(in: localStorage.paths)
-            let replacements = try artifacts.map { url -> VaultArtifactRekeyReplacement in
-                let artifactContent = url == mainURL
-                    ? merged.content
-                    : try requiredArtifactContent(url, from: parsedContents)
-                return VaultArtifactRekeyReplacement(
-                    url: url,
-                    data: try encoded(artifactContent, unlockData: newUnlock)
-                )
-            }
-            try rekeyTransaction.replace(replacements) { _, data in
-                _ = try KDBXReader.parse(data, unlockData: newUnlock)
-            }
-
-            var warnings = refreshCredentials(
-                with: newUnlock,
-                keepQuickUnlockEnabled: keepQuickUnlockEnabled
-            )
-            for conflictURL in immediateConflicts {
+            let change = try withLocalTransaction { () -> (
+                result: PasswordVaultMasterPasswordChangeResult,
+                data: Data
+            ) in
+                let diskData = try readLocalDataWithinTransaction()
+                let diskContent: KDBXContent
                 do {
-                    try coordinator.archiveResolvedConflict(conflictURL, alongside: mainURL)
+                    diskContent = try KDBXReader.parse(diskData, unlockData: oldUnlock)
+                } catch KDBXReader.Error.wrongCredentials {
+                    throw PasswordVaultError.wrongMasterPassword
                 } catch {
-                    warnings.append(.conflictArchivePending)
+                    throw PasswordVaultError.corruptedData
                 }
-            }
+                var merged = originalContent.map { merger.merge(local: $0, remote: diskContent) }
+                    ?? KDBXVaultMergeResult(content: diskContent, conflictCopyCount: 0)
+                let immediateConflicts = try coordinator.conflictFiles(alongside: mainURL)
+                var parsedContents = [URL: KDBXContent]()
+                for url in try rekeyTransaction.managedArtifactURLs(in: localStorage.paths) where url != mainURL {
+                    let artifact = try KDBXReader.parse(try coordinator.read(from: url), unlockData: oldUnlock)
+                    parsedContents[url] = artifact
+                    guard immediateConflicts.contains(url),
+                          artifact.database.meta.databaseName == "Pastera"
+                            || artifact.database.root.group.name == "Pastera" else { continue }
+                    let result = merger.merge(local: merged.content, remote: artifact)
+                    merged = KDBXVaultMergeResult(
+                        content: result.content,
+                        conflictCopyCount: merged.conflictCopyCount + result.conflictCopyCount
+                    )
+                }
 
-            if originalContent != nil, originalUnlockData != nil {
-                content = merged.content
-                unlockData = newUnlock
-                lastRevision = coordinator.revision(of: replacements[0].data)
-                if case .readOnlyWarning = originalState {
-                    state = originalState
-                } else {
-                    state = merged.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+                let newUnlock = UnlockData(masterPassword: newPassword)
+                let artifacts = try rekeyTransaction.managedArtifactURLs(in: localStorage.paths)
+                let replacements = try artifacts.map { url -> VaultArtifactRekeyReplacement in
+                    let artifactContent = url == mainURL
+                        ? merged.content
+                        : try requiredArtifactContent(url, from: parsedContents)
+                    return VaultArtifactRekeyReplacement(
+                        url: url,
+                        data: try encoded(artifactContent, unlockData: newUnlock)
+                    )
                 }
-                sessionController.touch()
-            } else {
-                sessionController.cancel()
-                content = nil
-                unlockData = nil
-                lastRevision = nil
-                state = .locked
+                try rekeyTransaction.replace(replacements) { _, data in
+                    _ = try KDBXReader.parse(data, unlockData: newUnlock)
+                }
+
+                var warnings = refreshCredentials(
+                    with: newUnlock,
+                    keepQuickUnlockEnabled: keepQuickUnlockEnabled
+                )
+                for conflictURL in immediateConflicts {
+                    do {
+                        try coordinator.archiveResolvedConflict(conflictURL, alongside: mainURL)
+                    } catch {
+                        warnings.append(.conflictArchivePending)
+                    }
+                }
+
+                if originalContent != nil, originalUnlockData != nil {
+                    content = merged.content
+                    unlockData = newUnlock
+                    lastRevision = coordinator.revision(of: replacements[0].data)
+                    if case .readOnlyWarning = originalState {
+                        state = originalState
+                    } else {
+                        state = merged.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+                    }
+                    sessionController.touch()
+                } else {
+                    sessionController.cancel()
+                    content = nil
+                    unlockData = nil
+                    lastRevision = nil
+                    state = .locked
+                }
+                let uniqueWarnings = Array(Set(warnings)).sorted { $0.rawValue < $1.rawValue }
+                return (
+                    PasswordVaultMasterPasswordChangeResult(warnings: uniqueWarnings),
+                    replacements[0].data
+                )
             }
-            let uniqueWarnings = Array(Set(warnings)).sorted { $0.rawValue < $1.rawValue }
-            publishCommit(data: replacements[0].data, origin: .userMutation)
-            return PasswordVaultMasterPasswordChangeResult(warnings: uniqueWarnings)
+            publishCommit(data: change.data, origin: .userMutation)
+            return change.result
         } catch let error as PasswordVaultError {
             restoreRekeyState(originalState, content: originalContent, unlockData: originalUnlockData, revision: originalRevision)
             throw error

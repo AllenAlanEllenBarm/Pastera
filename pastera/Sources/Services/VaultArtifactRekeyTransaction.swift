@@ -88,7 +88,8 @@ final class VaultArtifactRekeyTransaction {
         guard !replacements.isEmpty else { throw PasswordVaultError.databaseNotConfigured }
         let transactionID = UUID().uuidString
         var staged = [StagedArtifact]()
-        defer { cleanup(staged) }
+        var committedSuccessfully = false
+        defer { cleanup(staged, recoverRollbacks: !committedSuccessfully) }
 
         do {
             for replacement in replacements {
@@ -122,6 +123,7 @@ final class VaultArtifactRekeyTransaction {
             }
 
             try commit(staged)
+            committedSuccessfully = true
         } catch let error as PasswordVaultError {
             throw error
         } catch {
@@ -151,27 +153,27 @@ final class VaultArtifactRekeyTransaction {
             throw error
         }
 
-        do {
-            for artifact in committed {
+        for artifact in committed {
+            do {
                 try fileManager.removeItem(at: artifact.rollbackURL)
+            } catch {
+                continue
             }
-        } catch {
-            throw PasswordVaultError.saveFailed
         }
     }
 
-    private func cleanup(_ staged: [StagedArtifact]) {
+    private func cleanup(_ staged: [StagedArtifact], recoverRollbacks: Bool) {
         for artifact in staged {
             if fileManager.fileExists(atPath: artifact.stagedURL.path) {
                 try? fileManager.removeItem(at: artifact.stagedURL)
             }
-            if fileManager.fileExists(atPath: artifact.rollbackURL.path) {
-                if !fileManager.fileExists(atPath: artifact.replacement.url.path) {
-                    try? fileManager.moveItem(at: artifact.rollbackURL, to: artifact.replacement.url)
-                }
-                if fileManager.fileExists(atPath: artifact.replacement.url.path) {
-                    try? fileManager.removeItem(at: artifact.rollbackURL)
-                }
+            guard recoverRollbacks,
+                  fileManager.fileExists(atPath: artifact.rollbackURL.path) else { continue }
+            if !fileManager.fileExists(atPath: artifact.replacement.url.path) {
+                try? fileManager.moveItem(at: artifact.rollbackURL, to: artifact.replacement.url)
+            }
+            if fileManager.fileExists(atPath: artifact.replacement.url.path) {
+                try? fileManager.removeItem(at: artifact.rollbackURL)
             }
         }
     }

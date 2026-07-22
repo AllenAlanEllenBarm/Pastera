@@ -186,7 +186,7 @@ struct PasswordVaultMenuTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let store = KDBXPasswordVaultStore(localStorage: makeMenuLocalStorage(at: root))
         let vaultController = PasswordVaultUIController(store: store, authorizer: AllowPasswordVaultAuthorizer())
         var createResult: Result<Void, PasswordVaultError>?
 
@@ -213,7 +213,7 @@ struct PasswordVaultMenuTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let store = KDBXPasswordVaultStore(localStorage: makeMenuLocalStorage(at: root))
         let controller = PasswordVaultUIController(
             store: store,
             clipboard: PasswordVaultClipboardProbe(),
@@ -323,7 +323,7 @@ struct PasswordVaultMenuTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let store = KDBXPasswordVaultStore(localStorage: makeMenuLocalStorage(at: root))
         try store.createDatabase(masterPassword: "ui-flow-password", rememberQuickUnlock: false)
         let clipboard = PasswordVaultClipboardProbe()
         let usernamePasteboard = NSPasteboard(
@@ -896,7 +896,7 @@ struct PasswordVaultMenuTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let store = KDBXPasswordVaultStore(localStorage: makeMenuLocalStorage(at: root))
         try store.createDatabase(masterPassword: "runtime-renewal", rememberQuickUnlock: false)
         let folder = try store.createFolder(name: "Work")
         let originalEntry = try store.create(.init(
@@ -1177,6 +1177,16 @@ struct PasswordVaultMenuTests {
             )
         )
     }
+}
+
+private func makeMenuLocalStorage(at root: URL) -> FilePasswordVaultLocalStorage {
+    let directory = root.appendingPathComponent("PasswordVault", isDirectory: true)
+    return FilePasswordVaultLocalStorage(paths: PasswordVaultLocalPaths(
+        directoryURL: directory,
+        vaultURL: directory.appendingPathComponent("PasteraVault.kdbx"),
+        backupURL: directory.appendingPathComponent("PasteraVault.kdbx.bak"),
+        metadataURL: directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+    ))
 }
 
 @MainActor

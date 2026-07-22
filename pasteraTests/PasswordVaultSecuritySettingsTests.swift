@@ -140,7 +140,7 @@ private final class SecuritySettingsFixture {
         suiteName = "PasswordVaultSecuritySettingsTests.\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suiteName))
         store = KDBXPasswordVaultStore(
-            syncRootProvider: { [root] in root },
+            localStorage: makeSecuritySettingsLocalStorage(at: root),
             unlockKeyStore: quickKey,
             automationUnlockKeyStore: SecuritySettingsAutomationKeyStore()
         )
@@ -167,6 +167,16 @@ private final class SecuritySettingsFixture {
     func setQuickUnlock(_ enabled: Bool) async -> Result<Void, PasswordVaultError> {
         await result { controller.setQuickUnlockEnabled(enabled, completion: $0) }
     }
+}
+
+private func makeSecuritySettingsLocalStorage(at root: URL) -> FilePasswordVaultLocalStorage {
+    let directory = root.appendingPathComponent("PasswordVault", isDirectory: true)
+    return FilePasswordVaultLocalStorage(paths: PasswordVaultLocalPaths(
+        directoryURL: directory,
+        vaultURL: directory.appendingPathComponent("PasteraVault.kdbx"),
+        backupURL: directory.appendingPathComponent("PasteraVault.kdbx.bak"),
+        metadataURL: directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+    ))
 }
 
 private final class ControllerSpyFixture {

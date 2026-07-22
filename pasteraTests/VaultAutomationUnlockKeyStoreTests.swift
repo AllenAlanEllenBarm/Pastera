@@ -553,43 +553,6 @@ private func makeAgentLocalStorage(at root: URL) -> FilePasswordVaultLocalStorag
     ))
 }
 
-extension KDBXPasswordVaultStore {
-    convenience init(
-        syncRootProvider: @escaping () -> URL?,
-        fileManager: FileManager = .default,
-        unlockKeyStore: VaultUnlockKeyStoring = VaultUnlockKeyStore(),
-        automationUnlockKeyStore: VaultAutomationUnlockKeyStoring = VaultAutomationUnlockKeyStore(),
-        rekeyTransaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction(),
-        sessionNotificationCenter: NotificationCenter? = nil,
-        autoLockTimeoutProvider: @escaping () -> TimeInterval = {
-            VaultSessionController.resolvedTimeout(defaults: .standard)
-        },
-        now: @escaping () -> Date = Date.init
-    ) {
-        let root = syncRootProvider() ?? fileManager.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let vaultURL = VaultFileCoordinator.vaultURL(for: root)
-        self.init(
-            localStorage: FilePasswordVaultLocalStorage(
-                paths: PasswordVaultLocalPaths(
-                    directoryURL: vaultURL.deletingLastPathComponent(),
-                    vaultURL: vaultURL,
-                    backupURL: vaultURL.appendingPathExtension("bak"),
-                    metadataURL: vaultURL.deletingLastPathComponent()
-                        .appendingPathComponent("PasswordVaultSyncMetadata.json")
-                ),
-                fileManager: fileManager
-            ),
-            unlockKeyStore: unlockKeyStore,
-            automationUnlockKeyStore: automationUnlockKeyStore,
-            rekeyTransaction: rekeyTransaction,
-            sessionNotificationCenter: sessionNotificationCenter,
-            autoLockTimeoutProvider: autoLockTimeoutProvider,
-            now: now
-        )
-    }
-}
-
 private final class AgentAutomationUnlockKeyStore: VaultAutomationUnlockKeyStoring {
     var data: Data?
     private(set) var saveCallCount = 0

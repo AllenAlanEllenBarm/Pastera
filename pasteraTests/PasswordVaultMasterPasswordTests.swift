@@ -127,6 +127,39 @@ struct PasswordVaultMasterPasswordTests {
         #expect(fixture.rekeyTemporaryFiles().isEmpty)
     }
 
+    @Test("rollback cleanup failure after commit keeps disk memory and unlock keys on the new password")
+    func committedRekeyIgnoresRollbackCleanupFailure() throws {
+        let fileManager = RekeyRollbackCleanupFailingFileManager()
+        let fixture = try RekeyFixture(transaction: VaultArtifactRekeyTransaction(fileManager: fileManager))
+        defer { fixture.remove() }
+        try fixture.addLocalEntry(title: "Preserved Entry")
+        try fixture.store.enableQuickUnlock()
+        try fixture.store.enableAutomationUnlock()
+
+        let outcome = Result {
+            try fixture.store.changeMasterPassword(
+                currentPassword: fixture.oldPassword,
+                newPassword: fixture.newPassword,
+                keepQuickUnlockEnabled: true
+            )
+        }
+
+        let result = try outcome.get()
+        #expect(result.warnings.isEmpty)
+        #expect(fixture.canOpen(fixture.vaultURL, password: fixture.newPassword))
+        #expect(!fixture.canOpen(fixture.vaultURL, password: fixture.oldPassword))
+        #expect(fixture.store.state == .unlocked)
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+        #expect(fixture.rekeyTemporaryFiles().contains { $0.pathExtension == "rollback" })
+
+        fixture.store.lock()
+        try fixture.store.unlockWithQuickKey(reason: "rekey cleanup test")
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+        fixture.store.lock()
+        try fixture.store.unlockForAutomation()
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+    }
+
     @Test("a locked store stays locked after a successful password change")
     func lockedStoreRemainsLocked() throws {
         let fixture = try RekeyFixture()
@@ -328,4 +361,13 @@ private final class RekeyAutomationKeyStore: VaultAutomationUnlockKeyStoring {
     func save(_ data: Data) throws { self.data = data }
     func load() throws -> Data { try #require(data) }
     func delete() throws { data = nil }
+}
+
+private final class RekeyRollbackCleanupFailingFileManager: FileManager {
+    override func removeItem(at URL: URL) throws {
+        if URL.pathExtension == "rollback" {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try super.removeItem(at: URL)
+    }
 }
