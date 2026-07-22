@@ -92,6 +92,55 @@ struct PromptOptimizationPreferenceTests {
     }
 
     @Test
+    func closingWindowCancelsInFlightConnectionTest() async throws {
+        let service = BlockingConnectionPromptService()
+        let settingsStore = PreferenceSettingsStore()
+        let apiKeyStore = PreferenceAPIKeyStore(hasAPIKey: false)
+        let promptPage = CPYPromptOptimizationPreferenceViewController(
+            settingsStore: settingsStore,
+            apiKeyStore: apiKeyStore,
+            optimizationService: service
+        )
+        let controller = CPYPreferencesWindowController(
+            catalog: .default,
+            pageControllerProvider: { paneID in
+                if paneID == .promptOptimization { return promptPage }
+                return PasteraPreferencePageViewController(paneID: paneID, title: paneID.rawValue)
+            },
+            reduceMotion: { true },
+            frameAutosaveName: "PromptOptimizationPreferenceTests.\(UUID().uuidString)",
+            applicationWindows: { [] },
+            deactivateApplication: {}
+        )
+        controller.showPreferencePaneForTesting(paneID: .promptOptimization)
+        let section = try #require(promptPage.promptOptimizationSectionForTesting)
+        section.selectProviderForTesting(.openAICompatible)
+        section.setRemoteFieldsForTesting(
+            baseURL: "https://api.example.com/v1",
+            model: "compatible-model"
+        )
+        let window = try #require(controller.window)
+        defer {
+            service.completeConnectionTest()
+            controller.close()
+        }
+
+        let testButton = try #require(findButton(
+            in: section,
+            titles: ["Test Connection", "测试连接"]
+        ))
+        testButton.performClick(nil)
+        await service.waitUntilConnectionTestStarts()
+        #expect(!testButton.isEnabled)
+
+        window.close()
+
+        #expect(section.window === window)
+        #expect(await service.waitUntilConnectionTestIsCancelled())
+        #expect(testButton.isEnabled)
+    }
+
+    @Test
     func promptOptimizationPaneOwnsConfiguration() throws {
         let fixture = makeFixture()
         let page = CPYPromptOptimizationPreferenceViewController(
@@ -129,7 +178,7 @@ struct PromptOptimizationPreferenceTests {
 
     private func makeFixture(
         hasAPIKey: Bool = false,
-        service: PreferencePromptService = PreferencePromptService()
+        service: any PromptOptimizationServicing = PreferencePromptService()
     ) -> PreferenceFixture {
         let store = PreferenceSettingsStore()
         let keyStore = PreferenceAPIKeyStore(hasAPIKey: hasAPIKey)
@@ -152,7 +201,7 @@ private struct PreferenceFixture {
     let section: PromptOptimizationPreferenceSection
     let settingsStore: PreferenceSettingsStore
     let apiKeyStore: PreferenceAPIKeyStore
-    let service: PreferencePromptService
+    let service: any PromptOptimizationServicing
 }
 
 private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
@@ -213,4 +262,79 @@ private final class PreferencePromptService: PromptOptimizationServicing {
         testCalls += 1
         return testResult
     }
+}
+
+private final class BlockingConnectionPromptService: PromptOptimizationServicing {
+    var availability: PromptOptimizationAvailability = .available
+    private let lock = NSLock()
+    private let completionStream: AsyncStream<Void>
+    private let completionContinuation: AsyncStream<Void>.Continuation
+    private var started = false
+    private var cancellationObserved = false
+
+    init() {
+        let stream = AsyncStream<Void>.makeStream()
+        completionStream = stream.stream
+        completionContinuation = stream.continuation
+    }
+
+    var didStartConnectionTest: Bool {
+        lock.withLock { started }
+    }
+
+    var didObserveCancellation: Bool {
+        lock.withLock { cancellationObserved }
+    }
+
+    func optimize(_ text: String) async -> PromptOptimizationOutcome {
+        .unchanged(source: .localFormatter)
+    }
+
+    func confirmRemoteOrigin(_ origin: String) {}
+
+    func testRemoteConnection() async -> Result<Void, PromptOptimizationError> {
+        lock.withLock { started = true }
+        return await withTaskCancellationHandler {
+            for await _ in completionStream {
+                return Task.isCancelled ? .failure(.cancelled) : .success(())
+            }
+            return .failure(.cancelled)
+        } onCancel: { [weak self] in
+            guard let self else { return }
+            self.lock.withLock { self.cancellationObserved = true }
+            self.completionContinuation.yield(())
+        }
+    }
+
+    func waitUntilConnectionTestStarts() async {
+        for _ in 0..<100 {
+            if didStartConnectionTest { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("connection test did not start")
+    }
+
+    func waitUntilConnectionTestIsCancelled() async -> Bool {
+        for _ in 0..<100 {
+            if didObserveCancellation { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return false
+    }
+
+    func completeConnectionTest() {
+        completionContinuation.yield(())
+    }
+}
+
+private func findButton(in view: NSView, titles: Set<String>) -> NSButton? {
+    if let button = view as? NSButton, titles.contains(button.title) {
+        return button
+    }
+    for subview in view.subviews {
+        if let button = findButton(in: subview, titles: titles) {
+            return button
+        }
+    }
+    return nil
 }

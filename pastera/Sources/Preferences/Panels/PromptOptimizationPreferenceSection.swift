@@ -30,6 +30,8 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     private var loadedSettings: PromptOptimizationSettings
     private var connectionTask: Task<Void, Never>?
     private var progressWorkItem: DispatchWorkItem?
+    private weak var observedWindow: NSWindow?
+    private var windowWillCloseObserver: NSObjectProtocol?
     private var isTestingConnection = false
     var onContentSizeChange: (() -> Void)?
 
@@ -55,15 +57,54 @@ final class PromptOptimizationPreferenceSection: NSStackView {
 
     required init?(coder: NSCoder) { nil }
 
+    deinit {
+        if let windowWillCloseObserver {
+            NotificationCenter.default.removeObserver(windowWillCloseObserver)
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window == nil else { return }
+        guard window == nil else {
+            observeWindowWillClose()
+            return
+        }
+        removeWindowWillCloseObserver()
+        cancelConnectionTest()
+    }
+
+    private func observeWindowWillClose() {
+        guard let window else { return }
+        guard observedWindow !== window else { return }
+        removeWindowWillCloseObserver()
+        observedWindow = window
+        windowWillCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.cancelConnectionTest()
+            }
+        }
+    }
+
+    private func removeWindowWillCloseObserver() {
+        if let windowWillCloseObserver {
+            NotificationCenter.default.removeObserver(windowWillCloseObserver)
+        }
+        windowWillCloseObserver = nil
+        observedWindow = nil
+    }
+
+    private func cancelConnectionTest() {
         progressWorkItem?.cancel()
         progressWorkItem = nil
         connectionTask?.cancel()
         connectionTask = nil
         progressIndicator.stopAnimation(nil)
         isTestingConnection = false
+        testButton.isEnabled = true
     }
 
     private func configureCard() {
