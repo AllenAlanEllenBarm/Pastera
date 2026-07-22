@@ -1232,7 +1232,7 @@ git commit -m "feat(prompt): 拆分独立设置页"
 - 不再修改功能接口；本任务只验证 AC-09、AC-10 和 AC-11，并回读安装后的真实应用状态。
 - 不填写真实 API Key，不点击可能产生费用的远端请求；远端表单只验证显隐、布局和既有安全提示。
 
-- [ ] **步骤 1：运行完整串行清理回归**
+- [x] **步骤 1：运行完整串行清理回归**
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
@@ -1245,7 +1245,7 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
 预期：输出 `** TEST SUCCEEDED **`。记录通过的测试与套件数量；如出现失败，先按 `superpowers:systematic-debugging` 查明根因，再制定修复步骤，不能把失败标记为完成。
 
-- [ ] **步骤 2：安装本地构建并验证进程来源**
+- [x] **步骤 2：安装本地构建并验证进程来源**
 
 ```bash
 ./script/install_local.sh --verify
@@ -1254,7 +1254,7 @@ pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
 
 预期：安装脚本构建和签名校验通过，运行进程来自 `/Applications/Pastera.app/Contents/MacOS/Pastera`。
 
-- [ ] **步骤 3：在真实 AppKit 设置窗口执行页面验收**
+- [x] **步骤 3：在真实 AppKit 设置窗口执行页面验收**
 
 1. 打开设置，确认“提示词优化”只有一个入口，并位于“历史记录”和“脚本”之间，图标为 `wand.and.stars`。
 2. 搜索“美化”、`OpenAI` 和 `Ollama`，确认结果进入独立页面并定位配置区块。
@@ -1265,7 +1265,7 @@ pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
 
 保存独立页面免费模式、远端展开模式、侧栏顺序和纯脚本页面的截图路径；浅色与深色至少各检查一次，不向计划写入提示词正文、API Key 或响应内容。
 
-- [ ] **步骤 4：更新交付记录并提交验证证据**
+- [x] **步骤 4：更新交付记录并提交验证证据**
 
 把实际文件、聚焦测试、完整回归、安装进程、截图、偏差和残余风险写入本计划的“交付记录”，并把计划状态改为“独立设置页已实施并验证”。然后执行：
 
@@ -1307,10 +1307,10 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 ## 交付元数据
 
 - 计划路径：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`
-- 计划状态：`既有功能已实施并验证；任务 9 独立设置页已实施，任务 10 待执行`
+- 计划状态：`独立设置页已实施并验证`
 - 证据档位：`standard`
 - 需求 ID：`未请求`
-- 任务 ID：`未请求；Superpowers 任务 1-9 已交付，任务 10 待执行`
+- 任务 ID：`未请求；Superpowers 任务 1-10 已交付`
 - 禅道同步状态：`未请求`
 - 禅道回读：`不适用`
 - 最后更新：`2026-07-22`
@@ -1329,7 +1329,9 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 - 数据与网络边界：本轮未填写、保存或读取真实 API Key，未点击连接测试，也未向付费或私有模型发起请求。只删除了本轮创建、以 `Pastera 功能验收 20260721` 开头的 2 条合成历史并回读剩余 0；测试便笺经系统确认框删除，用户原有“目标功能…”便笺保持不变。
 - 后续设计确认：用户选择仅拆分设置入口的方案 A，并确认“提示词优化”独立侧栏页位于“历史记录”和“脚本”之间；脚本页恢复为纯脚本管理，历史魔法棒、编辑器、服务、UserDefaults、Keychain 和远端安全契约保持不变。未增加第二份规格，确认设计已写回本计划，尚未开始实现。
 - 任务 9 实施：新增独立 `CPYPromptOptimizationPreferenceViewController`，将目录、路由、唯一搜索锚点和页面工厂接入 `.promptOptimization`；脚本页只保留脚本列表和快捷键，未改变提示词服务、UserDefaults、Keychain、来源确认或历史编辑器行为。聚焦四套件 45/45 通过；串行完整 `clean test` 最终 970 个测试、93 个 suites 通过。
-- 任务 9 计划偏差：完整回归首次仅暴露 `PreferencePaneAlignmentTests` 的固定 10 项侧栏标题断言遗漏；经确认后，只在该直接受影响测试的“历史记录”与“脚本”之间加入“提示词优化”，未扩大产品范围。任务 10 的本地安装、真实 UI 和交付证据仍未执行。
-- 剩余风险：Apple 模型质量、可用性和降级仍需在符合条件的真实硬件上验证；至少一个真实 OpenAI 兼容或私有端点、Keychain 重启持久化、401/429/超时真机状态以及完整 UI/VoiceOver 手工矩阵仍待验证。
-- 后续动作：本次提交推送后，按需要在真实 Apple Intelligence 设备和一个用户自配兼容端点上补充手工矩阵；不阻塞当前默认免费模式、自动化回归和本地安装交付。
+- 任务 9 计划偏差：完整回归首次仅暴露 `PreferencePaneAlignmentTests` 的固定 10 项侧栏标题断言遗漏；经确认后，只在该直接受影响测试的“历史记录”与“脚本”之间加入“提示词优化”，未扩大产品范围。
+- 任务 10 验证：当前工作树串行 `clean test` 以 970 个测试、93 个 suites 和 `** TEST SUCCEEDED **` 通过；`./script/install_local.sh --verify` 输出 `** BUILD SUCCEEDED **`、签名有效，并确认精确 `/Applications/Pastera.app/Contents/MacOS/Pastera` 来源。安装产物存在新锚点 `promptOptimization.configuration`，不存在旧锚点 `scripts.promptOptimization`。真实 AppKit UI 已验证唯一侧栏入口及顺序、三词搜索、免费/远端展开与切回紧凑、纯脚本页，以及浅色和深色可读性；`success-01` 至 `success-14` 位于 `/Users/feeyo/.codex/visualizations/2026/07/21/019f8208-cf47-77d0-9ec1-5e20f97aa61c/pastera-prompt-optimization-pane-20260722`。真实历史闭环只使用本轮合成条目：魔法棒打开既有编辑器，免费本地整理可撤销，`Cmd+Z` 恢复原草稿，显式保存后重新打开仍可见，最后精确计数回读该合成标题为 0；未读取用户既有历史正文。
+- 任务 10 验收偏差：因 `SystemUIServer` / `ControlCenter` AX 持续 `-10005: timeoutReached`，控制器以 lldb 附加精确运行进程，经 `NSStatusBarWindow` 的 `_statusItem`、button、target 调用既有 `statusItemButtonClicked:` 拉起真实主面板；浅色验收则只为同一安装进程设置 `NSAppearanceNameAqua`，关闭并重新创建设置窗口后截图，再重启未注入外观的应用恢复系统深色。两者均未修改业务代码或安装二进制，是验收环境路径偏差，非产品行为变更。
+- 剩余风险：Apple 模型质量、符合条件硬件上的可用性与降级、真实 OpenAI 兼容或私有端点、Keychain 重启持久化、401/429/超时和完整 VoiceOver 手工矩阵仍待验证。本轮未输入、读取或保存 API Key，未点击测试连接，未发远端请求。
+- 后续动作：按需要在符合条件的 Apple Intelligence 设备、一个用户自配兼容端点及 VoiceOver 环境补充未覆盖矩阵；不阻塞当前默认免费模式、自动化回归和本地安装交付。
 - 禅道收尾：未请求。
