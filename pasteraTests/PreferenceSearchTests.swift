@@ -30,15 +30,16 @@ struct PreferenceSearchTests {
     @Test
     func preferenceSearchFindsPromptOptimization() throws {
         let item = try #require(catalog.pages.flatMap(\.searchItems).first {
-            $0.id == "scripts.promptOptimization"
+            $0.id == "promptOptimization.configuration"
         })
 
-        #expect(item.paneID == .scripts)
-        #expect(item.anchorID == "scripts.promptOptimization")
+        #expect(item.paneID == .promptOptimization)
+        #expect(item.sectionID == "promptOptimization.configuration")
+        #expect(item.anchorID == "promptOptimization.configuration")
         #expect(item.keywords.contains("OpenAI"))
         #expect(item.keywords.contains("Ollama"))
         #expect(PasteraPreferenceSearch(catalog: catalog).search("美化").contains { page in
-            page.paneID == .scripts && page.searchItems.contains(item)
+            page.paneID == .promptOptimization && page.searchItems.contains(item)
         })
     }
 
@@ -47,6 +48,7 @@ struct PreferenceSearchTests {
         #expect(PasteraPreferencePaneID.allCases == [
             .general,
             .history,
+            .promptOptimization,
             .scripts,
             .shortcuts,
             .passwordVault,
@@ -59,6 +61,7 @@ struct PreferenceSearchTests {
         #expect(PasteraPreferencePaneID.allCases.map(\.rawValue) == [
             "general",
             "history",
+            "promptOptimization",
             "scripts",
             "shortcuts",
             "passwordVault",
@@ -87,6 +90,7 @@ struct PreferenceSearchTests {
         #expect(pages.map(\.paneID) == [
             .general,
             .history,
+            .promptOptimization,
             .scripts,
             .shortcuts,
             .passwordVault,
@@ -103,6 +107,7 @@ struct PreferenceSearchTests {
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Usage Preferences"),
+            pasteraPreferenceString("Usage Preferences"),
             pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support"),
             pasteraPreferenceString("Services & Support"),
@@ -111,6 +116,7 @@ struct PreferenceSearchTests {
         #expect(pages.map(\.title) == [
             pasteraPreferenceString("General"),
             pasteraPreferenceString("History & Preview"),
+            pasteraScriptString("Prompt Optimization", "提示词优化"),
             pasteraPreferenceString("Scripts"),
             pasteraPreferenceString("Shortcuts"),
             pasteraPreferenceString("Password Vault"),
@@ -123,6 +129,7 @@ struct PreferenceSearchTests {
         #expect(pages.map(\.symbolName) == [
             "gearshape",
             "clock.arrow.circlepath",
+            "wand.and.stars",
             "curlybraces.square",
             "keyboard",
             "lock.shield",

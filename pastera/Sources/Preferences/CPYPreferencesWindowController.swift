@@ -238,6 +238,8 @@ private extension CPYPreferencesWindowController {
             return CPYGeneralPreferenceViewController()
         case .history:
             return CPYHistoryPreferenceViewController()
+        case .promptOptimization:
+            return CPYPromptOptimizationPreferenceViewController()
         case .scripts:
             return CPYScriptsPreferenceViewController()
         case .shortcuts:
@@ -1179,6 +1181,8 @@ extension CPYPreferencesWindowController {
             return .general
         case "history & preview", "history", "types":
             return .history
+        case "prompt optimization", "prompt", "optimization":
+            return .promptOptimization
         case "shortcuts":
             return .shortcuts
         case "password vault", "vault":
@@ -1204,6 +1208,7 @@ extension CPYPreferencesWindowController {
         switch paneID {
         case .general: return "General"
         case .history: return "History & Preview"
+        case .promptOptimization: return "Prompt Optimization"
         case .scripts: return "Scripts"
         case .shortcuts: return "Shortcuts"
         case .passwordVault: return "Password Vault"

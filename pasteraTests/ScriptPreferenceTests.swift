@@ -20,6 +20,10 @@ struct ScriptPreferenceTests {
         #expect(page.hasSeparateShortcutCardForTesting)
         #expect(!page.isTestActionEnabledForTesting)
         #expect(page.view.fittingSize.height > 200)
+        #expect(page.orderedSectionIDsForTesting == [
+            "scripts.list", "scripts.shortcut"
+        ])
+        #expect(!page.orderedSectionIDsForTesting.contains("scripts.promptOptimization"))
     }
 
     @Test

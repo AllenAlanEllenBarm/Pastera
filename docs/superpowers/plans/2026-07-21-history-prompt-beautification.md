@@ -945,7 +945,7 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 - `CPYScriptsPreferenceViewController` 构造器恢复为脚本仓库、脚本执行器和快捷键服务三个依赖，不得再知道提示词设置、Keychain、优化服务或配置区块。
 - 现有 UserDefaults 键、Keychain 服务名、确认来源集合、优化器路由和历史编辑器行为保持不变。
 
-- [ ] **步骤 1：先把目录、路由和页面边界测试改为新契约**
+- [x] **步骤 1：先把目录、路由和页面边界测试改为新契约**
 
 在 `PreferenceSearchTests` 中把固定 pane 列表和目录列表都改为以下顺序，并把页面标题、分组和图标的精确数组同步增加一项：
 
@@ -1038,7 +1038,7 @@ func promptOptimizationPaneRelayoutsAfterRevealingRemoteProviderFields() throws 
 #expect(!page.orderedSectionIDsForTesting.contains("scripts.promptOptimization"))
 ```
 
-- [ ] **步骤 2：运行聚焦测试并确认红灯来自缺失的新页面契约**
+- [x] **步骤 2：运行聚焦测试并确认红灯来自缺失的新页面契约**
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
@@ -1055,7 +1055,7 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
 预期：编译因 `.promptOptimization` 和 `CPYPromptOptimizationPreferenceViewController` 尚不存在而失败。不得通过放宽固定顺序、删除搜索结果断言或继续实例化脚本页来转绿。
 
-- [ ] **步骤 3：注册独立 pane 与唯一搜索项**
+- [x] **步骤 3：注册独立 pane 与唯一搜索项**
 
 在 `PasteraPreferenceCatalog.swift` 的枚举和目录中把新页面插入历史与脚本之间：
 
@@ -1103,7 +1103,7 @@ PasteraPreferenceCatalogPage(
 
 从 `.scripts` 页移除原 `scripts.promptOptimization` 搜索项，保留脚本列表、快捷键和测试脚本搜索项。
 
-- [ ] **步骤 4：实现只负责组合现有配置区块的新页面**
+- [x] **步骤 4：实现只负责组合现有配置区块的新页面**
 
 新建 `CPYPromptOptimizationPreferenceViewController.swift`：
 
@@ -1157,7 +1157,7 @@ final class CPYPromptOptimizationPreferenceViewController: PasteraPreferencePage
 
 该控制器不复制表单、不增加状态存储，也不改变 `PromptOptimizationPreferenceSection` 的保存、连接测试和取消生命周期。
 
-- [ ] **步骤 5：接入页面工厂、标题映射和 Xcode 工程**
+- [x] **步骤 5：接入页面工厂、标题映射和 Xcode 工程**
 
 在 `CPYPreferencesWindowController.makePageController(paneID:)` 增加：
 
@@ -1179,7 +1179,7 @@ case .promptOptimization: return "Prompt Optimization"
 
 在 `pastera.xcodeproj/project.pbxproj` 为新控制器增加唯一的 `PBXFileReference` 和 `PBXBuildFile`，把文件加入 `Panels` group 与 Pastera target 的 `Sources` build phase；不改 target、Scheme 或部署版本。
 
-- [ ] **步骤 6：清除脚本页中的提示词依赖和布局**
+- [x] **步骤 6：清除脚本页中的提示词依赖和布局**
 
 从 `CPYScriptsPreferenceViewController` 删除以下内容：
 
@@ -1195,11 +1195,11 @@ var orderedSectionIDsForTesting: [String] {
 }
 ```
 
-- [ ] **步骤 7：重复聚焦测试并确认绿灯**
+- [x] **步骤 7：重复聚焦测试并确认绿灯**
 
 重复步骤 2 的命令。预期四个套件全部通过，并同时证明：侧栏顺序固定、搜索只进入新页面、页面工厂类型正确、远端字段展开会更新独立页面高度、脚本页不再承载提示词配置。
 
-- [ ] **步骤 8：检查范围与提交原子实现**
+- [x] **步骤 8：检查范围与提交原子实现**
 
 ```bash
 plutil -lint pastera.xcodeproj/project.pbxproj
@@ -1307,10 +1307,10 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 ## 交付元数据
 
 - 计划路径：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`
-- 计划状态：`既有功能已实施并验证；独立设置页实施计划已生成，待执行确认`
+- 计划状态：`既有功能已实施并验证；任务 9 独立设置页已实施，任务 10 待执行`
 - 证据档位：`standard`
 - 需求 ID：`未请求`
-- 任务 ID：`未请求；Superpowers 任务 1-8 已交付，任务 9-10 待执行`
+- 任务 ID：`未请求；Superpowers 任务 1-9 已交付，任务 10 待执行`
 - 禅道同步状态：`未请求`
 - 禅道回读：`不适用`
 - 最后更新：`2026-07-22`
@@ -1328,6 +1328,8 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 - 真实 UI 截图：修复后的自备服务模式完整显示服务预设、基础地址、模型、API Key、HTTP 开关、保存设置和测试连接，滚动到底部后转换脚本与全局快捷键区域仍完整；切回“免费自动”后远端字段收起且页面恢复紧凑。证据为 `/Users/feeyo/.codex/visualizations/2026/07/21/019f8208-cf47-77d0-9ec1-5e20f97aa61c/pastera-prompt-remote-expanded.jpeg`、`pastera-prompt-remote-scrolled.jpeg` 和 `pastera-prompt-free-restored.jpeg`。先前只渲染独立区块的视觉检查没有覆盖父页面动态失效，这是本次补充真实整页切换和页面高度回归测试的原因。
 - 数据与网络边界：本轮未填写、保存或读取真实 API Key，未点击连接测试，也未向付费或私有模型发起请求。只删除了本轮创建、以 `Pastera 功能验收 20260721` 开头的 2 条合成历史并回读剩余 0；测试便笺经系统确认框删除，用户原有“目标功能…”便笺保持不变。
 - 后续设计确认：用户选择仅拆分设置入口的方案 A，并确认“提示词优化”独立侧栏页位于“历史记录”和“脚本”之间；脚本页恢复为纯脚本管理，历史魔法棒、编辑器、服务、UserDefaults、Keychain 和远端安全契约保持不变。未增加第二份规格，确认设计已写回本计划，尚未开始实现。
+- 任务 9 实施：新增独立 `CPYPromptOptimizationPreferenceViewController`，将目录、路由、唯一搜索锚点和页面工厂接入 `.promptOptimization`；脚本页只保留脚本列表和快捷键，未改变提示词服务、UserDefaults、Keychain、来源确认或历史编辑器行为。聚焦四套件 45/45 通过；串行完整 `clean test` 最终 970 个测试、93 个 suites 通过。
+- 任务 9 计划偏差：完整回归首次仅暴露 `PreferencePaneAlignmentTests` 的固定 10 项侧栏标题断言遗漏；经确认后，只在该直接受影响测试的“历史记录”与“脚本”之间加入“提示词优化”，未扩大产品范围。任务 10 的本地安装、真实 UI 和交付证据仍未执行。
 - 剩余风险：Apple 模型质量、可用性和降级仍需在符合条件的真实硬件上验证；至少一个真实 OpenAI 兼容或私有端点、Keychain 重启持久化、401/429/超时真机状态以及完整 UI/VoiceOver 手工矩阵仍待验证。
 - 后续动作：本次提交推送后，按需要在真实 Apple Intelligence 设备和一个用户自配兼容端点上补充手工矩阵；不阻塞当前默认免费模式、自动化回归和本地安装交付。
 - 禅道收尾：未请求。

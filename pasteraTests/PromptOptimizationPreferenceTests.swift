@@ -92,34 +92,30 @@ struct PromptOptimizationPreferenceTests {
     }
 
     @Test
-    func scriptsPanePlacesPromptOptimizationBeforeScriptManagement() {
+    func promptOptimizationPaneOwnsConfiguration() throws {
         let fixture = makeFixture()
-        let page = CPYScriptsPreferenceViewController(
-            repository: PreferenceScriptRepository(),
-            executor: ScriptExecutionService(),
-            hotKeyService: HotKeyService(),
-            promptSettingsStore: fixture.settingsStore,
-            promptAPIKeyStore: fixture.apiKeyStore,
-            promptOptimizationService: fixture.service
+        let page = CPYPromptOptimizationPreferenceViewController(
+            settingsStore: fixture.settingsStore,
+            apiKeyStore: fixture.apiKeyStore,
+            optimizationService: fixture.service
         )
         _ = page.view
 
-        #expect(page.orderedSectionIDsForTesting.prefix(3) == [
-            "scripts.promptOptimization", "scripts.list", "scripts.shortcut"
-        ])
+        #expect(page.paneID == .promptOptimization)
+        #expect(page.revealSetting(
+            anchorID: "promptOptimization.configuration",
+            animated: false
+        ))
         #expect(page.promptOptimizationSectionForTesting != nil)
     }
 
     @Test
-    func scriptsPaneRelayoutsAfterRevealingRemoteProviderFields() throws {
+    func promptOptimizationPaneRelayoutsAfterRevealingRemoteProviderFields() throws {
         let fixture = makeFixture()
-        let page = CPYScriptsPreferenceViewController(
-            repository: PreferenceScriptRepository(),
-            executor: ScriptExecutionService(),
-            hotKeyService: HotKeyService(),
-            promptSettingsStore: fixture.settingsStore,
-            promptAPIKeyStore: fixture.apiKeyStore,
-            promptOptimizationService: fixture.service
+        let page = CPYPromptOptimizationPreferenceViewController(
+            settingsStore: fixture.settingsStore,
+            apiKeyStore: fixture.apiKeyStore,
+            optimizationService: fixture.service
         )
         _ = page.view
         let freeHeight = page.view.frame.height
@@ -217,13 +213,4 @@ private final class PreferencePromptService: PromptOptimizationServicing {
         testCalls += 1
         return testResult
     }
-}
-
-private final class PreferenceScriptRepository: ScriptRepositoryProtocol {
-    func fetchAll() throws -> [ScriptTransform] { [] }
-    func fetchEnabled(for trigger: ScriptTrigger) throws -> [ScriptTransform] { [] }
-    func insert(_ script: ScriptTransform) throws {}
-    func update(_ script: ScriptTransform) throws {}
-    func delete(id: UUID) throws {}
-    func replaceOrder(ids: [UUID]) throws {}
 }

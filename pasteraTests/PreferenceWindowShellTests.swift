@@ -36,6 +36,7 @@ struct PreferenceWindowShellTests {
         #expect(controller.preferenceSidebarTitlesForTesting == [
             "基础设置",
             "历史记录",
+            "提示词优化",
             "脚本",
             "快捷键",
             "密码箱",
@@ -48,6 +49,7 @@ struct PreferenceWindowShellTests {
         #expect(controller.preferenceSidebarSymbolNamesForTesting == [
             "gearshape",
             "clock.arrow.circlepath",
+            "wand.and.stars",
             "curlybraces.square",
             "keyboard",
             "lock.shield",
@@ -198,6 +200,7 @@ struct PreferenceWindowShellTests {
 
             #expect(controller.cachedPreferencePageForTesting(paneID: .general) is CPYGeneralPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .history) is CPYHistoryPreferenceViewController)
+            #expect(controller.cachedPreferencePageForTesting(paneID: .promptOptimization) is CPYPromptOptimizationPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .scripts) is CPYScriptsPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .shortcuts) is CPYShortcutsPreferenceViewController)
             #expect(controller.cachedPreferencePageForTesting(paneID: .passwordVault) is CPYPasswordVaultPreferenceViewController)

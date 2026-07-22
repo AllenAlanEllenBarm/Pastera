@@ -195,6 +195,7 @@
 		C5F720032FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */; };
 		C5F720052FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */; };
 		C5F730012FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */; };
+		C5F731012FFF300000B7C0DE /* CPYPromptOptimizationPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F731022FFF300000B7C0DE /* CPYPromptOptimizationPreferenceViewController.swift */; };
 		C5F730032FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730042FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift */; };
 		C5F730052FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730062FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift */; };
 		C57100032FCEB00000C8F965 /* PasteboardHistoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57100022FCEB00000C8F965 /* PasteboardHistoryRepository.swift */; };
@@ -325,6 +326,7 @@
 		C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationEndpointPolicy.swift; sourceTree = "<group>"; };
 		C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatiblePromptOptimizer.swift; sourceTree = "<group>"; };
 		C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationPreferenceSection.swift; sourceTree = "<group>"; };
+		C5F731022FFF300000B7C0DE /* CPYPromptOptimizationPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYPromptOptimizationPreferenceViewController.swift; sourceTree = "<group>"; };
 		C5F730042FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationPreferenceTests.swift; sourceTree = "<group>"; };
 		C5F730062FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryEditorWindowControllerTests.swift; sourceTree = "<group>"; };
 		C5F4000E2FF4000000B7C0DE /* ClipboardScriptCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardScriptCoordinator.swift; sourceTree = "<group>"; };
@@ -919,6 +921,7 @@
 					C5A930032FD300000B7C0DE /* CPYSoftwareUpdatePreferenceViewController.swift */,
 					FEE500000000000000000002 /* CPYAboutPreferenceViewController.swift */,
 					C5F500000000000000000002 /* CPYScriptsPreferenceViewController.swift */,
+					C5F731022FFF300000B7C0DE /* CPYPromptOptimizationPreferenceViewController.swift */,
 					C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */,
 					C5F500000000000000000004 /* ScriptEditorViewController.swift */,
 					C5F520000000000000000004 /* ScriptTemplateMarketViewController.swift */,
@@ -1524,6 +1527,7 @@
 				C5F720032FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift in Sources */,
 				C5F720052FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift in Sources */,
 				C5F730012FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift in Sources */,
+				C5F731012FFF300000B7C0DE /* CPYPromptOptimizationPreferenceViewController.swift in Sources */,
 				A69000000000000000000003 /* VaultAgentIntegrationInstaller.swift in Sources */,
 				A65000000000000000000003 /* VaultAgentPeerVerifier.swift in Sources */,
 				A65000000000000000000007 /* VaultAgentBroker.swift in Sources */,

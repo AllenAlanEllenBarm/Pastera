@@ -43,6 +43,7 @@ struct PreferenceSidebarTests {
         #expect(titles == [
             "基础设置",
             "历史记录",
+            "提示词优化",
             "脚本",
             "快捷键",
             "密码箱",

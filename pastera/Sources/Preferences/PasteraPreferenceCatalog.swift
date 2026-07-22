@@ -9,6 +9,7 @@ import Foundation
 enum PasteraPreferencePaneID: String, CaseIterable {
     case general
     case history
+    case promptOptimization
     case scripts
     case shortcuts
     case passwordVault
@@ -198,16 +199,16 @@ struct PasteraPreferenceCatalog: Equatable {
                 ]
             ),
             PasteraPreferenceCatalogPage(
-                paneID: .scripts,
+                paneID: .promptOptimization,
                 groupTitle: pasteraPreferenceString("Usage Preferences"),
-                title: Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "脚本" : pasteraPreferenceString("Scripts"),
-                symbolName: "curlybraces.square",
+                title: pasteraScriptString("Prompt Optimization", "提示词优化"),
+                symbolName: "wand.and.stars",
                 searchItems: [
                     PasteraPreferenceSearchItem(
-                        id: "scripts.promptOptimization",
-                        paneID: .scripts,
-                        sectionID: "scripts.promptOptimization",
-                        anchorID: "scripts.promptOptimization",
+                        id: "promptOptimization.configuration",
+                        paneID: .promptOptimization,
+                        sectionID: "promptOptimization.configuration",
+                        anchorID: "promptOptimization.configuration",
                         title: pasteraScriptString("Prompt Optimization", "提示词优化"),
                         subtitle: pasteraScriptString(
                             "Improve history prompts locally or with your own compatible model.",
@@ -217,7 +218,15 @@ struct PasteraPreferenceCatalog: Equatable {
                             "prompt", "optimization", "优化", "美化", "model",
                             "OpenAI", "Gemini", "Ollama", "LM Studio"
                         ]
-                    ),
+                    )
+                ]
+            ),
+            PasteraPreferenceCatalogPage(
+                paneID: .scripts,
+                groupTitle: pasteraPreferenceString("Usage Preferences"),
+                title: Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "脚本" : pasteraPreferenceString("Scripts"),
+                symbolName: "curlybraces.square",
+                searchItems: [
                     PasteraPreferenceSearchItem(
                         id: "scripts.list",
                         paneID: .scripts,
