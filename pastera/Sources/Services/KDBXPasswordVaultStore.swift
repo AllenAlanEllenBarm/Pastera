@@ -63,28 +63,8 @@ final class VaultFileCoordinator {
     }
 }
 
-private final class PasswordVaultLocalTransactionRegistry: @unchecked Sendable {
-    static let shared = PasswordVaultLocalTransactionRegistry()
-
-    private let registryLock = NSLock()
-    private var pathLocks = [String: NSLock]()
-
-    func lock(for vaultURL: URL) -> NSLock {
-        let path = vaultURL.standardizedFileURL.path
-        registryLock.lock()
-        defer { registryLock.unlock() }
-        if let existing = pathLocks[path] {
-            return existing
-        }
-        let lock = NSLock()
-        pathLocks[path] = lock
-        return lock
-    }
-}
-
 final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess {
     private let localStorage: PasswordVaultLocalStoring
-    private let localTransactionLock: NSLock
     private let coordinator = VaultFileCoordinator()
     private let unlockKeyStore: VaultUnlockKeyStoring
     private let automationUnlockKeyStore: VaultAutomationUnlockKeyStoring
@@ -121,9 +101,6 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         now: @escaping () -> Date = Date.init
     ) {
         self.localStorage = localStorage
-        localTransactionLock = PasswordVaultLocalTransactionRegistry.shared.lock(
-            for: localStorage.paths.vaultURL
-        )
         self.unlockKeyStore = unlockKeyStore
         self.automationUnlockKeyStore = automationUnlockKeyStore
         self.rekeyTransaction = rekeyTransaction
@@ -616,10 +593,8 @@ extension KDBXPasswordVaultStore {
         }
     }
 
-    private func withLocalTransaction<Value>(_ operation: () throws -> Value) rethrows -> Value {
-        localTransactionLock.lock()
-        defer { localTransactionLock.unlock() }
-        return try operation()
+    private func withLocalTransaction<Value>(_ operation: () throws -> Value) throws -> Value {
+        try localStorage.withExclusiveTransaction(operation)
     }
 
     private func localReadFailureState(for error: PasswordVaultError) -> PasswordVaultState {

@@ -304,6 +304,10 @@ private final class CoordinatedReviewLocalStorage: PasswordVaultLocalStoring, @u
         backing.containsVault()
     }
 
+    func withExclusiveTransaction<Value>(_ operation: () throws -> Value) throws -> Value {
+        try backing.withExclusiveTransaction(operation)
+    }
+
     func read() throws -> Data {
         let observer = coordinationLock.withLock {
             defer { nextReadObserver = nil }
@@ -327,8 +331,8 @@ private final class CoordinatedReviewLocalStorage: PasswordVaultLocalStoring, @u
         try backing.writeAtomically(data)
     }
 
-    func removeVaultCreatedByFailedMigration() throws {
-        try backing.removeVaultCreatedByFailedMigration()
+    func removeVaultCreatedByFailedMigration(expectedDigest: String) throws -> Bool {
+        try backing.removeVaultCreatedByFailedMigration(expectedDigest: expectedDigest)
     }
 
     func readBackup() throws -> Data {

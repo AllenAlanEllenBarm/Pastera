@@ -1,10 +1,12 @@
 import Foundation
+import KDBXKit
 import Testing
 @testable import Pastera
 
 // The serialized migration matrix keeps its crash/retry fixtures beside the scenarios they support.
 // swiftlint:disable file_length
 
+// swiftlint:disable type_body_length
 @Suite("Password vault legacy migration", .serialized)
 struct PasswordVaultMigrationTests {
     @Test("an existing local vault always wins without reading or changing legacy cloud data")
@@ -101,6 +103,34 @@ struct PasswordVaultMigrationTests {
 
         #expect(outcome == .failed(.remoteCorrupted))
         #expect(try Data(contentsOf: fixture.remoteURL) == corruptData)
+        #expect(!fixture.localStorage.containsVault())
+        #expect(fixture.metadataStore.savedValues.isEmpty)
+    }
+
+    @Test("a signature-only cloud file is corrupted rather than migration-ready")
+    func signatureOnlyFileIsRejected() throws {
+        let signatureOnly = Data([0x03, 0xD9, 0xA2, 0x9A, 0x67, 0xFB, 0x4B, 0xB5])
+        let fixture = try MigrationFixture(remoteData: signatureOnly)
+        defer { fixture.remove() }
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .failed(.remoteCorrupted))
+        #expect(!fixture.localStorage.containsVault())
+        #expect(fixture.metadataStore.savedValues.isEmpty)
+    }
+
+    @Test("a valid outer header with a truncated encrypted block stream is corrupted")
+    func truncatedEncryptedPayloadIsRejected() throws {
+        let complete = try migrationKDBXData("complete")
+        let truncated = Data(complete.dropLast(36))
+        _ = try KDBXReader.parseHeader(truncated)
+        let fixture = try MigrationFixture(remoteData: truncated)
+        defer { fixture.remove() }
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .failed(.remoteCorrupted))
         #expect(!fixture.localStorage.containsVault())
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
@@ -259,6 +289,108 @@ struct PasswordVaultMigrationTests {
         #expect(fixture.reader.readCount == 0)
     }
 
+    @Test("a local vault created while cloud bytes are read wins before migration writes")
+    func concurrentLocalCreationWinsMigrationRace() throws {
+        let fixture = try RealStorageMigrationFixture(remoteData: migrationKDBXData("remote-race"))
+        defer { fixture.remove() }
+        let laterLocal = try migrationKDBXData("later-local")
+        let readEntered = DispatchSemaphore(value: 0)
+        let releaseRead = DispatchSemaphore(value: 0)
+        let reader = BlockingMigrationReader(
+            data: try Data(contentsOf: fixture.remoteURL),
+            entered: readEntered,
+            release: releaseRead
+        )
+        let migrator = fixture.makeMigrator(reader: reader)
+        let result = MigrationLockedResult<PasswordVaultMigrationOutcome>()
+        let finished = DispatchSemaphore(value: 0)
+
+        Thread.detachNewThread {
+            result.set(Result { try migrator.migrateLegacyVaultIfNeeded() })
+            finished.signal()
+        }
+        #expect(readEntered.wait(timeout: .now() + 30) == .success)
+        try fixture.secondStorage.writeAtomically(laterLocal)
+        releaseRead.signal()
+        #expect(finished.wait(timeout: .now() + 30) == .success)
+
+        #expect(try result.get() == .notNeeded)
+        #expect(try fixture.firstStorage.read() == laterLocal)
+        #expect(fixture.metadataStore.savedValues.isEmpty)
+    }
+
+    @Test("migration reloads metadata after the remote read before saving its baseline")
+    func migrationPreservesMetadataChangedDuringRemoteRead() throws {
+        let fixture = try RealStorageMigrationFixture(remoteData: migrationKDBXData("metadata-race"))
+        defer { fixture.remove() }
+        let readEntered = DispatchSemaphore(value: 0)
+        let releaseRead = DispatchSemaphore(value: 0)
+        let reader = BlockingMigrationReader(
+            data: try Data(contentsOf: fixture.remoteURL),
+            entered: readEntered,
+            release: releaseRead
+        )
+        let result = MigrationLockedResult<PasswordVaultMigrationOutcome>()
+        let finished = DispatchSemaphore(value: 0)
+
+        Thread.detachNewThread {
+            result.set(Result { try fixture.makeMigrator(reader: reader).migrateLegacyVaultIfNeeded() })
+            finished.signal()
+        }
+        #expect(readEntered.wait(timeout: .now() + 30) == .success)
+        var changedMetadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        changedMetadata.localRevision = 9
+        changedMetadata.pendingChangeCount = 3
+        fixture.metadataStore.replaceMetadata(changedMetadata)
+        releaseRead.signal()
+        #expect(finished.wait(timeout: .now() + 30) == .success)
+
+        #expect(try result.get() == .migrated)
+        let saved = try #require(fixture.metadataStore.savedValues.last)
+        #expect(saved.localRevision == 9)
+        #expect(saved.lastSyncedLocalRevision == 9)
+    }
+
+    @Test("failed migration cleanup finishes before a later local writer can commit")
+    func cleanupCannotDeleteLaterLocalWrite() throws {
+        let fixture = try RealStorageMigrationFixture(remoteData: migrationKDBXData("cleanup-race"))
+        defer { fixture.remove() }
+        let laterLocal = try migrationKDBXData("later-writer")
+        let saveEntered = DispatchSemaphore(value: 0)
+        let releaseSave = DispatchSemaphore(value: 0)
+        fixture.metadataStore.saveBarrier = (saveEntered, releaseSave)
+        fixture.metadataStore.saveError = .saveFailed
+        let migrationResult = MigrationLockedResult<PasswordVaultMigrationOutcome>()
+        let migrationFinished = DispatchSemaphore(value: 0)
+
+        Thread.detachNewThread {
+            migrationResult.set(Result { try fixture.makeMigrator().migrateLegacyVaultIfNeeded() })
+            migrationFinished.signal()
+        }
+        #expect(saveEntered.wait(timeout: .now() + 30) == .success)
+
+        let writerStarted = DispatchSemaphore(value: 0)
+        let writerFinished = DispatchSemaphore(value: 0)
+        let writerResult = MigrationLockedResult<Void>()
+        Thread.detachNewThread {
+            writerStarted.signal()
+            writerResult.set(Result { try fixture.secondStorage.writeAtomically(laterLocal) })
+            writerFinished.signal()
+        }
+        #expect(writerStarted.wait(timeout: .now() + 30) == .success)
+        let writerBeforeCleanup = writerFinished.wait(timeout: .now() + 1)
+        releaseSave.signal()
+
+        #expect(migrationFinished.wait(timeout: .now() + 30) == .success)
+        if writerBeforeCleanup == .timedOut {
+            #expect(writerFinished.wait(timeout: .now() + 30) == .success)
+        }
+        #expect(writerBeforeCleanup == .timedOut)
+        #expect(try migrationResult.get() == .failed(.localWriteFailed))
+        try writerResult.get()
+        #expect(try fixture.firstStorage.read() == laterLocal)
+    }
+
     @Test("file storage removes a newly migrated vault when metadata cannot commit")
     func fileStorageRollsBackNewVaultAfterMetadataFailure() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -317,6 +449,7 @@ struct PasswordVaultMigrationTests {
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 }
+// swiftlint:enable type_body_length
 
 @MainActor
 @Suite("Password vault migration environment", .serialized)
@@ -371,10 +504,11 @@ struct PasswordVaultMigrationEnvironmentTests {
         let elapsed = startedAt.duration(to: .now)
 
         #expect(elapsed < .milliseconds(100))
+        #expect(environment.passwordVaultUIController === controller)
         await waitForMigrationCall(migrator)
-        #expect(environment.passwordVaultStore.state == .preparingLocalCopy)
+        #expect(controller.state == .preparingLocalCopy)
         gate.signal()
-        await waitForMigrationState(store, .locked)
+        await waitForMigrationState(controller, .locked)
         #expect(migrator.callCount == 1)
     }
 
@@ -395,10 +529,10 @@ struct PasswordVaultMigrationEnvironmentTests {
             }
         )
 
-        store.prepareLocalCopy(using: migrator)
-        await waitForMigrationState(store, .localCopyUnavailable(.oneDriveUnavailable))
-        store.prepareLocalCopy(using: migrator)
-        await waitForMigrationState(store, .locked)
+        controller.vaultAgentExecutor.async { store.prepareLocalCopy(using: migrator) }
+        await waitForMigrationState(controller, .localCopyUnavailable(.oneDriveUnavailable))
+        controller.vaultAgentExecutor.async { store.prepareLocalCopy(using: migrator) }
+        await waitForMigrationState(controller, .locked)
 
         #expect(controller.state == .locked)
         #expect(migrator.callCount == 2)
@@ -460,6 +594,47 @@ private final class MigrationFixture {
     }
 }
 
+private final class RealStorageMigrationFixture: @unchecked Sendable {
+    let root: URL
+    let syncRoot: URL
+    let remoteURL: URL
+    let firstStorage: FilePasswordVaultLocalStorage
+    let secondStorage: FilePasswordVaultLocalStorage
+    let metadataStore = MigrationMetadataStore(metadata: .defaultLocalOnly)
+
+    init(remoteData: Data) throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        syncRoot = root.appendingPathComponent("OneDrive", isDirectory: true)
+        remoteURL = VaultFileCoordinator.vaultURL(for: syncRoot)
+        let localDirectory = root.appendingPathComponent("Local", isDirectory: true)
+        let paths = PasswordVaultLocalPaths(
+            directoryURL: localDirectory,
+            vaultURL: localDirectory.appendingPathComponent("PasteraVault.kdbx"),
+            backupURL: localDirectory.appendingPathComponent("PasteraVault.kdbx.bak"),
+            metadataURL: localDirectory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+        )
+        firstStorage = FilePasswordVaultLocalStorage(paths: paths)
+        secondStorage = FilePasswordVaultLocalStorage(paths: paths)
+        try FileManager.default.createDirectory(at: remoteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try remoteData.write(to: remoteURL)
+    }
+
+    func makeMigrator(
+        reader: PasswordVaultLegacyReading = CoordinatedPasswordVaultLegacyReader()
+    ) -> PasswordVaultMigrationService {
+        PasswordVaultMigrationService(
+            localStorage: firstStorage,
+            metadataStore: metadataStore,
+            legacySyncRootProvider: { [syncRoot] in syncRoot },
+            legacyReader: reader
+        )
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
 private final class MigrationLocalStorage: PasswordVaultLocalStoring {
     let paths: PasswordVaultLocalPaths
     var data: Data?
@@ -493,20 +668,24 @@ private final class MigrationLocalStorage: PasswordVaultLocalStoring {
         self.data = data
     }
 
-    func removeVaultCreatedByFailedMigration() throws {
+    func removeVaultCreatedByFailedMigration(expectedDigest: String) throws -> Bool {
         if let removeError { throw removeError }
+        guard let currentData = data else { return true }
+        guard PasswordVaultDigest.hex(currentData) == expectedDigest else { return false }
         data = nil
         readOverride = nil
+        return true
     }
 
     func readBackup() throws -> Data { throw PasswordVaultError.databaseNotConfigured }
 }
 
-private final class MigrationMetadataStore: PasswordVaultSyncMetadataStoring {
+private final class MigrationMetadataStore: PasswordVaultSyncMetadataStoring, @unchecked Sendable {
     private var metadata: PasswordVaultSyncMetadata
     private let events: MigrationEventRecorder?
     private(set) var savedValues = [PasswordVaultSyncMetadata]()
     var saveError: PasswordVaultError?
+    var saveBarrier: (entered: DispatchSemaphore, release: DispatchSemaphore)?
 
     init(metadata: PasswordVaultSyncMetadata, events: MigrationEventRecorder? = nil) {
         self.metadata = metadata
@@ -515,8 +694,18 @@ private final class MigrationMetadataStore: PasswordVaultSyncMetadataStoring {
 
     func load() throws -> PasswordVaultSyncMetadata { metadata }
 
+    func replaceMetadata(_ metadata: PasswordVaultSyncMetadata) {
+        self.metadata = metadata
+    }
+
     func save(_ metadata: PasswordVaultSyncMetadata) throws {
         events?.append("save-metadata")
+        if let saveBarrier {
+            saveBarrier.entered.signal()
+            guard saveBarrier.release.wait(timeout: .now() + 30) == .success else {
+                throw PasswordVaultError.saveFailed
+            }
+        }
         if let saveError { throw saveError }
         self.metadata = metadata
         savedValues.append(metadata)
@@ -537,6 +726,41 @@ private final class MigrationReader: PasswordVaultLegacyReading {
         events?.append("read-remote")
         if let result { return try result.get() }
         return try Data(contentsOf: url)
+    }
+}
+
+private final class BlockingMigrationReader: PasswordVaultLegacyReading, @unchecked Sendable {
+    private let data: Data
+    private let entered: DispatchSemaphore
+    private let release: DispatchSemaphore
+
+    init(data: Data, entered: DispatchSemaphore, release: DispatchSemaphore) {
+        self.data = data
+        self.entered = entered
+        self.release = release
+    }
+
+    func readCompleteFile(at url: URL) throws -> Data {
+        entered.signal()
+        guard release.wait(timeout: .now() + 30) == .success else {
+            throw PasswordVaultLocalPreparationFailure.oneDriveUnavailable
+        }
+        return data
+    }
+}
+
+private final class MigrationLockedResult<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Value, Error>?
+
+    func set(_ result: Result<Value, Error>) {
+        lock.withLock { self.result = result }
+    }
+
+    func get() throws -> Value {
+        try lock.withLock {
+            try #require(result).get()
+        }
     }
 }
 
@@ -583,8 +807,40 @@ private final class SequencedMigrator: PasswordVaultMigrating {
     }
 }
 
+private final class MigrationKDBXFixtureCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values = [String: Data]()
+
+    func data(for suffix: String) throws -> Data {
+        try lock.withLock {
+            if let existing = values[suffix] { return existing }
+            let stream = OutputStream(toMemory: ())
+            stream.open()
+            defer { stream.close() }
+            let content = KDBXContent.makeEmpty(databaseName: "Migration-\(suffix)", generator: "PasteraTests")
+            try KDBXWriter(to: stream).write(
+                content,
+                unlockData: UnlockData(masterPassword: "migration-fixture")
+            )
+            let data = try #require(stream.property(forKey: .dataWrittenToMemoryStreamKey) as? Data)
+            values[suffix] = data
+            return data
+        }
+    }
+}
+
+private let migrationKDBXFixtureCache = MigrationKDBXFixtureCache()
+
+private func migrationKDBXData(_ suffix: String) throws -> Data {
+    try migrationKDBXFixtureCache.data(for: suffix)
+}
+
 private func validKDBXData(_ suffix: String) -> Data {
-    Data([0x03, 0xD9, 0xA2, 0x9A, 0x67, 0xFB, 0x4B, 0xB5]) + Data(suffix.utf8)
+    do {
+        return try migrationKDBXData(suffix)
+    } catch {
+        preconditionFailure("Failed to create migration KDBX fixture: \(error)")
+    }
 }
 
 private func writeJournal(digest: String, to url: URL) throws {
@@ -598,15 +854,15 @@ private func writeJournal(digest: String, to url: URL) throws {
 
 @MainActor
 private func waitForMigrationState(
-    _ store: PasswordVaultStore,
+    _ controller: PasswordVaultUIController,
     _ expected: PasswordVaultState,
     timeout: TimeInterval = 5
 ) async {
     let deadline = Date().addingTimeInterval(timeout)
-    while store.state != expected, Date() < deadline {
+    while controller.state != expected, Date() < deadline {
         try? await Task.sleep(for: .milliseconds(10))
     }
-    #expect(store.state == expected)
+    #expect(controller.state == expected)
 }
 
 private func waitForMigrationCall(

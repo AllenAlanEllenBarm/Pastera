@@ -84,6 +84,67 @@ struct PasswordVaultLocalStorageTests {
         }
     }
 
+    @Test("two file storage instances serialize the same local vault transaction")
+    func samePathTransactionsAreSharedAcrossInstances() throws {
+        try withTemporaryDirectory { directory in
+            let paths = PasswordVaultLocalPaths(
+                directoryURL: directory,
+                vaultURL: directory.appendingPathComponent("PasteraVault.kdbx"),
+                backupURL: directory.appendingPathComponent("PasteraVault.kdbx.bak"),
+                metadataURL: directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+            )
+            let first = FilePasswordVaultLocalStorage(paths: paths)
+            let second = FilePasswordVaultLocalStorage(paths: paths)
+            let transactionEntered = DispatchSemaphore(value: 0)
+            let releaseTransaction = DispatchSemaphore(value: 0)
+            let writerStarted = DispatchSemaphore(value: 0)
+            let writerFinished = DispatchSemaphore(value: 0)
+            let transactionFinished = DispatchSemaphore(value: 0)
+            let secondData = kdbxData("second")
+
+            Thread.detachNewThread {
+                _ = try? first.withExclusiveTransaction {
+                    transactionEntered.signal()
+                    releaseTransaction.wait()
+                }
+                transactionFinished.signal()
+            }
+            #expect(transactionEntered.wait(timeout: .now() + 30) == .success)
+            Thread.detachNewThread {
+                writerStarted.signal()
+                try? second.writeAtomically(secondData)
+                writerFinished.signal()
+            }
+            #expect(writerStarted.wait(timeout: .now() + 30) == .success)
+            let writerBeforeRelease = writerFinished.wait(timeout: .now() + 1)
+            releaseTransaction.signal()
+
+            #expect(transactionFinished.wait(timeout: .now() + 30) == .success)
+            if writerBeforeRelease == .timedOut {
+                #expect(writerFinished.wait(timeout: .now() + 30) == .success)
+            }
+            #expect(writerBeforeRelease == .timedOut)
+            let readback = try second.read()
+            #expect(readback == secondData)
+        }
+    }
+
+    @Test("migration cleanup preserves a local vault whose digest no longer matches")
+    func migrationCleanupRequiresDigestOwnership() throws {
+        try withTemporaryStorage { storage in
+            let current = kdbxData("newer-local")
+            try storage.writeAtomically(current)
+
+            let removed = try storage.removeVaultCreatedByFailedMigration(
+                expectedDigest: PasswordVaultDigest.hex(kdbxData("older-migration"))
+            )
+
+            #expect(!removed)
+            let readback = try storage.read()
+            #expect(readback == current)
+        }
+    }
+
     @Test("sync metadata JSON contains no decrypted vault fields")
     func syncMetadataJSONExcludesSensitiveFields() throws {
         let metadata = PasswordVaultSyncMetadata(

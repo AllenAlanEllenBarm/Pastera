@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import KDBXKit
 
 enum PasswordVaultLocalPreparationFailure: Error, Equatable {
     case oneDriveUnavailable
@@ -170,10 +172,13 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
     }
 
     func migrateLegacyVaultIfNeeded() throws -> PasswordVaultMigrationOutcome {
-        if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
-        guard !localStorage.containsVault() else { return .notNeeded }
+        let initialOutcome = try localStorage.withExclusiveTransaction { () -> PasswordVaultMigrationOutcome? in
+            if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
+            return localStorage.containsVault() ? .notNeeded : nil
+        }
+        if let initialOutcome { return initialOutcome }
 
-        var metadata = try metadataStore.load()
+        let metadata = try metadataStore.load()
         guard let syncRootURL = legacySyncRootProvider() else {
             return metadata.mode == .oneDrive ? .waitingForOneDrive : .notNeeded
         }
@@ -197,50 +202,59 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
         guard remoteData.count >= Self.signature.count else {
             return .waitingForOneDrive
         }
-        guard remoteData.prefix(Self.signature.count) == Self.signature else {
+        guard remoteData.prefix(Self.signature.count) == Self.signature,
+              PasswordVaultKDBXEnvelopeValidator.isValid(remoteData) else {
             return .failed(.remoteCorrupted)
         }
 
         let remoteDigest = PasswordVaultDigest.hex(remoteData)
-        do {
-            try journal.begin(remoteDigest: remoteDigest)
-        } catch {
-            return .failed(.localWriteFailed)
-        }
-        do {
-            try localStorage.writeAtomically(remoteData)
-            let localData = try localStorage.read()
-            guard PasswordVaultDigest.hex(localData) == remoteDigest else {
-                return discardNewLocalCopy()
-            }
-        } catch {
-            return discardNewLocalCopy()
-        }
+        return try localStorage.withExclusiveTransaction {
+            if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
+            guard !localStorage.containsVault() else { return .notNeeded }
+            var migratedMetadata = try metadataStore.load()
 
-        metadata.migrationVersion = 1
-        metadata.mode = .oneDrive
-        metadata.lastSyncedLocalRevision = metadata.localRevision
-        metadata.lastSyncedLocalDigest = remoteDigest
-        metadata.lastObservedRemoteDigest = remoteDigest
-        metadata.lastSyncAt = now()
-        metadata.pendingChangeCount = 0
-        metadata.lastFailure = nil
-        do {
-            try metadataStore.save(metadata)
-        } catch {
-            return discardNewLocalCopy()
+            do {
+                try journal.begin(remoteDigest: remoteDigest)
+            } catch {
+                return .failed(.localWriteFailed)
+            }
+            do {
+                try localStorage.writeAtomically(remoteData)
+                let localData = try localStorage.read()
+                guard PasswordVaultDigest.hex(localData) == remoteDigest else {
+                    return discardNewLocalCopy(expectedDigest: remoteDigest)
+                }
+            } catch {
+                return discardNewLocalCopy(expectedDigest: remoteDigest)
+            }
+
+            migratedMetadata.migrationVersion = 1
+            migratedMetadata.mode = .oneDrive
+            migratedMetadata.lastSyncedLocalRevision = migratedMetadata.localRevision
+            migratedMetadata.lastSyncedLocalDigest = remoteDigest
+            migratedMetadata.lastObservedRemoteDigest = remoteDigest
+            migratedMetadata.lastSyncAt = now()
+            migratedMetadata.pendingChangeCount = 0
+            migratedMetadata.lastFailure = nil
+            do {
+                try metadataStore.save(migratedMetadata)
+            } catch {
+                return discardNewLocalCopy(expectedDigest: remoteDigest)
+            }
+            do {
+                try journal.clear()
+            } catch {
+                return .failed(.localCleanupFailed)
+            }
+            return .migrated
         }
-        do {
-            try journal.clear()
-        } catch {
-            return .failed(.localCleanupFailed)
-        }
-        return .migrated
     }
 
-    private func discardNewLocalCopy() -> PasswordVaultMigrationOutcome {
+    private func discardNewLocalCopy(expectedDigest: String) -> PasswordVaultMigrationOutcome {
         do {
-            try localStorage.removeVaultCreatedByFailedMigration()
+            guard try localStorage.removeVaultCreatedByFailedMigration(expectedDigest: expectedDigest) else {
+                return .failed(.localCleanupFailed)
+            }
         } catch {
             return .failed(.localCleanupFailed)
         }
@@ -284,7 +298,11 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
                 guard localDigestMatches(savedJournal.remoteDigest) else {
                     return .failed(.localCleanupFailed)
                 }
-                try localStorage.removeVaultCreatedByFailedMigration()
+                guard try localStorage.removeVaultCreatedByFailedMigration(
+                    expectedDigest: savedJournal.remoteDigest
+                ) else {
+                    return .failed(.localCleanupFailed)
+                }
             }
             try journal.clear()
             return nil
@@ -297,5 +315,109 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
         guard localStorage.containsVault(),
               let localData = try? localStorage.read() else { return false }
         return PasswordVaultDigest.hex(localData) == expectedDigest
+    }
+}
+
+private enum PasswordVaultKDBXEnvelopeValidator {
+    private static let fixedHeaderLength = 12
+    private static let digestLength = 32
+    private static let blockFrameLength = 36
+
+    static func isValid(_ data: Data) -> Bool {
+        do {
+            let header = try KDBXReader.parseHeader(data)
+            guard let headerEnd = headerEnd(in: data, isLegacy3x: header.formatVersion.isLegacy3x) else {
+                return false
+            }
+            if header.formatVersion.isLegacy3x {
+                return validateLegacyPayload(data, headerEnd: headerEnd)
+            }
+            return validate4xPayload(data, headerEnd: headerEnd, cipher: header.encryptionAlgorithm)
+        } catch {
+            return false
+        }
+    }
+
+    private static func headerEnd(in data: Data, isLegacy3x: Bool) -> Int? {
+        var cursor = fixedHeaderLength
+        while cursor < data.count {
+            guard let type = byte(in: data, at: cursor) else { return nil }
+            cursor += 1
+            let length: Int
+            if isLegacy3x {
+                guard let value = uint16(in: data, at: cursor) else { return nil }
+                cursor += MemoryLayout<UInt16>.size
+                length = Int(value)
+            } else {
+                guard let value = uint32(in: data, at: cursor) else { return nil }
+                cursor += MemoryLayout<UInt32>.size
+                length = Int(value)
+            }
+            guard length <= data.count - cursor else { return nil }
+            cursor += length
+            if type == 0 { return cursor }
+        }
+        return nil
+    }
+
+    private static func validateLegacyPayload(_ data: Data, headerEnd: Int) -> Bool {
+        let payloadLength = data.count - headerEnd
+        return payloadLength > 0 && payloadLength.isMultiple(of: 16)
+    }
+
+    private static func validate4xPayload(
+        _ data: Data,
+        headerEnd: Int,
+        cipher: Header.EncryptionAlgorithm
+    ) -> Bool {
+        guard headerEnd <= data.count - (digestLength * 2) else { return false }
+        let expectedHeaderDigest = Data(SHA256.hash(data: data.prefix(headerEnd)))
+        let storedHeaderDigest = data.subdata(in: headerEnd..<(headerEnd + digestLength))
+        guard expectedHeaderDigest == storedHeaderDigest else { return false }
+
+        var cursor = headerEnd + (digestLength * 2)
+        var encryptedPayloadLength = 0
+        var foundPayload = false
+        while cursor <= data.count - blockFrameLength {
+            cursor += digestLength
+            guard let rawSize = uint32(in: data, at: cursor) else { return false }
+            let size = Int32(bitPattern: rawSize)
+            cursor += MemoryLayout<Int32>.size
+            guard size >= 0 else { return false }
+            let blockLength = Int(size)
+            guard blockLength <= data.count - cursor else { return false }
+            if blockLength == 0 {
+                guard cursor == data.count, foundPayload else { return false }
+                switch cipher {
+                case .AES256CBC:
+                    return encryptedPayloadLength.isMultiple(of: 16)
+                case .ChaCha20:
+                    return true
+                }
+            }
+            foundPayload = true
+            encryptedPayloadLength += blockLength
+            cursor += blockLength
+        }
+        return false
+    }
+
+    private static func byte(in data: Data, at offset: Int) -> UInt8? {
+        guard offset >= 0, offset < data.count else { return nil }
+        return data[data.startIndex + offset]
+    }
+
+    private static func uint16(in data: Data, at offset: Int) -> UInt16? {
+        guard offset >= 0, offset <= data.count - MemoryLayout<UInt16>.size else { return nil }
+        return data.withUnsafeBytes {
+            UInt16(littleEndian: $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self))
+        }
+    }
+
+    private static func uint32(in data: Data, at offset: Int) -> UInt32? {
+        guard offset >= 0, offset <= data.count - MemoryLayout<UInt32>.size else { return nil }
+        return data.withUnsafeBytes {
+            UInt32(littleEndian: $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self))
+        }
     }
 }
