@@ -384,6 +384,15 @@ struct PasswordVaultStoreTests {
         #expect(!entry.matches("secret-value"))
     }
 
+    @Test("encrypted vault digests use lowercase SHA-256")
+    func encryptedVaultDigestUsesSHA256() {
+        let data = Data("abc".utf8)
+
+        #expect(PasswordVaultDigest.hex(data) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        #expect(PasswordVaultEncryptedSnapshot(data: data, digest: PasswordVaultDigest.hex(data)).data == data)
+        #expect(PasswordVaultCommit(origin: .userMutation, encryptedDigest: PasswordVaultDigest.hex(data)).origin == .userMutation)
+    }
+
     @Test("secret query is local-only and requires user presence")
     func secretQueryUsesProtectedLocalKeychainItem() throws {
         let id = UUID()

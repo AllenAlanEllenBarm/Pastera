@@ -97,6 +97,8 @@ struct Constants {
         static let passwordVaultAutoLockInterval = "kPasteraPasswordVaultAutoLockInterval"
         static let passwordVaultQuickUnlockEnabled = "kPasteraPasswordVaultQuickUnlockEnabled"
         static let passwordVaultQuickActionsCoachmarkShown = "kPasteraPasswordVaultQuickActionsCoachmarkShown"
+        static let passwordVaultSyncMode = "kPasteraPasswordVaultSyncMode"
+        static let passwordVaultLocalFirstMigrationVersion = "kPasteraPasswordVaultLocalFirstMigrationVersion"
         static let promptOptimizationProvider = "kPasteraPromptOptimizationProvider"
         static let promptOptimizationPreset = "kPasteraPromptOptimizationPreset"
         static let promptOptimizationBaseURL = "kPasteraPromptOptimizationBaseURL"
