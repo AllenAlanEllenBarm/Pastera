@@ -152,6 +152,11 @@ struct PasswordVaultSyncMetadata: Codable, Equatable {
     var lastFailure: PasswordVaultSyncFailure?
     var migrationVersion: Int
 }
+
+protocol PasswordVaultSyncMetadataStoring {
+    func load() throws -> PasswordVaultSyncMetadata
+    func save(_ metadata: PasswordVaultSyncMetadata) throws
+}
 ```
 
 ### 同步决策表
@@ -192,7 +197,7 @@ git worktree add ../Pastera-vault-local-first -b codex/password-vault-local-firs
 
 ```bash
 git status --short --branch
-git rev-list --left-right --count origin/develop HEAD
+git rev-list --left-right --count origin/develop...HEAD
 ```
 
 - [ ] 运行当前密码箱和同步基线，保存通过数量与失败名称；基线失败必须先单独复现并归类，不得直接归因于本功能：
@@ -335,7 +340,7 @@ final class FilePasswordVaultLocalStorage: PasswordVaultLocalStoring {
 ```
 
 - [ ] `writeAtomically` 必须按“校验新数据签名 → 写同目录临时文件 → 校验临时文件 → 备份现有主文件 → 原子替换主文件”的顺序执行；任一步失败时主文件保持原值。KDBX 签名校验固定检查前八字节 `03 D9 A2 9A 67 FB 4B B5`。
-- [ ] 在 `PasswordVaultSyncModels.swift` 实现本计划“核心接口”中的同步模式、步骤、失败类别、快照、元数据、提交来源和加密摘要类型；使用 `CryptoKit.SHA256` 统一生成小写十六进制摘要。
+- [ ] 在 `PasswordVaultSyncModels.swift` 实现本计划“核心接口”中的同步模式、步骤、失败类别、快照、元数据、元数据存储协议、提交来源和加密摘要类型；使用 `CryptoKit.SHA256` 统一生成小写十六进制摘要。Task 4 先通过该协议注入测试存储，Task 5 再提供 JSON 生产实现。
 - [ ] 在 `Constants.UserDefaults` 增加独立键：
 
 ```swift
@@ -526,11 +531,6 @@ git commit -m "feat(vault): migrate legacy cloud vault safely"
 - [ ] 实现元数据存储：
 
 ```swift
-protocol PasswordVaultSyncMetadataStoring {
-    func load() throws -> PasswordVaultSyncMetadata
-    func save(_ metadata: PasswordVaultSyncMetadata) throws
-}
-
 final class JSONPasswordVaultSyncMetadataStore: PasswordVaultSyncMetadataStoring {
     private let url: URL
     private let encoder: JSONEncoder
