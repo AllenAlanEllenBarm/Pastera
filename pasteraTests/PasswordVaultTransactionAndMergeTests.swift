@@ -300,8 +300,8 @@ private final class CoordinatedReviewLocalStorage: PasswordVaultLocalStoring, @u
         coordinationLock.withLock { nextWriteBarrier = (entered, release) }
     }
 
-    func containsVault() -> Bool {
-        backing.containsVault()
+    func containsVault() throws -> Bool {
+        try backing.containsVault()
     }
 
     func withExclusiveTransaction<Value>(_ operation: () throws -> Value) throws -> Value {

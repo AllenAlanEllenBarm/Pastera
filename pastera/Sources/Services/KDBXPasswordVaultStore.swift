@@ -107,7 +107,11 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         self.sessionNotificationCenter = sessionNotificationCenter
         self.autoLockTimeoutProvider = autoLockTimeoutProvider
         self.now = now
-        state = localStorage.containsVault() ? .locked : .notConfigured
+        do {
+            state = try localStorage.containsVault() ? .locked : .notConfigured
+        } catch {
+            state = .localCopyUnavailable(.localWriteFailed)
+        }
     }
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws {
@@ -118,7 +122,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         let persistence: (data: Data, revision: Data)
         do {
             persistence = try withLocalTransaction {
-                guard !localStorage.containsVault() else { throw PasswordVaultError.duplicateEntry }
+                guard try !localStorage.containsVault() else { throw PasswordVaultError.duplicateEntry }
                 let bytes = try encoded(newContent, unlockData: unlock)
                 try localStorage.writeAtomically(bytes)
                 let written = try readLocalDataWithinTransaction()
@@ -199,7 +203,11 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         content = nil
         unlockData = nil
         lastRevision = nil
-        state = localStorage.containsVault() ? .locked : .notConfigured
+        do {
+            state = try localStorage.containsVault() ? .locked : .notConfigured
+        } catch {
+            state = .localCopyUnavailable(.localWriteFailed)
+        }
         onStateChange?()
     }
 
@@ -578,7 +586,7 @@ extension KDBXPasswordVaultStore {
     }
 
     private func readLocalDataWithinTransaction() throws -> Data {
-        guard localStorage.containsVault() else {
+        guard try localStorage.containsVault() else {
             throw PasswordVaultError.databaseNotConfigured
         }
         do {
@@ -586,7 +594,7 @@ extension KDBXPasswordVaultStore {
         } catch let error as PasswordVaultError {
             throw error
         } catch {
-            guard localStorage.containsVault() else {
+            guard try localStorage.containsVault() else {
                 throw PasswordVaultError.databaseNotConfigured
             }
             throw PasswordVaultError.corruptedData
@@ -824,7 +832,7 @@ extension KDBXPasswordVaultStore {
         do {
             switch try migrator.migrateLegacyVaultIfNeeded() {
             case .notNeeded:
-                state = localStorage.containsVault() ? .locked : .notConfigured
+                state = try localStorage.containsVault() ? .locked : .notConfigured
             case .migrated:
                 if let data = try? localStorage.read() {
                     state = .locked

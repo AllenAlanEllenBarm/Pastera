@@ -172,9 +172,14 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
     }
 
     func migrateLegacyVaultIfNeeded() throws -> PasswordVaultMigrationOutcome {
-        let initialOutcome = try localStorage.withExclusiveTransaction { () -> PasswordVaultMigrationOutcome? in
-            if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
-            return localStorage.containsVault() ? .notNeeded : nil
+        let initialOutcome: PasswordVaultMigrationOutcome?
+        do {
+            initialOutcome = try localStorage.withExclusiveTransaction {
+                if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
+                return try localStorage.containsVault() ? .notNeeded : nil
+            }
+        } catch {
+            return .failed(.localCleanupFailed)
         }
         if let initialOutcome { return initialOutcome }
 
@@ -208,45 +213,49 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
         }
 
         let remoteDigest = PasswordVaultDigest.hex(remoteData)
-        return try localStorage.withExclusiveTransaction {
-            if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
-            guard !localStorage.containsVault() else { return .notNeeded }
-            var migratedMetadata = try metadataStore.load()
+        do {
+            return try localStorage.withExclusiveTransaction {
+                if let recoveryOutcome = recoverJournaledMigrationIfNeeded() { return recoveryOutcome }
+                guard try !localStorage.containsVault() else { return .notNeeded }
+                var migratedMetadata = try metadataStore.load()
 
-            do {
-                try journal.begin(remoteDigest: remoteDigest)
-            } catch {
-                return .failed(.localWriteFailed)
-            }
-            do {
-                try localStorage.writeAtomically(remoteData)
-                let localData = try localStorage.read()
-                guard PasswordVaultDigest.hex(localData) == remoteDigest else {
+                do {
+                    try journal.begin(remoteDigest: remoteDigest)
+                } catch {
+                    return .failed(.localWriteFailed)
+                }
+                do {
+                    try localStorage.writeAtomically(remoteData)
+                    let localData = try localStorage.read()
+                    guard PasswordVaultDigest.hex(localData) == remoteDigest else {
+                        return discardNewLocalCopy(expectedDigest: remoteDigest)
+                    }
+                } catch {
                     return discardNewLocalCopy(expectedDigest: remoteDigest)
                 }
-            } catch {
-                return discardNewLocalCopy(expectedDigest: remoteDigest)
-            }
 
-            migratedMetadata.migrationVersion = 1
-            migratedMetadata.mode = .oneDrive
-            migratedMetadata.lastSyncedLocalRevision = migratedMetadata.localRevision
-            migratedMetadata.lastSyncedLocalDigest = remoteDigest
-            migratedMetadata.lastObservedRemoteDigest = remoteDigest
-            migratedMetadata.lastSyncAt = now()
-            migratedMetadata.pendingChangeCount = 0
-            migratedMetadata.lastFailure = nil
-            do {
-                try metadataStore.save(migratedMetadata)
-            } catch {
-                return discardNewLocalCopy(expectedDigest: remoteDigest)
+                migratedMetadata.migrationVersion = 1
+                migratedMetadata.mode = .oneDrive
+                migratedMetadata.lastSyncedLocalRevision = migratedMetadata.localRevision
+                migratedMetadata.lastSyncedLocalDigest = remoteDigest
+                migratedMetadata.lastObservedRemoteDigest = remoteDigest
+                migratedMetadata.lastSyncAt = now()
+                migratedMetadata.pendingChangeCount = 0
+                migratedMetadata.lastFailure = nil
+                do {
+                    try metadataStore.save(migratedMetadata)
+                } catch {
+                    return discardNewLocalCopy(expectedDigest: remoteDigest)
+                }
+                do {
+                    try journal.clear()
+                } catch {
+                    return .failed(.localCleanupFailed)
+                }
+                return .migrated
             }
-            do {
-                try journal.clear()
-            } catch {
-                return .failed(.localCleanupFailed)
-            }
-            return .migrated
+        } catch {
+            return .failed(.localWriteFailed)
         }
     }
 
@@ -294,7 +303,7 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
         }
 
         do {
-            if localStorage.containsVault() {
+            if try localStorage.containsVault() {
                 guard localDigestMatches(savedJournal.remoteDigest) else {
                     return .failed(.localCleanupFailed)
                 }
@@ -312,7 +321,8 @@ final class PasswordVaultMigrationService: PasswordVaultMigrating {
     }
 
     private func localDigestMatches(_ expectedDigest: String) -> Bool {
-        guard localStorage.containsVault(),
+        // Inspection failure must preserve both the journal and local file; false never authorizes cleanup.
+        guard (try? localStorage.containsVault()) == true,
               let localData = try? localStorage.read() else { return false }
         return PasswordVaultDigest.hex(localData) == expectedDigest
     }
@@ -362,7 +372,7 @@ private enum PasswordVaultKDBXEnvelopeValidator {
 
     private static func validateLegacyPayload(_ data: Data, headerEnd: Int) -> Bool {
         let payloadLength = data.count - headerEnd
-        return payloadLength > 0 && payloadLength.isMultiple(of: 16)
+        return payloadLength >= 80 && payloadLength.isMultiple(of: 16)
     }
 
     private static func validate4xPayload(

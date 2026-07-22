@@ -60,7 +60,8 @@ struct PasswordVaultMigrationTests {
         let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .waitingForOneDrive)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -74,7 +75,8 @@ struct PasswordVaultMigrationTests {
 
         #expect(outcome == .waitingForOneDrive)
         #expect(try Data(contentsOf: fixture.remoteURL) == shortData)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -89,7 +91,8 @@ struct PasswordVaultMigrationTests {
 
         #expect(outcome == .waitingForOneDrive)
         #expect(try Data(contentsOf: fixture.remoteURL) == remoteData)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -103,7 +106,8 @@ struct PasswordVaultMigrationTests {
 
         #expect(outcome == .failed(.remoteCorrupted))
         #expect(try Data(contentsOf: fixture.remoteURL) == corruptData)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -116,7 +120,8 @@ struct PasswordVaultMigrationTests {
         let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .failed(.remoteCorrupted))
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -131,7 +136,80 @@ struct PasswordVaultMigrationTests {
         let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .failed(.remoteCorrupted))
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
+        #expect(fixture.metadataStore.savedValues.isEmpty)
+    }
+
+    @Test("KDBX 3.1 ciphertext below the minimum envelope is rejected", arguments: [16, 32, 48, 64])
+    func undersizedKDBX31CiphertextIsRejected(ciphertextLength: Int) throws {
+        let candidate = try migrationKDBX31Header() + Data(repeating: 0, count: ciphertextLength)
+        _ = try KDBXReader.parseHeader(candidate)
+        let fixture = try MigrationFixture(remoteData: candidate)
+        defer { fixture.remove() }
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .failed(.remoteCorrupted))
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
+        #expect(fixture.metadataStore.savedValues.isEmpty)
+    }
+
+    @Test("KDBX 3.1 accepts the minimum credential-free ciphertext envelope")
+    func minimumKDBX31CiphertextEnvelopeIsAccepted() throws {
+        let candidate = try migrationKDBX31Header() + Data(repeating: 0, count: 80)
+        _ = try KDBXReader.parseHeader(candidate)
+        let fixture = try MigrationFixture(remoteData: candidate)
+        defer { fixture.remove() }
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .migrated)
+        #expect(fixture.localStorage.data == candidate)
+        #expect(fixture.metadataStore.savedValues.last?.migrationVersion == 1)
+    }
+
+    @Test("a real KDBX 3.1 vault passes credential-free migration validation")
+    func realKDBX31VaultMigrates() throws {
+        let candidate = try migrationKDBX31Fixture()
+        let content = try KDBXReader.parse(candidate, unlockData: UnlockData(masterPassword: "test"))
+        #expect(content.header.formatVersion == .v3_1)
+        let fixture = try MigrationFixture(remoteData: candidate)
+        defer { fixture.remove() }
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .migrated)
+        #expect(fixture.localStorage.data == candidate)
+        #expect(fixture.metadataStore.savedValues.last?.migrationVersion == 1)
+    }
+
+    @Test("initial local transaction failure is fail-closed before reading cloud data")
+    func initialTransactionFailureStopsMigration() throws {
+        let fixture = try MigrationFixture(remoteData: validKDBXData("initial-lock-failure"))
+        defer { fixture.remove() }
+        fixture.localStorage.transactionFailureAttempt = 1
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .failed(.localCleanupFailed))
+        #expect(fixture.reader.readCount == 0)
+        #expect(fixture.localStorage.data == nil)
+        #expect(fixture.metadataStore.savedValues.isEmpty)
+    }
+
+    @Test("final local transaction failure is fail-closed after cloud validation")
+    func finalTransactionFailureStopsMigrationWrite() throws {
+        let fixture = try MigrationFixture(remoteData: validKDBXData("final-lock-failure"))
+        defer { fixture.remove() }
+        fixture.localStorage.transactionFailureAttempt = 2
+
+        let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
+
+        #expect(outcome == .failed(.localWriteFailed))
+        #expect(fixture.reader.readCount == 1)
+        #expect(fixture.localStorage.data == nil)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -146,7 +224,8 @@ struct PasswordVaultMigrationTests {
 
         #expect(outcome == .failed(.localWriteFailed))
         #expect(try Data(contentsOf: fixture.remoteURL) == remoteData)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -159,7 +238,8 @@ struct PasswordVaultMigrationTests {
         let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .failed(.localWriteFailed))
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -173,7 +253,8 @@ struct PasswordVaultMigrationTests {
         let firstOutcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(firstOutcome == .failed(.localWriteFailed))
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(try Data(contentsOf: fixture.remoteURL) == remoteData)
         fixture.metadataStore.saveError = nil
 
@@ -195,7 +276,7 @@ struct PasswordVaultMigrationTests {
         let firstOutcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(firstOutcome == .failed(.localCleanupFailed))
-        #expect(fixture.localStorage.containsVault())
+        #expect(try fixture.localStorage.containsVault())
         #expect(fixture.reader.readCount == 1)
         #expect(fixture.metadataStore.savedValues.isEmpty)
         #expect(FileManager.default.fileExists(atPath: fixture.journalURL.path))
@@ -418,7 +499,8 @@ struct PasswordVaultMigrationTests {
         let outcome = try migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .failed(.localWriteFailed))
-        #expect(!localStorage.containsVault())
+        let containsLocalVault = try localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(try Data(contentsOf: remoteURL) == remoteData)
         #expect(!FileManager.default.fileExists(atPath: localPaths.backupURL.path))
     }
@@ -431,7 +513,8 @@ struct PasswordVaultMigrationTests {
         let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .notNeeded)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 
@@ -445,7 +528,8 @@ struct PasswordVaultMigrationTests {
         let outcome = try fixture.migrator.migrateLegacyVaultIfNeeded()
 
         #expect(outcome == .waitingForOneDrive)
-        #expect(!fixture.localStorage.containsVault())
+        let containsLocalVault = try fixture.localStorage.containsVault()
+        #expect(!containsLocalVault)
         #expect(fixture.metadataStore.savedValues.isEmpty)
     }
 }
@@ -641,6 +725,8 @@ private final class MigrationLocalStorage: PasswordVaultLocalStoring {
     var readOverride: Data?
     var writeError: PasswordVaultError?
     var removeError: PasswordVaultError?
+    var transactionFailureAttempt: Int?
+    private var transactionAttempt = 0
     private let events: MigrationEventRecorder?
 
     init(root: URL, events: MigrationEventRecorder? = nil) {
@@ -653,7 +739,13 @@ private final class MigrationLocalStorage: PasswordVaultLocalStoring {
         self.events = events
     }
 
-    func containsVault() -> Bool { data != nil }
+    func containsVault() throws -> Bool { data != nil }
+
+    func withExclusiveTransaction<Value>(_ operation: () throws -> Value) throws -> Value {
+        transactionAttempt += 1
+        if transactionAttempt == transactionFailureAttempt { throw PasswordVaultError.saveFailed }
+        return try operation()
+    }
 
     func read() throws -> Data {
         events?.append("read-local")
@@ -833,6 +925,19 @@ private let migrationKDBXFixtureCache = MigrationKDBXFixtureCache()
 
 private func migrationKDBXData(_ suffix: String) throws -> Data {
     try migrationKDBXFixtureCache.data(for: suffix)
+}
+
+private func migrationKDBX31Fixture() throws -> Data {
+    let fixtureURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/kpxc-kdbx31-default.kdbx.base64")
+    let encoded = try Data(contentsOf: fixtureURL)
+    return try #require(Data(base64Encoded: encoded, options: .ignoreUnknownCharacters))
+}
+
+private func migrationKDBX31Header() throws -> Data {
+    // This fixture's stock KeePassXC 3.1 outer header ends after 222 bytes.
+    try Data(migrationKDBX31Fixture().prefix(222))
 }
 
 private func validKDBXData(_ suffix: String) -> Data {

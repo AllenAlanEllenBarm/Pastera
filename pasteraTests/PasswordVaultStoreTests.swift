@@ -84,7 +84,7 @@ struct PasswordVaultStoreTests {
         #expect(try store.listFolders().map(\.id) == [archive.id, work.id])
         #expect(try store.listEntries().map(\.title) == ["Mail Updated"])
         #expect(try store.revealPassword(id: first.id, reason: "test") == "secret-one-updated")
-        #expect(localStorage.containsVault())
+        #expect(try localStorage.containsVault())
         #expect(!FileManager.default.fileExists(atPath: missingOneDriveRoot.path))
     }
 
@@ -99,6 +99,21 @@ struct PasswordVaultStoreTests {
             try store.unlock(masterPassword: "anything", rememberQuickUnlock: false)
         }
         #expect(store.state == .notConfigured)
+    }
+
+    @Test("local storage inspection failure is a recovery state rather than not configured")
+    func localStorageInspectionFailureIsFailClosed() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("blocks-vault-directory".utf8).write(
+            to: root.appendingPathComponent("PasswordVault")
+        )
+
+        let store = KDBXPasswordVaultStore(localStorage: makeLocalStorage(at: root))
+
+        #expect(store.state == .localCopyUnavailable(.localWriteFailed))
     }
 
     @Test("only KDBX wrong credentials become wrong-master-password")

@@ -25,7 +25,7 @@ struct PasswordVaultLocalStorageTests {
 
             try storage.writeAtomically(data)
 
-            #expect(storage.containsVault())
+            #expect(try storage.containsVault())
             #expect(try storage.read() == data)
             #expect(!FileManager.default.fileExists(atPath: storage.paths.backupURL.path))
         }
@@ -80,7 +80,8 @@ struct PasswordVaultLocalStorageTests {
             #expect(throws: PasswordVaultError.corruptedData) {
                 try storage.writeAtomically(Data("not-a-kdbx".utf8))
             }
-            #expect(!storage.containsVault())
+            let containsVault = try storage.containsVault()
+            #expect(!containsVault)
         }
     }
 
@@ -126,6 +127,80 @@ struct PasswordVaultLocalStorageTests {
             #expect(writerBeforeRelease == .timedOut)
             let readback = try second.read()
             #expect(readback == secondData)
+        }
+    }
+
+    @Test("the local vault transaction blocks a separate process flock")
+    func separateProcessFlockBlocksTransaction() throws {
+        try withTemporaryDirectory { directory in
+            let lockURL = directory.appendingPathComponent(".PasteraVault.lock")
+            let paths = PasswordVaultLocalPaths(
+                directoryURL: directory,
+                vaultURL: directory.appendingPathComponent("PasteraVault.kdbx"),
+                backupURL: directory.appendingPathComponent("PasteraVault.kdbx.bak"),
+                metadataURL: directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+            )
+            let storage = FilePasswordVaultLocalStorage(paths: paths)
+            let transactionEntered = DispatchSemaphore(value: 0)
+            let releaseTransaction = DispatchSemaphore(value: 0)
+            let transactionFinished = DispatchSemaphore(value: 0)
+            Thread.detachNewThread {
+                _ = try? storage.withExclusiveTransaction {
+                    transactionEntered.signal()
+                    releaseTransaction.wait()
+                }
+                transactionFinished.signal()
+            }
+            #expect(transactionEntered.wait(timeout: .now() + 30) == .success)
+
+            let child = Process()
+            let childOutput = Pipe()
+            child.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            child.arguments = [
+                "-c",
+                """
+                import fcntl, os, sys
+                fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)
+                print("attempting", flush=True)
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                print("locked", flush=True)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+                """,
+                lockURL.path
+            ]
+            child.standardOutput = childOutput
+            try child.run()
+            defer {
+                releaseTransaction.signal()
+                if child.isRunning { child.terminate() }
+            }
+
+            let attempting = childOutput.fileHandleForReading.availableData
+            let attemptingText = try #require(String(data: attempting, encoding: .utf8))
+            #expect(attemptingText.contains("attempting"))
+            #expect(!attemptingText.contains("locked"))
+            let lockedReadStarted = DispatchSemaphore(value: 0)
+            let lockedReadFinished = DispatchSemaphore(value: 0)
+            let lockedOutput = PasswordVaultProcessOutputBox()
+            Thread.detachNewThread {
+                lockedReadStarted.signal()
+                lockedOutput.set(childOutput.fileHandleForReading.availableData)
+                lockedReadFinished.signal()
+            }
+            #expect(lockedReadStarted.wait(timeout: .now() + 30) == .success)
+            let lockedBeforeRelease = lockedReadFinished.wait(timeout: .now() + 1)
+            releaseTransaction.signal()
+
+            #expect(lockedBeforeRelease == .timedOut)
+            #expect(transactionFinished.wait(timeout: .now() + 30) == .success)
+            if lockedBeforeRelease == .timedOut {
+                #expect(lockedReadFinished.wait(timeout: .now() + 30) == .success)
+            }
+            let lockedText = try #require(String(data: lockedOutput.data, encoding: .utf8))
+            #expect(lockedText.contains("locked"))
+            child.waitUntilExit()
+            #expect(child.terminationStatus == 0)
         }
     }
 
@@ -200,5 +275,16 @@ struct PasswordVaultLocalStorageTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         try operation(directory)
+    }
+}
+
+private final class PasswordVaultProcessOutputBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = Data()
+
+    var data: Data { lock.withLock { storage } }
+
+    func set(_ data: Data) {
+        lock.withLock { storage = data }
     }
 }

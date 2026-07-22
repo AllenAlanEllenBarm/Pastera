@@ -36,18 +36,12 @@ protocol PasswordVaultLocalStoring {
     var paths: PasswordVaultLocalPaths { get }
 
     func withExclusiveTransaction<Value>(_ operation: () throws -> Value) throws -> Value
-    func containsVault() -> Bool
+    func containsVault() throws -> Bool
     func read() throws -> Data
     func writeAtomically(_ data: Data) throws
     @discardableResult
     func removeVaultCreatedByFailedMigration(expectedDigest: String) throws -> Bool
     func readBackup() throws -> Data
-}
-
-extension PasswordVaultLocalStoring {
-    func withExclusiveTransaction<Value>(_ operation: () throws -> Value) throws -> Value {
-        try operation()
-    }
 }
 
 private final class PasswordVaultLocalFileLockRegistry: @unchecked Sendable {
@@ -140,10 +134,10 @@ final class FilePasswordVaultLocalStorage: PasswordVaultLocalStoring {
         )
     }
 
-    func containsVault() -> Bool {
-        (try? withExclusiveTransaction {
+    func containsVault() throws -> Bool {
+        try withExclusiveTransaction {
             fileManager.fileExists(atPath: paths.vaultURL.path)
-        }) ?? false
+        }
     }
 
     func withExclusiveTransaction<Value>(_ operation: () throws -> Value) throws -> Value {
@@ -176,7 +170,7 @@ final class FilePasswordVaultLocalStorage: PasswordVaultLocalStoring {
             try data.write(to: temporaryURL, options: .withoutOverwriting)
             try validate(Data(contentsOf: temporaryURL))
 
-            guard containsVault() else {
+            guard try containsVault() else {
                 try fileManager.moveItem(at: temporaryURL, to: paths.vaultURL)
                 return
             }
@@ -191,7 +185,7 @@ final class FilePasswordVaultLocalStorage: PasswordVaultLocalStoring {
     @discardableResult
     func removeVaultCreatedByFailedMigration(expectedDigest: String) throws -> Bool {
         try withExclusiveTransaction {
-            guard containsVault() else { return true }
+            guard try containsVault() else { return true }
             let current = try Data(contentsOf: paths.vaultURL)
             guard PasswordVaultDigest.hex(current) == expectedDigest else { return false }
             try fileManager.removeItem(at: paths.vaultURL)
