@@ -39,17 +39,18 @@ final class VaultArtifactRekeyTransaction {
         self.init(fileManager: .default, checkpointAction: checkpointAction)
     }
 
-    func managedArtifactURLs(alongside mainURL: URL) throws -> [URL] {
+    func managedArtifactURLs(in paths: PasswordVaultLocalPaths) throws -> [URL] {
+        let mainURL = paths.vaultURL
         guard fileManager.fileExists(atPath: mainURL.path) else {
             throw PasswordVaultError.databaseNotConfigured
         }
         var artifacts = [mainURL]
-        let backupURL = mainURL.appendingPathExtension("bak")
+        let backupURL = paths.backupURL
         if fileManager.fileExists(atPath: backupURL.path) {
             artifacts.append(backupURL)
         }
 
-        let directory = mainURL.deletingLastPathComponent()
+        let directory = paths.directoryURL
         let mainPath = mainURL.standardizedFileURL.path
         let immediateConflicts = try fileManager.contentsOfDirectory(
             at: directory,

@@ -58,7 +58,7 @@ struct PasswordVaultMasterPasswordTests {
 
         #expect(result.warnings.isEmpty)
         #expect(Set(try fixture.store.listEntries().map(\.title)) == ["Memory Entry", "Disk Entry", "Conflict Entry"])
-        let artifacts = try fixture.transaction.managedArtifactURLs(alongside: fixture.vaultURL)
+        let artifacts = try fixture.transaction.managedArtifactURLs(in: fixture.localStorage.paths)
         #expect(artifacts.count >= 3)
         for url in artifacts {
             #expect(fixture.canOpen(url, password: fixture.newPassword))
@@ -145,6 +145,27 @@ struct PasswordVaultMasterPasswordTests {
         try fixture.store.unlock(masterPassword: fixture.newPassword, rememberQuickUnlock: false)
         #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
     }
+
+    @Test("password change never enumerates a KDBX outside local storage")
+    func passwordChangeIgnoresExternalCloudCopy() throws {
+        let fixture = try RekeyFixture()
+        defer { fixture.remove() }
+        let cloudRoot = fixture.root.appendingPathComponent("OneDrive", isDirectory: true)
+        let cloudStorage = makeRekeyLocalStorage(at: cloudRoot)
+        let cloudStore = KDBXPasswordVaultStore(localStorage: cloudStorage)
+        try cloudStore.createDatabase(masterPassword: fixture.oldPassword, rememberQuickUnlock: false)
+        let cloudBefore = try Data(contentsOf: cloudStorage.paths.vaultURL)
+
+        _ = try fixture.store.changeMasterPassword(
+            currentPassword: fixture.oldPassword,
+            newPassword: fixture.newPassword,
+            keepQuickUnlockEnabled: false
+        )
+
+        #expect(try Data(contentsOf: cloudStorage.paths.vaultURL) == cloudBefore)
+        #expect(fixture.canOpen(cloudStorage.paths.vaultURL, password: fixture.oldPassword))
+        #expect(!fixture.canOpen(cloudStorage.paths.vaultURL, password: fixture.newPassword))
+    }
 }
 
 enum RekeyFault: CaseIterable {
@@ -173,6 +194,7 @@ private final class RekeyFixture {
     let oldPassword = "old fixture password"
     let newPassword = "new fixture password"
     let root: URL
+    let localStorage: FilePasswordVaultLocalStorage
     let vaultURL: URL
     let transaction: VaultArtifactRekeyTransaction
     let store: KDBXPasswordVaultStore
@@ -180,10 +202,11 @@ private final class RekeyFixture {
     init(transaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction()) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        vaultURL = VaultFileCoordinator.vaultURL(for: root)
+        localStorage = makeRekeyLocalStorage(at: root)
+        vaultURL = localStorage.paths.vaultURL
         self.transaction = transaction
         store = KDBXPasswordVaultStore(
-            syncRootProvider: { [root] in root },
+            localStorage: localStorage,
             unlockKeyStore: RekeyUnlockKeyStore(),
             automationUnlockKeyStore: RekeyAutomationKeyStore(),
             rekeyTransaction: transaction
@@ -208,7 +231,7 @@ private final class RekeyFixture {
     }
 
     func addExternalEntry(title: String) throws {
-        let external = KDBXPasswordVaultStore(syncRootProvider: { [root] in root })
+        let external = KDBXPasswordVaultStore(localStorage: localStorage)
         try external.unlock(masterPassword: oldPassword, rememberQuickUnlock: false)
         let folder = try external.listFolders().first ?? external.createFolder(name: "External")
         _ = try external.create(.init(
@@ -225,7 +248,8 @@ private final class RekeyFixture {
         let conflictRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: conflictRoot) }
         try FileManager.default.createDirectory(at: conflictRoot, withIntermediateDirectories: true)
-        let conflictStore = KDBXPasswordVaultStore(syncRootProvider: { [conflictRoot] in conflictRoot })
+        let conflictStorage = makeRekeyLocalStorage(at: conflictRoot)
+        let conflictStore = KDBXPasswordVaultStore(localStorage: conflictStorage)
         try conflictStore.createDatabase(masterPassword: oldPassword, rememberQuickUnlock: false)
         let folder = try conflictStore.createFolder(name: "Conflict")
         _ = try conflictStore.create(.init(
@@ -237,7 +261,7 @@ private final class RekeyFixture {
             password: "conflict fixture value"
         ))
         let conflictURL = vaultURL.deletingLastPathComponent().appendingPathComponent("PasteraVault-conflict.kdbx")
-        try Data(contentsOf: VaultFileCoordinator.vaultURL(for: conflictRoot)).write(to: conflictURL, options: .atomic)
+        try Data(contentsOf: conflictStorage.paths.vaultURL).write(to: conflictURL, options: .atomic)
     }
 
     func addResolvedArchive() throws {
@@ -251,7 +275,7 @@ private final class RekeyFixture {
     }
 
     func addManagedCopies() throws {
-        try Data(contentsOf: vaultURL).write(to: vaultURL.appendingPathExtension("bak"), options: .atomic)
+        try Data(contentsOf: vaultURL).write(to: localStorage.paths.backupURL, options: .atomic)
         try Data(contentsOf: vaultURL).write(
             to: vaultURL.deletingLastPathComponent().appendingPathComponent("PasteraVault-conflict.kdbx"),
             options: .atomic
@@ -260,7 +284,7 @@ private final class RekeyFixture {
     }
 
     func artifactBytes() throws -> [URL: Data] {
-        try Dictionary(uniqueKeysWithValues: transaction.managedArtifactURLs(alongside: vaultURL).map {
+        try Dictionary(uniqueKeysWithValues: transaction.managedArtifactURLs(in: localStorage.paths).map {
             ($0, try Data(contentsOf: $0))
         })
     }
@@ -278,6 +302,16 @@ private final class RekeyFixture {
             return false
         }
     }
+}
+
+private func makeRekeyLocalStorage(at root: URL) -> FilePasswordVaultLocalStorage {
+    let directory = root.appendingPathComponent("PasswordVault", isDirectory: true)
+    return FilePasswordVaultLocalStorage(paths: PasswordVaultLocalPaths(
+        directoryURL: directory,
+        vaultURL: directory.appendingPathComponent("PasteraVault.kdbx"),
+        backupURL: directory.appendingPathComponent("PasteraVault.kdbx.bak"),
+        metadataURL: directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+    ))
 }
 
 private final class RekeyUnlockKeyStore: VaultUnlockKeyStoring {

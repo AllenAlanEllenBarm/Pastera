@@ -149,7 +149,7 @@ struct VaultAutomationUnlockKeyStoreTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let automation = AgentAutomationUnlockKeyStore()
         let store = KDBXPasswordVaultStore(
-            syncRootProvider: { root },
+            localStorage: makeAgentLocalStorage(at: root),
             automationUnlockKeyStore: automation
         )
         try store.createDatabase(masterPassword: "master", rememberQuickUnlock: false)
@@ -219,7 +219,7 @@ struct PasswordVaultAgentAccessTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let automation = AgentAutomationUnlockKeyStore()
         let store = KDBXPasswordVaultStore(
-            syncRootProvider: { root },
+            localStorage: makeAgentLocalStorage(at: root),
             automationUnlockKeyStore: automation
         )
         try store.createDatabase(masterPassword: "agent-password", rememberQuickUnlock: false)
@@ -291,7 +291,7 @@ struct PasswordVaultAgentAccessTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let store = KDBXPasswordVaultStore(syncRootProvider: { root })
+        let store = KDBXPasswordVaultStore(localStorage: makeAgentLocalStorage(at: root))
         try store.createDatabase(masterPassword: "ui-password", rememberQuickUnlock: false)
         store.lock()
         let queueKey = DispatchSpecificKey<Int>()
@@ -375,7 +375,7 @@ struct PasswordVaultAgentAccessTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let sessionNotificationCenter = NotificationCenter()
         let store = KDBXPasswordVaultStore(
-            syncRootProvider: { root },
+            localStorage: makeAgentLocalStorage(at: root),
             sessionNotificationCenter: sessionNotificationCenter
         )
         try store.createDatabase(masterPassword: "session-password", rememberQuickUnlock: false)
@@ -405,7 +405,7 @@ struct PasswordVaultAgentAccessTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let sessionNotificationCenter = NotificationCenter()
         let store = KDBXPasswordVaultStore(
-            syncRootProvider: { root },
+            localStorage: makeAgentLocalStorage(at: root),
             sessionNotificationCenter: sessionNotificationCenter
         )
         try store.createDatabase(masterPassword: "session-password", rememberQuickUnlock: false)
@@ -448,7 +448,7 @@ struct PasswordVaultAgentAccessTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let sessionNotificationCenter = NotificationCenter()
         let store = KDBXPasswordVaultStore(
-            syncRootProvider: { root },
+            localStorage: makeAgentLocalStorage(at: root),
             sessionNotificationCenter: sessionNotificationCenter
         )
         try store.createDatabase(masterPassword: "session-password", rememberQuickUnlock: false)
@@ -481,7 +481,7 @@ struct PasswordVaultAgentAccessTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let sessionNotificationCenter = NotificationCenter()
         let store = KDBXPasswordVaultStore(
-            syncRootProvider: { root },
+            localStorage: makeAgentLocalStorage(at: root),
             sessionNotificationCenter: sessionNotificationCenter
         )
         try store.createDatabase(masterPassword: "session-password", rememberQuickUnlock: false)
@@ -493,9 +493,17 @@ struct PasswordVaultAgentAccessTests {
 
     @Test("an initialized MenuManager follows environment push replace and pop")
     func initializedMenuManagerFollowsEnvironmentStack() {
-        let firstStore = KDBXPasswordVaultStore(syncRootProvider: { nil })
-        let secondStore = KDBXPasswordVaultStore(syncRootProvider: { nil })
-        let thirdStore = KDBXPasswordVaultStore(syncRootProvider: { nil })
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let firstStore = KDBXPasswordVaultStore(
+            localStorage: makeAgentLocalStorage(at: root.appendingPathComponent("first", isDirectory: true))
+        )
+        let secondStore = KDBXPasswordVaultStore(
+            localStorage: makeAgentLocalStorage(at: root.appendingPathComponent("second", isDirectory: true))
+        )
+        let thirdStore = KDBXPasswordVaultStore(
+            localStorage: makeAgentLocalStorage(at: root.appendingPathComponent("third", isDirectory: true))
+        )
         let firstController = PasswordVaultUIController(store: firstStore)
         let secondController = PasswordVaultUIController(store: secondStore)
         let thirdController = PasswordVaultUIController(store: thirdStore)
@@ -532,6 +540,53 @@ struct PasswordVaultAgentAccessTests {
         #expect(menuManager.passwordVaultUIController === firstController)
         #expect(firstController.onChange != nil)
         #expect(thirdController.onChange == nil)
+    }
+}
+
+private func makeAgentLocalStorage(at root: URL) -> FilePasswordVaultLocalStorage {
+    let directory = root.appendingPathComponent("PasswordVault", isDirectory: true)
+    return FilePasswordVaultLocalStorage(paths: PasswordVaultLocalPaths(
+        directoryURL: directory,
+        vaultURL: directory.appendingPathComponent("PasteraVault.kdbx"),
+        backupURL: directory.appendingPathComponent("PasteraVault.kdbx.bak"),
+        metadataURL: directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+    ))
+}
+
+extension KDBXPasswordVaultStore {
+    convenience init(
+        syncRootProvider: @escaping () -> URL?,
+        fileManager: FileManager = .default,
+        unlockKeyStore: VaultUnlockKeyStoring = VaultUnlockKeyStore(),
+        automationUnlockKeyStore: VaultAutomationUnlockKeyStoring = VaultAutomationUnlockKeyStore(),
+        rekeyTransaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction(),
+        sessionNotificationCenter: NotificationCenter? = nil,
+        autoLockTimeoutProvider: @escaping () -> TimeInterval = {
+            VaultSessionController.resolvedTimeout(defaults: .standard)
+        },
+        now: @escaping () -> Date = Date.init
+    ) {
+        let root = syncRootProvider() ?? fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let vaultURL = VaultFileCoordinator.vaultURL(for: root)
+        self.init(
+            localStorage: FilePasswordVaultLocalStorage(
+                paths: PasswordVaultLocalPaths(
+                    directoryURL: vaultURL.deletingLastPathComponent(),
+                    vaultURL: vaultURL,
+                    backupURL: vaultURL.appendingPathExtension("bak"),
+                    metadataURL: vaultURL.deletingLastPathComponent()
+                        .appendingPathComponent("PasswordVaultSyncMetadata.json")
+                ),
+                fileManager: fileManager
+            ),
+            unlockKeyStore: unlockKeyStore,
+            automationUnlockKeyStore: automationUnlockKeyStore,
+            rekeyTransaction: rekeyTransaction,
+            sessionNotificationCenter: sessionNotificationCenter,
+            autoLockTimeoutProvider: autoLockTimeoutProvider,
+            now: now
+        )
     }
 }
 

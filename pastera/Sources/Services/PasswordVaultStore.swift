@@ -202,49 +202,52 @@ struct PasswordVaultViewState: Equatable {
 
 struct KDBXVaultMergeResult {
     let content: KDBXContent
-    let hasConflictCopies: Bool
+    let conflictCopyCount: Int
+    var hasConflictCopies: Bool { conflictCopyCount > 0 }
 }
 
 final class KDBXVaultMerger {
     func merge(local: KDBXContent, remote: KDBXContent) -> KDBXVaultMergeResult {
         var output = remote
-        var hasConflicts = false
+        var conflictCopyCount = 0
         output.database.root.group = mergeGroup(
             local.database.root.group,
             remote.database.root.group,
-            hasConflicts: &hasConflicts
+            conflictCopyCount: &conflictCopyCount
         )
         let tombstones = (local.database.root.deletedObjects + remote.database.root.deletedObjects).reduce(into: [UUID: KDBX.DeletedObject]()) {
             if ($0[$1.uuid]?.deletionTime ?? .distantPast) < $1.deletionTime { $0[$1.uuid] = $1 }
         }
         output.database.root.deletedObjects = Array(tombstones.values)
         removeDeleted(from: &output.database.root.group, tombstones: tombstones)
-        return KDBXVaultMergeResult(content: output, hasConflictCopies: hasConflicts)
+        return KDBXVaultMergeResult(content: output, conflictCopyCount: conflictCopyCount)
     }
 
-    private func mergeGroup(
-        _ local: KDBX.Group,
-        _ remote: KDBX.Group,
-        hasConflicts: inout Bool
-    ) -> KDBX.Group {
+    private func mergeGroup(_ local: KDBX.Group, _ remote: KDBX.Group, conflictCopyCount: inout Int) -> KDBX.Group {
         var output = newer(local, remote)
-        output.entries = mergeEntries(local.entries, remote.entries, hasConflicts: &hasConflicts)
+        let preferredGroupIDs = output.groups.map(\.uuid)
+        output.entries = mergeEntries(local.entries, remote.entries, conflictCopyCount: &conflictCopyCount)
         var groups = Dictionary(uniqueKeysWithValues: remote.groups.map { ($0.uuid, $0) })
         for group in local.groups {
             if let remoteGroup = groups[group.uuid] {
-                groups[group.uuid] = mergeGroup(group, remoteGroup, hasConflicts: &hasConflicts)
+                groups[group.uuid] = mergeGroup(group, remoteGroup, conflictCopyCount: &conflictCopyCount)
             } else {
                 groups[group.uuid] = group
             }
         }
-        output.groups = Array(groups.values)
+        output.groups = preferredGroupIDs.compactMap { groups.removeValue(forKey: $0) }
+        for group in local.groups + remote.groups {
+            if let remaining = groups.removeValue(forKey: group.uuid) {
+                output.groups.append(remaining)
+            }
+        }
         return output
     }
 
     private func mergeEntries(
         _ local: [KDBX.Entry],
         _ remote: [KDBX.Entry],
-        hasConflicts: inout Bool
+        conflictCopyCount: inout Int
     ) -> [KDBX.Entry] {
         var entries = Dictionary(uniqueKeysWithValues: remote.map { ($0.uuid, $0) })
         for entry in local {
@@ -260,7 +263,7 @@ final class KDBXVaultMerger {
                 conflict.uuid = UUID()
                 setTitle(on: &conflict, title: "\(title(of: entry)) (Conflict)")
                 entries[conflict.uuid] = conflict
-                hasConflicts = true
+                conflictCopyCount += 1
             } else {
                 var winner = localTime > remoteTime ? entry : remoteEntry
                 var loser = localTime > remoteTime ? remoteEntry : entry

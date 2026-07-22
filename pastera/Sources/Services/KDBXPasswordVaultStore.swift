@@ -63,9 +63,9 @@ final class VaultFileCoordinator {
     }
 }
 
-final class KDBXPasswordVaultStore: PasswordVaultStore {
-    private let syncRootProvider: () -> URL?
-    private let coordinator: VaultFileCoordinator
+final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess {
+    private let localStorage: PasswordVaultLocalStoring
+    private let coordinator = VaultFileCoordinator()
     private let unlockKeyStore: VaultUnlockKeyStoring
     private let automationUnlockKeyStore: VaultAutomationUnlockKeyStoring
     private let rekeyTransaction: VaultArtifactRekeyTransaction
@@ -79,6 +79,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     private var sessionExecutor: VaultAgentSerialExecutor?
     private var sessionStateChange: (() -> Void)?
     private let sessionNotificationCenter: NotificationCenter?
+    private var commitObserver: (PasswordVaultCommit) -> Void = { _ in }
     private(set) var state: PasswordVaultState
     var canQuickUnlock: Bool { unlockKeyStore.containsKey }
     var canAutomationUnlock: Bool { automationUnlockKeyStore.containsKey }
@@ -89,10 +90,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     )
 
     init(
-        syncRootProvider: @escaping () -> URL? = {
-            UserDefaultsSyncSettingsStore(defaults: .standard).settings().rootURL
-        },
-        fileManager: FileManager = .default,
+        localStorage: PasswordVaultLocalStoring = FilePasswordVaultLocalStorage.live(),
         unlockKeyStore: VaultUnlockKeyStoring = VaultUnlockKeyStore(),
         automationUnlockKeyStore: VaultAutomationUnlockKeyStoring = VaultAutomationUnlockKeyStore(),
         rekeyTransaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction(),
@@ -102,32 +100,26 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         },
         now: @escaping () -> Date = Date.init
     ) {
-        self.syncRootProvider = syncRootProvider
-        coordinator = VaultFileCoordinator(fileManager: fileManager)
+        self.localStorage = localStorage
         self.unlockKeyStore = unlockKeyStore
         self.automationUnlockKeyStore = automationUnlockKeyStore
         self.rekeyTransaction = rekeyTransaction
         self.sessionNotificationCenter = sessionNotificationCenter
         self.autoLockTimeoutProvider = autoLockTimeoutProvider
         self.now = now
-        if let root = syncRootProvider(), fileManager.fileExists(atPath: VaultFileCoordinator.vaultURL(for: root).path) {
-            state = .locked
-        } else {
-            state = .notConfigured
-        }
+        state = localStorage.containsVault() ? .locked : .notConfigured
     }
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws {
         guard !masterPassword.isEmpty else { throw PasswordVaultError.invalidPassword }
-        let url = try vaultURL()
-        guard !FileManager.default.fileExists(atPath: url.path) else { throw PasswordVaultError.duplicateEntry }
+        guard !localStorage.containsVault() else { throw PasswordVaultError.duplicateEntry }
         let unlock = UnlockData(masterPassword: masterPassword)
         var newContent = KDBXContent.makeEmpty(databaseName: "Pastera", generator: "Pastera")
         newContent.database.meta.historyMaxItems = .value(10)
         let bytes = try encoded(newContent, unlockData: unlock)
         do {
-            try coordinator.write(bytes, to: url)
-            let written = try coordinator.read(from: url)
+            try localStorage.writeAtomically(bytes)
+            let written = try readLocalData()
             _ = try KDBXReader.parse(written, unlockData: unlock)
             lastRevision = coordinator.revision(of: written)
         } catch {
@@ -139,13 +131,14 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         state = .unlocked
         sessionController.touch()
         if rememberQuickUnlock { try? remember(unlock) }
+        publishCommit(data: bytes, origin: .userMutation)
     }
 
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws {
         state = .unlocking
         let unlock = UnlockData(masterPassword: masterPassword)
         do {
-            let data = try coordinator.read(from: try vaultURL())
+            let data = try readLocalData()
             content = try KDBXReader.parse(data, unlockData: unlock)
             lastRevision = coordinator.revision(of: data)
             unlockData = unlock
@@ -156,7 +149,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
             state = .locked
             throw PasswordVaultError.wrongMasterPassword
         } catch let error as PasswordVaultError {
-            state = error == .databaseNotConfigured ? .notConfigured : .failed("read")
+            state = localReadFailureState(for: error)
             throw error
         } catch {
             state = .failed("corrupted")
@@ -168,18 +161,21 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         state = .unlocking
         do {
             let unlock = UnlockData(rawKeyData: try unlockKeyStore.load(reason: reason))
-            let data = try coordinator.read(from: try vaultURL())
+            let data = try readLocalData()
             content = try KDBXReader.parse(data, unlockData: unlock)
             lastRevision = coordinator.revision(of: data)
             unlockData = unlock
             state = .unlocked
             sessionController.touch()
-        } catch let error as PasswordVaultError {
-            state = .locked
-            throw error
-        } catch {
+        } catch KDBXReader.Error.wrongCredentials {
             state = .locked
             throw PasswordVaultError.wrongMasterPassword
+        } catch let error as PasswordVaultError {
+            state = localReadFailureState(for: error)
+            throw error
+        } catch {
+            state = .failed("corrupted")
+            throw PasswordVaultError.corruptedData
         }
     }
 
@@ -197,38 +193,23 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         content = nil
         unlockData = nil
         lastRevision = nil
-        state = syncRootProvider().map { FileManager.default.fileExists(atPath: VaultFileCoordinator.vaultURL(for: $0).path) } == true
-            ? .locked : .notConfigured
+        state = localStorage.containsVault() ? .locked : .notConfigured
         onStateChange?()
     }
 
     func reloadAndMerge() throws {
         let unlock = try requiredUnlockData()
         do {
-            let url = try vaultURL()
-            let data = try coordinator.read(from: url)
-            let remote = try KDBXReader.parse(data, unlockData: unlock)
-            var merged = content.map { merger.merge(local: $0, remote: remote) }
-                ?? KDBXVaultMergeResult(content: remote, hasConflictCopies: false)
-            var resolvedFiles = [URL]()
-            for conflictURL in try coordinator.conflictFiles(alongside: url) {
-                let candidateData = try coordinator.read(from: conflictURL)
-                let candidate = try KDBXReader.parse(candidateData, unlockData: unlock)
-                guard candidate.database.meta.databaseName == "Pastera"
-                        || candidate.database.root.group.name == "Pastera" else { continue }
-                let result = merger.merge(local: merged.content, remote: candidate)
-                merged = KDBXVaultMergeResult(
-                    content: result.content,
-                    hasConflictCopies: merged.hasConflictCopies || result.hasConflictCopies
-                )
-                resolvedFiles.append(conflictURL)
-            }
+            let data = try readLocalData()
+            let diskContent = try KDBXReader.parse(data, unlockData: unlock)
+            let merged = content.map { merger.merge(local: $0, remote: diskContent) }
+                ?? KDBXVaultMergeResult(content: diskContent, conflictCopyCount: 0)
             content = merged.content
-            if !resolvedFiles.isEmpty || coordinator.revision(of: data) != lastRevision {
+            if coordinator.revision(of: data) != lastRevision {
                 let bytes = try encoded(merged.content, unlockData: unlock)
-                try coordinator.write(bytes, to: url)
+                try localStorage.writeAtomically(bytes)
                 lastRevision = coordinator.revision(of: bytes)
-                try resolvedFiles.forEach { try coordinator.archiveResolvedConflict($0, alongside: url) }
+                publishCommit(data: bytes, origin: .syncMerge)
             } else {
                 lastRevision = coordinator.revision(of: data)
             }
@@ -380,21 +361,21 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
     private func save(_ newContent: KDBXContent) throws {
         let unlock = try requiredUnlockData()
         do {
-            let url = try vaultURL()
-            let diskData = try coordinator.read(from: url)
+            let diskData = try readLocalData()
             let diskRevision = coordinator.revision(of: diskData)
             let mergeResult: KDBXVaultMergeResult
             if let lastRevision, lastRevision != diskRevision {
-                let remote = try KDBXReader.parse(diskData, unlockData: unlock)
-                mergeResult = merger.merge(local: newContent, remote: remote)
+                let diskContent = try KDBXReader.parse(diskData, unlockData: unlock)
+                mergeResult = merger.merge(local: newContent, remote: diskContent)
             } else {
-                mergeResult = .init(content: newContent, hasConflictCopies: false)
+                mergeResult = .init(content: newContent, conflictCopyCount: 0)
             }
             let bytes = try encoded(mergeResult.content, unlockData: unlock)
-            try coordinator.write(bytes, to: url)
+            try localStorage.writeAtomically(bytes)
             content = mergeResult.content
             lastRevision = coordinator.revision(of: bytes)
             state = mergeResult.hasConflictCopies ? .readOnlyWarning("conflict-copy") : .unlocked
+            publishCommit(data: bytes, origin: .userMutation)
         } catch let error as PasswordVaultError {
             throw error
         } catch {
@@ -493,11 +474,104 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
 }
 
 extension KDBXPasswordVaultStore {
-    private func vaultURL() throws -> URL {
-        guard let root = syncRootProvider(), FileManager.default.fileExists(atPath: root.path) else {
-            throw PasswordVaultError.cloudUnavailable
+    func encryptedSnapshot() throws -> PasswordVaultEncryptedSnapshot {
+        let data = try readLocalData()
+        return PasswordVaultEncryptedSnapshot(data: data, digest: PasswordVaultDigest.hex(data))
+    }
+
+    func mergeRemoteSnapshot(
+        _ remoteData: Data,
+        remoteMasterPassword: String?
+    ) throws -> PasswordVaultMergeApplication {
+        guard state == .unlocked, let localContent = content, let localUnlock = unlockData else {
+            throw PasswordVaultError.vaultLocked
         }
-        return VaultFileCoordinator.vaultURL(for: root)
+        let remoteContent = try readRemoteContent(
+            remoteData,
+            localUnlock: localUnlock,
+            remoteMasterPassword: remoteMasterPassword
+        )
+        let mergeResult = merger.merge(local: localContent, remote: remoteContent)
+        let bytes = try encoded(mergeResult.content, unlockData: localUnlock)
+        do {
+            try localStorage.writeAtomically(bytes)
+        } catch {
+            state = .readOnlyWarning("save")
+            throw PasswordVaultError.saveFailed
+        }
+        content = mergeResult.content
+        lastRevision = coordinator.revision(of: bytes)
+        state = .unlocked
+        publishCommit(data: bytes, origin: .syncMerge)
+        return PasswordVaultMergeApplication(
+            encryptedSnapshot: PasswordVaultEncryptedSnapshot(
+                data: bytes,
+                digest: PasswordVaultDigest.hex(bytes)
+            ),
+            conflictCopyCount: mergeResult.conflictCopyCount
+        )
+    }
+
+    func setCommitObserver(_ observer: @escaping (PasswordVaultCommit) -> Void) {
+        commitObserver = observer
+    }
+
+    private func readRemoteContent(
+        _ data: Data,
+        localUnlock: UnlockData,
+        remoteMasterPassword: String?
+    ) throws -> KDBXContent {
+        do {
+            return try KDBXReader.parse(data, unlockData: localUnlock)
+        } catch KDBXReader.Error.wrongCredentials {
+            guard let remoteMasterPassword, !remoteMasterPassword.isEmpty else {
+                throw PasswordVaultSyncFailure.remoteCredentialsRequired
+            }
+            do {
+                let remoteUnlock = UnlockData(masterPassword: remoteMasterPassword)
+                return try KDBXReader.parse(data, unlockData: remoteUnlock)
+            } catch KDBXReader.Error.wrongCredentials {
+                throw PasswordVaultSyncFailure.remoteCredentialsRequired
+            } catch {
+                throw PasswordVaultSyncFailure.remoteCorrupted
+            }
+        } catch {
+            throw PasswordVaultSyncFailure.remoteCorrupted
+        }
+    }
+
+    private func readLocalData() throws -> Data {
+        guard localStorage.containsVault() else {
+            throw PasswordVaultError.databaseNotConfigured
+        }
+        do {
+            return try localStorage.read()
+        } catch let error as PasswordVaultError {
+            throw error
+        } catch {
+            guard localStorage.containsVault() else {
+                throw PasswordVaultError.databaseNotConfigured
+            }
+            throw PasswordVaultError.corruptedData
+        }
+    }
+
+    private func localReadFailureState(for error: PasswordVaultError) -> PasswordVaultState {
+        switch error {
+        case .databaseNotConfigured:
+            .notConfigured
+        case .corruptedData:
+            .failed("corrupted")
+        default:
+            .failed("read")
+        }
+    }
+
+    private func publishCommit(data: Data, origin: PasswordVaultCommitOrigin) {
+        commitObserver(PasswordVaultCommit(
+            origin: origin,
+            encryptedDigest: PasswordVaultDigest.hex(data)
+        ))
     }
 
     func enableQuickUnlock() throws {
@@ -533,9 +607,9 @@ extension KDBXPasswordVaultStore {
         let originalContent = content
         let originalUnlockData = unlockData
         let originalRevision = lastRevision
-        let mainURL = try vaultURL()
+        let mainURL = localStorage.paths.vaultURL
         let oldUnlock = UnlockData(masterPassword: currentPassword)
-        let diskData = try coordinator.read(from: mainURL)
+        let diskData = try readLocalData()
         let diskContent: KDBXContent
         do {
             diskContent = try KDBXReader.parse(diskData, unlockData: oldUnlock)
@@ -547,10 +621,10 @@ extension KDBXPasswordVaultStore {
 
         do {
             var merged = originalContent.map { merger.merge(local: $0, remote: diskContent) }
-                ?? KDBXVaultMergeResult(content: diskContent, hasConflictCopies: false)
+                ?? KDBXVaultMergeResult(content: diskContent, conflictCopyCount: 0)
             let immediateConflicts = try coordinator.conflictFiles(alongside: mainURL)
             var parsedContents = [URL: KDBXContent]()
-            for url in try rekeyTransaction.managedArtifactURLs(alongside: mainURL) where url != mainURL {
+            for url in try rekeyTransaction.managedArtifactURLs(in: localStorage.paths) where url != mainURL {
                 let artifact = try KDBXReader.parse(try coordinator.read(from: url), unlockData: oldUnlock)
                 parsedContents[url] = artifact
                 guard immediateConflicts.contains(url),
@@ -559,12 +633,12 @@ extension KDBXPasswordVaultStore {
                 let result = merger.merge(local: merged.content, remote: artifact)
                 merged = KDBXVaultMergeResult(
                     content: result.content,
-                    hasConflictCopies: merged.hasConflictCopies || result.hasConflictCopies
+                    conflictCopyCount: merged.conflictCopyCount + result.conflictCopyCount
                 )
             }
 
             let newUnlock = UnlockData(masterPassword: newPassword)
-            let artifacts = try rekeyTransaction.managedArtifactURLs(alongside: mainURL)
+            let artifacts = try rekeyTransaction.managedArtifactURLs(in: localStorage.paths)
             let replacements = try artifacts.map { url -> VaultArtifactRekeyReplacement in
                 let artifactContent = url == mainURL
                     ? merged.content
@@ -608,6 +682,7 @@ extension KDBXPasswordVaultStore {
                 state = .locked
             }
             let uniqueWarnings = Array(Set(warnings)).sorted { $0.rawValue < $1.rawValue }
+            publishCommit(data: replacements[0].data, origin: .userMutation)
             return PasswordVaultMasterPasswordChangeResult(warnings: uniqueWarnings)
         } catch let error as PasswordVaultError {
             restoreRekeyState(originalState, content: originalContent, unlockData: originalUnlockData, revision: originalRevision)
@@ -708,7 +783,7 @@ extension KDBXPasswordVaultStore {
             let key = try automationUnlockKeyStore.load()
             guard key.count == 32 else { throw PasswordVaultError.keychainUnavailable }
             let unlock = UnlockData(rawKeyData: key)
-            let data = try coordinator.read(from: try vaultURL())
+            let data = try readLocalData()
             content = try KDBXReader.parse(data, unlockData: unlock)
             lastRevision = coordinator.revision(of: data)
             unlockData = unlock
@@ -721,7 +796,7 @@ extension KDBXPasswordVaultStore {
             if error == .keychainUnavailable {
                 state = .locked
             } else {
-                state = error == .databaseNotConfigured ? .notConfigured : .failed("read")
+                state = localReadFailureState(for: error)
             }
             throw error
         } catch {
