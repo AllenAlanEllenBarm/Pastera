@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct PasswordVaultCloudSnapshot: Equatable {
@@ -5,17 +6,32 @@ struct PasswordVaultCloudSnapshot: Equatable {
     let digest: String
 }
 
+enum PasswordVaultRemoteExpectation: Equatable {
+    case absent
+    case digest(String)
+}
+
 protocol PasswordVaultCloudReplica {
     func read(rootURL: URL) throws -> PasswordVaultCloudSnapshot?
-    func writeAtomically(_ data: Data, rootURL: URL) throws -> String
+    func writeAtomically(
+        _ data: Data,
+        rootURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws -> String
     func delete(rootURL: URL) throws
+}
+
+enum PasswordVaultCloudItemStatus: Equatable {
+    case missing
+    case regular(size: Int)
+    case other
 }
 
 struct PasswordVaultCloudFileOperations {
     var fileExists: (URL) -> Bool
     var isDirectory: (URL) throws -> Bool
     var isWritable: (URL) -> Bool
-    var fileSize: (URL) throws -> Int
+    var itemStatus: (URL) throws -> PasswordVaultCloudItemStatus
     var readData: (URL) throws -> Data
     var writeData: (Data, URL) throws -> Void
     var createDirectory: (URL) throws -> Void
@@ -29,12 +45,17 @@ struct PasswordVaultCloudFileOperations {
             try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
         },
         isWritable: { FileManager.default.isWritableFile(atPath: $0.path) },
-        fileSize: { url in
-            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard values.isRegularFile == true, let size = values.fileSize else {
-                throw CocoaError(.fileReadUnknown)
+        itemStatus: { url in
+            var fileInformation = stat()
+            guard lstat(url.path, &fileInformation) == 0 else {
+                let errorCode = errno
+                if errorCode == ENOENT {
+                    return .missing
+                }
+                throw POSIXError(POSIXErrorCode(rawValue: errorCode) ?? .EIO)
             }
-            return size
+            guard fileInformation.st_mode & S_IFMT == S_IFREG else { return .other }
+            return .regular(size: Int(fileInformation.st_size))
         },
         readData: { try Data(contentsOf: $0, options: .mappedIfSafe) },
         writeData: { data, url in try data.write(to: url) },
@@ -66,23 +87,23 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
     func read(rootURL: URL) throws -> PasswordVaultCloudSnapshot? {
         try validateRoot(rootURL, requiresWriteAccess: false)
         let targetURL = VaultFileCoordinator.vaultURL(for: rootURL)
-        guard operations.fileExists(targetURL) else { return nil }
-
         do {
             return try coordinateRead(at: targetURL) { coordinatedURL in
-                let expectedSize = try operations.fileSize(coordinatedURL)
-                let data = try operations.readData(coordinatedURL)
-                guard data.count == expectedSize else {
-                    throw PasswordVaultSyncFailure.remoteUnavailable
-                }
-                guard Self.hasKDBXSignature(data) else {
+                switch try itemStatus(at: coordinatedURL) {
+                case .missing:
+                    return nil
+                case let .regular(size):
+                    return try readSnapshot(
+                        at: coordinatedURL,
+                        expectedSize: size,
+                        shortReadFailure: .remoteUnavailable
+                    )
+                case .other:
                     throw PasswordVaultSyncFailure.remoteCorrupted
                 }
-                return PasswordVaultCloudSnapshot(
-                    data: data,
-                    digest: PasswordVaultDigest.hex(data)
-                )
             }
+        } catch let error where Self.isNoSuchFile(error) {
+            return nil
         } catch let failure as PasswordVaultSyncFailure {
             throw failure
         } catch {
@@ -90,7 +111,11 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
         }
     }
 
-    func writeAtomically(_ data: Data, rootURL: URL) throws -> String {
+    func writeAtomically(
+        _ data: Data,
+        rootURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws -> String {
         guard Self.hasKDBXSignature(data) else {
             throw PasswordVaultSyncFailure.remoteCorrupted
         }
@@ -104,11 +129,7 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
         )
         let expectedDigest = PasswordVaultDigest.hex(data)
 
-        defer {
-            if operations.fileExists(temporaryURL) {
-                try? operations.removeItem(temporaryURL)
-            }
-        }
+        defer { try? operations.removeItem(temporaryURL) }
 
         do {
             try operations.createDirectory(directoryURL)
@@ -119,11 +140,11 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
                 expectedDigest: expectedDigest
             )
             try coordinateWrite(at: targetURL, options: .forReplacing) { coordinatedURL in
-                if operations.fileExists(coordinatedURL) {
-                    try operations.replaceItem(coordinatedURL, temporaryURL)
-                } else {
-                    try operations.moveItem(temporaryURL, coordinatedURL)
-                }
+                try replaceTarget(
+                    at: coordinatedURL,
+                    with: temporaryURL,
+                    expecting: expectation
+                )
             }
         } catch let failure as PasswordVaultSyncFailure {
             throw failure
@@ -144,12 +165,21 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
     func delete(rootURL: URL) throws {
         try validateRoot(rootURL, requiresWriteAccess: true)
         let targetURL = VaultFileCoordinator.vaultURL(for: rootURL)
-        guard operations.fileExists(targetURL) else { return }
-
         do {
             try coordinateWrite(at: targetURL, options: .forDeleting) { coordinatedURL in
-                try operations.removeItem(coordinatedURL)
+                switch try itemStatus(at: coordinatedURL) {
+                case .missing:
+                    return
+                case .regular:
+                    try operations.removeItem(coordinatedURL)
+                case .other:
+                    throw PasswordVaultSyncFailure.remoteCorrupted
+                }
             }
+        } catch let error where Self.isNoSuchFile(error) {
+            return
+        } catch let failure as PasswordVaultSyncFailure {
+            throw failure
         } catch {
             throw PasswordVaultSyncFailure.remoteWriteFailed
         }
@@ -178,14 +208,95 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
         expectedSize: Int,
         expectedDigest: String
     ) throws {
-        let storedSize = try operations.fileSize(url)
-        let storedData = try operations.readData(url)
-        guard storedSize == expectedSize,
-              storedData.count == storedSize,
-              Self.hasKDBXSignature(storedData),
-              PasswordVaultDigest.hex(storedData) == expectedDigest else {
+        guard case let .regular(storedSize) = try itemStatus(at: url),
+              storedSize == expectedSize else {
             throw PasswordVaultSyncFailure.remoteWriteFailed
         }
+        let snapshot = try readSnapshot(
+            at: url,
+            expectedSize: storedSize,
+            shortReadFailure: .remoteWriteFailed
+        )
+        guard snapshot.digest == expectedDigest else {
+            throw PasswordVaultSyncFailure.remoteWriteFailed
+        }
+    }
+
+    private func replaceTarget(
+        at targetURL: URL,
+        with temporaryURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws {
+        let status = try itemStatus(at: targetURL)
+        switch (expectation, status) {
+        case (.absent, .missing):
+            try moveWithoutOverwriting(temporaryURL, to: targetURL)
+        case (.absent, .regular):
+            throw PasswordVaultSyncFailure.remoteVerificationFailed
+        case (.absent, .other), (.digest, .other):
+            throw PasswordVaultSyncFailure.remoteCorrupted
+        case (.digest, .missing):
+            throw PasswordVaultSyncFailure.remoteVerificationFailed
+        case let (.digest(expectedDigest), .regular(size)):
+            let current = try readSnapshot(
+                at: targetURL,
+                expectedSize: size,
+                shortReadFailure: .remoteWriteFailed
+            )
+            guard current.digest == expectedDigest else {
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            }
+            try operations.replaceItem(targetURL, temporaryURL)
+        }
+    }
+
+    private func moveWithoutOverwriting(_ sourceURL: URL, to targetURL: URL) throws {
+        do {
+            try operations.moveItem(sourceURL, targetURL)
+        } catch {
+            switch try itemStatus(at: targetURL) {
+            case .missing:
+                throw error
+            case .regular:
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            case .other:
+                throw PasswordVaultSyncFailure.remoteCorrupted
+            }
+        }
+    }
+
+    private func itemStatus(at url: URL) throws -> PasswordVaultCloudItemStatus {
+        do {
+            return try operations.itemStatus(url)
+        } catch let error where Self.isNoSuchFile(error) {
+            return .missing
+        }
+    }
+
+    private static func isNoSuchFile(_ error: Error) -> Bool {
+        if let cocoaError = error as? CocoaError,
+           cocoaError.code == .fileReadNoSuchFile {
+            return true
+        }
+        if let posixError = error as? POSIXError,
+           posixError.code == .ENOENT {
+            return true
+        }
+        let error = error as NSError
+        return error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT)
+    }
+
+    private func readSnapshot(
+        at url: URL,
+        expectedSize: Int,
+        shortReadFailure: PasswordVaultSyncFailure
+    ) throws -> PasswordVaultCloudSnapshot {
+        let data = try operations.readData(url)
+        guard data.count == expectedSize else { throw shortReadFailure }
+        guard Self.hasKDBXSignature(data) else {
+            throw PasswordVaultSyncFailure.remoteCorrupted
+        }
+        return PasswordVaultCloudSnapshot(data: data, digest: PasswordVaultDigest.hex(data))
     }
 
     private func coordinateRead<Result>(
