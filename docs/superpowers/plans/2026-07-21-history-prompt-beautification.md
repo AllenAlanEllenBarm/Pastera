@@ -183,7 +183,7 @@ HistoryMenuRowView 魔法棒
 
 **验证设计：** 先用失败测试锁定新 pane 注册与顺序、页面工厂类型、搜索路由、脚本页不再包含提示词配置，以及新页面免费/远端模式的实际高度；实现后运行提示词设置、设置搜索、偏好窗口和脚本设置聚焦套件，再执行完整串行回归、`./script/install_local.sh --verify` 和真实 AppKit 页面复测。
 
-> 以下任务 1-8 记录已经交付的原始实现及修复过程，其中任务 6 的脚本页嵌入方案是待迁移的历史状态。独立设置页的实施步骤将在本设计书面复核通过后追加到同一计划。
+> 以下任务 1-8 记录已经交付的原始实现及修复过程，其中任务 6 的脚本页嵌入方案是待迁移的历史状态；已确认的独立设置页实施步骤见任务 9-10。
 
 ## 任务 1：定义提示词优化契约、设置和 Keychain 存储
 
@@ -923,6 +923,361 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
 安装后打开“设置 → 脚本”，从“免费自动”切换到“OpenAI 兼容 — 自备服务”，确认服务预设、基础地址、模型、API Key、不安全 HTTP 开关、保存设置和测试连接均完整可见；切回免费模式后页面恢复紧凑高度，且没有保存草稿设置或发起网络请求。
 
+## 任务 9：将提示词优化配置迁移到独立设置页
+
+**文件：**
+
+- 新建：`pastera/Sources/Preferences/Panels/CPYPromptOptimizationPreferenceViewController.swift`
+- 修改：`pastera/Sources/Preferences/PasteraPreferenceCatalog.swift`
+- 修改：`pastera/Sources/Preferences/CPYPreferencesWindowController.swift`
+- 修改：`pastera/Sources/Preferences/Panels/CPYScriptsPreferenceViewController.swift`
+- 修改：`pastera.xcodeproj/project.pbxproj`
+- 修改：`pasteraTests/PromptOptimizationPreferenceTests.swift`
+- 修改：`pasteraTests/PreferenceSearchTests.swift`
+- 修改：`pasteraTests/PreferenceWindowShellTests.swift`
+- 修改：`pasteraTests/ScriptPreferenceTests.swift`
+
+**接口：**
+
+- `PasteraPreferencePaneID.promptOptimization` 是固定侧栏页面 ID，顺序必须在 `.history` 与 `.scripts` 之间。
+- `CPYPromptOptimizationPreferenceViewController` 只组合现有 `PromptOptimizationPreferenceSection`，构造参数继续依赖 `PromptOptimizationSettingsStoring`、`PromptOptimizationAPIKeyStoring` 与 `PromptOptimizationServicing`。
+- 新页面只注册 `promptOptimization.configuration` 锚点；同 ID 同时用于目录搜索项的 `id`、`sectionID` 和 `anchorID`。
+- `CPYScriptsPreferenceViewController` 构造器恢复为脚本仓库、脚本执行器和快捷键服务三个依赖，不得再知道提示词设置、Keychain、优化服务或配置区块。
+- 现有 UserDefaults 键、Keychain 服务名、确认来源集合、优化器路由和历史编辑器行为保持不变。
+
+- [ ] **步骤 1：先把目录、路由和页面边界测试改为新契约**
+
+在 `PreferenceSearchTests` 中把固定 pane 列表和目录列表都改为以下顺序，并把页面标题、分组和图标的精确数组同步增加一项：
+
+```swift
+#expect(PasteraPreferencePaneID.allCases == [
+    .general,
+    .history,
+    .promptOptimization,
+    .scripts,
+    .shortcuts,
+    .passwordVault,
+    .excludedApps,
+    .agentIntegrations,
+    .sync,
+    .softwareUpdate,
+    .about
+])
+```
+
+把提示词搜索契约改为独立页面：
+
+```swift
+let item = try #require(catalog.pages.flatMap(\.searchItems).first {
+    $0.id == "promptOptimization.configuration"
+})
+
+#expect(item.paneID == .promptOptimization)
+#expect(item.sectionID == "promptOptimization.configuration")
+#expect(item.anchorID == "promptOptimization.configuration")
+#expect(PasteraPreferenceSearch(catalog: catalog).search("美化").contains { page in
+    page.paneID == .promptOptimization && page.searchItems.contains(item)
+})
+```
+
+在 `PreferenceWindowShellTests` 增加新页面工厂断言：
+
+```swift
+#expect(
+    controller.cachedPreferencePageForTesting(paneID: .promptOptimization)
+        is CPYPromptOptimizationPreferenceViewController
+)
+```
+
+在 `PromptOptimizationPreferenceTests` 用新页面替换两个脚本页承载测试：
+
+```swift
+@Test
+func promptOptimizationPaneOwnsConfiguration() throws {
+    let fixture = makeFixture()
+    let page = CPYPromptOptimizationPreferenceViewController(
+        settingsStore: fixture.settingsStore,
+        apiKeyStore: fixture.apiKeyStore,
+        optimizationService: fixture.service
+    )
+    _ = page.view
+
+    #expect(page.paneID == .promptOptimization)
+    #expect(page.revealSetting(
+        anchorID: "promptOptimization.configuration",
+        animated: false
+    ))
+    #expect(page.promptOptimizationSectionForTesting != nil)
+}
+
+@Test
+func promptOptimizationPaneRelayoutsAfterRevealingRemoteProviderFields() throws {
+    let fixture = makeFixture()
+    let page = CPYPromptOptimizationPreferenceViewController(
+        settingsStore: fixture.settingsStore,
+        apiKeyStore: fixture.apiKeyStore,
+        optimizationService: fixture.service
+    )
+    _ = page.view
+    let freeHeight = page.view.frame.height
+
+    let section = try #require(page.promptOptimizationSectionForTesting)
+    section.selectProviderForTesting(.openAICompatible)
+
+    #expect(page.view.frame.height > freeHeight)
+    #expect(page.view.frame.height >= page.view.fittingSize.height - 1)
+}
+```
+
+删除 `PromptOptimizationPreferenceTests` 中迁移后不再使用的 `PreferenceScriptRepository`。在 `ScriptPreferenceTests` 明确锁定纯脚本页面：
+
+```swift
+#expect(page.orderedSectionIDsForTesting == [
+    "scripts.list", "scripts.shortcut"
+])
+#expect(!page.orderedSectionIDsForTesting.contains("scripts.promptOptimization"))
+```
+
+- [ ] **步骤 2：运行聚焦测试并确认红灯来自缺失的新页面契约**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:pasteraTests/PromptOptimizationPreferenceTests \
+  -only-testing:pasteraTests/PreferenceSearchTests \
+  -only-testing:pasteraTests/PreferenceWindowShellTests \
+  -only-testing:pasteraTests/ScriptPreferenceTests test
+```
+
+预期：编译因 `.promptOptimization` 和 `CPYPromptOptimizationPreferenceViewController` 尚不存在而失败。不得通过放宽固定顺序、删除搜索结果断言或继续实例化脚本页来转绿。
+
+- [ ] **步骤 3：注册独立 pane 与唯一搜索项**
+
+在 `PasteraPreferenceCatalog.swift` 的枚举和目录中把新页面插入历史与脚本之间：
+
+```swift
+enum PasteraPreferencePaneID: String, CaseIterable {
+    case general
+    case history
+    case promptOptimization
+    case scripts
+    case shortcuts
+    case passwordVault
+    case excludedApps
+    case agentIntegrations
+    case sync
+    case softwareUpdate
+    case about
+}
+```
+
+```swift
+PasteraPreferenceCatalogPage(
+    paneID: .promptOptimization,
+    groupTitle: pasteraPreferenceString("Usage Preferences"),
+    title: pasteraScriptString("Prompt Optimization", "提示词优化"),
+    symbolName: "wand.and.stars",
+    searchItems: [
+        PasteraPreferenceSearchItem(
+            id: "promptOptimization.configuration",
+            paneID: .promptOptimization,
+            sectionID: "promptOptimization.configuration",
+            anchorID: "promptOptimization.configuration",
+            title: pasteraScriptString("Prompt Optimization", "提示词优化"),
+            subtitle: pasteraScriptString(
+                "Improve history prompts locally or with your own compatible model.",
+                "在本机或通过自备兼容模型美化历史提示词。"
+            ),
+            keywords: [
+                "prompt", "optimization", "优化", "美化", "model",
+                "OpenAI", "Gemini", "Ollama", "LM Studio"
+            ]
+        )
+    ]
+),
+```
+
+从 `.scripts` 页移除原 `scripts.promptOptimization` 搜索项，保留脚本列表、快捷键和测试脚本搜索项。
+
+- [ ] **步骤 4：实现只负责组合现有配置区块的新页面**
+
+新建 `CPYPromptOptimizationPreferenceViewController.swift`：
+
+```swift
+import AppKit
+
+@MainActor
+final class CPYPromptOptimizationPreferenceViewController: PasteraPreferencePageViewController {
+    private let settingsStore: any PromptOptimizationSettingsStoring
+    private let apiKeyStore: any PromptOptimizationAPIKeyStoring
+    private let optimizationService: any PromptOptimizationServicing
+    private weak var promptOptimizationSection: PromptOptimizationPreferenceSection?
+
+    init(
+        settingsStore: any PromptOptimizationSettingsStoring = PromptOptimizationSettingsStore(),
+        apiKeyStore: any PromptOptimizationAPIKeyStoring = PromptOptimizationAPIKeyStore(),
+        optimizationService: any PromptOptimizationServicing = AppEnvironment.current.promptOptimizationService
+    ) {
+        self.settingsStore = settingsStore
+        self.apiKeyStore = apiKeyStore
+        self.optimizationService = optimizationService
+        super.init(
+            paneID: .promptOptimization,
+            title: pasteraScriptString("Prompt Optimization", "提示词优化")
+        )
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        super.loadView()
+        let section = PromptOptimizationPreferenceSection(
+            settingsStore: settingsStore,
+            apiKeyStore: apiKeyStore,
+            optimizationService: optimizationService
+        )
+        section.onContentSizeChange = { [weak self] in
+            self?.invalidateContentSize()
+        }
+        promptOptimizationSection = section
+        addAdaptiveContent(section)
+        registerAnchor("promptOptimization.configuration", view: section)
+        invalidateContentSize()
+    }
+
+    var promptOptimizationSectionForTesting: PromptOptimizationPreferenceSection? {
+        promptOptimizationSection
+    }
+}
+```
+
+该控制器不复制表单、不增加状态存储，也不改变 `PromptOptimizationPreferenceSection` 的保存、连接测试和取消生命周期。
+
+- [ ] **步骤 5：接入页面工厂、标题映射和 Xcode 工程**
+
+在 `CPYPreferencesWindowController.makePageController(paneID:)` 增加：
+
+```swift
+case .promptOptimization:
+    return CPYPromptOptimizationPreferenceViewController()
+```
+
+在测试标题解析和英文标题的穷举 `switch` 中分别增加：
+
+```swift
+case "prompt optimization", "prompt", "optimization":
+    return .promptOptimization
+```
+
+```swift
+case .promptOptimization: return "Prompt Optimization"
+```
+
+在 `pastera.xcodeproj/project.pbxproj` 为新控制器增加唯一的 `PBXFileReference` 和 `PBXBuildFile`，把文件加入 `Panels` group 与 Pastera target 的 `Sources` build phase；不改 target、Scheme 或部署版本。
+
+- [ ] **步骤 6：清除脚本页中的提示词依赖和布局**
+
+从 `CPYScriptsPreferenceViewController` 删除以下内容：
+
+- 三个 `prompt...` 构造参数和存储属性。
+- `promptOptimizationSection` 弱引用及测试访问器。
+- `loadView()` 中配置区块构造、尺寸回调、`addAdaptiveContent` 和 `scripts.promptOptimization` 锚点注册。
+
+保留脚本列表、市场入口、测试动作、快捷键卡片和既有脚本页面布局策略。测试辅助接口改为真实的纯脚本顺序：
+
+```swift
+var orderedSectionIDsForTesting: [String] {
+    ["scripts.list", "scripts.shortcut"]
+}
+```
+
+- [ ] **步骤 7：重复聚焦测试并确认绿灯**
+
+重复步骤 2 的命令。预期四个套件全部通过，并同时证明：侧栏顺序固定、搜索只进入新页面、页面工厂类型正确、远端字段展开会更新独立页面高度、脚本页不再承载提示词配置。
+
+- [ ] **步骤 8：检查范围与提交原子实现**
+
+```bash
+plutil -lint pastera.xcodeproj/project.pbxproj
+git diff --check
+git status --short
+git diff --stat
+```
+
+预期：只出现任务 9 列出的生产代码、测试、工程文件和本计划进度更新；`.codex/config.toml`、`.superpowers/` 仍未跟踪且未改动。实现与聚焦测试通过后提交：
+
+```bash
+git add pastera/Sources/Preferences \
+  pasteraTests/PromptOptimizationPreferenceTests.swift \
+  pasteraTests/PreferenceSearchTests.swift \
+  pasteraTests/PreferenceWindowShellTests.swift \
+  pasteraTests/ScriptPreferenceTests.swift \
+  pastera.xcodeproj/project.pbxproj \
+  docs/superpowers/plans/2026-07-21-history-prompt-beautification.md
+git commit -m "feat(prompt): 拆分独立设置页"
+```
+
+## 任务 10：完成独立设置页回归、安装与真实 UI 验收
+
+**文件：**
+
+- 修改：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`（只记录真实执行结果、证据和偏差）
+
+**接口：**
+
+- 不再修改功能接口；本任务只验证 AC-09、AC-10 和 AC-11，并回读安装后的真实应用状态。
+- 不填写真实 API Key，不点击可能产生费用的远端请求；远端表单只验证显隐、布局和既有安全提示。
+
+- [ ] **步骤 1：运行完整串行清理回归**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation \
+  -parallel-testing-enabled NO clean test
+```
+
+预期：输出 `** TEST SUCCEEDED **`。记录通过的测试与套件数量；如出现失败，先按 `superpowers:systematic-debugging` 查明根因，再制定修复步骤，不能把失败标记为完成。
+
+- [ ] **步骤 2：安装本地构建并验证进程来源**
+
+```bash
+./script/install_local.sh --verify
+pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
+```
+
+预期：安装脚本构建和签名校验通过，运行进程来自 `/Applications/Pastera.app/Contents/MacOS/Pastera`。
+
+- [ ] **步骤 3：在真实 AppKit 设置窗口执行页面验收**
+
+1. 打开设置，确认“提示词优化”只有一个入口，并位于“历史记录”和“脚本”之间，图标为 `wand.and.stars`。
+2. 搜索“美化”、`OpenAI` 和 `Ollama`，确认结果进入独立页面并定位配置区块。
+3. 在独立页面从“免费自动”切换到“OpenAI 兼容 — 自备服务”，确认页面滚动高度同步增长，服务预设、基础地址、模型、API Key、HTTP 开关、保存设置和测试连接完整可见。
+4. 切回“免费自动”，确认页面恢复紧凑且未保存远端草稿、未发起网络请求。
+5. 打开“脚本”，确认仅展示脚本管理、测试入口和快捷键，不再出现提示词优化标题或配置。
+6. 打开一条可编辑历史，确认魔法棒仍打开原编辑器，免费优化、撤销和显式保存行为没有变化。
+
+保存独立页面免费模式、远端展开模式、侧栏顺序和纯脚本页面的截图路径；浅色与深色至少各检查一次，不向计划写入提示词正文、API Key 或响应内容。
+
+- [ ] **步骤 4：更新交付记录并提交验证证据**
+
+把实际文件、聚焦测试、完整回归、安装进程、截图、偏差和残余风险写入本计划的“交付记录”，并把计划状态改为“独立设置页已实施并验证”。然后执行：
+
+```bash
+git diff --check
+git status --short
+git add docs/superpowers/plans/2026-07-21-history-prompt-beautification.md
+git commit -m "docs(prompt): 记录独立设置页交付"
+```
+
+此处只提交真实新增的交付记录；如果步骤 1-3 没有全部通过，不创建该完成提交。
+
 ## 风险、回滚与观察
 
 ### 风险
@@ -952,13 +1307,13 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 ## 交付元数据
 
 - 计划路径：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`
-- 计划状态：`既有功能已实施并验证；独立设置页拆分设计已确认，待实施计划`
+- 计划状态：`既有功能已实施并验证；独立设置页实施计划已生成，待执行确认`
 - 证据档位：`standard`
 - 需求 ID：`未请求`
-- 任务 ID：`未请求；Superpowers 任务 1-8 已交付，独立设置页尚未拆解实施任务`
+- 任务 ID：`未请求；Superpowers 任务 1-8 已交付，任务 9-10 待执行`
 - 禅道同步状态：`未请求`
 - 禅道回读：`不适用`
-- 最后更新：`2026-07-21`
+- 最后更新：`2026-07-22`
 
 ## 交付记录
 
