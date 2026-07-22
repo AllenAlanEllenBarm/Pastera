@@ -9,6 +9,11 @@ final class JSONPasswordVaultSyncMetadataStore: PasswordVaultSyncMetadataStoring
     typealias ReadData = (URL) throws -> Data
     typealias AtomicWrite = (Data, URL) throws -> Void
 
+    private static let noSuchFileErrorCodes: Set<Int> = [
+        NSFileReadNoSuchFileError,
+        NSFileNoSuchFileError
+    ]
+
     private let url: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -35,7 +40,7 @@ final class JSONPasswordVaultSyncMetadataStore: PasswordVaultSyncMetadataStoring
         let data: Data
         do {
             data = try readData(url)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        } catch let error where Self.isNoSuchFile(error) {
             return PasswordVaultSyncMetadata.defaultLocalOnly
         }
         let metadata: PasswordVaultSyncMetadata
@@ -60,5 +65,11 @@ final class JSONPasswordVaultSyncMetadataStore: PasswordVaultSyncMetadataStoring
             withIntermediateDirectories: true
         )
         try atomicWrite(data, url)
+    }
+
+    private static func isNoSuchFile(_ error: Error) -> Bool {
+        let error = error as NSError
+        guard error.domain == NSCocoaErrorDomain else { return false }
+        return noSuchFileErrorCodes.contains(error.code)
     }
 }

@@ -72,6 +72,10 @@ struct PasswordVaultCloudFileOperations {
 
 final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
     private static let kdbxSignature = Data([0x03, 0xD9, 0xA2, 0x9A, 0x67, 0xFB, 0x4B, 0xB5])
+    private static let cocoaNoSuchFileErrorCodes: Set<Int> = [
+        NSFileReadNoSuchFileError,
+        NSFileNoSuchFileError
+    ]
 
     private let fileCoordinator: NSFileCoordinator
     private let operations: PasswordVaultCloudFileOperations
@@ -274,16 +278,24 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
     }
 
     private static func isNoSuchFile(_ error: Error) -> Bool {
-        if let cocoaError = error as? CocoaError,
-           cocoaError.code == .fileReadNoSuchFile {
-            return true
+        var currentError: NSError? = error as NSError
+        var inspectedErrors = Set<ObjectIdentifier>()
+        while let error = currentError {
+            guard inspectedErrors.insert(ObjectIdentifier(error)).inserted else { return false }
+            if error.domain == NSCocoaErrorDomain,
+               cocoaNoSuchFileErrorCodes.contains(error.code) {
+                return true
+            }
+            if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
+                return true
+            }
+            if let underlyingError = error.userInfo[NSUnderlyingErrorKey] as? Error {
+                currentError = underlyingError as NSError
+            } else {
+                currentError = nil
+            }
         }
-        if let posixError = error as? POSIXError,
-           posixError.code == .ENOENT {
-            return true
-        }
-        let error = error as NSError
-        return error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT)
+        return false
     }
 
     private func readSnapshot(

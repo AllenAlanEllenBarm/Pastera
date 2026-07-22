@@ -121,6 +121,7 @@
 		C5F607002FF6600000B7C0DE /* PasswordVaultSyncMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F607012FF6600000B7C0DE /* PasswordVaultSyncMetadataTests.swift */; };
 		C5F608002FF6700000B7C0DE /* PasswordVaultSyncMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F608012FF6700000B7C0DE /* PasswordVaultSyncMetadataStore.swift */; };
 		C5F609002FF6800000B7C0DE /* PasswordVaultCloudReplicaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F609012FF6800000B7C0DE /* PasswordVaultCloudReplicaTests.swift */; };
+		C5F60B002FF6A00000B7C0DE /* PasswordVaultCloudReplicaMissingFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F60B012FF6A00000B7C0DE /* PasswordVaultCloudReplicaMissingFileTests.swift */; };
 		C5F60A002FF6900000B7C0DE /* PasswordVaultCloudReplica.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F60A012FF6900000B7C0DE /* PasswordVaultCloudReplica.swift */; };
 		C5F700022FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700032FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift */; };
 		C5F700062FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700072FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift */; };
@@ -404,6 +405,7 @@
 		C5F607012FF6600000B7C0DE /* PasswordVaultSyncMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultSyncMetadataTests.swift; sourceTree = "<group>"; };
 		C5F608012FF6700000B7C0DE /* PasswordVaultSyncMetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultSyncMetadataStore.swift; sourceTree = "<group>"; };
 		C5F609012FF6800000B7C0DE /* PasswordVaultCloudReplicaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultCloudReplicaTests.swift; sourceTree = "<group>"; };
+		C5F60B012FF6A00000B7C0DE /* PasswordVaultCloudReplicaMissingFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultCloudReplicaMissingFileTests.swift; sourceTree = "<group>"; };
 		C5F60A012FF6900000B7C0DE /* PasswordVaultCloudReplica.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultCloudReplica.swift; sourceTree = "<group>"; };
 		C5F700032FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultArtifactRekeyTransaction.swift; sourceTree = "<group>"; };
 		C5F700072FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultSecuritySettings.swift; sourceTree = "<group>"; };
@@ -1080,6 +1082,7 @@
 				C5F606012FF6500000B7C0DE /* PasswordVaultMigrationTests.swift */,
 				C5F607012FF6600000B7C0DE /* PasswordVaultSyncMetadataTests.swift */,
 				C5F609012FF6800000B7C0DE /* PasswordVaultCloudReplicaTests.swift */,
+				C5F60B012FF6A00000B7C0DE /* PasswordVaultCloudReplicaMissingFileTests.swift */,
 				C5F700012FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift */,
 				C5F700052FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift */,
 				C5F300052FF3000000B7C0DE /* SecureClipboardServiceTests.swift */,
@@ -1734,6 +1737,7 @@
 					C5F606002FF6500000B7C0DE /* PasswordVaultMigrationTests.swift in Sources */,
 					C5F607002FF6600000B7C0DE /* PasswordVaultSyncMetadataTests.swift in Sources */,
 					C5F609002FF6800000B7C0DE /* PasswordVaultCloudReplicaTests.swift in Sources */,
+					C5F60B002FF6A00000B7C0DE /* PasswordVaultCloudReplicaMissingFileTests.swift in Sources */,
 					C5F700002FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift in Sources */,
 					C5F700042FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift in Sources */,
 					C5F300042FF3000000B7C0DE /* SecureClipboardServiceTests.swift in Sources */,

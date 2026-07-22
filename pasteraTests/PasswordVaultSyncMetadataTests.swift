@@ -16,6 +16,25 @@ struct PasswordVaultSyncMetadataTests {
         }
     }
 
+    @Test(
+        "raw Foundation missing metadata errors start in local-only mode",
+        arguments: [NSFileReadNoSuchFileError, NSFileNoSuchFileError]
+    )
+    func rawFoundationMissingErrorsUseDefault(errorCode: Int) throws {
+        try withTemporaryDirectory { directory in
+            let url = directory.appendingPathComponent("PasswordVaultSyncMetadata.json")
+            let store = JSONPasswordVaultSyncMetadataStore(
+                url: url,
+                readData: { _ in
+                    throw NSError(domain: NSCocoaErrorDomain, code: errorCode)
+                }
+            )
+
+            let loaded = try store.load()
+            #expect(loaded == .defaultLocalOnly)
+        }
+    }
+
     @Test("metadata read failure never silently downgrades to local-only mode")
     func readFailureIsPropagated() throws {
         try withTemporaryDirectory { directory in
