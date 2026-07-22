@@ -165,6 +165,53 @@ struct PasswordVaultMasterPasswordTests {
         #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
     }
 
+    @Test(
+        "post-commit sanitize faults keep the new key active and report pending cleanup",
+        arguments: RekeyPostCommitWriteRestriction.allCases
+    )
+    func committedRekeyDoesNotRollBackAfterSanitizeFault(
+        restriction: RekeyPostCommitWriteRestriction
+    ) throws {
+        let fileManager = RekeyPostCommitWriteFailingFileManager(restriction: restriction)
+        let fixture = try RekeyFixture(transaction: VaultArtifactRekeyTransaction(fileManager: fileManager))
+        defer {
+            fileManager.restoreWriteAccess()
+            fixture.remove()
+        }
+        try fixture.addLocalEntry(title: "Preserved Entry")
+        try FileManager.default.removeItem(at: fixture.localStorage.paths.backupURL)
+        try fixture.store.enableQuickUnlock()
+        try fixture.store.enableAutomationUnlock()
+
+        let outcome = Result {
+            try fixture.store.changeMasterPassword(
+                currentPassword: fixture.oldPassword,
+                newPassword: fixture.newPassword,
+                keepQuickUnlockEnabled: true
+            )
+        }
+        fileManager.restoreWriteAccess()
+
+        let result = try outcome.get()
+        #expect(result.warnings.map(\.rawValue) == ["rekeyArtifactCleanupPending"])
+        #expect(fixture.canOpen(fixture.vaultURL, password: fixture.newPassword))
+        #expect(!fixture.canOpen(fixture.vaultURL, password: fixture.oldPassword))
+        #expect(fixture.store.state == .unlocked)
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+        let rollbackURL = try #require(
+            fixture.rekeyTemporaryFiles().first { $0.pathExtension == "rollback" }
+        )
+        #expect(FileManager.default.fileExists(atPath: rollbackURL.path))
+        #expect(fixture.canOpen(rollbackURL, password: fixture.oldPassword) == restriction.preservesOldRollback)
+
+        fixture.store.lock()
+        try fixture.store.unlockWithQuickKey(reason: "rekey sanitize fault test")
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+        fixture.store.lock()
+        try fixture.store.unlockForAutomation()
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+    }
+
     @Test("a locked store stays locked after a successful password change")
     func lockedStoreRemainsLocked() throws {
         let fixture = try RekeyFixture()
@@ -374,5 +421,52 @@ private final class RekeyRollbackCleanupFailingFileManager: FileManager {
             throw CocoaError(.fileWriteUnknown)
         }
         try super.removeItem(at: URL)
+    }
+}
+
+enum RekeyPostCommitWriteRestriction: CaseIterable {
+    case atomicWriteFailsAfterTruncate
+    case rollbackCannotBeInvalidated
+
+    var preservesOldRollback: Bool {
+        self == .rollbackCannotBeInvalidated
+    }
+}
+
+private final class RekeyPostCommitWriteFailingFileManager: FileManager {
+    private let restriction: RekeyPostCommitWriteRestriction
+    private var restrictedDirectory: URL?
+
+    init(restriction: RekeyPostCommitWriteRestriction) {
+        self.restriction = restriction
+        super.init()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func moveItem(at sourceURL: URL, to destinationURL: URL) throws {
+        try super.moveItem(at: sourceURL, to: destinationURL)
+        guard restrictedDirectory == nil,
+              sourceURL.pathExtension == "staged",
+              destinationURL.pathExtension == "kdbx" else { return }
+        let directory = destinationURL.deletingLastPathComponent()
+        if restriction == .rollbackCannotBeInvalidated,
+           let rollbackURL = try contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .first(where: { $0.pathExtension == "rollback" }) {
+            try setAttributes([.posixPermissions: 0o400], ofItemAtPath: rollbackURL.path)
+        }
+        try setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        restrictedDirectory = directory
+    }
+
+    func restoreWriteAccess() {
+        guard let restrictedDirectory else { return }
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: restrictedDirectory.path
+        )
+        self.restrictedDirectory = nil
     }
 }

@@ -23,7 +23,6 @@ final class VaultArtifactRekeyTransaction {
 
     private struct StagedArtifact {
         let replacement: VaultArtifactRekeyReplacement
-        let sourceData: Data
         let sourceRevision: Data
         let stagedURL: URL
         let rollbackURL: URL
@@ -93,8 +92,8 @@ final class VaultArtifactRekeyTransaction {
         guard !replacements.isEmpty else { throw PasswordVaultError.databaseNotConfigured }
         let transactionID = UUID().uuidString
         var staged = [StagedArtifact]()
-        var committedSuccessfully = false
-        defer { cleanup(staged, recoverRollbacks: !committedSuccessfully) }
+        var mainArtifactsCommitted = false
+        defer { cleanup(staged, recoverRollbacks: !mainArtifactsCommitted) }
 
         do {
             for replacement in replacements {
@@ -105,7 +104,6 @@ final class VaultArtifactRekeyTransaction {
                 let rollbackURL = directory.appendingPathComponent("\(stem).rollback")
                 let artifact = StagedArtifact(
                     replacement: replacement,
-                    sourceData: sourceData,
                     sourceRevision: revision(of: sourceData),
                     stagedURL: stagedURL,
                     rollbackURL: rollbackURL
@@ -128,9 +126,10 @@ final class VaultArtifactRekeyTransaction {
                 }
             }
 
-            let result = try commit(staged)
-            committedSuccessfully = true
-            return result
+            try commit(staged)
+            // Past this point, every managed artifact uses the new key. Cleanup faults must not roll them back.
+            mainArtifactsCommitted = true
+            return finalizeCommittedArtifacts(staged)
         } catch let error as PasswordVaultError {
             throw error
         } catch {
@@ -138,7 +137,7 @@ final class VaultArtifactRekeyTransaction {
         }
     }
 
-    private func commit(_ staged: [StagedArtifact]) throws -> VaultArtifactRekeyResult {
+    private func commit(_ staged: [StagedArtifact]) throws {
         var committed = [StagedArtifact]()
         do {
             for (index, artifact) in staged.enumerated() {
@@ -152,18 +151,22 @@ final class VaultArtifactRekeyTransaction {
                 }
                 committed.append(artifact)
             }
-            for artifact in committed {
-                try artifact.replacement.data.write(to: artifact.rollbackURL, options: .atomic)
-            }
         } catch {
             for artifact in committed.reversed() {
-                try? artifact.sourceData.write(to: artifact.replacement.url, options: .atomic)
+                try? fileManager.removeItem(at: artifact.replacement.url)
+                try? fileManager.moveItem(at: artifact.rollbackURL, to: artifact.replacement.url)
             }
             throw error
         }
+    }
 
+    private func finalizeCommittedArtifacts(_ committed: [StagedArtifact]) -> VaultArtifactRekeyResult {
         var hasPendingCleanup = false
         for artifact in committed {
+            guard sanitizeRollback(artifact) else {
+                hasPendingCleanup = true
+                continue
+            }
             do {
                 try fileManager.removeItem(at: artifact.rollbackURL)
             } catch {
@@ -171,6 +174,29 @@ final class VaultArtifactRekeyTransaction {
             }
         }
         return VaultArtifactRekeyResult(hasPendingCleanup: hasPendingCleanup)
+    }
+
+    private func sanitizeRollback(_ artifact: StagedArtifact) -> Bool {
+        do {
+            let handle = try FileHandle(forWritingTo: artifact.rollbackURL)
+            do {
+                try handle.truncate(atOffset: 0)
+                try handle.synchronize()
+                try handle.close()
+            } catch {
+                try? handle.close()
+                return false
+            }
+        } catch {
+            return false
+        }
+
+        do {
+            try artifact.replacement.data.write(to: artifact.rollbackURL, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func cleanup(_ staged: [StagedArtifact], recoverRollbacks: Bool) {
