@@ -380,6 +380,8 @@ final class CPYPasswordVaultPreferenceViewController: PasteraPreferencePageViewC
                 return pasteraPreferenceString("An old unlock credential could not be removed. Review Keychain access.")
             case .conflictArchivePending:
                 return pasteraPreferenceString("A resolved conflict archive still needs attention.")
+            case .rekeyArtifactCleanupPending:
+                return pasteraPreferenceString("A secured password-change artifact is still pending cleanup.")
             }
         }
         if warningMessages.isEmpty {

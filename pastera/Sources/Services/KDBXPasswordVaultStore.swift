@@ -718,7 +718,7 @@ extension KDBXPasswordVaultStore {
                         data: try encoded(artifactContent, unlockData: newUnlock)
                     )
                 }
-                try rekeyTransaction.replace(replacements) { _, data in
+                let rekeyResult = try rekeyTransaction.replace(replacements) { _, data in
                     _ = try KDBXReader.parse(data, unlockData: newUnlock)
                 }
 
@@ -726,6 +726,9 @@ extension KDBXPasswordVaultStore {
                     with: newUnlock,
                     keepQuickUnlockEnabled: keepQuickUnlockEnabled
                 )
+                if rekeyResult.hasPendingCleanup {
+                    warnings.append(.rekeyArtifactCleanupPending)
+                }
                 for conflictURL in immediateConflicts {
                     do {
                         try coordinator.archiveResolvedConflict(conflictURL, alongside: mainURL)

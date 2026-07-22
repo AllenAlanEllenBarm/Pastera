@@ -13,12 +13,17 @@ struct VaultArtifactRekeyReplacement {
     let data: Data
 }
 
+struct VaultArtifactRekeyResult {
+    let hasPendingCleanup: Bool
+}
+
 final class VaultArtifactRekeyTransaction {
     typealias CheckpointAction = (VaultArtifactRekeyCheckpoint) throws -> Void
     typealias Validator = (URL, Data) throws -> Void
 
     private struct StagedArtifact {
         let replacement: VaultArtifactRekeyReplacement
+        let sourceData: Data
         let sourceRevision: Data
         let stagedURL: URL
         let rollbackURL: URL
@@ -84,7 +89,7 @@ final class VaultArtifactRekeyTransaction {
     func replace(
         _ replacements: [VaultArtifactRekeyReplacement],
         validate: Validator
-    ) throws {
+    ) throws -> VaultArtifactRekeyResult {
         guard !replacements.isEmpty else { throw PasswordVaultError.databaseNotConfigured }
         let transactionID = UUID().uuidString
         var staged = [StagedArtifact]()
@@ -100,6 +105,7 @@ final class VaultArtifactRekeyTransaction {
                 let rollbackURL = directory.appendingPathComponent("\(stem).rollback")
                 let artifact = StagedArtifact(
                     replacement: replacement,
+                    sourceData: sourceData,
                     sourceRevision: revision(of: sourceData),
                     stagedURL: stagedURL,
                     rollbackURL: rollbackURL
@@ -122,8 +128,9 @@ final class VaultArtifactRekeyTransaction {
                 }
             }
 
-            try commit(staged)
+            let result = try commit(staged)
             committedSuccessfully = true
+            return result
         } catch let error as PasswordVaultError {
             throw error
         } catch {
@@ -131,7 +138,7 @@ final class VaultArtifactRekeyTransaction {
         }
     }
 
-    private func commit(_ staged: [StagedArtifact]) throws {
+    private func commit(_ staged: [StagedArtifact]) throws -> VaultArtifactRekeyResult {
         var committed = [StagedArtifact]()
         do {
             for (index, artifact) in staged.enumerated() {
@@ -145,21 +152,25 @@ final class VaultArtifactRekeyTransaction {
                 }
                 committed.append(artifact)
             }
+            for artifact in committed {
+                try artifact.replacement.data.write(to: artifact.rollbackURL, options: .atomic)
+            }
         } catch {
             for artifact in committed.reversed() {
-                try? fileManager.removeItem(at: artifact.replacement.url)
-                try? fileManager.moveItem(at: artifact.rollbackURL, to: artifact.replacement.url)
+                try? artifact.sourceData.write(to: artifact.replacement.url, options: .atomic)
             }
             throw error
         }
 
+        var hasPendingCleanup = false
         for artifact in committed {
             do {
                 try fileManager.removeItem(at: artifact.rollbackURL)
             } catch {
-                continue
+                hasPendingCleanup = true
             }
         }
+        return VaultArtifactRekeyResult(hasPendingCleanup: hasPendingCleanup)
     }
 
     private func cleanup(_ staged: [StagedArtifact], recoverRollbacks: Bool) {

@@ -4,37 +4,50 @@ import Testing
 @testable import Pastera
 
 extension PasswordVaultStoreTests {
-    @Test("barrier-started KDBX writers preserve both stores' changes")
+    @Test("a second store cannot read the same path until the first write transaction releases")
     func concurrentVaultWritersMerge() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let first = KDBXPasswordVaultStore(localStorage: makeReviewLocalStorage(at: root))
-        let second = KDBXPasswordVaultStore(localStorage: makeReviewLocalStorage(at: root))
-        try first.createDatabase(masterPassword: "shared password", rememberQuickUnlock: false)
-        try second.unlock(masterPassword: "shared password", rememberQuickUnlock: false)
+        let seed = KDBXPasswordVaultStore(localStorage: makeReviewLocalStorage(at: root))
+        try seed.createDatabase(masterPassword: "shared password", rememberQuickUnlock: false)
 
-        let stores = [first, second]
-        let ready = DispatchSemaphore(value: 0)
-        let start = DispatchSemaphore(value: 0)
+        let firstWriteEntered = DispatchSemaphore(value: 0)
+        let releaseFirstWrite = DispatchSemaphore(value: 0)
+        let secondReadEntered = DispatchSemaphore(value: 0)
+        let firstStorage = CoordinatedReviewLocalStorage(backing: makeReviewLocalStorage(at: root))
+        let secondStorage = CoordinatedReviewLocalStorage(backing: makeReviewLocalStorage(at: root))
+        let first = KDBXPasswordVaultStore(localStorage: firstStorage)
+        let second = KDBXPasswordVaultStore(localStorage: secondStorage)
+        try first.unlock(masterPassword: "shared password", rememberQuickUnlock: false)
+        try second.unlock(masterPassword: "shared password", rememberQuickUnlock: false)
+        firstStorage.blockNextWrite(entered: firstWriteEntered, release: releaseFirstWrite)
+        secondStorage.observeNextRead { secondReadEntered.signal() }
+
+        let secondStarted = DispatchSemaphore(value: 0)
         let finished = DispatchGroup()
         let outcomes = LockedReviewResults<PasswordVaultFolder>()
-        for index in stores.indices {
-            finished.enter()
-            Thread.detachNewThread {
-                ready.signal()
-                _ = start.wait(timeout: .now() + 30)
-                outcomes.append(Result {
-                    try stores[index].createFolder(name: index == 0 ? "First" : "Second")
-                })
-                finished.leave()
-            }
+        finished.enter()
+        Thread.detachNewThread {
+            outcomes.append(Result { try first.createFolder(name: "First") })
+            finished.leave()
         }
-        #expect(ready.wait(timeout: .now() + 30) == .success)
-        #expect(ready.wait(timeout: .now() + 30) == .success)
-        start.signal()
-        start.signal()
+        #expect(firstWriteEntered.wait(timeout: .now() + 30) == .success)
+
+        finished.enter()
+        Thread.detachNewThread {
+            secondStarted.signal()
+            outcomes.append(Result { try second.createFolder(name: "Second") })
+            finished.leave()
+        }
+        #expect(secondStarted.wait(timeout: .now() + 30) == .success)
+        let secondReadBeforeRelease = secondReadEntered.wait(timeout: .now() + 1)
+        releaseFirstWrite.signal()
+        if secondReadBeforeRelease == .timedOut {
+            #expect(secondReadEntered.wait(timeout: .now() + 30) == .success)
+        }
         #expect(finished.wait(timeout: .now() + 30) == .success)
+        #expect(secondReadBeforeRelease == .timedOut)
         for outcome in outcomes.values {
             _ = try outcome.get()
         }
@@ -263,5 +276,58 @@ private final class LockedReviewResults<Value>: @unchecked Sendable {
 
     func append(_ result: Result<Value, Error>) {
         lock.withLock { storage.append(result) }
+    }
+}
+
+private final class CoordinatedReviewLocalStorage: PasswordVaultLocalStoring, @unchecked Sendable {
+    let paths: PasswordVaultLocalPaths
+
+    private let backing: FilePasswordVaultLocalStorage
+    private let coordinationLock = NSLock()
+    private var nextReadObserver: (() -> Void)?
+    private var nextWriteBarrier: (entered: DispatchSemaphore, release: DispatchSemaphore)?
+
+    init(backing: FilePasswordVaultLocalStorage) {
+        self.backing = backing
+        paths = backing.paths
+    }
+
+    func observeNextRead(_ observer: @escaping () -> Void) {
+        coordinationLock.withLock { nextReadObserver = observer }
+    }
+
+    func blockNextWrite(entered: DispatchSemaphore, release: DispatchSemaphore) {
+        coordinationLock.withLock { nextWriteBarrier = (entered, release) }
+    }
+
+    func containsVault() -> Bool {
+        backing.containsVault()
+    }
+
+    func read() throws -> Data {
+        let observer = coordinationLock.withLock {
+            defer { nextReadObserver = nil }
+            return nextReadObserver
+        }
+        observer?()
+        return try backing.read()
+    }
+
+    func writeAtomically(_ data: Data) throws {
+        let barrier = coordinationLock.withLock {
+            defer { nextWriteBarrier = nil }
+            return nextWriteBarrier
+        }
+        if let barrier {
+            barrier.entered.signal()
+            guard barrier.release.wait(timeout: .now() + 30) == .success else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+        try backing.writeAtomically(data)
+    }
+
+    func readBackup() throws -> Data {
+        try backing.readBackup()
     }
 }

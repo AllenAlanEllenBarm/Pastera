@@ -286,6 +286,7 @@ enum PasswordVaultMasterPasswordChangeWarning: String, Hashable {
     case automationUnlockDisabled
     case credentialCleanupFailed
     case conflictArchivePending
+    case rekeyArtifactCleanupPending
 }
 
 struct PasswordVaultMasterPasswordChangeResult: Equatable {

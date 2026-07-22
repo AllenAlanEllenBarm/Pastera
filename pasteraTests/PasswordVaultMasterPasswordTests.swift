@@ -127,8 +127,8 @@ struct PasswordVaultMasterPasswordTests {
         #expect(fixture.rekeyTemporaryFiles().isEmpty)
     }
 
-    @Test("rollback cleanup failure after commit keeps disk memory and unlock keys on the new password")
-    func committedRekeyIgnoresRollbackCleanupFailure() throws {
+    @Test("rollback cleanup failure leaves only new-password data and reports pending cleanup")
+    func committedRekeySanitizesRollbackBeforeCleanupFailure() throws {
         let fileManager = RekeyRollbackCleanupFailingFileManager()
         let fixture = try RekeyFixture(transaction: VaultArtifactRekeyTransaction(fileManager: fileManager))
         defer { fixture.remove() }
@@ -145,12 +145,17 @@ struct PasswordVaultMasterPasswordTests {
         }
 
         let result = try outcome.get()
-        #expect(result.warnings.isEmpty)
+        #expect(result.warnings.map(\.rawValue) == ["rekeyArtifactCleanupPending"])
         #expect(fixture.canOpen(fixture.vaultURL, password: fixture.newPassword))
         #expect(!fixture.canOpen(fixture.vaultURL, password: fixture.oldPassword))
         #expect(fixture.store.state == .unlocked)
         #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
-        #expect(fixture.rekeyTemporaryFiles().contains { $0.pathExtension == "rollback" })
+        let rollbackFiles = fixture.rekeyTemporaryFiles().filter { $0.pathExtension == "rollback" }
+        #expect(!rollbackFiles.isEmpty)
+        for rollbackURL in rollbackFiles {
+            #expect(fixture.canOpen(rollbackURL, password: fixture.newPassword))
+            #expect(!fixture.canOpen(rollbackURL, password: fixture.oldPassword))
+        }
 
         fixture.store.lock()
         try fixture.store.unlockWithQuickKey(reason: "rekey cleanup test")
