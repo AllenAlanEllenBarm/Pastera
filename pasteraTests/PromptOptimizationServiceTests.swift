@@ -132,6 +132,24 @@ struct PromptOptimizationServiceTests {
         #expect(formatter.format("  First  \r\n\r\n\r\n\r\nSecond  ") == "First\n\n\nSecond")
     }
 
+    @Test
+    func localFormatterCorrectsConfirmedChineseContextualTypo() {
+        let formatter = LocalPromptFormatter()
+
+        #expect(formatter.format("先帮我把代码分工翰") == "先帮我把代码分功能")
+    }
+
+    @Test
+    func localFormatterDoesNotCorrectTextInsideCodeFence() {
+        let formatter = LocalPromptFormatter()
+        let source = "请修正先帮我把代码分工翰\n```\n先帮我把代码分工翰\n```"
+
+        #expect(
+            formatter.format(source)
+                == "请修正先帮我把代码分功能\n```\n先帮我把代码分工翰\n```"
+        )
+    }
+
     private func makeService(
         appleAvailability: PromptOptimizationAvailability,
         appleResult: Result<String, Error>

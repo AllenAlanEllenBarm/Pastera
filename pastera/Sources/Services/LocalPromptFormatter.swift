@@ -5,6 +5,10 @@ protocol LocalPromptFormatting: AnyObject {
 }
 
 final class LocalPromptFormatter: LocalPromptFormatting {
+    private static let confirmedContextualCorrections = [
+        ("分工翰", "分功能")
+    ]
+
     func format(_ text: String) -> String {
         let normalized = text
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -42,7 +46,7 @@ final class LocalPromptFormatter: LocalPromptFormatting {
                 }
             } else {
                 consecutiveBlankLines = 0
-                result.append(cleaned)
+                result.append(correctingConfirmedTypos(in: cleaned))
             }
         }
 
@@ -59,6 +63,12 @@ final class LocalPromptFormatter: LocalPromptFormatting {
 
     private func removingTrailingWhitespace(from line: String) -> String {
         String(line.drop(whileFromEnd: { $0 == " " || $0 == "\t" }))
+    }
+
+    private func correctingConfirmedTypos(in line: String) -> String {
+        Self.confirmedContextualCorrections.reduce(line) { result, correction in
+            result.replacingOccurrences(of: correction.0, with: correction.1)
+        }
     }
 
 }
