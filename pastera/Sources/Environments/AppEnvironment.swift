@@ -43,6 +43,7 @@ struct AppEnvironment {
                      accessibilityService: AccessibilityService = current.accessibilityService,
                      oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                      passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
+                     passwordVaultSyncService: PasswordVaultSyncControlling = current.passwordVaultSyncService,
                      secureClipboard: SecureClipboardWriting = current.secureClipboard,
                      passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
                      vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
@@ -58,6 +59,7 @@ struct AppEnvironment {
                                       accessibilityService: accessibilityService,
                                       oneDriveProcessStatusService: oneDriveProcessStatusService,
                                       passwordVaultStore: passwordVaultStore,
+                                      passwordVaultSyncService: passwordVaultSyncService,
                                       secureClipboard: secureClipboard,
                                       passwordVaultUIController: passwordVaultUIController,
                                       vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
@@ -74,6 +76,7 @@ struct AppEnvironment {
                                accessibilityService: AccessibilityService = current.accessibilityService,
                                oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                                passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
+                               passwordVaultSyncService: PasswordVaultSyncControlling = current.passwordVaultSyncService,
                                secureClipboard: SecureClipboardWriting = current.secureClipboard,
                                passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
                                vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
@@ -89,6 +92,7 @@ struct AppEnvironment {
                                                 accessibilityService: accessibilityService,
                                                 oneDriveProcessStatusService: oneDriveProcessStatusService,
                                                 passwordVaultStore: passwordVaultStore,
+                                                passwordVaultSyncService: passwordVaultSyncService,
                                                 secureClipboard: secureClipboard,
                                                 passwordVaultUIController: passwordVaultUIController,
                                                 vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
@@ -108,6 +112,7 @@ struct AppEnvironment {
         return Environment(hotKeyService: HotKeyService(defaults: defaults),
                            excludeAppService: excludeAppService,
                            accessibilityService: AccessibilityService(),
+                           prepareProductionPasswordVault: true,
                            vaultAgentApplicationRuntimeFactory: { controller in
                                VaultAgentApplicationRuntime.production(
                                    vault: controller,

@@ -62,7 +62,13 @@ final class MenuManager: NSObject {
     private let passwordVaultUIControllerProvider: () -> PasswordVaultUIController = {
         AppEnvironment.current.passwordVaultUIController
     }
+    private let passwordVaultSyncServiceProvider: () -> PasswordVaultSyncControlling = {
+        AppEnvironment.current.passwordVaultSyncService
+    }
     private weak var installedPasswordVaultUIController: PasswordVaultUIController?
+    private var installedPasswordVaultSyncService: PasswordVaultSyncControlling?
+    private var passwordVaultSyncObserver: UUID?
+    private(set) var passwordVaultSyncSnapshot: PasswordVaultSyncSnapshot?
     var passwordVaultUIController: PasswordVaultUIController {
         let controller = passwordVaultUIControllerProvider()
         if installedPasswordVaultUIController !== controller {
@@ -72,7 +78,12 @@ final class MenuManager: NSObject {
                 self?.mainMenuPanelController?.reloadContentIfVisible()
             }
         }
+        installPasswordVaultSyncObservationIfNeeded()
         return controller
+    }
+    var passwordVaultSyncService: PasswordVaultSyncControlling {
+        installPasswordVaultSyncObservationIfNeeded()
+        return passwordVaultSyncServiceProvider()
     }
     private lazy var historyEditorWindowController = HistoryEditorWindowController(
         repository: pasteboardHistoryRepository,
@@ -132,6 +143,9 @@ final class MenuManager: NSObject {
     }
 
     deinit {
+        if let passwordVaultSyncObserver {
+            installedPasswordVaultSyncService?.removeObserver(passwordVaultSyncObserver)
+        }
         secureEventInputStatusTimer?.invalidate()
         oneDriveStatusObservation?.cancel()
         removePanelDismissMonitors()
@@ -139,6 +153,7 @@ final class MenuManager: NSObject {
     }
 
     func setup() {
+        installPasswordVaultSyncObservationIfNeeded()
         createClipMenu()
         configureStatusItemFromDefaults()
         startSecureEventInputStatusMonitoring()
@@ -146,6 +161,22 @@ final class MenuManager: NSObject {
         bind()
     }
 
+}
+
+private extension MenuManager {
+    func installPasswordVaultSyncObservationIfNeeded() {
+        let service = passwordVaultSyncServiceProvider()
+        guard installedPasswordVaultSyncService !== service else { return }
+        if let passwordVaultSyncObserver {
+            installedPasswordVaultSyncService?.removeObserver(passwordVaultSyncObserver)
+        }
+        installedPasswordVaultSyncService = service
+        passwordVaultSyncSnapshot = service.snapshot
+        passwordVaultSyncObserver = service.addObserver { [weak self, weak service] snapshot in
+            guard let self, self.installedPasswordVaultSyncService === service else { return }
+            self.passwordVaultSyncSnapshot = snapshot
+        }
+    }
 }
 
 // MARK: - Popup Menu
@@ -456,6 +487,7 @@ extension MenuManager {
         return controller
     }
 
+    // swiftlint:disable:next function_body_length
     func makeMainMenuPanelController() -> MainMenuPanelController {
         MainMenuPanelController(
             historyTitle: String(localized: "History"),
@@ -658,7 +690,7 @@ extension MenuManager {
                 let shortcutText = PasteraShortcutFormatter.string(
                     for: AppEnvironment.current.hotKeyService.snippetKeyCombo(forIdentifier: folder.id.uuidString)
                 )
-                items.append(.snippetFolder(title: title, image: folderImage, shortcutText: shortcutText) { [weak self] anchorFrame in
+                items.append(.snippetFolder(title: title, image: folderImage, shortcutText: shortcutText) { [weak self] _ in
                     guard let self,
                           let detail = self.snippetRepository.fetchFolderDetail(id: folder.id) else { return }
                     self.popUpSnippetFolder(detail)

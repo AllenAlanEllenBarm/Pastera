@@ -13,6 +13,8 @@
 import Combine
 import Foundation
 
+// swiftlint:disable file_length
+
 struct SyncSettings: Equatable {
     let rootURL: URL?
     let historyUploadEnabled: Bool
@@ -375,6 +377,7 @@ struct SyncDefaultFolderResolver {
     }
 }
 
+// swiftlint:disable:next type_body_length
 final class SyncCoordinator {
     private struct ActivationSignature: Equatable {
         let rootPath: String?
@@ -383,9 +386,9 @@ final class SyncCoordinator {
         let historyObservationEnabled: Bool
         let snippetObservationEnabled: Bool
         let hasEnabledWork: Bool
-        let vaultCanSync: Bool
+        let vaultSyncEnabled: Bool
     }
-    enum Reason {
+    enum Reason: Equatable {
         case startup
         case timer
         case localChange
@@ -401,12 +404,22 @@ final class SyncCoordinator {
     private let providerFactory: (URL) -> OneDriveFolderSyncProvider
     private let historyRepository: PasteboardHistoryRepositoryProtocol
     private let snippetRepository: SnippetRepositoryProtocol
-    private let passwordVaultStoreProvider: () -> PasswordVaultStore
+    private let passwordVaultSyncServiceProvider: () -> PasswordVaultSyncControlling
+    private let oneDriveProcessStatusServiceProvider: () -> OneDriveProcessStatusServicing
+    private let vaultChangeDebounceInterval: TimeInterval
     private let queue: DispatchQueue
+    private let queueKey = DispatchSpecificKey<Void>()
     private var timer: DispatchSourceTimer?
     private var historyObservation: AnyCancellable?
     private var snippetObservation: AnyCancellable?
     private var configurationObservation: AnyCancellable?
+    private var observedPasswordVaultSyncService: PasswordVaultSyncControlling?
+    private var passwordVaultSyncObserverIdentifier: UUID?
+    private var observedOneDriveProcessStatusService: OneDriveProcessStatusServicing?
+    private var oneDriveProcessStatusObservation: OneDriveProcessStatusObservation?
+    private var pendingVaultSyncWorkItem: DispatchWorkItem?
+    private var lastPasswordVaultSyncSnapshot: PasswordVaultSyncSnapshot?
+    private var isStarted = false
     private var activationSignature: ActivationSignature?
     private var lastHistoryExportSignature: HistoryWindowSignature?
     private var importedHistorySnapshotStates = [String: HistoryRemoteSnapshotState]()
@@ -435,57 +448,93 @@ final class SyncCoordinator {
         providerFactory: @escaping (URL) -> OneDriveFolderSyncProvider = { OneDriveFolderSyncProvider(rootURL: $0) },
         historyRepository: PasteboardHistoryRepositoryProtocol = PasteboardHistoryRepository(),
         snippetRepository: SnippetRepositoryProtocol = SnippetRepository(),
-        passwordVaultStoreProvider: @escaping () -> PasswordVaultStore = { AppEnvironment.current.passwordVaultStore },
+        passwordVaultSyncServiceProvider: @escaping () -> PasswordVaultSyncControlling = {
+            AppEnvironment.current.passwordVaultSyncService
+        },
+        oneDriveProcessStatusServiceProvider: @escaping () -> OneDriveProcessStatusServicing = {
+            AppEnvironment.current.oneDriveProcessStatusService
+        },
+        vaultChangeDebounceInterval: TimeInterval = 2,
         queue: DispatchQueue = DispatchQueue(label: "com.pastera.sync.coordinator", qos: .utility)
     ) {
         self.settingsProvider = settingsProvider
         self.providerFactory = providerFactory
         self.historyRepository = historyRepository
         self.snippetRepository = snippetRepository
-        self.passwordVaultStoreProvider = passwordVaultStoreProvider
+        self.passwordVaultSyncServiceProvider = passwordVaultSyncServiceProvider
+        self.oneDriveProcessStatusServiceProvider = oneDriveProcessStatusServiceProvider
+        self.vaultChangeDebounceInterval = vaultChangeDebounceInterval
         self.queue = queue
+        queue.setSpecific(key: queueKey, value: ())
     }
 
     func start() {
-        configurationObservation = NotificationCenter.default.publisher(
-            for: UserDefaultsSyncSettingsStore.didChangeNotification
-        )
-        .sink { [weak self] _ in self?.reloadConfiguration() }
-        reloadConfiguration()
+        stop()
+        performOnQueueAndWait {
+            isStarted = true
+            configurationObservation = NotificationCenter.default.publisher(
+                for: UserDefaultsSyncSettingsStore.didChangeNotification
+            )
+            .sink { [weak self] _ in self?.reloadConfiguration() }
+            bindPasswordVaultSyncObservation()
+            bindOneDriveProcessStatusObservation()
+            applyConfiguration()
+        }
         syncNow(reason: .startup)
     }
 
     func stop() {
+        performOnQueueAndWait { stopOnQueue() }
+    }
+
+    private func stopOnQueue() {
         timer?.cancel()
         timer = nil
         historyObservation = nil
         snippetObservation = nil
         configurationObservation = nil
+        pendingVaultSyncWorkItem?.cancel()
+        pendingVaultSyncWorkItem = nil
+        if let identifier = passwordVaultSyncObserverIdentifier {
+            observedPasswordVaultSyncService?.removeObserver(identifier)
+        }
+        passwordVaultSyncObserverIdentifier = nil
+        observedPasswordVaultSyncService = nil
+        lastPasswordVaultSyncSnapshot = nil
+        oneDriveProcessStatusObservation?.cancel()
+        oneDriveProcessStatusObservation = nil
+        observedOneDriveProcessStatusService = nil
         activationSignature = nil
+        isStarted = false
     }
 
     func reloadConfiguration() {
-        queue.async { [weak self] in self?.applyConfiguration() }
+        queue.async { [weak self] in
+            guard let self, self.isStarted else { return }
+            self.bindPasswordVaultSyncObservation()
+            self.bindOneDriveProcessStatusObservation()
+            self.applyConfiguration()
+        }
     }
 
     private func applyConfiguration() {
         let settings = settingsProvider()
         let rootAvailable = settings.rootURL.map { FileManager.default.fileExists(atPath: $0.path) } == true
-        let vaultStore = passwordVaultStoreProvider()
-        let vaultCanSync = vaultStore.state == .unlocked
-            || { if case .readOnlyWarning = vaultStore.state { return true }; return false }()
+        let vaultSyncEnabled = passwordVaultSyncServiceProvider().snapshot.mode == .oneDrive
+        let genericSyncEnabled = rootAvailable && settings.hasEnabledWork
         let signature = ActivationSignature(
             rootPath: settings.rootURL?.standardizedFileURL.path,
             rootAvailable: rootAvailable,
             pollInterval: settings.pollInterval,
-            historyObservationEnabled: settings.historyUploadEnabled || settings.fileUploadEnabled,
-            snippetObservationEnabled: settings.snippetUploadEnabled,
-            hasEnabledWork: settings.hasEnabledWork,
-            vaultCanSync: vaultCanSync
+            historyObservationEnabled: genericSyncEnabled
+                && (settings.historyUploadEnabled || settings.fileUploadEnabled),
+            snippetObservationEnabled: genericSyncEnabled && settings.snippetUploadEnabled,
+            hasEnabledWork: genericSyncEnabled,
+            vaultSyncEnabled: vaultSyncEnabled
         )
         guard signature != activationSignature else { return }
         activationSignature = signature
-        guard rootAvailable, settings.hasEnabledWork || vaultCanSync else {
+        guard genericSyncEnabled || vaultSyncEnabled else {
             timer?.cancel()
             timer = nil
             historyObservation = nil
@@ -493,21 +542,28 @@ final class SyncCoordinator {
             return
         }
         installTimer()
-        observeLocalChanges(settings: settings)
+        observeLocalChanges(settings: settings, enabled: genericSyncEnabled)
     }
 
     func syncNow(reason: Reason, wait: Bool = false) {
         let work = { [weak self] in
-            self?.performSync(reason: reason)
+            guard let self else { return }
+            self.performSync(reason: reason)
         }
         if wait {
-            queue.sync {
-                work()
-            }
+            performOnQueueAndWait(work)
         } else {
             queue.async {
                 work()
             }
+        }
+    }
+
+    private func performOnQueueAndWait(_ operation: () -> Void) {
+        if DispatchQueue.getSpecific(key: queueKey) != nil {
+            operation()
+        } else {
+            queue.sync(execute: operation)
         }
     }
 
@@ -523,9 +579,9 @@ final class SyncCoordinator {
         self.timer = timer
     }
 
-    private func observeLocalChanges(settings: SyncSettings) {
+    private func observeLocalChanges(settings: SyncSettings, enabled: Bool) {
         historyObservation = nil
-        if settings.historyUploadEnabled || settings.fileUploadEnabled {
+        if enabled, settings.historyUploadEnabled || settings.fileUploadEnabled {
             let publisher = settings.fileUploadEnabled
                 ? historyRepository.observeHistoryChanges()
                 : historyRepository.observeTextSyncCandidateChanges(currentDeviceID: currentDeviceID)
@@ -536,7 +592,7 @@ final class SyncCoordinator {
         }
 
         snippetObservation = nil
-        if settings.snippetUploadEnabled {
+        if enabled, settings.snippetUploadEnabled {
             snippetObservation = snippetRepository.observeFolderDetails()
                 .dropFirst()
                 .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
@@ -546,19 +602,23 @@ final class SyncCoordinator {
 
     private func performSync(reason: Reason) {
         let settings = settingsProvider()
+        let passwordVaultSyncService = passwordVaultSyncServiceProvider()
+        let vaultSyncEnabled = passwordVaultSyncService.snapshot.mode == .oneDrive
+        if vaultSyncEnabled {
+            passwordVaultSyncService.synchronize(reason: reason)
+        }
+        guard settings.hasEnabledWork else {
+            if !vaultSyncEnabled {
+                setSkipped(error: SyncCoordinatorError.noEnabledWork)
+            }
+            return
+        }
         guard let rootURL = settings.rootURL else {
             setSkipped(error: SyncCoordinatorError.missingOneDrive)
             return
         }
         guard FileManager.default.fileExists(atPath: rootURL.path) else {
             setSkipped(error: SyncCoordinatorError.folderUnavailable)
-            return
-        }
-        let vaultStore = passwordVaultStoreProvider()
-        let vaultCanSync = vaultStore.state == .unlocked
-            || { if case .readOnlyWarning = vaultStore.state { return true }; return false }()
-        guard settings.hasEnabledWork || vaultCanSync else {
-            setSkipped(error: SyncCoordinatorError.noEnabledWork)
             return
         }
         let directionPlan = directionPlan(reason: reason, settings: settings)
@@ -575,16 +635,8 @@ final class SyncCoordinator {
         }
 
         do {
-            if vaultCanSync {
-                try vaultStore.reloadAndMerge()
-            }
-            let result: SyncRunResult
-            if settings.hasEnabledWork {
-                let provider = providerFactory(rootURL)
-                result = try sync(settings: settings, provider: provider, directionPlan: directionPlan)
-            } else {
-                result = SyncRunResult()
-            }
+            let provider = providerFactory(rootURL)
+            let result = try sync(settings: settings, provider: provider, directionPlan: directionPlan)
             guard reason == .manual || !result.isNoOp else { return }
             setStatus(SyncStatus(
                 phase: .succeeded,
@@ -604,6 +656,75 @@ final class SyncCoordinator {
                 warningDescription: nil
             ))
         }
+    }
+
+    private func bindPasswordVaultSyncObservation() {
+        let service = passwordVaultSyncServiceProvider()
+        guard observedPasswordVaultSyncService !== service else { return }
+        if let identifier = passwordVaultSyncObserverIdentifier {
+            observedPasswordVaultSyncService?.removeObserver(identifier)
+        }
+        pendingVaultSyncWorkItem?.cancel()
+        pendingVaultSyncWorkItem = nil
+        lastPasswordVaultSyncSnapshot = nil
+        observedPasswordVaultSyncService = service
+        passwordVaultSyncObserverIdentifier = service.addObserver { [weak self, weak service] snapshot in
+            guard let self, let service else { return }
+            self.queue.async { [weak self, weak service] in
+                guard let self,
+                      let service,
+                      self.isStarted,
+                      self.observedPasswordVaultSyncService === service else { return }
+                self.handlePasswordVaultSyncSnapshot(snapshot)
+            }
+        }
+    }
+
+    private func bindOneDriveProcessStatusObservation() {
+        let service = oneDriveProcessStatusServiceProvider()
+        guard observedOneDriveProcessStatusService !== service else { return }
+        oneDriveProcessStatusObservation?.cancel()
+        observedOneDriveProcessStatusService = service
+        oneDriveProcessStatusObservation = service.startMonitoring { [weak self, weak service] in
+            guard let self, let service else { return }
+            self.queue.async { [weak self, weak service] in
+                guard let self,
+                      let service,
+                      self.isStarted,
+                      self.observedOneDriveProcessStatusService === service else { return }
+                self.bindPasswordVaultSyncObservation()
+                self.applyConfiguration()
+                self.performSync(reason: .startup)
+            }
+        }
+    }
+
+    private func handlePasswordVaultSyncSnapshot(_ snapshot: PasswordVaultSyncSnapshot) {
+        let previousSnapshot = lastPasswordVaultSyncSnapshot
+        lastPasswordVaultSyncSnapshot = snapshot
+        if let previousSnapshot, previousSnapshot.mode != snapshot.mode {
+            if snapshot.mode == .localOnly {
+                pendingVaultSyncWorkItem?.cancel()
+                pendingVaultSyncWorkItem = nil
+            }
+            applyConfiguration()
+            if snapshot.mode == .oneDrive {
+                performSync(reason: .startup)
+            }
+        }
+        guard snapshot.mode == .oneDrive,
+              let previousSnapshot,
+              snapshot.pendingChangeCount > previousSnapshot.pendingChangeCount else { return }
+        pendingVaultSyncWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.isStarted else { return }
+            self.performSync(reason: .localChange)
+        }
+        pendingVaultSyncWorkItem = workItem
+        queue.asyncAfter(
+            deadline: .now() + max(0, vaultChangeDebounceInterval),
+            execute: workItem
+        )
     }
 
     private func sync(
@@ -792,3 +913,5 @@ final class SyncCoordinator {
         )
     }
 }
+
+// swiftlint:enable file_length

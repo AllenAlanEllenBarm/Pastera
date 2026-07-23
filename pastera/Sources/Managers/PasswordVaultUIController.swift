@@ -61,6 +61,7 @@ protocol PasswordVaultAgentAccess: AnyObject {
 // swiftlint:disable:next type_body_length
 final class PasswordVaultUIController: PasswordVaultAgentAccess {
     private let store: PasswordVaultStore
+    private let syncController: PasswordVaultSyncControlling
     private let clipboard: SecureClipboardWriting
     private let authorizer: PasswordVaultAuthorizing
     private let pasteService: PasteService
@@ -78,6 +79,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
 
     init(
         store: PasswordVaultStore = KDBXPasswordVaultStore(),
+        syncController: PasswordVaultSyncControlling = LocalOnlyPasswordVaultSyncController(),
         clipboard: SecureClipboardWriting = SecureClipboardService(),
         authorizer: PasswordVaultAuthorizing = SystemPasswordVaultAuthorizer(),
         pasteService: PasteService = PasteService(),
@@ -88,6 +90,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         )
     ) {
         self.store = store
+        self.syncController = syncController
         self.clipboard = clipboard
         self.authorizer = authorizer
         self.pasteService = pasteService
@@ -97,6 +100,9 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         snapshot = PasswordVaultViewState(state: .locked)
         store.bindSessionExecutor(vaultAgentExecutor) { [weak self] in
             self?.storeStateDidChange()
+        }
+        (store as? PasswordVaultSyncAccess)?.setCommitObserver { [weak syncController] commit in
+            syncController?.record(commit)
         }
         vaultAgentExecutor.sync { refreshSnapshotFromStore() }
     }
@@ -164,6 +170,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         }
     }
 
+    // swiftlint:disable:next inclusive_language
     func changeMasterPassword(
         currentPassword: String,
         newPassword: String,
@@ -270,6 +277,10 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
                 result = .failure(error)
             } catch {
                 result = .failure(.corruptedData)
+            }
+            if case .success = result,
+               self.store.state == .unlocked || self.store.state.isReadableWarning {
+                self.syncController.synchronize(reason: .localChange)
             }
             self.finish(result, completion: completion)
         }

@@ -17,7 +17,7 @@ import Foundation
 import Testing
 @testable import Pastera
 
-// swiftlint:disable type_body_length
+// swiftlint:disable file_length
 
 @MainActor
 @Suite(
@@ -25,6 +25,7 @@ import Testing
         try $0.bootstrapDatabase()
     }
 )
+// swiftlint:disable:next type_body_length
 struct SyncCoordinatorTests {
     private let historyRepository = PasteboardHistoryRepository()
     private let snippetRepository = SnippetRepository()
@@ -775,6 +776,128 @@ struct SyncCoordinatorTests {
         #expect(coordinator.status.statusText == "已写入 1 条到本地同步文件夹，等待 OneDrive 客户端上传；Pastera 不知道云端是否已完成。")
     }
 
+    @Test
+    func coordinatorSynchronizesOneDriveVaultWhileLockedWithoutGenericRoot() throws {
+        let missingRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let vaultSync = CoordinatorPasswordVaultSyncController(
+            snapshot: makeVaultSnapshot(mode: .oneDrive, localVaultAvailable: false)
+        )
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: missingRootURL) },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository,
+            passwordVaultSyncServiceProvider: { vaultSync }
+        )
+
+        coordinator.syncNow(reason: .manual, wait: true)
+
+        #expect(vaultSync.synchronizeReasons == [.manual])
+        #expect(vaultSync.snapshot.mode == .oneDrive)
+        #expect(coordinator.status.phase == .idle)
+    }
+
+    @Test
+    func coordinatorDebouncesPendingVaultChanges() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let vaultSync = CoordinatorPasswordVaultSyncController(
+            snapshot: makeVaultSnapshot(mode: .oneDrive, pendingChangeCount: 0)
+        )
+        let processStatus = CoordinatorOneDriveProcessStatusService()
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL) },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository,
+            passwordVaultSyncServiceProvider: { vaultSync },
+            oneDriveProcessStatusServiceProvider: { processStatus },
+            vaultChangeDebounceInterval: 0.02
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        coordinator.syncNow(reason: .timer, wait: true)
+        vaultSync.removeSynchronizeReasons()
+
+        vaultSync.publish(makeVaultSnapshot(mode: .oneDrive, pendingChangeCount: 1))
+        vaultSync.publish(makeVaultSnapshot(mode: .oneDrive, pendingChangeCount: 2))
+        Thread.sleep(forTimeInterval: 0.08)
+        coordinator.syncNow(reason: .timer, wait: true)
+
+        #expect(vaultSync.synchronizeReasons.filter { $0 == .localChange }.count == 1)
+    }
+
+    @Test
+    func coordinatorRetriesWhenVaultModeChangesToOneDrive() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let vaultSync = CoordinatorPasswordVaultSyncController(
+            snapshot: makeVaultSnapshot(mode: .localOnly)
+        )
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL) },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository,
+            passwordVaultSyncServiceProvider: { vaultSync }
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        coordinator.syncNow(reason: .timer, wait: true)
+        vaultSync.removeSynchronizeReasons()
+
+        vaultSync.publish(makeVaultSnapshot(mode: .oneDrive))
+        coordinator.syncNow(reason: .timer, wait: true)
+
+        #expect(vaultSync.synchronizeReasons.filter { $0 == .startup }.count == 1)
+    }
+
+    @Test
+    func coordinatorRebindsDynamicVaultServiceWhenOneDriveLifecycleChanges() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let localOnlySync = CoordinatorPasswordVaultSyncController(
+            snapshot: makeVaultSnapshot(mode: .localOnly)
+        )
+        let oneDriveSync = CoordinatorPasswordVaultSyncController(
+            snapshot: makeVaultSnapshot(mode: .oneDrive)
+        )
+        var currentSync = localOnlySync
+        let processStatus = CoordinatorOneDriveProcessStatusService()
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL) },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository,
+            passwordVaultSyncServiceProvider: { currentSync },
+            oneDriveProcessStatusServiceProvider: { processStatus },
+            vaultChangeDebounceInterval: 0.02
+        )
+        coordinator.start()
+        coordinator.syncNow(reason: .timer, wait: true)
+        localOnlySync.removeSynchronizeReasons()
+
+        currentSync = oneDriveSync
+        processStatus.sendLifecycleChange()
+        processStatus.sendLifecycleChange()
+        Thread.sleep(forTimeInterval: 0.04)
+        coordinator.syncNow(reason: .timer, wait: true)
+
+        #expect(localOnlySync.synchronizeReasons.isEmpty)
+        #expect(oneDriveSync.synchronizeReasons.filter { $0 == .startup }.count == 2)
+
+        oneDriveSync.removeSynchronizeReasons()
+        oneDriveSync.publish(makeVaultSnapshot(mode: .oneDrive, pendingChangeCount: 1))
+        Thread.sleep(forTimeInterval: 0.08)
+        coordinator.syncNow(reason: .timer, wait: true)
+        #expect(oneDriveSync.synchronizeReasons.filter { $0 == .localChange }.count == 1)
+
+        coordinator.stop()
+        oneDriveSync.removeSynchronizeReasons()
+        processStatus.sendLifecycleChange()
+        oneDriveSync.publish(makeVaultSnapshot(mode: .oneDrive, pendingChangeCount: 2))
+        Thread.sleep(forTimeInterval: 0.08)
+
+        #expect(oneDriveSync.synchronizeReasons.isEmpty)
+    }
+
     private func makeRootURL() throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -855,6 +978,115 @@ struct SyncCoordinatorTests {
 
     private var currentDeviceID: String {
         CPYUtilities.deviceID ?? ProcessInfo.processInfo.hostName
+    }
+
+    private func makeVaultSnapshot(
+        mode: PasswordVaultSyncMode,
+        localVaultAvailable: Bool = true,
+        pendingChangeCount: Int = 0
+    ) -> PasswordVaultSyncSnapshot {
+        PasswordVaultSyncSnapshot(
+            mode: mode,
+            phase: mode == .oneDrive ? .synced : .disabled,
+            localVaultAvailable: localVaultAvailable,
+            remoteVaultAvailable: mode == .oneDrive,
+            pendingChangeCount: pendingChangeCount,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        )
+    }
+}
+
+private final class CoordinatorPasswordVaultSyncController: PasswordVaultSyncControlling {
+    private let lock = NSLock()
+    private var currentSnapshot: PasswordVaultSyncSnapshot
+    private var observers = [UUID: (PasswordVaultSyncSnapshot) -> Void]()
+    private var reasons = [SyncCoordinator.Reason]()
+
+    init(snapshot: PasswordVaultSyncSnapshot) {
+        currentSnapshot = snapshot
+    }
+
+    var snapshot: PasswordVaultSyncSnapshot {
+        lock.withLock { currentSnapshot }
+    }
+
+    var synchronizeReasons: [SyncCoordinator.Reason] {
+        lock.withLock { reasons }
+    }
+
+    func addObserver(_ observer: @escaping (PasswordVaultSyncSnapshot) -> Void) -> UUID {
+        let identifier = UUID()
+        let initialSnapshot = lock.withLock {
+            observers[identifier] = observer
+            return currentSnapshot
+        }
+        observer(initialSnapshot)
+        return identifier
+    }
+
+    func removeObserver(_ identifier: UUID) {
+        _ = lock.withLock { observers.removeValue(forKey: identifier) }
+    }
+
+    func record(_: PasswordVaultCommit) {}
+
+    func synchronize(reason: SyncCoordinator.Reason) {
+        lock.withLock { reasons.append(reason) }
+    }
+
+    func enableOneDrive(
+        rootURL _: URL,
+        remoteMasterPassword _: String?, // swiftlint:disable:this inclusive_language
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        completion(.success(()))
+    }
+
+    func switchToLocalOnly(
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        completion(.success(()))
+    }
+
+    func deleteRemoteReplica(
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        completion(.success(()))
+    }
+
+    func publish(_ snapshot: PasswordVaultSyncSnapshot) {
+        let callbacks = lock.withLock {
+            currentSnapshot = snapshot
+            return Array(observers.values)
+        }
+        callbacks.forEach { $0(snapshot) }
+    }
+
+    func removeSynchronizeReasons() {
+        lock.withLock { reasons.removeAll() }
+    }
+}
+
+private final class CoordinatorOneDriveProcessStatusService: OneDriveProcessStatusServicing {
+    private let lock = NSLock()
+    private var onChange: (() -> Void)?
+
+    func currentStatus() -> OneDriveProcessStatus {
+        .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+    }
+
+    func openOneDrive() -> Bool { true }
+
+    func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {
+        lock.withLock { self.onChange = onChange }
+        return OneDriveProcessStatusObservation { [weak self] in
+            self?.lock.withLock { self?.onChange = nil }
+        }
+    }
+
+    func sendLifecycleChange() {
+        lock.withLock { onChange }?()
     }
 }
 
@@ -952,3 +1184,5 @@ private final class CountingHistoryRepository: PasteboardHistoryRepositoryProtoc
 
     func suppressSyncedHistory(id _: PasteboardHistory.ID) {}
 }
+
+// swiftlint:enable file_length

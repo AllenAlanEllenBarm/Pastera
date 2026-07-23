@@ -22,6 +22,20 @@ struct PasswordVaultSecuritySettingsTests {
         #expect(fixture.quickKey.data == nil)
     }
 
+    @Test("local commits are recorded and a successful unlock retries synchronization")
+    func localCommitAndUnlockDriveSyncLifecycle() async throws {
+        let fixture = try SecuritySettingsFixture()
+        defer { fixture.remove() }
+
+        #expect(await fixture.createDatabase().isSuccess)
+        #expect(fixture.syncController.commits.map(\.origin) == [.userMutation])
+
+        fixture.syncController.reasons.removeAll()
+        fixture.store.lock()
+        #expect(await fixture.unlock().isSuccess)
+        #expect(fixture.syncController.reasons == [.localChange])
+    }
+
     @Test("quick unlock can only be enabled while the vault is readable")
     func quickUnlockEnableRequiresReadableVault() async throws {
         let fixture = try SecuritySettingsFixture()
@@ -96,12 +110,12 @@ struct PasswordVaultSecuritySettingsTests {
             }
         }
         try await Task.sleep(for: .milliseconds(50))
-        #expect(fixture.store.changeMasterPasswordCallCount == 0)
+        #expect(fixture.store.passwordChangeCallCount == 0)
 
         fixture.store.metadataRelease.signal()
         #expect(await agentTask.value.isSuccess)
         #expect(await changeTask.value.isSuccess)
-        #expect(fixture.store.changeMasterPasswordCallCount == 1)
+        #expect(fixture.store.passwordChangeCallCount == 1)
         #expect(!fixture.defaults.bool(forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled))
     }
 
@@ -130,6 +144,7 @@ private final class SecuritySettingsFixture {
     let defaults: UserDefaults
     let quickKey = SecuritySettingsQuickKeyStore()
     let store: KDBXPasswordVaultStore
+    let syncController = SecuritySettingsSyncController()
     let controller: PasswordVaultUIController
     private let suiteName: String
     private let password = "security settings fixture password"
@@ -144,7 +159,11 @@ private final class SecuritySettingsFixture {
             unlockKeyStore: quickKey,
             automationUnlockKeyStore: SecuritySettingsAutomationKeyStore()
         )
-        controller = PasswordVaultUIController(store: store, defaults: defaults)
+        controller = PasswordVaultUIController(
+            store: store,
+            syncController: syncController,
+            defaults: defaults
+        )
     }
 
     func remove() {
@@ -167,6 +186,41 @@ private final class SecuritySettingsFixture {
     func setQuickUnlock(_ enabled: Bool) async -> Result<Void, PasswordVaultError> {
         await result { controller.setQuickUnlockEnabled(enabled, completion: $0) }
     }
+}
+
+private final class SecuritySettingsSyncController: PasswordVaultSyncControlling {
+    var snapshot = PasswordVaultSyncSnapshot(
+        mode: .localOnly,
+        phase: .disabled,
+        localVaultAvailable: true,
+        remoteVaultAvailable: nil,
+        pendingChangeCount: 0,
+        conflictCopyCount: 0,
+        lastSyncAt: nil
+    )
+    var commits = [PasswordVaultCommit]()
+    var reasons = [SyncCoordinator.Reason]()
+
+    func addObserver(_ observer: @escaping (PasswordVaultSyncSnapshot) -> Void) -> UUID {
+        let identifier = UUID()
+        observer(snapshot)
+        return identifier
+    }
+
+    func removeObserver(_ identifier: UUID) {}
+    func record(_ commit: PasswordVaultCommit) { commits.append(commit) }
+    func synchronize(reason: SyncCoordinator.Reason) { reasons.append(reason) }
+    func enableOneDrive(
+        rootURL: URL,
+        remoteMasterPassword: String?, // swiftlint:disable:this inclusive_language
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) { completion(.success(())) }
+    func switchToLocalOnly(
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) { completion(.success(())) }
+    func deleteRemoteReplica(
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) { completion(.success(())) }
 }
 
 private func makeSecuritySettingsLocalStorage(at root: URL) -> FilePasswordVaultLocalStorage {
@@ -253,6 +307,7 @@ private final class LockedNotificationCounts {
 private final class SecuritySettingsQuickKeyStore: VaultUnlockKeyStoring {
     var data: Data?
     var containsKey: Bool { data != nil }
+
     func save(_ data: Data) throws { self.data = data }
     func load(reason: String) throws -> Data { try #require(data) }
     func delete() throws { data = nil }
@@ -261,6 +316,7 @@ private final class SecuritySettingsQuickKeyStore: VaultUnlockKeyStoring {
 private final class SecuritySettingsAutomationKeyStore: VaultAutomationUnlockKeyStoring {
     var data: Data?
     var containsKey: Bool { data != nil }
+
     func save(_ data: Data) throws { self.data = data }
     func load() throws -> Data { try #require(data) }
     func delete() throws { data = nil }
@@ -272,14 +328,20 @@ private final class SecuritySettingsStoreSpy: PasswordVaultStore {
     var canQuickUnlock: Bool { quickUnlockAvailable }
     var canAutomationUnlock: Bool { false }
     var refreshAutoLockCallCount = 0
-    var changeMasterPasswordCallCount = 0
+    var passwordChangeCallCount = 0
     var changeResult = PasswordVaultMasterPasswordChangeResult(warnings: [])
     var blockMetadataRead = false
     let metadataStarted = DispatchSemaphore(value: 0)
     let metadataRelease = DispatchSemaphore(value: 0)
 
-    func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws {}
-    func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws {}
+    func createDatabase(
+        masterPassword: String, // swiftlint:disable:this inclusive_language
+        rememberQuickUnlock: Bool
+    ) throws {}
+    func unlock(
+        masterPassword: String, // swiftlint:disable:this inclusive_language
+        rememberQuickUnlock: Bool
+    ) throws {}
     func unlockWithQuickKey(reason: String) throws {}
     func enableQuickUnlock() throws {
         guard state == .unlocked else { throw PasswordVaultError.vaultLocked }
@@ -287,12 +349,13 @@ private final class SecuritySettingsStoreSpy: PasswordVaultStore {
     }
     func disableQuickUnlock() throws { quickUnlockAvailable = false }
     func refreshAutoLockSchedule() { refreshAutoLockCallCount += 1 }
+    // swiftlint:disable:next inclusive_language
     func changeMasterPassword(
         currentPassword: String,
         newPassword: String,
         keepQuickUnlockEnabled: Bool
     ) throws -> PasswordVaultMasterPasswordChangeResult {
-        changeMasterPasswordCallCount += 1
+        passwordChangeCallCount += 1
         return changeResult
     }
     func lock() { state = .locked }

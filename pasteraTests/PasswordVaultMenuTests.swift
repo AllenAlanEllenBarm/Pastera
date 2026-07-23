@@ -247,29 +247,31 @@ struct PasswordVaultMenuTests {
         #expect(vaultController.state == .unlocked)
     }
 
-    @Test("environment and MenuManager share one password vault controller")
+    @Test("environment and MenuManager share one password vault graph")
     func environmentAndMenuShareController() {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let store = KDBXPasswordVaultStore(localStorage: makeMenuLocalStorage(at: root))
-        let controller = PasswordVaultUIController(
-            store: store,
-            clipboard: PasswordVaultClipboardProbe(),
-            pasteService: PasteService()
-        )
         let menuManager = MenuManager()
+        let syncController = LocalOnlyPasswordVaultSyncController(localVaultAvailable: true)
         let environment = Environment(
             passwordVaultStore: store,
-            passwordVaultUIController: controller,
+            passwordVaultSyncService: syncController,
+            secureClipboard: PasswordVaultClipboardProbe(),
             menuManager: menuManager
         )
+        let controller = environment.passwordVaultUIController
         AppEnvironment.push(environment: environment)
         defer { AppEnvironment.popLast() }
 
         #expect(environment.passwordVaultUIController === controller)
+        #expect(environment.passwordVaultSyncService === syncController)
         #expect(menuManager.passwordVaultUIController === controller)
+        #expect(menuManager.passwordVaultSyncService === syncController)
+        #expect(menuManager.passwordVaultSyncSnapshot == syncController.snapshot)
         #expect(AppEnvironment.current.passwordVaultUIController === controller)
+        #expect(AppEnvironment.current.passwordVaultSyncService === syncController)
     }
 
     @Test("an unlocked empty vault exposes folder creation in edit mode")

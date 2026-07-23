@@ -183,7 +183,13 @@ extension PasswordVaultSyncService {
 
 private extension PasswordVaultSyncService {
     private func recordOnQueue(_ commit: PasswordVaultCommit) {
-        var candidate = metadata
+        var candidate: PasswordVaultSyncMetadata
+        if commit.origin == .migration {
+            guard let persisted = try? metadataStore.load() else { return }
+            candidate = persisted
+        } else {
+            candidate = metadata
+        }
         switch commit.origin {
         case .userMutation:
             candidate.localRevision &+= 1

@@ -22,6 +22,7 @@ struct Environment {
     let accessibilityService: AccessibilityService
     let oneDriveProcessStatusService: OneDriveProcessStatusServicing
     let passwordVaultStore: PasswordVaultStore
+    let passwordVaultSyncService: PasswordVaultSyncControlling
     let secureClipboard: SecureClipboardWriting
     let passwordVaultUIController: PasswordVaultUIController
     let vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing
@@ -39,7 +40,9 @@ struct Environment {
          accessibilityService: AccessibilityService = AccessibilityService(),
          oneDriveProcessStatusService: OneDriveProcessStatusServicing = OneDriveProcessStatusService(),
          passwordVaultStore: PasswordVaultStore? = nil,
+         passwordVaultSyncService: PasswordVaultSyncControlling? = nil,
          passwordVaultMigrator: PasswordVaultMigrating? = nil,
+         prepareProductionPasswordVault: Bool = false,
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
          passwordVaultUIController: PasswordVaultUIController? = nil,
          vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing? = nil,
@@ -64,21 +67,68 @@ struct Environment {
         self.excludeAppService = excludeAppService
         self.accessibilityService = accessibilityService
         self.oneDriveProcessStatusService = oneDriveProcessStatusService
+        let vaultQueue = DispatchQueue(
+            label: "com.pastera.password-vault.store",
+            qos: .userInitiated
+        )
+        let localStorage = FilePasswordVaultLocalStorage.live()
+        let metadataStore = JSONPasswordVaultSyncMetadataStore(url: localStorage.paths.metadataURL)
+        let usesProductionVaultStore = passwordVaultStore == nil
         let resolvedPasswordVaultStore = passwordVaultStore ?? KDBXPasswordVaultStore(
+            localStorage: localStorage,
             autoLockTimeoutProvider: { VaultSessionController.resolvedTimeout(defaults: defaults) }
         )
         self.passwordVaultStore = resolvedPasswordVaultStore
+        let syncSettingsStore = UserDefaultsSyncSettingsStore(defaults: defaults)
+        let resolvedPasswordVaultSyncService: PasswordVaultSyncControlling
+        if let passwordVaultSyncService {
+            resolvedPasswordVaultSyncService = passwordVaultSyncService
+        } else if usesProductionVaultStore,
+                  let access = resolvedPasswordVaultStore as? PasswordVaultSyncAccess {
+            do {
+                resolvedPasswordVaultSyncService = try PasswordVaultSyncService(
+                    access: access,
+                    metadataStore: metadataStore,
+                    cloudReplica: OneDrivePasswordVaultCloudReplica(),
+                    processStatus: oneDriveProcessStatusService,
+                    rootURLProvider: { syncSettingsStore.settings().rootURL },
+                    rootURLSetter: { syncSettingsStore.setRootURL($0) },
+                    rootValidator: Self.validatePasswordVaultSyncRoot,
+                    queue: vaultQueue
+                )
+            } catch {
+                resolvedPasswordVaultSyncService = LocalOnlyPasswordVaultSyncController(
+                    localVaultAvailable: Self.isLocalVaultAvailable(resolvedPasswordVaultStore.state),
+                    failure: .remoteUnavailable
+                )
+            }
+        } else {
+            resolvedPasswordVaultSyncService = LocalOnlyPasswordVaultSyncController(
+                localVaultAvailable: Self.isLocalVaultAvailable(resolvedPasswordVaultStore.state)
+            )
+        }
+        self.passwordVaultSyncService = resolvedPasswordVaultSyncService
         self.secureClipboard = secureClipboard
         let resolvedPasswordVaultUIController = passwordVaultUIController ?? PasswordVaultUIController(
             store: resolvedPasswordVaultStore,
+            syncController: resolvedPasswordVaultSyncService,
             clipboard: secureClipboard,
             pasteService: resolvedPasteService,
-            defaults: defaults
+            defaults: defaults,
+            storeQueue: vaultQueue
         )
         self.passwordVaultUIController = resolvedPasswordVaultUIController
-        if let passwordVaultMigrator {
+        let resolvedPasswordVaultMigrator = passwordVaultMigrator ?? (usesProductionVaultStore
+            && prepareProductionPasswordVault
+            ? PasswordVaultMigrationService(
+                localStorage: localStorage,
+                metadataStore: metadataStore,
+                legacySyncRootProvider: { syncSettingsStore.settings().rootURL }
+            )
+            : nil)
+        if let resolvedPasswordVaultMigrator {
             resolvedPasswordVaultUIController.vaultAgentExecutor.async {
-                resolvedPasswordVaultStore.prepareLocalCopy(using: passwordVaultMigrator)
+                resolvedPasswordVaultStore.prepareLocalCopy(using: resolvedPasswordVaultMigrator)
             }
         }
         self.vaultAgentApplicationRuntime = vaultAgentApplicationRuntime ??
@@ -91,6 +141,24 @@ struct Environment {
         )
         self.menuManager = menuManager
         self.defaults = defaults
+    }
+
+    private static func validatePasswordVaultSyncRoot(_ url: URL) -> PasswordVaultSyncFailure? {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return .folderUnavailable
+        }
+        return FileManager.default.isWritableFile(atPath: url.path) ? nil : .folderNotWritable
+    }
+
+    private static func isLocalVaultAvailable(_ state: PasswordVaultState) -> Bool {
+        switch state {
+        case .notConfigured, .preparingLocalCopy, .localCopyUnavailable:
+            false
+        case .locked, .unlocking, .unlocked, .readOnlyWarning, .recoveryRequired, .failed:
+            true
+        }
     }
 
 }
