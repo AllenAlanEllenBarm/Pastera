@@ -10,8 +10,136 @@ import Dependencies
 import Testing
 @testable import Pastera
 
+// These serialized suites exercise the complete footer interaction surface.
+// swiftlint:disable file_length
+
 @MainActor
 @Suite(.serialized)
+struct MainMenuVaultSyncFooterTests {
+    @Test
+    func passwordVaultSyncDisabledUsesNeutralOneDrivePresentationWithoutBadge() {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: makePasswordVaultSyncSnapshot(mode: .localOnly, phase: .disabled),
+            processStatus: .notInstalled
+        )
+
+        #expect(presentation.badge == .none)
+        #expect(presentation.tintColor.isEqual(NSColor.secondaryLabelColor))
+        #expect(presentation.accessibilityLabel == String(localized: "OneDrive sync is not enabled"))
+    }
+
+    @Test
+    func passwordVaultSyncedUsesBluePresentationWithoutBadge() {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: makePasswordVaultSyncSnapshot(mode: .oneDrive, phase: .synced),
+            processStatus: .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+        )
+
+        #expect(presentation.badge == .none)
+        #expect(presentation.tintColor.isEqual(NSColor.systemBlue))
+        #expect(presentation.accessibilityLabel == String(localized: "OneDrive is synced"))
+    }
+
+    @Test
+    func passwordVaultSyncingUsesStaticProgressShapeAndTextSemantics() {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: makePasswordVaultSyncSnapshot(
+                mode: .oneDrive,
+                phase: .syncing(.uploading),
+                pendingChangeCount: 1
+            ),
+            processStatus: .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+        )
+
+        #expect(presentation.badge == .progress)
+        #expect(presentation.tintColor.isEqual(NSColor.systemBlue))
+        #expect(presentation.accessibilityLabel == String(
+            format: String(localized: "OneDrive is syncing: %@"),
+            String(localized: "Uploading encrypted replica")
+        ))
+    }
+
+    @Test
+    func enabledPasswordVaultSyncDisconnectedUsesRedShapeAndPendingText() {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: makePasswordVaultSyncSnapshot(
+                mode: .oneDrive,
+                phase: .synced,
+                pendingChangeCount: 3
+            ),
+            processStatus: .notRunning(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+        )
+
+        #expect(presentation.badge == .disconnected)
+        #expect(presentation.badgeColor.isEqual(NSColor.systemRed))
+        #expect(presentation.pendingChangeCount == 3)
+        #expect(presentation.accessibilityLabel == String(
+            format: String(localized: "OneDrive is disconnected; %lld changes are waiting"),
+            Int64(3)
+        ))
+    }
+
+    @Test
+    func passwordVaultConflictsUseYellowQuantityBadgeAndTextSemantics() {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: makePasswordVaultSyncSnapshot(
+                mode: .oneDrive,
+                phase: .conflicts(2),
+                conflictCopyCount: 2
+            ),
+            processStatus: .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+        )
+
+        #expect(presentation.badge == .conflicts(2))
+        #expect(presentation.badgeColor.isEqual(NSColor.systemYellow))
+        #expect(presentation.accessibilityLabel == String(
+            format: String(localized: "OneDrive has %lld conflict copies"),
+            Int64(2)
+        ))
+    }
+
+    @Test
+    func statusButtonRendersDisconnectedShapeWithoutEncodingSecretsInAccessibility() {
+        let button = MainMenuOneDriveStatusButton(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
+        button.configure(
+            snapshot: makePasswordVaultSyncSnapshot(
+                mode: .oneDrive,
+                phase: .disconnected(.oneDriveNotRunning),
+                pendingChangeCount: 4
+            ),
+            processStatus: .notRunning(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+        )
+
+        #expect(button.syncBadgeForTesting == .disconnected)
+        #expect(button.accessibilityLabel() == String(
+            format: String(localized: "OneDrive is disconnected; %lld changes are waiting"),
+            Int64(4)
+        ))
+        #expect(button.syncBadgeSymbolForTesting == "bolt.slash.fill")
+        #expect(button.hitTest(NSPoint(x: 21, y: 21)) === button)
+    }
+
+    private func makePasswordVaultSyncSnapshot(
+        mode: PasswordVaultSyncMode,
+        phase: PasswordVaultSyncPhase,
+        pendingChangeCount: Int = 0,
+        conflictCopyCount: Int = 0
+    ) -> PasswordVaultSyncSnapshot {
+        PasswordVaultSyncSnapshot(
+            mode: mode,
+            phase: phase,
+            localVaultAvailable: true,
+            remoteVaultAvailable: mode == .oneDrive,
+            pendingChangeCount: pendingChangeCount,
+            conflictCopyCount: conflictCopyCount,
+            lastSyncAt: nil
+        )
+    }
+}
+
+@MainActor
+@Suite(.serialized)
+// swiftlint:disable:next type_body_length
 struct MainMenuOneDriveFooterTests {
     @Test
     func mainMenuPanelPlacesOneDriveStatusInFooterWithoutQuitOrPin() throws {
@@ -542,7 +670,7 @@ struct MainMenuOneDriveStatusAssetTests {
 @Suite(.serialized)
 struct MainMenuFooterButtonActionTests {
     @Test
-    func mainMenuFooterOneDriveStatusOpensOneDriveWithoutOpeningHistory() {
+    func mainMenuFooterOneDriveStatusDoesNotStartOneDriveOrOpenHistory() {
         let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notRunning(
             appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
         ))
@@ -563,7 +691,7 @@ struct MainMenuFooterButtonActionTests {
 
         controller.performMainMenuOneDriveStatusClickForTesting()
 
-        #expect(oneDriveService.openCallCount == 1)
+        #expect(oneDriveService.openCallCount == 0)
         #expect(!didOpenHistory)
     }
 
@@ -797,3 +925,5 @@ private struct MainMenuEmptySnippetRepository: SnippetRepositoryProtocol {
     func moveSnippet(_ id: Snippet.ID, to folderID: SnippetFolder.ID, snippetIDs: [Snippet.ID]) {}
     func deleteSnippet(_ id: Snippet.ID) {}
 }
+
+// swiftlint:enable file_length

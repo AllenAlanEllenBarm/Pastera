@@ -175,6 +175,17 @@ private extension MenuManager {
         passwordVaultSyncObserver = service.addObserver { [weak self, weak service] snapshot in
             guard let self, self.installedPasswordVaultSyncService === service else { return }
             self.passwordVaultSyncSnapshot = snapshot
+            let refresh: () -> Void = { [weak self] in
+                guard let self else { return }
+                self.mainMenuPanelController?.refreshPasswordVaultSyncPresentationIfVisible(
+                    snapshot: snapshot
+                )
+            }
+            if Thread.isMainThread {
+                refresh()
+            } else {
+                DispatchQueue.main.async(execute: refresh)
+            }
         }
     }
 }
@@ -489,7 +500,9 @@ extension MenuManager {
 
     // swiftlint:disable:next function_body_length
     func makeMainMenuPanelController() -> MainMenuPanelController {
-        MainMenuPanelController(
+        let syncFolderResolver = SyncDefaultFolderResolver()
+        let localOnlyFallback = LocalOnlyPasswordVaultSyncController(localVaultAvailable: false)
+        return MainMenuPanelController(
             historyTitle: String(localized: "History"),
             historyImage: MainMenuModeIcons.history(),
             historyShortcutText: PasteraShortcutFormatter.string(for: AppEnvironment.current.hotKeyService.historyKeyCombo),
@@ -656,6 +669,54 @@ extension MenuManager {
                         orderedEntryIDsByFolder: orders,
                         completion: completion
                     )
+                }
+            ),
+            passwordVaultSyncDataSource: MainMenuPasswordVaultSyncDataSource(
+                snapshot: { [weak self] in
+                    self?.passwordVaultSyncSnapshot
+                        ?? self?.passwordVaultSyncService.snapshot
+                        ?? localOnlyFallback.snapshot
+                },
+                candidates: {
+                    syncFolderResolver.oneDriveCandidates()
+                },
+                enableOneDrive: { [weak self] rootURL, remoteMasterPassword, completion in
+                    guard let self else {
+                        completion(.failure(.remoteUnavailable))
+                        return
+                    }
+                    let requestedURL = rootURL.resolvingSymlinksInPath().standardizedFileURL
+                    guard let candidate = syncFolderResolver.oneDriveCandidates().first(where: {
+                        $0.syncRootURL.resolvingSymlinksInPath().standardizedFileURL == requestedURL
+                    }), let prepared = syncFolderResolver.prepare(candidate) else {
+                        completion(.failure(.folderUnavailable))
+                        return
+                    }
+                    self.passwordVaultSyncService.enableOneDrive(
+                        rootURL: prepared.syncRootURL,
+                        remoteMasterPassword: remoteMasterPassword,
+                        completion: completion
+                    )
+                },
+                switchToLocalOnly: { [weak self] completion in
+                    guard let self else {
+                        completion(.failure(.remoteUnavailable))
+                        return
+                    }
+                    self.passwordVaultSyncService.switchToLocalOnly(completion: completion)
+                },
+                retry: { [weak self] in
+                    self?.passwordVaultSyncService.synchronize(reason: .manual)
+                },
+                startOneDrive: {
+                    AppEnvironment.current.oneDriveProcessStatusService.openOneDrive()
+                },
+                deleteRemoteReplica: { [weak self] completion in
+                    guard let self else {
+                        completion(.failure(.remoteUnavailable))
+                        return
+                    }
+                    self.passwordVaultSyncService.deleteRemoteReplica(completion: completion)
                 }
             ),
             oneDriveStatusService: AppEnvironment.current.oneDriveProcessStatusService,

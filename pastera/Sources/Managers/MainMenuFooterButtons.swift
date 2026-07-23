@@ -1,5 +1,8 @@
 import AppKit
 
+// This file owns the complete footer control family and its shared visual behavior.
+// swiftlint:disable file_length
+
 func mainMenuShortcutToolTip(title: String, includesPlainText: Bool, itemShortcut: String?) -> String {
     var hints = ["\(title) · ↩"]
     if includesPlainText { hints.append("⇧↩") }
@@ -32,6 +35,17 @@ struct MainMenuPanelBehavior {
 struct MainMenuToolbarViewConfiguration {
     let selectedMode: MainMenuToolbarMode
     let oneDriveStatus: OneDriveProcessStatus
+    let passwordVaultSyncSnapshot: PasswordVaultSyncSnapshot?
+
+    init(
+        selectedMode: MainMenuToolbarMode,
+        oneDriveStatus: OneDriveProcessStatus,
+        passwordVaultSyncSnapshot: PasswordVaultSyncSnapshot? = nil
+    ) {
+        self.selectedMode = selectedMode
+        self.oneDriveStatus = oneDriveStatus
+        self.passwordVaultSyncSnapshot = passwordVaultSyncSnapshot
+    }
 }
 
 enum MainMenuToolbarMode {
@@ -521,7 +535,11 @@ final class MainMenuToolbarView: NSView {
         ))
         button.target = self
         button.action = #selector(oneDriveButtonClicked(_:))
-        button.configure(status: configuration.oneDriveStatus)
+        if let snapshot = configuration.passwordVaultSyncSnapshot {
+            button.configure(snapshot: snapshot, processStatus: configuration.oneDriveStatus)
+        } else {
+            button.configure(status: configuration.oneDriveStatus)
+        }
         button.onHoverChanged = { [weak self, weak button] isHovered in
             guard let self, let button, let hoverTip = button.hoverTip else { return }
             if isHovered {
@@ -668,8 +686,191 @@ final class MainMenuPanelNoticeView: NSView {
     }
 }
 
+enum MainMenuOneDriveSyncBadge: Equatable {
+    case none
+    case progress
+    case disconnected
+    case conflicts(Int)
+}
+
+struct MainMenuOneDriveStatusPresentation {
+    let badge: MainMenuOneDriveSyncBadge
+    let tintColor: NSColor
+    let badgeColor: NSColor
+    let pendingChangeCount: Int
+    let accessibilityLabel: String
+
+    init(snapshot: PasswordVaultSyncSnapshot, processStatus: OneDriveProcessStatus) {
+        pendingChangeCount = snapshot.pendingChangeCount
+
+        guard snapshot.mode == .oneDrive else {
+            badge = .none
+            tintColor = .secondaryLabelColor
+            badgeColor = .clear
+            accessibilityLabel = String(localized: "OneDrive sync is not enabled")
+            return
+        }
+
+        let conflictCount = Self.conflictCount(snapshot: snapshot)
+        if conflictCount > 0 {
+            badge = .conflicts(conflictCount)
+            tintColor = .systemBlue
+            badgeColor = .systemYellow
+            accessibilityLabel = String(
+                format: String(localized: "OneDrive has %lld conflict copies"),
+                Int64(conflictCount)
+            )
+            return
+        }
+
+        if !processStatus.isRunning || snapshot.phase.isDisconnected {
+            badge = .disconnected
+            tintColor = .secondaryLabelColor
+            badgeColor = .systemRed
+            accessibilityLabel = Self.disconnectedLabel(pendingChangeCount: snapshot.pendingChangeCount)
+            return
+        }
+
+        switch snapshot.phase {
+        case let .syncing(step):
+            badge = .progress
+            tintColor = .systemBlue
+            badgeColor = .systemBlue
+            accessibilityLabel = String(
+                format: String(localized: "OneDrive is syncing: %@"),
+                step.localizedStatus
+            )
+        case .waitingForUnlock:
+            badge = .none
+            tintColor = .systemBlue
+            badgeColor = .clear
+            accessibilityLabel = String(localized: "OneDrive is waiting for the vault to unlock")
+        case .failed:
+            badge = .disconnected
+            tintColor = .secondaryLabelColor
+            badgeColor = .systemRed
+            accessibilityLabel = String(localized: "OneDrive sync failed")
+        case .disabled:
+            badge = .none
+            tintColor = .secondaryLabelColor
+            badgeColor = .clear
+            accessibilityLabel = String(localized: "OneDrive sync is not enabled")
+        case .synced, .conflicts, .disconnected:
+            badge = .none
+            tintColor = .systemBlue
+            badgeColor = .clear
+            accessibilityLabel = String(localized: "OneDrive is synced")
+        }
+    }
+
+    private static func conflictCount(snapshot: PasswordVaultSyncSnapshot) -> Int {
+        if case let .conflicts(phaseCount) = snapshot.phase {
+            return max(phaseCount, snapshot.conflictCopyCount)
+        }
+        return snapshot.conflictCopyCount
+    }
+
+    private static func disconnectedLabel(pendingChangeCount: Int) -> String {
+        guard pendingChangeCount > 0 else { return String(localized: "OneDrive is disconnected") }
+        return String(
+            format: String(localized: "OneDrive is disconnected; %lld changes are waiting"),
+            Int64(pendingChangeCount)
+        )
+    }
+}
+
+private extension PasswordVaultSyncPhase {
+    var isDisconnected: Bool {
+        if case .disconnected = self {
+            return true
+        }
+        return false
+    }
+}
+
+private extension PasswordVaultSyncStep {
+    var localizedStatus: String {
+        switch self {
+        case .checking: String(localized: "Checking OneDrive")
+        case .downloading: String(localized: "Downloading encrypted replica")
+        case .merging: String(localized: "Merging vault changes")
+        case .savingLocal: String(localized: "Saving the local vault")
+        case .uploading: String(localized: "Uploading encrypted replica")
+        case .verifying: String(localized: "Verifying OneDrive copy")
+        }
+    }
+}
+
+private final class MainMenuOneDriveSyncBadgeView: NSView {
+    private let imageView = NSImageView()
+    private let countLabel = NSTextField(labelWithString: "")
+    private(set) var symbolName: String?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    func configure(badge: MainMenuOneDriveSyncBadge, color: NSColor) {
+        symbolName = nil
+        imageView.image = nil
+        countLabel.stringValue = ""
+        isHidden = badge == .none
+        guard badge != .none else { return }
+
+        layer?.backgroundColor = color.cgColor
+        switch badge {
+        case .none:
+            break
+        case .progress:
+            configureSymbol("arrow.triangle.2.circlepath")
+        case .disconnected:
+            configureSymbol("bolt.slash.fill")
+        case let .conflicts(count):
+            countLabel.stringValue = count > 99 ? "99+" : String(count)
+            countLabel.textColor = .black
+        }
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = bounds.height / 2
+        layer?.borderColor = NSColor.windowBackgroundColor.cgColor
+        layer?.borderWidth = 1
+        setAccessibilityElement(false)
+
+        imageView.frame = bounds.insetBy(dx: 2.5, dy: 2.5)
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.contentTintColor = .white
+        imageView.autoresizingMask = [.width, .height]
+        addSubview(imageView)
+
+        countLabel.frame = bounds
+        countLabel.alignment = .center
+        countLabel.font = .systemFont(ofSize: 8, weight: .bold)
+        countLabel.autoresizingMask = [.width, .height]
+        addSubview(countLabel)
+    }
+
+    private func configureSymbol(_ name: String) {
+        symbolName = name
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        image?.isTemplate = true
+        imageView.image = image
+    }
+}
+
 final class MainMenuOneDriveStatusButton: MainMenuToolbarButton {
     override var acceptsFirstResponder: Bool { false }
+
+    private let syncBadgeView = MainMenuOneDriveSyncBadgeView(frame: NSRect(x: 15, y: 15, width: 13, height: 13))
+    private var syncBadge: MainMenuOneDriveSyncBadge = .none
+    private var statusTintColor: NSColor?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -682,24 +883,49 @@ final class MainMenuOneDriveStatusButton: MainMenuToolbarButton {
     }
 
     func configure(status: OneDriveProcessStatus) {
+        syncBadge = .none
+        syncBadgeView.configure(badge: .none, color: .clear)
         switch status {
         case .running:
             image = Self.oneDriveStatusIcon
-            contentTintColor = .systemBlue
+            statusTintColor = .systemBlue
             alphaValue = 1
             hoverTip = MainMenuHoverTipContent(title: "OneDrive 正在运行", shortcut: nil)
         case .notRunning:
             image = Self.oneDriveStatusIcon
-            contentTintColor = .secondaryLabelColor
+            statusTintColor = .secondaryLabelColor
             alphaValue = 0.90
             hoverTip = MainMenuHoverTipContent(title: "OneDrive 未运行", shortcut: nil)
         case .notInstalled:
             image = Self.oneDriveStatusIcon
-            contentTintColor = .tertiaryLabelColor
+            statusTintColor = .tertiaryLabelColor
             alphaValue = 0.82
             hoverTip = MainMenuHoverTipContent(title: "未安装 OneDrive", shortcut: nil)
         }
+        contentTintColor = statusTintColor
         setAccessibilityLabel(hoverTip?.accessibilityLabel)
+    }
+
+    func configure(snapshot: PasswordVaultSyncSnapshot, processStatus: OneDriveProcessStatus) {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: snapshot,
+            processStatus: processStatus
+        )
+        image = Self.oneDriveStatusIcon
+        statusTintColor = presentation.tintColor
+        contentTintColor = presentation.tintColor
+        alphaValue = 1
+        syncBadge = presentation.badge
+        syncBadgeView.configure(badge: presentation.badge, color: presentation.badgeColor)
+        hoverTip = MainMenuHoverTipContent(title: presentation.accessibilityLabel, shortcut: nil)
+        setAccessibilityLabel(presentation.accessibilityLabel)
+    }
+
+    override func updateAppearance() {
+        super.updateAppearance()
+        if let statusTintColor {
+            contentTintColor = statusTintColor
+        }
     }
 
     private func setup() {
@@ -710,11 +936,18 @@ final class MainMenuOneDriveStatusButton: MainMenuToolbarButton {
         imagePosition = .imageOnly
         wantsLayer = true
         layer?.cornerRadius = MainMenuPanelLayout.toolbarButtonSize / 2
-        layer?.masksToBounds = true
+        layer?.masksToBounds = false
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.borderColor = NSColor.clear.cgColor
         layer?.borderWidth = 0
+        syncBadgeView.autoresizingMask = [.minXMargin, .minYMargin]
+        addSubview(syncBadgeView)
     }
+
+    #if DEBUG
+    var syncBadgeForTesting: MainMenuOneDriveSyncBadge { syncBadge }
+    var syncBadgeSymbolForTesting: String? { syncBadgeView.symbolName }
+    #endif
 
     private static let oneDriveStatusIcon: NSImage = {
         let image = NSImage(named: "onedrive_status_template")
@@ -731,3 +964,5 @@ final class MainMenuOneDriveStatusButton: MainMenuToolbarButton {
         return image
     }()
 }
+
+// swiftlint:enable file_length

@@ -286,6 +286,15 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         case passwordVault
     }
 
+    private enum PasswordVaultPage: Equatable {
+        case vault
+        case sync
+        case remoteCredentials
+        case conflictSummary
+        case confirmRemoteDeletion
+        case localCopyRecovery
+    }
+
     fileprivate enum KeyboardEntryRole {
         case none
         case snippetFolder(SnippetFolder.ID)
@@ -381,6 +390,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private let historyDataSource: MainMenuHistoryDataSource?
     private let snippetDataSource: MainMenuSnippetDataSource?
     private let passwordVaultDataSource: MainMenuPasswordVaultDataSource?
+    private let passwordVaultSyncDataSource: MainMenuPasswordVaultSyncDataSource?
     private let oneDriveStatusService: OneDriveProcessStatusServicing
     private let onOpenPreferences: () -> Void
     private let onCloseChildPanels: () -> Void
@@ -411,6 +421,9 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var passwordVaultPendingDeletion: PasswordVaultPendingDeletion?
     private var passwordVaultAccessError: String?
     private var passwordVaultAccessView: PasswordVaultAccessView?
+    private var passwordVaultSyncView: PasswordVaultSyncView?
+    private var passwordVaultPage: PasswordVaultPage = .vault
+    private var passwordVaultCreateStorageMode: PasswordVaultCreateStorageMode = .localOnly
     private var passwordVaultAccessModeInFlight: PasswordVaultAccessView.Mode?
     private var passwordVaultAutomaticQuickUnlockAttempted = false
     private var passwordVaultQuickUnlockAvailability = PasswordVaultQuickUnlockAvailability.unknown
@@ -443,6 +456,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         historyDataSource: MainMenuHistoryDataSource? = nil,
         snippetDataSource: MainMenuSnippetDataSource? = nil,
         passwordVaultDataSource: MainMenuPasswordVaultDataSource? = nil,
+        passwordVaultSyncDataSource: MainMenuPasswordVaultSyncDataSource? = nil,
         oneDriveStatusService: OneDriveProcessStatusServicing = AppEnvironment.current.oneDriveProcessStatusService,
         onOpenPreferences: @escaping () -> Void = {
             (NSApp.delegate as? AppDelegate)?.showPreferenceWindow()
@@ -460,6 +474,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         self.historyDataSource = historyDataSource
         self.snippetDataSource = snippetDataSource
         self.passwordVaultDataSource = passwordVaultDataSource
+        self.passwordVaultSyncDataSource = passwordVaultSyncDataSource
         self.oneDriveStatusService = oneDriveStatusService
         self.onOpenPreferences = onOpenPreferences
         self.onCloseChildPanels = onCloseChildPanels
@@ -530,6 +545,10 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     }
 
     private func handlePanelCancel() {
+        if selectedMode == .passwordVault, passwordVaultPage != .vault {
+            returnToPasswordVaultFromSync()
+            return
+        }
         if passwordVaultEditorState != nil {
             discardPasswordVaultEditor()
             return
@@ -594,6 +613,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
         resetPasswordVaultAccessPresentation()
+        passwordVaultPage = .vault
         selectedMode = .history
         reloadContentIfVisible()
         onCloseChildPanels()
@@ -607,6 +627,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
         resetPasswordVaultAccessPresentation()
+        passwordVaultPage = .vault
         selectedMode = .snippets
         expandedSnippetFolderID = nil
         reloadContentIfVisible()
@@ -621,6 +642,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
         resetPasswordVaultAccessPresentation()
+        passwordVaultPage = .vault
         selectedMode = .snippets
         expandedSnippetFolderID = folderID
         reloadContentIfVisible()
@@ -632,6 +654,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         guard commitInlineEditorFromCurrentDraft() else { return }
         editingFolderShortcutID = nil
         selectedMode = .passwordVault
+        passwordVaultPage = .vault
         passwordVaultAccessError = nil
         reloadContentIfVisible()
         onCloseChildPanels()
@@ -1133,6 +1156,9 @@ extension MainMenuPanelController {
             }
             return makeSnippetContent()
         case .passwordVault:
+            if passwordVaultPage == .sync {
+                return makePasswordVaultSyncContent()
+            }
             if let passwordVaultFolderEditorState {
                 switch passwordVaultFolderEditorState {
                 case .create:
@@ -1902,10 +1928,17 @@ extension MainMenuPanelController {
     ) -> EmbeddedContent {
         let view = PasswordVaultAccessView(
             mode: mode,
+            storageMode: passwordVaultCreateStorageMode,
             canQuickUnlock: mode == .unlock && passwordVaultQuickUnlockAvailability == .available,
             isBusy: isBusy,
             errorMessage: passwordVaultAccessError,
-            onSubmit: { [weak self] password in self?.submitPasswordVaultAccess(password: password, mode: mode) },
+            onStorageModeChange: { [weak self] storageMode in
+                self?.passwordVaultCreateStorageMode = storageMode
+            },
+            onSubmit: { [weak self] password, storageMode in
+                self?.passwordVaultCreateStorageMode = storageMode
+                self?.submitPasswordVaultAccess(password: password, mode: mode)
+            },
             onQuickUnlock: { [weak self] in self?.performPasswordVaultQuickUnlock() }
         )
         passwordVaultAccessView = view
@@ -1916,6 +1949,34 @@ extension MainMenuPanelController {
             showsBackButton: false, canGoToPreviousPage: false, canGoToNextPage: false,
             typeFilter: nil,
             rows: [EmbeddedRow(title: title, view: view, confirm: { [weak view] in view?.submit() }, participatesInNavigation: false)]
+        )
+    }
+
+    private func makePasswordVaultSyncContent() -> EmbeddedContent {
+        guard let passwordVaultSyncDataSource else {
+            return passwordVaultFailureContent(message: String(localized: "OneDrive sync is unavailable"))
+        }
+        let view = PasswordVaultSyncView(
+            dataSource: passwordVaultSyncDataSource,
+            processStatus: oneDriveStatusService.currentStatus(),
+            onContentSizeChange: { [weak self] in
+                self?.reloadContentKeepingTopLeft()
+            }
+        )
+        passwordVaultSyncView = view
+        return EmbeddedContent(
+            headerTitle: String(localized: "OneDrive Sync"),
+            headerSubtitle: nil,
+            showsBackButton: true,
+            canGoToPreviousPage: false,
+            canGoToNextPage: false,
+            typeFilter: nil,
+            rows: [EmbeddedRow(
+                title: String(localized: "OneDrive Sync"),
+                view: view,
+                confirm: {},
+                participatesInNavigation: false
+            )]
         )
     }
 
@@ -1933,7 +1994,7 @@ extension MainMenuPanelController {
         passwordVaultAccessError = nil
         passwordVaultAccessModeInFlight = mode
         let completion: (Result<Void, PasswordVaultError>) -> Void = { [weak self] result in
-            self?.handlePasswordVaultAccessResult(result)
+            self?.handlePasswordVaultAccessResult(result, mode: mode)
         }
         switch mode {
         case .create:
@@ -1960,15 +2021,23 @@ extension MainMenuPanelController {
         passwordVaultAccessError = nil
         passwordVaultAccessModeInFlight = .unlock
         passwordVaultDataSource?.unlockWithQuickKey { [weak self] result in
-            self?.handlePasswordVaultAccessResult(result)
+            self?.handlePasswordVaultAccessResult(result, mode: .unlock)
         }
     }
 
-    private func handlePasswordVaultAccessResult(_ result: Result<Void, PasswordVaultError>) {
+    private func handlePasswordVaultAccessResult(
+        _ result: Result<Void, PasswordVaultError>,
+        mode: PasswordVaultAccessView.Mode
+    ) {
         passwordVaultAccessView?.clearSecrets()
         passwordVaultAccessModeInFlight = nil
         switch result {
-        case .success, .failure(.userCancelled):
+        case .success:
+            passwordVaultAccessError = nil
+            if mode == .create, passwordVaultCreateStorageMode == .oneDrive {
+                passwordVaultPage = .sync
+            }
+        case .failure(.userCancelled):
             passwordVaultAccessError = nil
         case let .failure(error):
             passwordVaultAccessError = passwordVaultMessage(error)
@@ -1979,6 +2048,7 @@ extension MainMenuPanelController {
     private func resetPasswordVaultAccessPresentation() {
         passwordVaultAccessView?.clearSecrets()
         passwordVaultAccessView = nil
+        passwordVaultCreateStorageMode = .localOnly
         passwordVaultAccessError = nil
         passwordVaultAccessModeInFlight = nil
         passwordVaultAutomaticQuickUnlockAttempted = false
@@ -2424,7 +2494,9 @@ extension MainMenuPanelController {
 
     private func addEmbeddedHeader(_ content: EmbeddedContent, frame: NSRect) {
         let supportsWorkspaceEditing = selectedMode == .snippets
-            || (selectedMode == .passwordVault && passwordVaultDataSource?.state() == .unlocked)
+            || (selectedMode == .passwordVault
+                && passwordVaultPage == .vault
+                && passwordVaultDataSource?.state() == .unlocked)
         let header = MainMenuEmbeddedHeaderView(
             frame: frame,
             title: content.headerTitle,
@@ -2435,13 +2507,21 @@ extension MainMenuPanelController {
             typeFilter: content.typeFilter,
             showsEditButton: supportsWorkspaceEditing,
             isEditing: isWorkspaceEditing,
-            onBack: { [weak self] in self?.returnToSnippetFolders() },
+            onBack: { [weak self] in self?.handleEmbeddedBack() },
             onPreviousPage: { [weak self] in self?.goToPreviousHistoryPage() },
             onNextPage: { [weak self] in self?.goToNextHistoryPage() },
             onTypeFilter: { [weak self] typeFilter in self?.updateHistoryTypeFilter(typeFilter) },
             onToggleEditing: { [weak self] in self?.toggleWorkspaceEditing() }
         )
         contentView.addSubview(header)
+    }
+
+    private func handleEmbeddedBack() {
+        if selectedMode == .passwordVault, passwordVaultPage != .vault {
+            returnToPasswordVaultFromSync()
+            return
+        }
+        returnToSnippetFolders()
     }
 
     private func toggleWorkspaceEditing() {
@@ -2577,7 +2657,8 @@ extension MainMenuPanelController {
                     case .passwordVault: return .passwordVault
                     }
                 }(),
-                oneDriveStatus: oneDriveStatusService.currentStatus()
+                oneDriveStatus: oneDriveStatusService.currentStatus(),
+                passwordVaultSyncSnapshot: passwordVaultSyncDataSource?.snapshot()
             ),
             actions: MainMenuToolbarActions(
                 onSearch: { [weak self] in self?.toggleSearchField() },
@@ -2712,7 +2793,11 @@ extension MainMenuPanelController {
 
     private func updateOneDriveStatusButton(_ status: OneDriveProcessStatus) {
         if let oneDriveStatusButton {
-            oneDriveStatusButton.configure(status: status)
+            if let snapshot = passwordVaultSyncDataSource?.snapshot() {
+                oneDriveStatusButton.configure(snapshot: snapshot, processStatus: status)
+            } else {
+                oneDriveStatusButton.configure(status: status)
+            }
         } else {
             reloadContentIfVisible()
         }
@@ -2771,7 +2856,22 @@ extension MainMenuPanelController {
 
     func reloadOneDriveStatusIfVisible() {
         guard panel?.isVisible == true else { return }
-        updateOneDriveStatusButton(oneDriveStatusService.currentStatus())
+        refreshPasswordVaultSyncPresentationIfVisible()
+    }
+
+    func refreshPasswordVaultSyncPresentationIfVisible(
+        snapshot: PasswordVaultSyncSnapshot? = nil
+    ) {
+        guard panel?.isVisible == true else { return }
+        let processStatus = oneDriveStatusService.currentStatus()
+        let resolvedSnapshot = snapshot ?? passwordVaultSyncDataSource?.snapshot()
+        if let resolvedSnapshot, let oneDriveStatusButton {
+            oneDriveStatusButton.configure(snapshot: resolvedSnapshot, processStatus: processStatus)
+        } else {
+            updateOneDriveStatusButton(processStatus)
+        }
+        guard passwordVaultPage == .sync, let resolvedSnapshot else { return }
+        passwordVaultSyncView?.update(snapshot: resolvedSnapshot, processStatus: processStatus)
     }
 
     private func showSearchField() {
@@ -2810,8 +2910,19 @@ extension MainMenuPanelController {
     }
 
     private func openOneDriveFromToolbar() {
-        _ = oneDriveStatusService.openOneDrive()
-        updateOneDriveStatusButton(oneDriveStatusService.currentStatus())
+        guard passwordVaultDataSource != nil, passwordVaultSyncDataSource != nil else { return }
+        editingFolderShortcutID = nil
+        isWorkspaceEditing = false
+        selectedMode = .passwordVault
+        passwordVaultPage = .sync
+        reloadContentKeepingTopLeft()
+        onCloseChildPanels()
+    }
+
+    private func returnToPasswordVaultFromSync() {
+        passwordVaultPage = .vault
+        passwordVaultSyncView = nil
+        reloadContentKeepingTopLeft()
     }
 
     private func openHistoryFromToolbar() {
@@ -4120,13 +4231,16 @@ struct PasswordVaultAccessLayoutSnapshot {
     let verticalGapFromFieldToButton: CGFloat
     let primaryButtonWidth: CGFloat
     let controlsFitBounds: Bool
+    let explanationWrapsWithoutTruncation: Bool
 }
 #endif
 
+// swiftlint:disable:next type_body_length
 private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
     enum Mode: Equatable { case create, unlock }
 
     private let mode: Mode
+    private var storageMode: PasswordVaultCreateStorageMode
     private let passwordField = NSSecureTextField()
     private let confirmationField = NSSecureTextField()
     private let visiblePasswordField = NSTextField()
@@ -4138,20 +4252,36 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
     private let errorLabel = NSTextField(labelWithString: "")
     private let titleLabel: NSTextField
     private let explanationLabel: NSTextField
+    private let storageLabel = NSTextField(labelWithString: String(localized: "Storage"))
+    private let localOnlyButton = NSButton(
+        radioButtonWithTitle: String(localized: "Keep on This Mac"),
+        target: nil,
+        action: nil
+    )
+    private let oneDriveButton = NSButton(
+        radioButtonWithTitle: String(localized: "Sync with OneDrive"),
+        target: nil,
+        action: nil
+    )
     private let primaryButton: NSButton
     private var quickUnlockButton: NSButton?
-    private let onSubmit: (String) -> Void
+    private let onStorageModeChange: (PasswordVaultCreateStorageMode) -> Void
+    private let onSubmit: (String, PasswordVaultCreateStorageMode) -> Void
     private let onQuickUnlock: () -> Void
 
     init(
         mode: Mode,
+        storageMode: PasswordVaultCreateStorageMode,
         canQuickUnlock: Bool,
         isBusy: Bool,
         errorMessage: String?,
-        onSubmit: @escaping (String) -> Void,
+        onStorageModeChange: @escaping (PasswordVaultCreateStorageMode) -> Void,
+        onSubmit: @escaping (String, PasswordVaultCreateStorageMode) -> Void,
         onQuickUnlock: @escaping () -> Void
     ) {
         self.mode = mode
+        self.storageMode = storageMode
+        self.onStorageModeChange = onStorageModeChange
         self.onSubmit = onSubmit
         self.onQuickUnlock = onQuickUnlock
         titleLabel = NSTextField(labelWithString: mode == .create
@@ -4163,7 +4293,7 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
             ? (mode == .create ? String(localized: "Creating…") : String(localized: "Unlocking…"))
             : (mode == .create ? String(localized: "Create Vault") : String(localized: "Unlock Vault")),
             target: nil, action: nil)
-        let height: CGFloat = mode == .create ? 260 : 198
+        let height: CGFloat = mode == .create ? 354 : 216
         super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: height))
 
         titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
@@ -4172,8 +4302,29 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
 
         explanationLabel.font = .systemFont(ofSize: 11)
         explanationLabel.textColor = .secondaryLabelColor
-        explanationLabel.lineBreakMode = .byTruncatingTail
+        explanationLabel.maximumNumberOfLines = 2
+        explanationLabel.lineBreakMode = .byWordWrapping
         addSubview(explanationLabel)
+
+        if mode == .create {
+            configureFieldLabel(storageLabel)
+            addSubview(storageLabel)
+            configureStorageButton(
+                localOnlyButton,
+                identifier: "passwordVaultStorageLocalOnly",
+                action: #selector(storageModeClicked(_:))
+            )
+            configureStorageButton(
+                oneDriveButton,
+                identifier: "passwordVaultStorageOneDrive",
+                action: #selector(storageModeClicked(_:))
+            )
+            localOnlyButton.tag = 0
+            oneDriveButton.tag = 1
+            addSubview(localOnlyButton)
+            addSubview(oneDriveButton)
+            updateStorageSelection()
+        }
 
         configureFieldLabel(passwordLabel)
         addSubview(passwordLabel)
@@ -4213,6 +4364,8 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         }
         passwordVisibilityButton.isEnabled = !isBusy
         confirmationVisibilityButton.isEnabled = !isBusy
+        localOnlyButton.isEnabled = !isBusy
+        oneDriveButton.isEnabled = !isBusy
         primaryButton.isEnabled = false
         addSubview(primaryButton)
 
@@ -4250,14 +4403,33 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         let inset: CGFloat = 12
         let availableWidth = max(0, bounds.width - inset * 2)
         titleLabel.frame = NSRect(x: inset, y: bounds.height - 31, width: availableWidth, height: 20)
-        explanationLabel.frame = NSRect(x: inset, y: bounds.height - 53, width: availableWidth, height: 16)
-        passwordLabel.frame = NSRect(x: inset, y: bounds.height - 78, width: availableWidth, height: 16)
-        passwordField.frame = NSRect(x: inset, y: bounds.height - 112, width: availableWidth, height: 30)
+        explanationLabel.frame = NSRect(x: inset, y: bounds.height - 69, width: availableWidth, height: 34)
+        let passwordLabelY: CGFloat
+        let passwordFieldY: CGFloat
+        if mode == .create {
+            storageLabel.frame = NSRect(x: inset, y: bounds.height - 94, width: availableWidth, height: 16)
+            let optionSpacing: CGFloat = 8
+            let optionWidth = (availableWidth - optionSpacing) / 2
+            localOnlyButton.frame = NSRect(x: inset, y: bounds.height - 150, width: optionWidth, height: 46)
+            oneDriveButton.frame = NSRect(
+                x: localOnlyButton.frame.maxX + optionSpacing,
+                y: localOnlyButton.frame.minY,
+                width: optionWidth,
+                height: 54
+            )
+            passwordLabelY = bounds.height - 174
+            passwordFieldY = bounds.height - 208
+        } else {
+            passwordLabelY = bounds.height - 96
+            passwordFieldY = bounds.height - 130
+        }
+        passwordLabel.frame = NSRect(x: inset, y: passwordLabelY, width: availableWidth, height: 16)
+        passwordField.frame = NSRect(x: inset, y: passwordFieldY, width: availableWidth, height: 30)
         visiblePasswordField.frame = passwordField.frame
         passwordVisibilityButton.frame = NSRect(x: passwordField.frame.maxX - 30, y: passwordField.frame.minY + 1, width: 28, height: 28)
         if mode == .create {
-            confirmationLabel.frame = NSRect(x: inset, y: bounds.height - 137, width: availableWidth, height: 16)
-            confirmationField.frame = NSRect(x: inset, y: bounds.height - 171, width: availableWidth, height: 30)
+            confirmationLabel.frame = NSRect(x: inset, y: bounds.height - 233, width: availableWidth, height: 16)
+            confirmationField.frame = NSRect(x: inset, y: bounds.height - 267, width: availableWidth, height: 30)
             visibleConfirmationField.frame = confirmationField.frame
             confirmationVisibilityButton.frame = NSRect(x: confirmationField.frame.maxX - 30, y: confirmationField.frame.minY + 1, width: 28, height: 28)
         }
@@ -4276,7 +4448,7 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
             errorLabel.stringValue = String(localized: "The master passwords do not match.")
             return
         }
-        onSubmit(password)
+        onSubmit(password, storageMode)
     }
 
     func clearSecrets() {
@@ -4316,6 +4488,38 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         button.setAccessibilityLabel(String(localized: "Show Password"))
     }
 
+    private func configureStorageButton(_ button: NSButton, identifier: String, action: Selector) {
+        button.identifier = NSUserInterfaceItemIdentifier(identifier)
+        button.target = self
+        button.action = action
+        button.font = .systemFont(ofSize: 11.5, weight: .medium)
+        button.alignment = .left
+        button.wantsLayer = true
+        button.layer?.cornerRadius = PasteraDesignTokens.Metrics.compactRowCornerRadius
+        button.layer?.borderWidth = 1
+        let help = button === localOnlyButton
+            ? String(localized: "The encrypted vault stays on this Mac.")
+            : String(localized: "Create the local vault first, then configure an encrypted OneDrive replica.")
+        button.setAccessibilityHelp(help)
+    }
+
+    private func updateStorageSelection() {
+        localOnlyButton.state = storageMode == .localOnly ? .on : .off
+        oneDriveButton.state = storageMode == .oneDrive ? .on : .off
+        localOnlyButton.layer?.backgroundColor = storageMode == .localOnly
+            ? NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
+            : MainMenuVisualColors.controlSurface.cgColor
+        oneDriveButton.layer?.backgroundColor = storageMode == .oneDrive
+            ? NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
+            : MainMenuVisualColors.controlSurface.cgColor
+        localOnlyButton.layer?.borderColor = storageMode == .localOnly
+            ? NSColor.controlAccentColor.withAlphaComponent(0.75).cgColor
+            : MainMenuVisualColors.controlBorder.cgColor
+        oneDriveButton.layer?.borderColor = storageMode == .oneDrive
+            ? NSColor.controlAccentColor.withAlphaComponent(0.75).cgColor
+            : MainMenuVisualColors.controlBorder.cgColor
+    }
+
     private var currentPassword: String { passwordField.isHidden ? visiblePasswordField.stringValue : passwordField.stringValue }
     private var currentConfirmation: String { confirmationField.isHidden ? visibleConfirmationField.stringValue : confirmationField.stringValue }
 
@@ -4345,6 +4549,11 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
 
     @objc private func primaryClicked(_ sender: Any?) { submit() }
     @objc private func quickUnlockClicked(_ sender: Any?) { onQuickUnlock() }
+    @objc private func storageModeClicked(_ sender: NSButton) {
+        storageMode = sender === oneDriveButton ? .oneDrive : .localOnly
+        updateStorageSelection()
+        onStorageModeChange(storageMode)
+    }
 
 #if DEBUG
     var secureFieldCountForTesting: Int { mode == .create ? 2 : 1 }
@@ -4352,7 +4561,9 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         layoutSubtreeIfNeeded()
         let activeField = mode == .create ? confirmationField : passwordField
         let controls = [titleLabel, explanationLabel, passwordLabel, passwordField, errorLabel, primaryButton]
-            + (mode == .create ? [confirmationLabel, confirmationField] : [])
+            + (mode == .create
+                ? [storageLabel, localOnlyButton, oneDriveButton, confirmationLabel, confirmationField]
+                : [])
         return PasswordVaultAccessLayoutSnapshot(
             title: titleLabel.stringValue,
             fieldLabel: passwordLabel.stringValue,
@@ -4360,9 +4571,12 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
             titleFontSize: titleLabel.font?.pointSize ?? 0,
             verticalGapFromFieldToButton: activeField.frame.minY - primaryButton.frame.maxY,
             primaryButtonWidth: primaryButton.frame.width,
-            controlsFitBounds: controls.allSatisfy { bounds.contains($0.frame) }
+            controlsFitBounds: controls.allSatisfy { bounds.contains($0.frame) },
+            explanationWrapsWithoutTruncation: explanationLabel.maximumNumberOfLines == 2
+                && explanationLabel.lineBreakMode == .byWordWrapping
         )
     }
+
     func setValuesForTesting(password: String, confirmation: String?) {
         passwordField.stringValue = password
         confirmationField.stringValue = confirmation ?? ""
@@ -4370,9 +4584,23 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
         visibleConfirmationField.stringValue = confirmation ?? ""
         updateSubmitState()
     }
+
     var passwordIsVisibleForTesting: Bool { passwordField.isHidden }
     var passwordValueForTesting: String { currentPassword }
+
     func togglePasswordVisibilityForTesting() { togglePasswordVisibility(passwordVisibilityButton) }
+
+    var storageOptionTitlesForTesting: [String] {
+        mode == .create ? [localOnlyButton.title, oneDriveButton.title] : []
+    }
+
+    var storageModeForTesting: PasswordVaultCreateStorageMode { storageMode }
+
+    func selectStorageModeForTesting(_ storageMode: PasswordVaultCreateStorageMode) {
+        self.storageMode = storageMode
+        updateStorageSelection()
+        onStorageModeChange(storageMode)
+    }
 #endif
 }
 
@@ -5356,6 +5584,63 @@ extension MainMenuPanelController {
 
     var passwordVaultAccessLayoutForTesting: PasswordVaultAccessLayoutSnapshot? {
         passwordVaultAccessView?.layoutForTesting
+    }
+
+    var vaultCreateStorageTitlesForTesting: [String] {
+        passwordVaultAccessView?.storageOptionTitlesForTesting ?? []
+    }
+
+    var vaultCreateStorageSelectionForTesting: String {
+        passwordVaultAccessView?.storageModeForTesting.rawValue
+            ?? passwordVaultCreateStorageMode.rawValue
+    }
+
+    func selectPasswordVaultCreateStorageForTesting(_ rawValue: String) {
+        guard let storageMode = PasswordVaultCreateStorageMode(rawValue: rawValue) else { return }
+        passwordVaultAccessView?.selectStorageModeForTesting(storageMode)
+    }
+
+    var passwordVaultPageForTesting: String {
+        switch passwordVaultPage {
+        case .vault: "vault"
+        case .sync: "sync"
+        case .remoteCredentials: "remoteCredentials"
+        case .conflictSummary: "conflictSummary"
+        case .confirmRemoteDeletion: "confirmRemoteDeletion"
+        case .localCopyRecovery: "localCopyRecovery"
+        }
+    }
+
+    var vaultSyncCandidateTitlesForTesting: [String] {
+        passwordVaultSyncView?.candidateTitlesForTesting ?? []
+    }
+
+    var passwordVaultSyncTextValuesForTesting: [String] {
+        passwordVaultSyncView?.textValuesForTesting ?? []
+    }
+
+    var vaultSyncSecondaryHiddenForTesting: Bool {
+        passwordVaultSyncView?.secondaryButtonIsHiddenForTesting ?? true
+    }
+
+    var vaultSyncStatusDetailsWrapForTesting: Bool {
+        passwordVaultSyncView?.statusDetailsWrapForTesting ?? false
+    }
+
+    var vaultSyncControlsDoNotOverlapForTesting: Bool {
+        passwordVaultSyncView?.controlsDoNotOverlapForTesting ?? false
+    }
+
+    func selectVaultSyncCandidateForTesting(at index: Int) {
+        passwordVaultSyncView?.selectCandidateForTesting(at: index)
+    }
+
+    func performVaultSyncPrimaryActionForTesting() {
+        passwordVaultSyncView?.performPrimaryActionForTesting()
+    }
+
+    func performPasswordVaultSyncBackForTesting() {
+        returnToPasswordVaultFromSync()
     }
 
     var passwordVaultControlsFitVisibleContentForTesting: Bool {

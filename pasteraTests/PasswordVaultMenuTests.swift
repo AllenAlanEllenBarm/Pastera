@@ -128,6 +128,198 @@ struct PasswordVaultMenuTests {
         #expect(controller.passwordVaultAccessLayoutForTesting?.explanation == String(
             localized: "The master password encrypts your password vault. If forgotten, it cannot be recovered by any other means."
         ))
+        #expect(controller.passwordVaultAccessLayoutForTesting?.explanationWrapsWithoutTruncation == true)
+    }
+
+    @Test("first-time setup defaults to local-only even when OneDrive is detected")
+    func createFormDefaultsToLocalOnly() {
+        let candidate = menuOneDriveCandidate(named: "OneDrive-Personal")
+        var enableCallCount = 0
+        let controller = makeVaultController(
+            state: { .notConfigured },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource(
+                candidates: { [candidate] },
+                enableOneDrive: { _, _, _ in enableCallCount += 1 }
+            )
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.vaultCreateStorageTitlesForTesting == [
+            String(localized: "Keep on This Mac"),
+            String(localized: "Sync with OneDrive")
+        ])
+        #expect(controller.vaultCreateStorageSelectionForTesting == "localOnly")
+        #expect(enableCallCount == 0)
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-password-vault-create-local-only.png")
+        )
+    }
+
+    @Test("choosing OneDrive creates the local vault first and then opens the inline sync page")
+    func oneDriveChoiceCreatesLocalVaultBeforeSync() {
+        let candidate = menuOneDriveCandidate(named: "OneDrive-Personal")
+        var state = PasswordVaultState.notConfigured
+        var enableCallCount = 0
+        let controller = makeVaultController(
+            state: { state },
+            folders: { [] },
+            createDatabase: { _, completion in
+                state = .unlocked
+                completion(.success(()))
+            },
+            syncDataSource: menuSyncDataSource(
+                candidates: { [candidate] },
+                enableOneDrive: { _, _, _ in enableCallCount += 1 }
+            )
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        controller.selectPasswordVaultCreateStorageForTesting("oneDrive")
+        controller.setPasswordVaultAccessValuesForTesting(
+            password: "new-master-password",
+            confirmation: "new-master-password"
+        )
+        controller.submitPasswordVaultAccessForTesting()
+
+        #expect(state == .unlocked)
+        #expect(controller.passwordVaultPageForTesting == "sync")
+        #expect(controller.vaultSyncCandidateTitlesForTesting == ["OneDrive-Personal"])
+        #expect(enableCallCount == 0)
+    }
+
+    @Test("the footer opens sync inside the current window and back restores vault content")
+    func footerOpensInlineSyncPage() {
+        let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)
+        let oneDriveService = PasswordVaultMenuOneDriveProcessStatusService(status: .running(
+            appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
+        ))
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [folder] },
+            syncDataSource: menuSyncDataSource(),
+            oneDriveStatusService: oneDriveService
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains("Work"))
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        #expect(controller.passwordVaultPageForTesting == "sync")
+        #expect(oneDriveService.openCallCount == 0)
+        #expect(controller.passwordVaultSyncTextValuesForTesting.contains(String(localized: "Saved on This Mac")))
+
+        controller.performPasswordVaultSyncBackForTesting()
+
+        #expect(controller.passwordVaultPageForTesting == "vault")
+        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains("Work"))
+    }
+
+    @Test("no OneDrive candidate keeps local-only usable without a dead secondary action")
+    func noOneDriveCandidateKeepsLocalOnlyUsable() {
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource(candidates: { [] })
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        #expect(controller.passwordVaultPageForTesting == "sync")
+        #expect(controller.vaultSyncCandidateTitlesForTesting.isEmpty)
+        #expect(controller.passwordVaultSyncTextValuesForTesting.contains(
+            String(localized: "No OneDrive account folder was found. Install OneDrive or sign in, then try again.")
+        ))
+        #expect(controller.vaultSyncSecondaryHiddenForTesting)
+        #expect(controller.vaultSyncStatusDetailsWrapForTesting)
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-password-vault-sync-local-only.png")
+        )
+    }
+
+    @Test("multiple OneDrive candidates stay inline and enable only the selected account")
+    func multipleOneDriveCandidatesEnableSelectedAccount() {
+        let personal = menuOneDriveCandidate(named: "OneDrive-Personal")
+        let work = menuOneDriveCandidate(named: "OneDrive-Work")
+        let snapshot = PasswordVaultSyncSnapshot(
+            mode: .localOnly,
+            phase: .disabled,
+            localVaultAvailable: true,
+            remoteVaultAvailable: nil,
+            pendingChangeCount: 0,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        )
+        var candidates = [SyncDefaultFolderCandidate]()
+        var enabledURL: URL?
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource(
+                snapshot: { snapshot },
+                candidates: { candidates },
+                enableOneDrive: { url, _, completion in
+                    enabledURL = url
+                    completion(.failure(.folderUnavailable))
+                }
+            )
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        controller.performMainMenuOneDriveStatusClickForTesting()
+        #expect(enabledURL == nil)
+        #expect(controller.vaultSyncCandidateTitlesForTesting.isEmpty)
+
+        candidates = [personal, work]
+        controller.refreshPasswordVaultSyncPresentationIfVisible(snapshot: snapshot)
+
+        #expect(controller.vaultSyncCandidateTitlesForTesting == ["OneDrive-Personal", "OneDrive-Work"])
+        #expect(controller.vaultSyncControlsDoNotOverlapForTesting)
+
+        controller.selectVaultSyncCandidateForTesting(at: 1)
+        controller.performVaultSyncPrimaryActionForTesting()
+
+        #expect(enabledURL == work.syncRootURL)
+        #expect(controller.passwordVaultSyncTextValuesForTesting.contains(
+            String(localized: "The selected OneDrive folder is unavailable.")
+        ))
+        #expect(controller.vaultSyncControlsDoNotOverlapForTesting)
+    }
+
+    @Test("sync snapshot refresh does not clear a master password being typed")
+    func syncSnapshotRefreshPreservesCredentialInput() {
+        let controller = makeVaultController(
+            state: { .locked },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource()
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+        controller.setPasswordVaultAccessValuesForTesting(password: "still-being-typed")
+
+        controller.refreshPasswordVaultSyncPresentationIfVisible(snapshot: PasswordVaultSyncSnapshot(
+            mode: .oneDrive,
+            phase: .disconnected(.oneDriveNotRunning),
+            localVaultAvailable: true,
+            remoteVaultAvailable: true,
+            pendingChangeCount: 2,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        ))
+
+        #expect(controller.passwordVaultAccessPasswordValueForTesting == "still-being-typed")
     }
 
     @Test("master password visibility toggle preserves the entered value")
@@ -1187,7 +1379,11 @@ struct PasswordVaultMenuTests {
         },
         unlockWithQuickKey: @escaping (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { completion in
             completion(.failure(.keychainUnavailable))
-        }
+        },
+        syncDataSource: MainMenuPasswordVaultSyncDataSource? = nil,
+        oneDriveStatusService: OneDriveProcessStatusServicing = PasswordVaultMenuOneDriveProcessStatusService(
+            status: .notInstalled
+        )
     ) -> MainMenuPanelController {
         MainMenuPanelController(
             historyTitle: "History", historyImage: nil, snippetTitle: "Snippet", snippetImage: nil,
@@ -1215,8 +1411,70 @@ struct PasswordVaultMenuTests {
                     PasswordVaultFolder(id: id, name: name, createdAt: .distantPast, updatedAt: .now)
                 },
                 deleteFolder: { _ in }
-            )
+            ),
+            passwordVaultSyncDataSource: syncDataSource,
+            oneDriveStatusService: oneDriveStatusService
         )
+    }
+}
+
+private func menuOneDriveCandidate(named name: String) -> SyncDefaultFolderCandidate {
+    let rootURL = URL(fileURLWithPath: "/tmp/\(name)", isDirectory: true)
+    return SyncDefaultFolderCandidate(
+        oneDriveRootURL: rootURL,
+        syncRootURL: SyncDefaultFolderResolver.defaultFolderURL(oneDriveRootURL: rootURL),
+        displayName: name,
+        isOneDriveBacked: true
+    )
+}
+
+private func menuSyncDataSource(
+    snapshot: @escaping () -> PasswordVaultSyncSnapshot = {
+        PasswordVaultSyncSnapshot(
+            mode: .localOnly,
+            phase: .disabled,
+            localVaultAvailable: true,
+            remoteVaultAvailable: nil,
+            pendingChangeCount: 0,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        )
+    },
+    candidates: @escaping () -> [SyncDefaultFolderCandidate] = { [] },
+    enableOneDrive: @escaping (
+        URL,
+        String?,
+        @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) -> Void = { _, _, completion in completion(.success(())) }
+) -> MainMenuPasswordVaultSyncDataSource {
+    MainMenuPasswordVaultSyncDataSource(
+        snapshot: snapshot,
+        candidates: candidates,
+        enableOneDrive: enableOneDrive,
+        switchToLocalOnly: { completion in completion(.success(())) },
+        retry: {},
+        startOneDrive: { false },
+        deleteRemoteReplica: { completion in completion(.success(())) }
+    )
+}
+
+private final class PasswordVaultMenuOneDriveProcessStatusService: OneDriveProcessStatusServicing {
+    var status: OneDriveProcessStatus
+    private(set) var openCallCount = 0
+
+    init(status: OneDriveProcessStatus) {
+        self.status = status
+    }
+
+    func currentStatus() -> OneDriveProcessStatus { status }
+
+    func openOneDrive() -> Bool {
+        openCallCount += 1
+        return status.appURL != nil
+    }
+
+    func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {
+        OneDriveProcessStatusObservation {}
     }
 }
 

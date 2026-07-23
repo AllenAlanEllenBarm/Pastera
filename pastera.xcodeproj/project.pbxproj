@@ -77,6 +77,7 @@
 		C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */; };
 		C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */; };
 		C5D2A1002FEA100000B7C0DE /* MainMenuFooterButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */; };
+		C5F620002FF7000000B7C0DE /* PasswordVaultSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F620012FF7000000B7C0DE /* PasswordVaultSyncView.swift */; };
 		C5D2A1022FEA100000B7C0DE /* MainMenuOCRActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1032FEA100000B7C0DE /* MainMenuOCRActivityView.swift */; };
 		C5D2A1022FEA110000B7C0DE /* MainMenuModeIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D2A1032FEA110000B7C0DE /* MainMenuModeIcons.swift */; };
 		C5A909002FD1100000B7C0DE /* HistoryMenuRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */; };
@@ -366,6 +367,7 @@
 		C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuHeaderItemView.swift; sourceTree = "<group>"; };
 		C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuPanelController.swift; sourceTree = "<group>"; };
 		C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuFooterButtons.swift; sourceTree = "<group>"; };
+		C5F620012FF7000000B7C0DE /* PasswordVaultSyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultSyncView.swift; sourceTree = "<group>"; };
 		C5D2A1032FEA100000B7C0DE /* MainMenuOCRActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuOCRActivityView.swift; sourceTree = "<group>"; };
 		C5D2A1032FEA110000B7C0DE /* MainMenuModeIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuModeIcons.swift; sourceTree = "<group>"; };
 		C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMenuRowView.swift; sourceTree = "<group>"; };
@@ -851,6 +853,7 @@
 					C5A907012FD0D90000B7C0DE /* MainMenuHeaderItemView.swift */,
 					C5A908012FD0E20000B7C0DE /* MainMenuPanelController.swift */,
 					C5D2A1012FEA100000B7C0DE /* MainMenuFooterButtons.swift */,
+					C5F620012FF7000000B7C0DE /* PasswordVaultSyncView.swift */,
 					C5D2A1032FEA100000B7C0DE /* MainMenuOCRActivityView.swift */,
 					C5D2A1032FEA110000B7C0DE /* MainMenuModeIcons.swift */,
 					C5F3000B2FF3000000B7C0DE /* PasswordVaultUIController.swift */,
@@ -1662,6 +1665,7 @@
 					C5A907002FD0D90000B7C0DE /* MainMenuHeaderItemView.swift in Sources */,
 					C5A908002FD0E20000B7C0DE /* MainMenuPanelController.swift in Sources */,
 					C5D2A1002FEA100000B7C0DE /* MainMenuFooterButtons.swift in Sources */,
+					C5F620002FF7000000B7C0DE /* PasswordVaultSyncView.swift in Sources */,
 					C5D2A1022FEA100000B7C0DE /* MainMenuOCRActivityView.swift in Sources */,
 					C5D2A1022FEA110000B7C0DE /* MainMenuModeIcons.swift in Sources */,
 					C5F3000A2FF3000000B7C0DE /* PasswordVaultUIController.swift in Sources */,
