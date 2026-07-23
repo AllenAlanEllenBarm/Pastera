@@ -57,7 +57,7 @@ struct HistoryEditorWindowControllerTests {
     @Test
     func unchangedAndFailurePreserveDraft() async {
         let fixture = makeFixture(outcomes: [
-            .unchanged(source: .localFormatter),
+            .unchanged(source: .appleFoundationModel),
             .failed(.requestTimedOut)
         ])
         fixture.controller.show(historyID: fixture.historyID)
@@ -71,6 +71,20 @@ struct HistoryEditorWindowControllerTests {
         #expect(fixture.controller.draftForTesting == "Draft")
         #expect(fixture.controller.statusForTesting.contains("超时")
             || fixture.controller.statusForTesting.contains("timed out"))
+    }
+
+    @Test
+    func unchangedLocalFormattingDoesNotClaimThePromptNeedsNoAdjustment() async {
+        let fixture = makeFixture(outcomes: [.unchanged(source: .localFormatter)])
+        fixture.controller.show(historyID: fixture.historyID)
+
+        await fixture.controller.runPromptOptimizationForTesting()
+
+        #expect(fixture.controller.draftForTesting == "Draft")
+        #expect(fixture.controller.statusForTesting.contains("错别字")
+            || fixture.controller.statusForTesting.localizedCaseInsensitiveContains("typo"))
+        #expect(!fixture.controller.statusForTesting.contains("无需调整"))
+        #expect(!fixture.controller.statusForTesting.localizedCaseInsensitiveContains("does not need"))
     }
 
     @Test

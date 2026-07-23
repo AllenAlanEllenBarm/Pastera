@@ -14,6 +14,20 @@ struct PromptOptimizationPreferenceTests {
     }
 
     @Test
+    func automaticFreeExplainsTypoLimitationWhenOnlyLocalFormattingIsAvailable() {
+        let service = PreferencePromptService()
+        service.availability = .unavailable(.deviceNotEligible)
+
+        let fixture = makeFixture(service: service)
+        let visibleText = allText(in: fixture.section).joined(separator: "\n")
+
+        #expect(visibleText.contains("错别字")
+            || visibleText.localizedCaseInsensitiveContains("typo"))
+        #expect(visibleText.contains("本地")
+            || visibleText.localizedCaseInsensitiveContains("local"))
+    }
+
+    @Test
     func providerPresetFillsKnownBaseURLAndCustomPreservesIt() {
         let fixture = makeFixture()
         fixture.section.selectProviderForTesting(.openAICompatible)
@@ -337,4 +351,12 @@ private func findButton(in view: NSView, titles: Set<String>) -> NSButton? {
         }
     }
     return nil
+}
+
+private func allText(in view: NSView) -> [String] {
+    var result = (view as? NSTextField).map { [$0.stringValue] } ?? []
+    for subview in view.subviews {
+        result.append(contentsOf: allText(in: subview))
+    }
+    return result
 }

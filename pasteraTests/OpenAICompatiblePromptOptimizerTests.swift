@@ -89,6 +89,29 @@ struct OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func rewriteInstructionRequiresContextualTypoCorrection() async throws {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"先帮我把代码分工"}}]}"#
+        )
+
+        _ = try await client.optimize(
+            text: "先帮我把代码分工翰",
+            configuration: .fixture,
+            apiKey: ""
+        ).get()
+
+        let body = try #require(PromptOptimizationURLProtocolStub.lastRequestBody)
+        let payload = try #require(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let messages = try #require(payload["messages"] as? [[String: Any]])
+        let instruction = try #require(messages.first?["content"] as? String)
+        #expect(instruction.localizedCaseInsensitiveContains("typo"))
+        #expect(instruction.localizedCaseInsensitiveContains("context"))
+    }
+
+    @Test
     func connectionProbeUsesFixedTextAndTinyOutputLimit() async throws {
         let client = makeClient(
             status: 200,

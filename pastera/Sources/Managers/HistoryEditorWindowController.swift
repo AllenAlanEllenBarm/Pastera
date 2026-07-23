@@ -629,19 +629,29 @@ private extension HistoryEditorWindowController {
                     announces: true
                 )
             }
-        case .unchanged:
+        case let .unchanged(source):
             finishPromptOptimization(requestID: requestID)
             configureRunButton(
                 symbol: "arrow.clockwise",
                 label: historyEditorString("Check again", "再次检查")
             )
-            setStatus(
-                historyEditorString(
-                    "This prompt does not need adjustment.",
-                    "当前提示词无需调整。"
-                ),
-                announces: true
-            )
+            if source == .localFormatter {
+                setStatus(
+                    historyEditorString(
+                        "Local formatting found no format changes. A model is required to check typos and meaning.",
+                        "本地整理未发现格式变化；错别字与语义检查需要使用模型。"
+                    ),
+                    announces: true
+                )
+            } else {
+                setStatus(
+                    historyEditorString(
+                        "This prompt does not need adjustment.",
+                        "当前提示词无需调整。"
+                    ),
+                    announces: true
+                )
+            }
         case let .consentRequired(origin):
             guard allowsConsentRetry else {
                 finishPromptOptimization(requestID: requestID)

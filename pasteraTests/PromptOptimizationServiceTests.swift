@@ -46,6 +46,16 @@ struct PromptOptimizationServiceTests {
     }
 
     @Test
+    func automaticFreeReportsLocalFallbackWhenAppleModelIsUnavailable() {
+        let service = makeService(
+            appleAvailability: .unavailable(.deviceNotEligible),
+            appleResult: .success("unused")
+        )
+
+        #expect(service.availability == .unavailable(.deviceNotEligible))
+    }
+
+    @Test
     func automaticFreeFallsBackAfterAppleFailure() async {
         let service = makeService(
             appleAvailability: .available,

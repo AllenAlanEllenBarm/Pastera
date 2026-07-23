@@ -496,15 +496,25 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         let usesRemote = selectedProvider == .openAICompatible
         remoteStack.isHidden = !usesRemote
         testButton.isHidden = !usesRemote
-        availabilityLabel.stringValue = usesRemote
-            ? promptPreferenceString(
+        if usesRemote {
+            availabilityLabel.stringValue = promptPreferenceString(
                 "Uses your configured provider. Prompt text leaves this Mac only after confirmation.",
                 "使用你配置的服务；确认后提示词才会离开本机。"
             )
-            : promptPreferenceString(
-                "Free. Uses Apple on-device intelligence when available, with local formatting fallback.",
-                "免费；可用时使用 Apple 设备端智能，否则自动使用本地整理。"
-            )
+        } else {
+            switch optimizationService.availability {
+            case .available:
+                availabilityLabel.stringValue = promptPreferenceString(
+                    "Free. Apple on-device intelligence is ready for typo and semantic optimization.",
+                    "免费；Apple 设备端智能已就绪，可进行错别字与语义优化。"
+                )
+            case .unavailable:
+                availabilityLabel.stringValue = promptPreferenceString(
+                    "Apple on-device intelligence is unavailable. Local formatting cannot check typos or meaning; configure a compatible model for semantic optimization.",
+                    "Apple 设备端智能当前不可用。本地整理无法检查错别字或语义；如需语义优化，请配置兼容模型。"
+                )
+            }
+        }
         onContentSizeChange?()
     }
 

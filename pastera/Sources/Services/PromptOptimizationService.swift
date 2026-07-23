@@ -30,7 +30,7 @@ final class PromptOptimizationService: PromptOptimizationServicing {
     var availability: PromptOptimizationAvailability {
         switch settingsStore.load().provider {
         case .automaticFree:
-            return .available
+            return appleOptimizer.availability
         case .openAICompatible:
             let settings = settingsStore.load()
             guard !settings.remote.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
