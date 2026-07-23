@@ -620,6 +620,9 @@ extension MenuManager {
                 unlockWithQuickKey: { [weak self] completion in
                     self?.passwordVaultUIController.unlockWithQuickKey(completion: completion)
                 },
+                retryLocalPreparation: {
+                    AppEnvironment.current.retryPasswordVaultLocalPreparation()
+                },
                 fetchFolders: { [weak self] in
                     try self?.passwordVaultUIController.folders() ?? []
                 },
@@ -704,6 +707,16 @@ extension MenuManager {
                         return
                     }
                     self.passwordVaultSyncService.switchToLocalOnly(completion: completion)
+                },
+                retryWithRemotePassword: { [weak self] password, completion in
+                    guard let self else {
+                        completion(.failure(.remoteUnavailable))
+                        return
+                    }
+                    self.passwordVaultSyncService.retry(
+                        remoteMasterPassword: password,
+                        completion: completion
+                    )
                 },
                 retry: { [weak self] in
                     self?.passwordVaultSyncService.synchronize(reason: .manual)

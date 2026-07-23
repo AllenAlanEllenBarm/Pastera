@@ -1,5 +1,8 @@
 import Foundation
 
+// The sync state machine and its transactional helpers intentionally remain co-located.
+// swiftlint:disable file_length
+
 protocol PasswordVaultSyncControlling: AnyObject {
     var snapshot: PasswordVaultSyncSnapshot { get }
 
@@ -13,6 +16,10 @@ protocol PasswordVaultSyncControlling: AnyObject {
         remoteMasterPassword: String?,
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     )
+    func retry(
+        remoteMasterPassword: String,
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    )
     // swiftlint:enable inclusive_language
     func switchToLocalOnly(
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
@@ -20,6 +27,17 @@ protocol PasswordVaultSyncControlling: AnyObject {
     func deleteRemoteReplica(
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     )
+}
+
+extension PasswordVaultSyncControlling {
+    // swiftlint:disable inclusive_language
+    func retry(
+        remoteMasterPassword: String,
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        completion(.failure(.remoteUnavailable))
+    }
+    // swiftlint:enable inclusive_language
 }
 
 final class PasswordVaultSyncService: PasswordVaultSyncControlling {
@@ -131,6 +149,17 @@ extension PasswordVaultSyncService {
             }
             self.publish(phase: .syncing(.checking), remoteVaultAvailable: nil)
             self.synchronizeOnQueue(
+                remotePassword: remoteMasterPassword,
+                completion: completion
+            )
+        }
+    }
+    func retry(
+        remoteMasterPassword: String,
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        queue.async { [weak self] in
+            self?.synchronizeOnQueue(
                 remotePassword: remoteMasterPassword,
                 completion: completion
             )
@@ -488,3 +517,5 @@ private extension PasswordVaultSyncService {
         (error as? PasswordVaultSyncFailure) ?? .remoteWriteFailed
     }
 }
+
+// swiftlint:enable file_length

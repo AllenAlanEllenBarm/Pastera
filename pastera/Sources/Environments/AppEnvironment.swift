@@ -44,6 +44,7 @@ struct AppEnvironment {
                      oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                      passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
                      passwordVaultSyncService: PasswordVaultSyncControlling = current.passwordVaultSyncService,
+                     retryPasswordVaultLocalPreparation: @escaping () -> Void = current.retryPasswordVaultLocalPreparation,
                      secureClipboard: SecureClipboardWriting = current.secureClipboard,
                      passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
                      vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
@@ -60,6 +61,7 @@ struct AppEnvironment {
                                       oneDriveProcessStatusService: oneDriveProcessStatusService,
                                       passwordVaultStore: passwordVaultStore,
                                       passwordVaultSyncService: passwordVaultSyncService,
+                                      retryPasswordVaultLocalPreparation: retryPasswordVaultLocalPreparation,
                                       secureClipboard: secureClipboard,
                                       passwordVaultUIController: passwordVaultUIController,
                                       vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,
@@ -77,6 +79,7 @@ struct AppEnvironment {
                                oneDriveProcessStatusService: OneDriveProcessStatusServicing = current.oneDriveProcessStatusService,
                                passwordVaultStore: PasswordVaultStore = current.passwordVaultStore,
                                passwordVaultSyncService: PasswordVaultSyncControlling = current.passwordVaultSyncService,
+                               retryPasswordVaultLocalPreparation: @escaping () -> Void = current.retryPasswordVaultLocalPreparation,
                                secureClipboard: SecureClipboardWriting = current.secureClipboard,
                                passwordVaultUIController: PasswordVaultUIController = current.passwordVaultUIController,
                                vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing =
@@ -93,6 +96,7 @@ struct AppEnvironment {
                                                 oneDriveProcessStatusService: oneDriveProcessStatusService,
                                                 passwordVaultStore: passwordVaultStore,
                                                 passwordVaultSyncService: passwordVaultSyncService,
+                                                retryPasswordVaultLocalPreparation: retryPasswordVaultLocalPreparation,
                                                 secureClipboard: secureClipboard,
                                                 passwordVaultUIController: passwordVaultUIController,
                                                 vaultAgentApplicationRuntime: vaultAgentApplicationRuntime,

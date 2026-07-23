@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import Pastera
 
+// Integration coverage mirrors the full sync state machine in one suite.
+// swiftlint:disable file_length
+
 @Suite("Password vault sync service", .serialized)
 struct PasswordVaultSyncServiceTests {
     @Test("sync decision covers all local and remote change combinations")
@@ -272,6 +275,100 @@ struct PasswordVaultSyncServiceTests {
 }
 
 extension PasswordVaultSyncServiceTests {
+    @Test("switching to local-only preserves both replicas and the sync baseline")
+    func switchingToLocalOnlyPreservesReplicasAndBaseline() throws {
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.lastSyncedLocalDigest = "local-baseline"
+        metadata.lastObservedRemoteDigest = "remote-baseline"
+        metadata.pendingMergedRemoteDigest = "pending-remote"
+        metadata.pendingChangeCount = 3
+        let fixture = try makeSyncServiceFixture(metadata: metadata)
+        var result: Result<Void, PasswordVaultSyncFailure>?
+
+        fixture.service.switchToLocalOnly { result = $0 }
+        fixture.drain()
+
+        #expect(try result?.get() != nil)
+        #expect(fixture.metadata.value.mode == .localOnly)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-baseline")
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == "remote-baseline")
+        #expect(fixture.metadata.value.pendingMergedRemoteDigest == "pending-remote")
+        #expect(fixture.metadata.value.pendingChangeCount == 3)
+        #expect(fixture.cloud.deleteCount == 0)
+        #expect(fixture.service.snapshot.phase == .disabled)
+    }
+
+    @Test("failed remote deletion preserves mode and baseline")
+    func failedRemoteDeletionPreservesModeAndBaseline() throws {
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.lastSyncedLocalDigest = "local-baseline"
+        metadata.lastObservedRemoteDigest = "remote-baseline"
+        metadata.pendingChangeCount = 2
+        let fixture = try makeSyncServiceFixture(metadata: metadata)
+        fixture.cloud.deleteError = .remoteWriteFailed
+        var result: Result<Void, PasswordVaultSyncFailure>?
+
+        fixture.service.deleteRemoteReplica { result = $0 }
+        fixture.drain()
+
+        #expect(throws: PasswordVaultSyncFailure.self) { try result?.get() }
+        #expect(fixture.metadata.value.mode == .oneDrive)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-baseline")
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == "remote-baseline")
+        #expect(fixture.metadata.value.pendingChangeCount == 2)
+        #expect(fixture.cloud.deleteCount == 1)
+    }
+
+    @Test("successful remote deletion keeps local baseline and clears only remote state")
+    func successfulRemoteDeletionKeepsLocalBaseline() throws {
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.lastSyncedLocalDigest = "local-baseline"
+        metadata.lastObservedRemoteDigest = "remote-baseline"
+        metadata.pendingChangeCount = 2
+        let fixture = try makeSyncServiceFixture(metadata: metadata)
+        var result: Result<Void, PasswordVaultSyncFailure>?
+
+        fixture.service.deleteRemoteReplica { result = $0 }
+        fixture.drain()
+
+        #expect(try result?.get() != nil)
+        #expect(fixture.metadata.value.mode == .localOnly)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-baseline")
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == nil)
+        #expect(fixture.metadata.value.pendingChangeCount == 0)
+        #expect(fixture.cloud.deleteCount == 1)
+    }
+
+    @Test("remote credential retry passes the password to one merge only")
+    func remoteCredentialRetryIsOneShot() throws {
+        let local = Data("local-new".utf8)
+        let remote = Data("remote-new".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.lastSyncedLocalDigest = "local-old"
+        metadata.lastObservedRemoteDigest = "remote-old"
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: local)
+        fixture.access.state = .unlocked
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: remote,
+            digest: PasswordVaultDigest.hex(remote)
+        )
+        var result: Result<Void, PasswordVaultSyncFailure>?
+
+        fixture.service.retry(remoteMasterPassword: "remote-only-secret") { result = $0 }
+        fixture.drain()
+
+        #expect(try result?.get() != nil)
+        #expect(fixture.access.receivedRemotePasswords == ["remote-only-secret"])
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+        #expect(fixture.access.receivedRemotePasswords == ["remote-only-secret"])
+    }
+
     @Test("concurrent changes stay untouched while the local vault is locked")
     func concurrentChangesWaitForUnlock() throws {
         let local = Data("local-new".utf8)
@@ -491,3 +588,5 @@ extension PasswordVaultSyncServiceTests {
         #expect(deliveredOnMain)
     }
 }
+
+// swiftlint:enable file_length

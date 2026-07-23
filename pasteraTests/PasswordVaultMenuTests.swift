@@ -24,7 +24,7 @@ struct PasswordVaultMenuTests {
         defer { _ = controller.close() }
 
         #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
-        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "Preparing local vault")))
+        #expect(controller.vaultInlinePageTextsForTesting.contains(String(localized: "Preparing the Local Vault")))
         #expect(unlockAttempts == 0)
     }
 
@@ -44,10 +44,62 @@ struct PasswordVaultMenuTests {
         defer { _ = controller.close() }
 
         #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
-        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "Local vault is not ready")))
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "The local password vault could not be prepared.")
+        ))
         #expect(!controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "The master password is incorrect.")))
         #expect(unlockAttempts == 0)
         #expect(quickUnlockAttempts == 0)
+    }
+
+    @Test("local copy recovery stays inline and requires a data-branch warning before replacement")
+    func localCopyRecoveryStaysInline() {
+        let oneDriveService = PasswordVaultMenuOneDriveProcessStatusService(status: .notRunning(
+            appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
+        ))
+        var retryCount = 0
+        let controller = makeVaultController(
+            state: { .localCopyUnavailable(.oneDriveUnavailable) },
+            folders: { [] },
+            retryLocalPreparation: { retryCount += 1 },
+            syncDataSource: menuSyncDataSource(startOneDrive: {
+                oneDriveService.openOneDrive()
+            }),
+            oneDriveStatusService: oneDriveService
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.passwordVaultPageForTesting == "localCopyRecovery")
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "The local password vault could not be prepared.")
+        ))
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-vault-local-recovery.png")
+        )
+        #expect(controller.vaultInlineActionsFitViewportForTesting)
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultRecoveryStartOneDrive")
+        #expect(oneDriveService.openCallCount == 1)
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultRecoveryRetry")
+        #expect(retryCount == 1)
+        #expect(controller.passwordVaultPageForTesting == "localCopyRecovery")
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultRecoveryContinueLocal")
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "Creating a new local vault starts a separate data branch.")
+        ))
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-vault-local-branch-warning.png")
+        )
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultRecoveryConfirmReplacement")
+        #expect(controller.passwordVaultPageForTesting == "vault")
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 2)
     }
 
     @Test("a locked vault unlocks inside the main content area")
@@ -320,6 +372,197 @@ struct PasswordVaultMenuTests {
         ))
 
         #expect(controller.passwordVaultAccessPasswordValueForTesting == "still-being-typed")
+    }
+
+    @Test("stopping sync keeps both copies and returns the inline page to local-only")
+    func stoppingSyncKeepsBothCopies() {
+        var snapshot = PasswordVaultSyncSnapshot(
+            mode: .oneDrive,
+            phase: .disconnected(.oneDriveNotRunning),
+            localVaultAvailable: true,
+            remoteVaultAvailable: true,
+            pendingChangeCount: 3,
+            conflictCopyCount: 0,
+            lastSyncAt: .distantPast
+        )
+        var stopCount = 0
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource(
+                snapshot: { snapshot },
+                switchToLocalOnly: { completion in
+                    stopCount += 1
+                    snapshot = PasswordVaultSyncSnapshot(
+                        mode: .localOnly,
+                        phase: .disabled,
+                        localVaultAvailable: true,
+                        remoteVaultAvailable: nil,
+                        pendingChangeCount: 3,
+                        conflictCopyCount: 0,
+                        lastSyncAt: .distantPast
+                    )
+                    completion(.success(()))
+                }
+            )
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+        controller.performMainMenuOneDriveStatusClickForTesting()
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-vault-sync-disconnected-actions.png")
+        )
+        #expect(controller.vaultInlineActionsFitViewportForTesting)
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultSyncStopButton")
+
+        #expect(stopCount == 1)
+        #expect(controller.passwordVaultPageForTesting == "sync")
+        #expect(controller.passwordVaultSyncTextValuesForTesting.contains(String(localized: "OneDrive sync is off")))
+    }
+
+    @Test("remote deletion has inline confirmation and failure stays on the same page")
+    func remoteDeletionRequiresInlineConfirmation() {
+        let snapshot = PasswordVaultSyncSnapshot(
+            mode: .oneDrive,
+            phase: .synced,
+            localVaultAvailable: true,
+            remoteVaultAvailable: true,
+            pendingChangeCount: 0,
+            conflictCopyCount: 0,
+            lastSyncAt: .distantPast
+        )
+        var deleteCount = 0
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource(
+                snapshot: { snapshot },
+                deleteRemoteReplica: { completion in
+                    deleteCount += 1
+                    completion(.failure(.remoteWriteFailed))
+                }
+            )
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultSyncDeleteButton")
+        #expect(controller.passwordVaultPageForTesting == "confirmRemoteDeletion")
+        #expect(deleteCount == 0)
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "Your local vault will remain. The encrypted OneDrive copy will be deleted.")
+        ))
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-vault-delete-confirmation.png")
+        )
+        #expect(controller.vaultInlineActionsFitViewportForTesting)
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultDeleteRemoteConfirm")
+        #expect(deleteCount == 1)
+        #expect(controller.passwordVaultPageForTesting == "confirmRemoteDeletion")
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "The encrypted replica could not be saved to OneDrive.")
+        ))
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultDeleteRemoteCancel")
+        #expect(controller.passwordVaultPageForTesting == "sync")
+    }
+
+    @Test("remote credentials use one transient secure field and never show a local password error")
+    func remoteCredentialsAreTransient() {
+        let snapshot = PasswordVaultSyncSnapshot(
+            mode: .oneDrive,
+            phase: .failed(.remoteCredentialsRequired),
+            localVaultAvailable: true,
+            remoteVaultAvailable: true,
+            pendingChangeCount: 1,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        )
+        var receivedPassword: String?
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [] },
+            syncDataSource: menuSyncDataSource(
+                snapshot: { snapshot },
+                retryWithRemotePassword: { password, completion in
+                    receivedPassword = password
+                    completion(.failure(.remoteCredentialsRequired))
+                }
+            )
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        controller.performMainMenuOneDriveStatusClickForTesting()
+        #expect(controller.passwordVaultPageForTesting == "remoteCredentials")
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 1)
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-vault-remote-credentials.png")
+        )
+        #expect(controller.vaultInlineActionsFitViewportForTesting)
+
+        controller.setPasswordVaultRemoteCredentialForTesting("remote-only-secret")
+        controller.submitPasswordVaultRemoteCredentialForTesting()
+
+        #expect(receivedPassword == "remote-only-secret")
+        #expect(controller.vaultRemoteCredentialValueForTesting == "")
+        #expect(controller.passwordVaultPageForTesting == "remoteCredentials")
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "The OneDrive vault master password is incorrect.")
+        ))
+        #expect(!controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "The master password is incorrect.")
+        ))
+
+        controller.performPasswordVaultSyncBackForTesting()
+        #expect(controller.passwordVaultPageForTesting == "sync")
+        #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
+    }
+
+    @Test("conflict summary is optional and can filter conflict copies in the unlocked vault")
+    func conflictSummaryCanFilterConflictCopies() {
+        let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)
+        let snapshot = PasswordVaultSyncSnapshot(
+            mode: .oneDrive,
+            phase: .conflicts(2),
+            localVaultAvailable: true,
+            remoteVaultAvailable: true,
+            pendingChangeCount: 1,
+            conflictCopyCount: 2,
+            lastSyncAt: .distantPast
+        )
+        let controller = makeVaultController(
+            state: { .unlocked },
+            folders: { [folder] },
+            syncDataSource: menuSyncDataSource(snapshot: { snapshot })
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultSyncReviewButton")
+        #expect(controller.passwordVaultPageForTesting == "conflictSummary")
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(format: String(localized: "%lld conflict copies were kept for review."), Int64(2))
+        ))
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(format: String(localized: "%lld local changes are still waiting."), Int64(1))
+        ))
+        try? controller.mainMenuSnapshotPNGForTesting().write(
+            to: URL(fileURLWithPath: "/tmp/pastera-vault-conflict-summary.png")
+        )
+        #expect(controller.vaultInlineActionsFitViewportForTesting)
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultConflictViewCopies")
+        #expect(controller.passwordVaultPageForTesting == "vault")
+        #expect(controller.passwordVaultSearchQueryForTesting == "(Conflict)")
     }
 
     @Test("master password visibility toggle preserves the entered value")
@@ -1380,6 +1623,7 @@ struct PasswordVaultMenuTests {
         unlockWithQuickKey: @escaping (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { completion in
             completion(.failure(.keychainUnavailable))
         },
+        retryLocalPreparation: @escaping () -> Void = {},
         syncDataSource: MainMenuPasswordVaultSyncDataSource? = nil,
         oneDriveStatusService: OneDriveProcessStatusServicing = PasswordVaultMenuOneDriveProcessStatusService(
             status: .notInstalled
@@ -1398,6 +1642,7 @@ struct PasswordVaultMenuTests {
                 },
                 createDatabase: createDatabase,
                 unlock: unlock, unlockWithQuickKey: unlockWithQuickKey,
+                retryLocalPreparation: retryLocalPreparation,
                 fetchFolders: folders, fetchEntries: { [] },
                 copyPassword: { _, completion in completion(.success(())) },
                 loadDraft: { _, completion in completion(.failure(.entryNotFound)) },
@@ -1445,16 +1690,28 @@ private func menuSyncDataSource(
         URL,
         String?,
         @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) -> Void = { _, _, completion in completion(.success(())) }
+    ) -> Void = { _, _, completion in completion(.success(())) },
+    switchToLocalOnly: @escaping (
+        @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) -> Void = { completion in completion(.success(())) },
+    retryWithRemotePassword: @escaping (
+        String,
+        @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) -> Void = { _, completion in completion(.success(())) },
+    startOneDrive: @escaping () -> Bool = { false },
+    deleteRemoteReplica: @escaping (
+        @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) -> Void = { completion in completion(.success(())) }
 ) -> MainMenuPasswordVaultSyncDataSource {
     MainMenuPasswordVaultSyncDataSource(
         snapshot: snapshot,
         candidates: candidates,
         enableOneDrive: enableOneDrive,
-        switchToLocalOnly: { completion in completion(.success(())) },
+        switchToLocalOnly: switchToLocalOnly,
+        retryWithRemotePassword: retryWithRemotePassword,
         retry: {},
-        startOneDrive: { false },
-        deleteRemoteReplica: { completion in completion(.success(())) }
+        startOneDrive: startOneDrive,
+        deleteRemoteReplica: deleteRemoteReplica
     )
 }
 

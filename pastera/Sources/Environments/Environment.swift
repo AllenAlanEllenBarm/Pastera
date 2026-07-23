@@ -23,6 +23,7 @@ struct Environment {
     let oneDriveProcessStatusService: OneDriveProcessStatusServicing
     let passwordVaultStore: PasswordVaultStore
     let passwordVaultSyncService: PasswordVaultSyncControlling
+    let retryPasswordVaultLocalPreparation: () -> Void
     let secureClipboard: SecureClipboardWriting
     let passwordVaultUIController: PasswordVaultUIController
     let vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing
@@ -42,6 +43,7 @@ struct Environment {
          passwordVaultStore: PasswordVaultStore? = nil,
          passwordVaultSyncService: PasswordVaultSyncControlling? = nil,
          passwordVaultMigrator: PasswordVaultMigrating? = nil,
+         retryPasswordVaultLocalPreparation: (() -> Void)? = nil,
          prepareProductionPasswordVault: Bool = false,
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
          passwordVaultUIController: PasswordVaultUIController? = nil,
@@ -126,10 +128,15 @@ struct Environment {
                 legacySyncRootProvider: { syncSettingsStore.settings().rootURL }
             )
             : nil)
-        if let resolvedPasswordVaultMigrator {
+        let retryLocalPreparation = retryPasswordVaultLocalPreparation ?? {
+            guard let resolvedPasswordVaultMigrator else { return }
             resolvedPasswordVaultUIController.vaultAgentExecutor.async {
                 resolvedPasswordVaultStore.prepareLocalCopy(using: resolvedPasswordVaultMigrator)
             }
+        }
+        self.retryPasswordVaultLocalPreparation = retryLocalPreparation
+        if resolvedPasswordVaultMigrator != nil {
+            retryLocalPreparation()
         }
         self.vaultAgentApplicationRuntime = vaultAgentApplicationRuntime ??
             vaultAgentApplicationRuntimeFactory?(resolvedPasswordVaultUIController) ??

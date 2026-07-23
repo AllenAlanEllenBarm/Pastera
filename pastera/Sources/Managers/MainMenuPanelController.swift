@@ -168,6 +168,7 @@ struct MainMenuPasswordVaultDataSource {
     let createDatabase: (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let unlock: (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let unlockWithQuickKey: (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
+    let retryLocalPreparation: () -> Void
     let fetchFolders: () throws -> [PasswordVaultFolder]
     let fetchEntries: () throws -> [PasswordVaultEntry]
     let copyPassword: (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
@@ -191,6 +192,7 @@ struct MainMenuPasswordVaultDataSource {
         createDatabase: @escaping (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, completion in completion(.failure(.databaseNotConfigured)) },
         unlock: @escaping (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, completion in completion(.failure(.vaultLocked)) },
         unlockWithQuickKey: @escaping (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { completion in completion(.failure(.keychainUnavailable)) },
+        retryLocalPreparation: @escaping () -> Void = {},
         fetchFolders: @escaping () throws -> [PasswordVaultFolder],
         fetchEntries: @escaping () throws -> [PasswordVaultEntry],
         copyPassword: @escaping (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void,
@@ -214,6 +216,7 @@ struct MainMenuPasswordVaultDataSource {
         self.createDatabase = createDatabase
         self.unlock = unlock
         self.unlockWithQuickKey = unlockWithQuickKey
+        self.retryLocalPreparation = retryLocalPreparation
         self.fetchFolders = fetchFolders
         self.fetchEntries = fetchEntries
         self.copyPassword = copyPassword
@@ -422,8 +425,13 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var passwordVaultAccessError: String?
     private var passwordVaultAccessView: PasswordVaultAccessView?
     private var passwordVaultSyncView: PasswordVaultSyncView?
+    private var passwordVaultInlineActionView: PasswordVaultInlineActionView?
+    private var passwordVaultRemoteCredentialsView: PasswordVaultRemoteCredentialsView?
     private var passwordVaultPage: PasswordVaultPage = .vault
     private var passwordVaultCreateStorageMode: PasswordVaultCreateStorageMode = .localOnly
+    private var passwordVaultLocalRecoveryShowsWarning = false
+    private var passwordVaultAllowsLocalReplacement = false
+    private var passwordVaultSuppressesRemotePrompt = false
     private var passwordVaultAccessModeInFlight: PasswordVaultAccessView.Mode?
     private var passwordVaultAutomaticQuickUnlockAttempted = false
     private var passwordVaultQuickUnlockAvailability = PasswordVaultQuickUnlockAvailability.unknown
@@ -1156,8 +1164,19 @@ extension MainMenuPanelController {
             }
             return makeSnippetContent()
         case .passwordVault:
-            if passwordVaultPage == .sync {
+            switch passwordVaultPage {
+            case .sync:
                 return makePasswordVaultSyncContent()
+            case .remoteCredentials:
+                return makePasswordVaultRemoteCredentialsContent()
+            case .conflictSummary:
+                return makePasswordVaultConflictSummaryContent()
+            case .confirmRemoteDeletion:
+                return makePasswordVaultRemoteDeletionContent()
+            case .localCopyRecovery:
+                return makePasswordVaultLocalCopyRecoveryContent()
+            case .vault:
+                ()
             }
             if let passwordVaultFolderEditorState {
                 switch passwordVaultFolderEditorState {
@@ -1754,9 +1773,14 @@ extension MainMenuPanelController {
         case .notConfigured:
             return passwordVaultAccessContent(mode: .create, isBusy: false)
         case .preparingLocalCopy:
-            return passwordVaultFailureContent(message: String(localized: "Preparing local vault"))
+            passwordVaultPage = .localCopyRecovery
+            return makePasswordVaultLocalCopyRecoveryContent()
         case .localCopyUnavailable:
-            return passwordVaultFailureContent(message: String(localized: "Local vault is not ready"))
+            if passwordVaultAllowsLocalReplacement {
+                return passwordVaultAccessContent(mode: .create, isBusy: false)
+            }
+            passwordVaultPage = .localCopyRecovery
+            return makePasswordVaultLocalCopyRecoveryContent()
         case .locked:
             return passwordVaultAccessContent(mode: .unlock, isBusy: false)
         case .unlocking:
@@ -1956,9 +1980,22 @@ extension MainMenuPanelController {
         guard let passwordVaultSyncDataSource else {
             return passwordVaultFailureContent(message: String(localized: "OneDrive sync is unavailable"))
         }
+        if !passwordVaultSuppressesRemotePrompt,
+           case .failed(.remoteCredentialsRequired) = passwordVaultSyncDataSource.snapshot().phase {
+            passwordVaultPage = .remoteCredentials
+            return makePasswordVaultRemoteCredentialsContent()
+        }
         let view = PasswordVaultSyncView(
             dataSource: passwordVaultSyncDataSource,
             processStatus: oneDriveStatusService.currentStatus(),
+            onRequestRemoteDeletion: { [weak self] in
+                self?.passwordVaultPage = .confirmRemoteDeletion
+                self?.reloadContentKeepingTopLeft()
+            },
+            onRequestConflictSummary: { [weak self] in
+                self?.passwordVaultPage = .conflictSummary
+                self?.reloadContentKeepingTopLeft()
+            },
             onContentSizeChange: { [weak self] in
                 self?.reloadContentKeepingTopLeft()
             }
@@ -1977,6 +2014,278 @@ extension MainMenuPanelController {
                 confirm: {},
                 participatesInNavigation: false
             )]
+        )
+    }
+
+    // The recovery page intentionally keeps all branch choices in one native view.
+    // swiftlint:disable:next function_body_length
+    private func makePasswordVaultLocalCopyRecoveryContent() -> EmbeddedContent {
+        guard let passwordVaultDataSource else {
+            return passwordVaultFailureContent(message: String(localized: "Password Vault Unavailable"))
+        }
+        let state = passwordVaultDataSource.state()
+        let isPreparing: Bool
+        switch state {
+        case .preparingLocalCopy:
+            isPreparing = true
+        case .localCopyUnavailable:
+            isPreparing = false
+        default:
+            passwordVaultPage = .vault
+            passwordVaultLocalRecoveryShowsWarning = false
+            return makePasswordVaultContent()
+        }
+
+        let view: PasswordVaultInlineActionView
+        if passwordVaultLocalRecoveryShowsWarning {
+            view = PasswordVaultInlineActionView(
+                symbolName: "arrow.triangle.branch",
+                symbolColor: .systemOrange,
+                title: String(localized: "Create a Separate Local Vault?"),
+                messages: [
+                    String(localized: "Creating a new local vault starts a separate data branch."),
+                    String(localized: "The previous OneDrive vault will not be overwritten. You can reconnect it later and decide how to merge the two copies.")
+                ],
+                actions: [
+                    .init(
+                        title: String(localized: "Create New Local Vault"),
+                        identifier: "passwordVaultRecoveryConfirmReplacement",
+                        style: .danger,
+                        handler: { [weak self] in
+                            self?.passwordVaultAllowsLocalReplacement = true
+                            self?.passwordVaultLocalRecoveryShowsWarning = false
+                            self?.passwordVaultPage = .vault
+                            self?.reloadContentKeepingTopLeft()
+                        }
+                    ),
+                    .init(
+                        title: String(localized: "Back"),
+                        identifier: "passwordVaultRecoveryWarningBack",
+                        style: .secondary,
+                        handler: { [weak self] in
+                            self?.passwordVaultLocalRecoveryShowsWarning = false
+                            self?.reloadContentKeepingTopLeft()
+                        }
+                    )
+                ]
+            )
+        } else {
+            var actions = [PasswordVaultInlineActionView.Action]()
+            if oneDriveStatusService.currentStatus().appURL != nil {
+                actions.append(.init(
+                    title: String(localized: "Start OneDrive"),
+                    identifier: "passwordVaultRecoveryStartOneDrive",
+                    style: .primary,
+                    handler: { [weak self] in
+                        guard let self else { return }
+                        if self.passwordVaultSyncDataSource?.startOneDrive() != true {
+                            self.passwordVaultInlineActionView?.setError(
+                                String(localized: "OneDrive could not be started.")
+                            )
+                        }
+                    }
+                ))
+            }
+            actions.append(.init(
+                title: isPreparing ? String(localized: "Preparing…") : String(localized: "Try Again"),
+                identifier: "passwordVaultRecoveryRetry",
+                style: actions.isEmpty ? .primary : .secondary,
+                handler: { [weak self] in
+                    self?.passwordVaultDataSource?.retryLocalPreparation()
+                }
+            ))
+            actions.append(.init(
+                title: String(localized: "Continue with a New Local Vault"),
+                identifier: "passwordVaultRecoveryContinueLocal",
+                style: .secondary,
+                handler: { [weak self] in
+                    self?.passwordVaultLocalRecoveryShowsWarning = true
+                    self?.reloadContentKeepingTopLeft()
+                }
+            ))
+            view = PasswordVaultInlineActionView(
+                symbolName: isPreparing ? "arrow.triangle.2.circlepath" : "exclamationmark.icloud.fill",
+                symbolColor: isPreparing ? .controlAccentColor : .systemRed,
+                title: isPreparing
+                    ? String(localized: "Preparing the Local Vault")
+                    : String(localized: "The local password vault could not be prepared."),
+                messages: [isPreparing
+                    ? String(localized: "Pastera is creating a local working copy. No password is needed yet.")
+                    : String(localized: "If OneDrive was disconnected, start it and retry. Your cloud copy remains unchanged.")],
+                actions: actions
+            )
+        }
+        passwordVaultInlineActionView = view
+        return passwordVaultActionContent(
+            headerTitle: String(localized: "Local Vault Recovery"),
+            rowTitle: isPreparing
+                ? String(localized: "Preparing local vault")
+                : String(localized: "Local vault is not ready"),
+            view: view,
+            showsBackButton: passwordVaultLocalRecoveryShowsWarning
+        )
+    }
+
+    private func makePasswordVaultRemoteCredentialsContent() -> EmbeddedContent {
+        guard let passwordVaultSyncDataSource else {
+            return passwordVaultFailureContent(message: String(localized: "OneDrive sync is unavailable"))
+        }
+        let view = PasswordVaultRemoteCredentialsView { [weak self] password in
+            passwordVaultSyncDataSource.retryWithRemotePassword(password) { result in
+                self?.finishRemoteCredentialRetry(result)
+            }
+        }
+        passwordVaultRemoteCredentialsView = view
+        return passwordVaultActionContent(
+            headerTitle: String(localized: "OneDrive Password"),
+            rowTitle: String(localized: "Unlock the OneDrive Copy"),
+            view: view,
+            showsBackButton: true
+        )
+    }
+
+    private func finishRemoteCredentialRetry(_ result: Result<Void, PasswordVaultSyncFailure>) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.finishRemoteCredentialRetry(result) }
+            return
+        }
+        switch result {
+        case .success:
+            let snapshot = passwordVaultSyncDataSource?.snapshot()
+            passwordVaultPage = (snapshot?.conflictCopyCount ?? 0) > 0 ? .conflictSummary : .sync
+            passwordVaultRemoteCredentialsView = nil
+            reloadContentKeepingTopLeft()
+        case .failure(.remoteCredentialsRequired):
+            passwordVaultRemoteCredentialsView?.setError(
+                String(localized: "The OneDrive vault master password is incorrect.")
+            )
+        case .failure(let failure):
+            passwordVaultRemoteCredentialsView?.setError(passwordVaultSyncFailureMessage(failure))
+        }
+    }
+
+    private func makePasswordVaultRemoteDeletionContent() -> EmbeddedContent {
+        let view = PasswordVaultInlineActionView(
+            symbolName: "trash.fill",
+            symbolColor: .systemRed,
+            title: String(localized: "Delete the OneDrive Copy?"),
+            messages: [
+                String(localized: "Your local vault will remain. The encrypted OneDrive copy will be deleted."),
+                String(localized: "Sync will switch off. This action does not delete passwords from this Mac.")
+            ],
+            actions: [
+                .init(
+                    title: String(localized: "Delete OneDrive Copy"),
+                    identifier: "passwordVaultDeleteRemoteConfirm",
+                    style: .danger,
+                    handler: { [weak self] in
+                        self?.passwordVaultSyncDataSource?.deleteRemoteReplica { result in
+                            self?.finishRemoteDeletion(result)
+                        }
+                    }
+                ),
+                .init(
+                    title: String(localized: "Cancel"),
+                    identifier: "passwordVaultDeleteRemoteCancel",
+                    style: .secondary,
+                    handler: { [weak self] in
+                        self?.passwordVaultPage = .sync
+                        self?.reloadContentKeepingTopLeft()
+                    }
+                )
+            ]
+        )
+        passwordVaultInlineActionView = view
+        return passwordVaultActionContent(
+            headerTitle: String(localized: "Delete OneDrive Copy"),
+            rowTitle: String(localized: "Delete the OneDrive Copy?"),
+            view: view,
+            showsBackButton: true
+        )
+    }
+
+    private func finishRemoteDeletion(_ result: Result<Void, PasswordVaultSyncFailure>) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.finishRemoteDeletion(result) }
+            return
+        }
+        switch result {
+        case .success:
+            passwordVaultPage = .sync
+            reloadContentKeepingTopLeft()
+        case .failure(let failure):
+            passwordVaultInlineActionView?.setError(passwordVaultSyncFailureMessage(failure))
+        }
+    }
+
+    private func makePasswordVaultConflictSummaryContent() -> EmbeddedContent {
+        let snapshot = passwordVaultSyncDataSource?.snapshot() ?? PasswordVaultSyncSnapshot(
+            mode: .localOnly,
+            phase: .disabled,
+            localVaultAvailable: true,
+            remoteVaultAvailable: nil,
+            pendingChangeCount: 0,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        )
+        let view = PasswordVaultInlineActionView(
+            symbolName: snapshot.conflictCopyCount > 0 ? "checkmark.trianglebadge.exclamationmark" : "checkmark.circle.fill",
+            symbolColor: snapshot.conflictCopyCount > 0 ? .systemYellow : .systemGreen,
+            title: String(localized: "Sync Merge Complete"),
+            messages: [
+                String(localized: "Pastera automatically combined compatible local and OneDrive changes."),
+                String(format: String(localized: "%lld conflict copies were kept for review."), Int64(snapshot.conflictCopyCount)),
+                String(format: String(localized: "%lld local changes are still waiting."), Int64(snapshot.pendingChangeCount))
+            ],
+            actions: [
+                .init(
+                    title: String(localized: "View Conflict Copies"),
+                    identifier: "passwordVaultConflictViewCopies",
+                    style: .primary,
+                    handler: { [weak self] in self?.showPasswordVaultConflictCopies() }
+                ),
+                .init(
+                    title: String(localized: "Return to Vault"),
+                    identifier: "passwordVaultConflictReturnToVault",
+                    style: .secondary,
+                    handler: { [weak self] in
+                        self?.passwordVaultPage = .vault
+                        self?.reloadContentKeepingTopLeft()
+                    }
+                )
+            ]
+        )
+        passwordVaultInlineActionView = view
+        return passwordVaultActionContent(
+            headerTitle: String(localized: "Sync Result"),
+            rowTitle: String(localized: "Sync Merge Complete"),
+            view: view,
+            showsBackButton: true
+        )
+    }
+
+    private func showPasswordVaultConflictCopies() {
+        passwordVaultSearchQuery = "(Conflict)"
+        searchField.stringValue = passwordVaultSearchQuery
+        isSearchVisible = true
+        passwordVaultPage = .vault
+        reloadContentKeepingTopLeft()
+    }
+
+    private func passwordVaultActionContent(
+        headerTitle: String,
+        rowTitle: String,
+        view: NSView,
+        showsBackButton: Bool
+    ) -> EmbeddedContent {
+        EmbeddedContent(
+            headerTitle: headerTitle,
+            headerSubtitle: nil,
+            showsBackButton: showsBackButton,
+            canGoToPreviousPage: false,
+            canGoToNextPage: false,
+            typeFilter: nil,
+            rows: [EmbeddedRow(title: rowTitle, view: view, confirm: {}, participatesInNavigation: false)]
         )
     }
 
@@ -2034,6 +2343,7 @@ extension MainMenuPanelController {
         switch result {
         case .success:
             passwordVaultAccessError = nil
+            passwordVaultAllowsLocalReplacement = false
             if mode == .create, passwordVaultCreateStorageMode == .oneDrive {
                 passwordVaultPage = .sync
             }
@@ -2053,6 +2363,12 @@ extension MainMenuPanelController {
         passwordVaultAccessModeInFlight = nil
         passwordVaultAutomaticQuickUnlockAttempted = false
         passwordVaultQuickUnlockAvailability = .unknown
+        passwordVaultRemoteCredentialsView?.clearSecret()
+        passwordVaultRemoteCredentialsView = nil
+        passwordVaultInlineActionView = nil
+        passwordVaultLocalRecoveryShowsWarning = false
+        passwordVaultAllowsLocalReplacement = false
+        passwordVaultSuppressesRemotePrompt = false
     }
 
     private func newPasswordVaultCreateRow(folderID: PasswordVaultFolder.ID) -> EmbeddedRow {
@@ -2870,7 +3186,21 @@ extension MainMenuPanelController {
         } else {
             updateOneDriveStatusButton(processStatus)
         }
-        guard passwordVaultPage == .sync, let resolvedSnapshot else { return }
+        guard let resolvedSnapshot else { return }
+        if case .failed(.remoteCredentialsRequired) = resolvedSnapshot.phase {
+            // Keep the user's explicit Back choice stable until sync produces a different state.
+        } else {
+            passwordVaultSuppressesRemotePrompt = false
+        }
+        if passwordVaultPage == .sync,
+           !passwordVaultSuppressesRemotePrompt,
+           case .failed(.remoteCredentialsRequired) = resolvedSnapshot.phase {
+            passwordVaultPage = .remoteCredentials
+            passwordVaultSyncView = nil
+            reloadContentKeepingTopLeft()
+            return
+        }
+        guard passwordVaultPage == .sync else { return }
         passwordVaultSyncView?.update(snapshot: resolvedSnapshot, processStatus: processStatus)
     }
 
@@ -2914,14 +3244,34 @@ extension MainMenuPanelController {
         editingFolderShortcutID = nil
         isWorkspaceEditing = false
         selectedMode = .passwordVault
+        passwordVaultSuppressesRemotePrompt = false
         passwordVaultPage = .sync
         reloadContentKeepingTopLeft()
         onCloseChildPanels()
     }
 
     private func returnToPasswordVaultFromSync() {
-        passwordVaultPage = .vault
+        switch passwordVaultPage {
+        case .remoteCredentials:
+            passwordVaultRemoteCredentialsView?.clearSecret()
+            passwordVaultRemoteCredentialsView = nil
+            passwordVaultSuppressesRemotePrompt = true
+            passwordVaultPage = .sync
+        case .confirmRemoteDeletion:
+            passwordVaultPage = .sync
+        case .conflictSummary:
+            passwordVaultPage = .vault
+        case .localCopyRecovery where passwordVaultLocalRecoveryShowsWarning:
+            passwordVaultLocalRecoveryShowsWarning = false
+        case .localCopyRecovery:
+            return
+        case .sync:
+            passwordVaultPage = .vault
+        case .vault:
+            return
+        }
         passwordVaultSyncView = nil
+        passwordVaultInlineActionView = nil
         reloadContentKeepingTopLeft()
     }
 
@@ -5579,7 +5929,8 @@ extension MainMenuPanelController {
     }
 
     var passwordVaultAccessSecureFieldCountForTesting: Int {
-        passwordVaultAccessView?.secureFieldCountForTesting ?? 0
+        (passwordVaultAccessView?.secureFieldCountForTesting ?? 0)
+            + (passwordVaultRemoteCredentialsView == nil ? 0 : 1)
     }
 
     var passwordVaultAccessLayoutForTesting: PasswordVaultAccessLayoutSnapshot? {
@@ -5617,6 +5968,47 @@ extension MainMenuPanelController {
 
     var passwordVaultSyncTextValuesForTesting: [String] {
         passwordVaultSyncView?.textValuesForTesting ?? []
+    }
+
+    var vaultInlinePageTextsForTesting: [String] {
+        if let passwordVaultRemoteCredentialsView {
+            return passwordVaultRemoteCredentialsView.textValuesForTesting
+        }
+        return passwordVaultInlineActionView?.textValuesForTesting ?? []
+    }
+
+    var passwordVaultSearchQueryForTesting: String { passwordVaultSearchQuery }
+
+    var vaultRemoteCredentialValueForTesting: String? {
+        passwordVaultRemoteCredentialsView?.secretValueForTesting
+    }
+
+    var vaultInlineActionsFitViewportForTesting: Bool {
+        let actionPrefixes = [
+            "passwordVaultRecovery",
+            "passwordVaultDeleteRemote",
+            "passwordVaultRemoteCredential",
+            "passwordVaultConflict",
+            "passwordVaultSyncStop",
+            "passwordVaultSyncDelete"
+        ]
+        return collectButtons(in: contentView).filter { button in
+            guard let identifier = button.identifier?.rawValue else { return false }
+            return actionPrefixes.contains { identifier.hasPrefix($0) }
+        }.allSatisfy { button in
+            guard let superview = button.superview else { return false }
+            let frame = superview.convert(button.frame, to: contentView)
+            return frame.minY >= contentBlockFrame.minY - 0.5
+                && frame.maxY <= contentBlockFrame.maxY + 0.5
+        }
+    }
+
+    func setPasswordVaultRemoteCredentialForTesting(_ value: String) {
+        passwordVaultRemoteCredentialsView?.setSecretForTesting(value)
+    }
+
+    func submitPasswordVaultRemoteCredentialForTesting() {
+        passwordVaultRemoteCredentialsView?.submit()
     }
 
     var vaultSyncSecondaryHiddenForTesting: Bool {

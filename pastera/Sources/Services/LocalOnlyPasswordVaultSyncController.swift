@@ -34,6 +34,12 @@ final class LocalOnlyPasswordVaultSyncController: PasswordVaultSyncControlling {
         remoteMasterPassword: String?, // swiftlint:disable:this inclusive_language
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     ) { completion(.failure(.remoteUnavailable)) }
+    // swiftlint:disable inclusive_language
+    func retry(
+        remoteMasterPassword: String,
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) { completion(.failure(.remoteUnavailable)) }
+    // swiftlint:enable inclusive_language
     func switchToLocalOnly(
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     ) { completion(failure.map(Result.failure) ?? .success(())) }
