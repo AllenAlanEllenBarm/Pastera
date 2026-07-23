@@ -244,6 +244,7 @@ struct PasswordVaultSyncServiceTests {
         metadata.mode = .oneDrive
         metadata.lastSyncedLocalDigest = PasswordVaultDigest.hex(local)
         metadata.lastObservedRemoteDigest = "remote-old"
+        metadata.conflictCopyCount = 2
         let fixture = try makeSyncServiceFixture(metadata: metadata, localData: local)
         fixture.access.state = .unlocked
         fixture.access.mergeApplication = PasswordVaultMergeApplication(
@@ -251,7 +252,7 @@ struct PasswordVaultSyncServiceTests {
                 data: merged,
                 digest: PasswordVaultDigest.hex(merged)
             ),
-            conflictCopyCount: 0
+            conflictCopyCount: 1
         )
         fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
             data: remote,
@@ -265,11 +266,108 @@ struct PasswordVaultSyncServiceTests {
         #expect(fixture.cloud.writes.isEmpty)
         #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(merged))
         #expect(fixture.metadata.value.lastObservedRemoteDigest == PasswordVaultDigest.hex(remote))
-        #expect(fixture.service.snapshot.phase == .synced)
+        #expect(fixture.metadata.value.conflictCopyCount == 3)
+        #expect(fixture.service.snapshot.phase == .conflicts(3))
+    }
+}
+
+extension PasswordVaultSyncServiceTests {
+    @Test("concurrent changes stay untouched while the local vault is locked")
+    func concurrentChangesWaitForUnlock() throws {
+        let local = Data("local-new".utf8)
+        let remote = Data("remote-new".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.localRevision = 2
+        metadata.lastSyncedLocalRevision = 1
+        metadata.lastSyncedLocalDigest = "local-old"
+        metadata.lastObservedRemoteDigest = "remote-old"
+        metadata.pendingChangeCount = 1
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: local)
+        fixture.access.state = .locked
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: remote,
+            digest: PasswordVaultDigest.hex(remote)
+        )
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.service.snapshot.phase == .waitingForUnlock)
+        #expect(fixture.access.mergeCount == 0)
+        #expect(fixture.cloud.writes.isEmpty)
+        #expect(fixture.metadata.value.pendingChangeCount == 1)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-old")
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == "remote-old")
     }
 
-    @Test("cloud verification failure preserves pending work and both old baselines")
-    func mergeUploadFailureKeepsPendingWork() throws {
+    @Test("remote credentials failure preserves the unlocked local replica and pending work")
+    func remoteCredentialsFailurePreservesLocalState() throws {
+        let local = Data("local-new".utf8)
+        let remote = Data("remote-new".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.localRevision = 2
+        metadata.lastSyncedLocalRevision = 1
+        metadata.lastSyncedLocalDigest = "local-old"
+        metadata.lastObservedRemoteDigest = "remote-old"
+        metadata.pendingChangeCount = 1
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: local)
+        fixture.access.state = .unlocked
+        fixture.access.mergeError = PasswordVaultSyncFailure.remoteCredentialsRequired
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: remote,
+            digest: PasswordVaultDigest.hex(remote)
+        )
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.service.snapshot.phase == .failed(.remoteCredentialsRequired))
+        #expect(fixture.access.state == .unlocked)
+        #expect(fixture.cloud.writes.isEmpty)
+        #expect(fixture.metadata.value.pendingChangeCount == 1)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-old")
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == "remote-old")
+    }
+
+    @Test("enabling sync passes remote credentials only to the current merge")
+    func enablingSyncPassesTransientRemoteCredentials() throws {
+        let local = Data("local-new".utf8)
+        let remote = Data("remote-new".utf8)
+        let merged = Data("merged".utf8)
+        let fixture = try makeSyncServiceFixture(localData: local)
+        fixture.access.state = .unlocked
+        fixture.access.mergeApplication = PasswordVaultMergeApplication(
+            encryptedSnapshot: PasswordVaultEncryptedSnapshot(
+                data: merged,
+                digest: PasswordVaultDigest.hex(merged)
+            ),
+            conflictCopyCount: 0
+        )
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: remote,
+            digest: PasswordVaultDigest.hex(remote)
+        )
+        var completed = false
+
+        fixture.service.enableOneDrive(
+            rootURL: try #require(fixture.root.url),
+            remoteMasterPassword: "ephemeral-remote-secret"
+        ) { result in
+            if case .success = result { completed = true }
+        }
+        fixture.drain()
+
+        #expect(completed)
+        #expect(fixture.access.receivedRemotePasswords.count == 1)
+        #expect(fixture.access.receivedRemotePasswords[0] == "ephemeral-remote-secret")
+        #expect(fixture.metadata.value.mode == .oneDrive)
+        #expect(fixture.metadata.value.pendingChangeCount == 0)
+    }
+
+    @Test("cloud failure persists the merge marker and retries without merging twice")
+    func mergeUploadFailureRetriesIdempotently() throws {
         let local = Data("local-new".utf8)
         let remote = Data("remote-new".utf8)
         let merged = Data("merged".utf8)
@@ -301,9 +399,85 @@ struct PasswordVaultSyncServiceTests {
         #expect(fixture.access.mergeCount == 1)
         #expect(fixture.cloud.writes.first?.expectation == .digest(PasswordVaultDigest.hex(remote)))
         #expect(fixture.metadata.value.pendingChangeCount >= 1)
+        #expect(fixture.metadata.value.pendingMergedRemoteDigest == PasswordVaultDigest.hex(remote))
+        #expect(fixture.metadata.value.conflictCopyCount == 1)
         #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-old")
         #expect(fixture.metadata.value.lastObservedRemoteDigest == "remote-old")
         #expect(fixture.service.snapshot.phase == .failed(.remoteVerificationFailed))
+
+        fixture.service.record(PasswordVaultCommit(
+            origin: .syncMerge,
+            encryptedDigest: PasswordVaultDigest.hex(merged)
+        ))
+        fixture.drain()
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == "local-old")
+
+        fixture.cloud.writeError = nil
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.access.mergeCount == 1)
+        #expect(fixture.cloud.writes.count == 2)
+        #expect(fixture.metadata.value.pendingMergedRemoteDigest == nil)
+        #expect(fixture.metadata.value.pendingChangeCount == 0)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(merged))
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == PasswordVaultDigest.hex(merged))
+        #expect(fixture.metadata.value.conflictCopyCount == 1)
+        #expect(fixture.service.snapshot.phase == .conflicts(1))
+    }
+
+    @Test("a newer remote digest after upload failure is merged before retrying")
+    func changedRemoteAfterFailureIsMergedAgain() throws {
+        let local = Data("local-new".utf8)
+        let firstRemote = Data("remote-one".utf8)
+        let secondRemote = Data("remote-two".utf8)
+        let firstMerge = Data("merged-one".utf8)
+        let secondMerge = Data("merged-two".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.localRevision = 2
+        metadata.lastSyncedLocalRevision = 1
+        metadata.lastSyncedLocalDigest = "local-old"
+        metadata.lastObservedRemoteDigest = "remote-old"
+        metadata.pendingChangeCount = 1
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: local)
+        fixture.access.state = .unlocked
+        fixture.access.mergeApplication = PasswordVaultMergeApplication(
+            encryptedSnapshot: PasswordVaultEncryptedSnapshot(
+                data: firstMerge,
+                digest: PasswordVaultDigest.hex(firstMerge)
+            ),
+            conflictCopyCount: 0
+        )
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: firstRemote,
+            digest: PasswordVaultDigest.hex(firstRemote)
+        )
+        fixture.cloud.writeError = .remoteVerificationFailed
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: secondRemote,
+            digest: PasswordVaultDigest.hex(secondRemote)
+        )
+        fixture.cloud.writeError = nil
+        fixture.access.mergeApplication = PasswordVaultMergeApplication(
+            encryptedSnapshot: PasswordVaultEncryptedSnapshot(
+                data: secondMerge,
+                digest: PasswordVaultDigest.hex(secondMerge)
+            ),
+            conflictCopyCount: 0
+        )
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.access.mergeCount == 2)
+        #expect(fixture.cloud.writes.count == 2)
+        #expect(fixture.cloud.writes.last?.expectation == .digest(PasswordVaultDigest.hex(secondRemote)))
+        #expect(fixture.metadata.value.pendingMergedRemoteDigest == nil)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(secondMerge))
     }
 
     @Test("observer delivery uses the main thread by default")

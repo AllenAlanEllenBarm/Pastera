@@ -190,6 +190,8 @@ private extension PasswordVaultSyncService {
             if candidate.mode == .oneDrive {
                 candidate.pendingChangeCount += 1
             }
+        case .syncMerge where candidate.pendingMergedRemoteDigest != nil:
+            break
         case .syncMerge, .migration:
             candidate.lastSyncedLocalDigest = commit.encryptedDigest
         }
@@ -233,10 +235,14 @@ private extension PasswordVaultSyncService {
             } else {
                 remoteChanged = false
             }
-            let decision = passwordVaultSyncDecision(
-                localChanged: localChanged || remote == nil,
-                remoteChanged: remoteChanged
-            )
+            let remoteWasAlreadyMerged = metadata.pendingChangeCount > 0
+                && metadata.pendingMergedRemoteDigest == remote?.digest
+            let decision = remoteWasAlreadyMerged
+                ? PasswordVaultSyncDecision.uploadLocal
+                : passwordVaultSyncDecision(
+                    localChanged: localChanged || remote == nil,
+                    remoteChanged: remoteChanged
+                )
             try apply(
                 decision,
                 local: local,
@@ -322,11 +328,15 @@ private extension PasswordVaultSyncService {
         candidate.lastSyncedLocalRevision = candidate.localRevision
         candidate.lastSyncedLocalDigest = local.digest
         candidate.lastObservedRemoteDigest = verifiedDigest
+        candidate.pendingMergedRemoteDigest = nil
         candidate.lastSyncAt = now()
         candidate.pendingChangeCount = 0
         candidate.lastFailure = nil
         try save(candidate)
-        publish(phase: .synced, remoteVaultAvailable: true)
+        let phase: PasswordVaultSyncPhase = candidate.conflictCopyCount > 0
+            ? .conflicts(candidate.conflictCopyCount)
+            : .synced
+        publish(phase: phase, remoteVaultAvailable: true)
     }
 
     private func mergeRemote(
@@ -350,6 +360,8 @@ private extension PasswordVaultSyncService {
         if uploadMergedResult {
             var pending = metadata
             pending.pendingChangeCount = max(1, pending.pendingChangeCount)
+            pending.pendingMergedRemoteDigest = remote.digest
+            pending.conflictCopyCount += application.conflictCopyCount
             try save(pending)
             try upload(application.encryptedSnapshot, replacing: remote, rootURL: rootURL)
         } else {
@@ -357,13 +369,14 @@ private extension PasswordVaultSyncService {
             candidate.lastSyncedLocalRevision = candidate.localRevision
             candidate.lastSyncedLocalDigest = application.encryptedSnapshot.digest
             candidate.lastObservedRemoteDigest = remote.digest
+            candidate.pendingMergedRemoteDigest = nil
             candidate.lastSyncAt = now()
             candidate.pendingChangeCount = 0
             candidate.conflictCopyCount += application.conflictCopyCount
             candidate.lastFailure = nil
             try save(candidate)
-            let phase: PasswordVaultSyncPhase = application.conflictCopyCount > 0
-                ? .conflicts(application.conflictCopyCount)
+            let phase: PasswordVaultSyncPhase = candidate.conflictCopyCount > 0
+                ? .conflicts(candidate.conflictCopyCount)
                 : .synced
             publish(phase: phase, remoteVaultAvailable: true)
         }

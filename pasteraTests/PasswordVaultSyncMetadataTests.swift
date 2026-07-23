@@ -75,6 +75,27 @@ struct PasswordVaultSyncMetadataTests {
         }
     }
 
+    @Test("legacy metadata without a pending merge marker remains readable")
+    func legacyMetadataWithoutPendingMergeMarkerRemainsReadable() throws {
+        let legacyData = try JSONEncoder().encode(PasswordVaultSyncMetadata.defaultLocalOnly)
+
+        let decoded = try JSONDecoder().decode(PasswordVaultSyncMetadata.self, from: legacyData)
+
+        #expect(decoded.pendingMergedRemoteDigest == nil)
+    }
+
+    @Test("pending merge marker round trips as an anonymous digest")
+    func pendingMergeMarkerRoundTrips() throws {
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.pendingMergedRemoteDigest = String(repeating: "d", count: 64)
+
+        let encoded = try JSONEncoder().encode(metadata)
+        let decoded = try JSONDecoder().decode(PasswordVaultSyncMetadata.self, from: encoded)
+
+        #expect(decoded == metadata)
+        #expect(decoded.pendingMergedRemoteDigest == String(repeating: "d", count: 64))
+    }
+
     @Test("failed atomic save preserves the previous sync baseline")
     func failedSavePreservesPreviousValue() throws {
         try withTemporaryDirectory { directory in

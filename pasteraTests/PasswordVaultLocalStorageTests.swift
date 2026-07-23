@@ -229,6 +229,7 @@ struct PasswordVaultLocalStorageTests {
             lastSyncedLocalRevision: 3,
             lastSyncedLocalDigest: "local-digest",
             lastObservedRemoteDigest: "remote-digest",
+            pendingMergedRemoteDigest: nil,
             lastSyncAt: Date(timeIntervalSince1970: 100),
             pendingChangeCount: 1,
             conflictCopyCount: 0,

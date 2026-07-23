@@ -78,6 +78,7 @@ final class FakePasswordVaultSyncAccess: PasswordVaultSyncAccess {
     var mergeApplication: PasswordVaultMergeApplication?
     var mergeError: Error?
     var mergeCount = 0
+    var receivedRemotePasswords = [String?]()
     private var observer: (PasswordVaultCommit) -> Void = { _ in }
 
     init(data: Data) {
@@ -94,6 +95,7 @@ final class FakePasswordVaultSyncAccess: PasswordVaultSyncAccess {
         remoteMasterPassword: String?
     ) throws -> PasswordVaultMergeApplication {
         mergeCount += 1
+        receivedRemotePasswords.append(remoteMasterPassword)
         if let mergeError { throw mergeError }
         let result = mergeApplication ?? PasswordVaultMergeApplication(
             encryptedSnapshot: PasswordVaultEncryptedSnapshot(

@@ -109,6 +109,7 @@ struct PasswordVaultSyncMetadata: Codable, Equatable {
         lastSyncedLocalRevision: 0,
         lastSyncedLocalDigest: nil,
         lastObservedRemoteDigest: nil,
+        pendingMergedRemoteDigest: nil,
         lastSyncAt: nil,
         pendingChangeCount: 0,
         conflictCopyCount: 0,
@@ -122,6 +123,7 @@ struct PasswordVaultSyncMetadata: Codable, Equatable {
     var lastSyncedLocalRevision: UInt64
     var lastSyncedLocalDigest: String?
     var lastObservedRemoteDigest: String?
+    var pendingMergedRemoteDigest: String?
     var lastSyncAt: Date?
     var pendingChangeCount: Int
     var conflictCopyCount: Int
