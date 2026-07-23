@@ -233,9 +233,8 @@ private extension PasswordVaultSyncService {
             } else {
                 remoteChanged = false
             }
-            let remoteWasDeleted = remote == nil && metadata.lastObservedRemoteDigest != nil
             let decision = passwordVaultSyncDecision(
-                localChanged: localChanged || remoteWasDeleted,
+                localChanged: localChanged || remote == nil,
                 remoteChanged: remoteChanged
             )
             try apply(

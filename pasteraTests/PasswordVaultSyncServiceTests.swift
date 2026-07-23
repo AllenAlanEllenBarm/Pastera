@@ -172,6 +172,23 @@ struct PasswordVaultSyncServiceTests {
         #expect(fixture.cloud.writes.first?.expectation == .digest(PasswordVaultDigest.hex(remote)))
     }
 
+    @Test("a missing remote is rebuilt even when the local digest already has a baseline")
+    func missingRemoteCannotBeReportedAsSynced() throws {
+        let local = Data("local-with-baseline".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.lastSyncedLocalDigest = PasswordVaultDigest.hex(local)
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: local)
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.cloud.writes.count == 1)
+        #expect(fixture.cloud.writes.first?.expectation == .absent)
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == PasswordVaultDigest.hex(local))
+        #expect(fixture.service.snapshot.phase == .synced)
+    }
+
     @Test("no changes do not write either side")
     func noChangesAreNoOp() throws {
         let local = Data("local".utf8)
