@@ -102,6 +102,33 @@ struct PasswordVaultMenuTests {
         #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 2)
     }
 
+    @Test("running OneDrive recovery explains cloud download without offering to start it again")
+    func runningOneDriveRecoveryExplainsPendingCloudDownload() {
+        let oneDriveService = PasswordVaultMenuOneDriveProcessStatusService(status: .running(
+            appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
+        ))
+        var retryCount = 0
+        let controller = makeVaultController(
+            state: { .localCopyUnavailable(.oneDriveUnavailable) },
+            folders: { [] },
+            retryLocalPreparation: { retryCount += 1 },
+            oneDriveStatusService: oneDriveService
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(!controller.mainMenuButtonIdentifiersForTesting.contains(
+            "passwordVaultRecoveryStartOneDrive"
+        ))
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "OneDrive is running, but the cloud vault has not finished downloading. Wait for OneDrive to finish syncing, then try again. Your cloud copy remains unchanged.")
+        ))
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultRecoveryRetry")
+        #expect(retryCount == 1)
+    }
+
     @Test("a locked vault unlocks inside the main content area")
     func lockedVaultUsesEmbeddedUnlockForm() {
         let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)

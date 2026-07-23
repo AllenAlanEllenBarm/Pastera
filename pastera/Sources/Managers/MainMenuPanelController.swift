@@ -2071,7 +2071,8 @@ extension MainMenuPanelController {
             )
         } else {
             var actions = [PasswordVaultInlineActionView.Action]()
-            if oneDriveStatusService.currentStatus().appURL != nil {
+            let oneDriveStatus = oneDriveStatusService.currentStatus()
+            if case .notRunning = oneDriveStatus {
                 actions.append(.init(
                     title: String(localized: "Start OneDrive"),
                     identifier: "passwordVaultRecoveryStartOneDrive",
@@ -2111,7 +2112,9 @@ extension MainMenuPanelController {
                     : String(localized: "The local password vault could not be prepared."),
                 messages: [isPreparing
                     ? String(localized: "Pastera is creating a local working copy. No password is needed yet.")
-                    : String(localized: "If OneDrive was disconnected, start it and retry. Your cloud copy remains unchanged.")],
+                    : oneDriveStatus.isRunning
+                        ? String(localized: "OneDrive is running, but the cloud vault has not finished downloading. Wait for OneDrive to finish syncing, then try again. Your cloud copy remains unchanged.")
+                        : String(localized: "If OneDrive was disconnected, start it and retry. Your cloud copy remains unchanged.")],
                 actions: actions
             )
         }

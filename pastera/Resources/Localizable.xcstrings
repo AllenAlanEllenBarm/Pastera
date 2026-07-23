@@ -7282,6 +7282,7 @@
     "Pastera is creating a local working copy. No password is needed yet." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Pastera 正在创建本地工作副本，此时无需输入密码。" } } } },
     "The local password vault could not be prepared." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法准备本地密码箱。" } } } },
     "If OneDrive was disconnected, start it and retry. Your cloud copy remains unchanged." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "如果 OneDrive 已断开，请启动后重试。云端副本不会被更改。" } } } },
+    "OneDrive is running, but the cloud vault has not finished downloading. Wait for OneDrive to finish syncing, then try again. Your cloud copy remains unchanged." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已启动，但云端密码箱尚未下载完成。请等待 OneDrive 完成同步后重试。云端副本不会被更改。" } } } },
     "Local Vault Recovery" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复本地密码箱" } } } },
     "Unlock the OneDrive Copy" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁 OneDrive 副本" } } } },
     "Your local vault is already unlocked. Enter the OneDrive copy's master password for this merge only." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地密码箱已解锁。请输入 OneDrive 副本的主密码，本次合并后不会保留。" } } } },
