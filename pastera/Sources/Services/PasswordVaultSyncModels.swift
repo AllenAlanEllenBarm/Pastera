@@ -71,6 +71,25 @@ enum PasswordVaultSyncStep: String, Codable, Equatable {
     case verifying
 }
 
+enum PasswordVaultSyncDecision: Equatable {
+    case noChange
+    case uploadLocal
+    case applyRemote
+    case mergeBoth
+}
+
+func passwordVaultSyncDecision(
+    localChanged: Bool,
+    remoteChanged: Bool
+) -> PasswordVaultSyncDecision {
+    switch (localChanged, remoteChanged) {
+    case (false, false): .noChange
+    case (true, false): .uploadLocal
+    case (false, true): .applyRemote
+    case (true, true): .mergeBoth
+    }
+}
+
 struct PasswordVaultSyncSnapshot: Equatable {
     let mode: PasswordVaultSyncMode
     let phase: PasswordVaultSyncPhase
