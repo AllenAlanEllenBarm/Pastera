@@ -2736,7 +2736,7 @@ extension MainMenuPanelController {
         case .vaultLocked: return String(localized: "Unlock the password database first.")
         case .wrongMasterPassword: return String(localized: "The database password is incorrect.")
         case .unsupportedFormat: return String(localized: "This password database format is not supported.")
-        case .cloudUnavailable: return String(localized: "The configured OneDrive folder is unavailable.")
+        case .cloudUnavailable: return String(localized: "OneDrive sync needs attention")
         case .externalConflict: return String(localized: "Password database changes need conflict recovery.")
         case .saveFailed: return String(localized: "The password database could not be saved.")
         case .invalidAutoLockInterval: return String(localized: "Choose a supported automatic lock time.")
@@ -3240,6 +3240,10 @@ extension MainMenuPanelController {
     }
 
     private func openOneDriveFromToolbar() {
+        openPasswordVaultSyncFromMainMenu()
+    }
+
+    func openPasswordVaultSyncFromMainMenu() {
         guard passwordVaultDataSource != nil, passwordVaultSyncDataSource != nil else { return }
         editingFolderShortcutID = nil
         isWorkspaceEditing = false

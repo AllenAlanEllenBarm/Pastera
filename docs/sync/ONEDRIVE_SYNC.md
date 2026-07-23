@@ -40,6 +40,79 @@ Sync is intentionally non-destructive:
 - When a user deletes a synced local snippet folder or item, Pastera exports a
   deletion tombstone so other devices can apply the newer snippet deletion.
 
+## Password Vault Local-First Replica
+
+Password vault storage has its own lifecycle and is independent from history,
+snippet, and file-asset sync. Creating a password vault defaults to
+`localOnly`; the OneDrive root and the four history/snippet switches do not
+enable password-vault sync. The Sync settings pane only shows a password-vault
+summary and a **Manage in Main Window** entrance. Enabling, stopping, recovery,
+remote credentials, conflict review, and remote deletion stay in the main
+password-vault window.
+
+The production local working copy is stored outside OneDrive:
+
+```text
+~/Library/Application Support/com.pastera-app.Pastera/PasswordVault/
+  PasteraVault.kdbx
+  PasteraVault.kdbx.bak
+  PasswordVaultSyncMetadata.json
+```
+
+Debug builds use their own bundle-identifier directory. The local KDBX is the
+working source for every create, update, move, delete, lock, unlock, and quick
+unlock operation. OneDrive availability never gates these operations after the
+local copy has been prepared.
+
+When the user explicitly enables OneDrive, the encrypted replica remains at
+the compatible path used by earlier password-vault builds:
+
+```text
+<selected-OneDrive-sync-root>/PasteraSync/vault/PasteraVault.kdbx
+```
+
+`PasswordVaultSyncMetadata.json` contains only lifecycle state and digests:
+mode, local and last-synced revisions, local and observed-remote SHA-256
+digests, pending-merge digest, last-sync time, pending/conflict counts, failure,
+and migration version. It never stores entry titles, usernames, passwords,
+notes, websites, master passwords, or quick-unlock keys.
+
+The summary baselines are updated only after the corresponding file operation
+has been verified:
+
+- `lastSyncedLocalRevision` and `lastSyncedLocalDigest` identify the verified
+  local baseline.
+- `lastObservedRemoteDigest` identifies the verified OneDrive baseline.
+- `pendingChangeCount` remains non-zero until the encrypted remote write is
+  read back and its digest matches.
+- `pendingMergedRemoteDigest` prevents the same already-merged remote version
+  from being merged again when a later upload retry is required.
+- `lastSyncAt` records a verified password-vault synchronization, not a claim
+  that Microsoft's service has finished cloud transport.
+
+If OneDrive is not installed, stops running, or its folder becomes unavailable,
+the mode remains `oneDrive`, the footer and settings summary show a disconnected
+state, and local commits continue increasing the pending count. Pastera does
+not read or write the remote path while the OneDrive process is unavailable.
+After reconnection, it compares both digest baselines and performs one of four
+decisions: no change, upload local, apply remote, or merge both.
+
+Concurrent password-vault changes are merged at KDBX group and entry level.
+Independent entries are combined; newer versions win while the older value is
+retained in KDBX history (up to ten versions); equal-timestamp divergent values
+produce a new entry titled with `(Conflict)`. Newer KDBX deletion tombstones
+remove older matching entries or groups. A different remote master password is
+accepted only as a one-shot in-memory merge credential and is cleared when the
+page is submitted or left.
+
+Stopping sync changes the mode to `localOnly` and stops remote observation and
+writes. It preserves the local KDBX, the OneDrive KDBX, and both digest
+baselines so a later re-enable can compare both branches. **Delete OneDrive
+Copy** is a separate, in-window confirmed action: it preserves the local vault,
+deletes only the compatible remote KDBX, switches to `localOnly`, and clears the
+remote baseline only after deletion succeeds. A failed deletion leaves the
+mode, data, and baselines unchanged.
+
 ## Directory Layout
 
 `sync` is the protocol root. History and snippets are stored separately, and

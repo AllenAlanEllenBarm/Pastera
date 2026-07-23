@@ -127,7 +127,13 @@ struct PreferencePaneAlignmentTests {
         controller.showWindow(nil)
 
         let anchors: [(PasteraPreferencePaneID, [String])] = [
-            (.sync, ["sync.oneDriveStatus", "sync.rootFolder", "sync.fileTypes", "sync.actions"]),
+            (.sync, [
+                "sync.oneDriveStatus",
+                "sync.rootFolder",
+                "sync.passwordVault",
+                "sync.fileTypes",
+                "sync.actions"
+            ]),
             (.softwareUpdate, [
                 "softwareUpdate.currentVersion",
                 "softwareUpdate.automaticCheck",

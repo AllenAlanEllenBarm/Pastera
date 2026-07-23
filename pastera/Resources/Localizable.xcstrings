@@ -7037,6 +7037,7 @@
     "30 Minutes" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "30 Minutes" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "30 Minuten" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "30 minuti" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "30分" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "30 分钟" } } } },
     "A password vault security operation is in progress." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "A password vault security operation is in progress." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Ein Sicherheitsvorgang für den Passworttresor wird ausgeführt." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "È in corso un'operazione di sicurezza della cassaforte password." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫のセキュリティ操作を実行中です。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在处理密码箱安全操作。" } } } },
     "A resolved conflict archive still needs attention." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "A resolved conflict archive still needs attention." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Ein Archiv mit gelöstem Konflikt muss noch geprüft werden." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Un archivio di conflitti risolti richiede ancora attenzione." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "解決済みの競合アーカイブを確認してください。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仍有已解决的冲突归档需要处理。" } } } },
+    "A secured password-change artifact is still pending cleanup." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "A secured password-change artifact is still pending cleanup." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Ein gesichertes Passwortänderungs-Artefakt wartet noch auf die Bereinigung." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Un artefatto protetto del cambio password è ancora in attesa di pulizia." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "保護されたパスワード変更用アーティファクトのクリーンアップが保留中です。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "受保护的密码变更文件仍待清理。" } } } },
     "Agent automatic unlock needs to be authorized again." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent automatic unlock needs to be authorized again." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Die automatische Agent-Entsperrung muss erneut autorisiert werden." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Lo sblocco automatico dell'Agent deve essere autorizzato di nuovo." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "Agentの自動ロック解除を再認証してください。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要重新授权 Agent 自动解锁。" } } } },
     "An old unlock credential could not be removed. Review Keychain access." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "An old unlock credential could not be removed. Review Keychain access." } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Alte Entsperrdaten konnten nicht entfernt werden. Prüfe den Schlüsselbundzugriff." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Non è stato possibile rimuovere una vecchia credenziale. Controlla l'accesso al Portachiavi." } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "古いロック解除情報を削除できませんでした。キーチェーンのアクセスを確認してください。" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法移除旧解锁凭据，请检查钥匙串访问权限。" } } } },
     "Changing…" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Changing…" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "Wird geändert…" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Modifica…" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "変更中…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在修改…" } } } },
@@ -7150,21 +7151,57 @@
     "OneDrive is syncing: %@" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 正在同步：%@" } } } },
     "OneDrive is waiting for the vault to unlock" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 正在等待密码箱解锁" } } } },
     "OneDrive sync failed" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步失败" } } } },
-    "OneDrive is disconnected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已断开" } } } },
-    "OneDrive is disconnected; %lld changes are waiting" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已断开，%lld 项更改等待同步" } } } },
-    "OneDrive has %lld conflict copies" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 有 %lld 个冲突副本" } } } },
+    "OneDrive is disconnected" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive is disconnected" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive ist getrennt" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive è disconnesso" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive が切断されています" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已断开" } }
+    } },
+    "OneDrive is disconnected; %lld changes are waiting" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive is disconnected; %lld changes are waiting" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive ist getrennt; %lld Änderungen warten auf die Synchronisierung" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive è disconnesso; %lld modifiche in attesa di sincronizzazione" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive が切断されています。%lld 件の変更が同期待ちです" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已断开，%lld 项更改等待同步" } }
+    } },
+    "OneDrive has %lld conflict copies" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive has %lld conflict copies" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive enthält %lld Konfliktkopien" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive contiene %lld copie in conflitto" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive に %lld 件の競合コピーがあります" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 有 %lld 个冲突副本" } }
+    } },
     "OneDrive Sync" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步" } } } },
     "Saved on This Mac" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存在这台 Mac 上" } } } },
     "Your encrypted vault remains available without OneDrive." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "即使没有 OneDrive，你仍可使用本地加密密码箱。" } } } },
     "Local vault is not ready" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地密码箱尚未准备好" } } } },
     "Restore the local copy before changing sync settings." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先恢复本地副本，再更改同步设置。" } } } },
-    "OneDrive sync is off" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步已关闭" } } } },
+    "OneDrive sync is off" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive sync is off" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive-Synchronisierung ist deaktiviert" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "La sincronizzazione OneDrive è disattivata" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同期はオフです" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步已关闭" } }
+    } },
     "Nothing is uploaded until you choose to enable sync." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只有你主动开启同步后，数据才会上传。" } } } },
     "Local changes are safe and will wait on this Mac." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地更改是安全的，并会留在这台 Mac 上等待同步。" } } } },
     "No changes waiting" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有等待同步的更改" } } } },
-    "%lld changes waiting" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 项更改等待同步" } } } },
+    "%lld changes waiting" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld changes waiting" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "%lld Änderungen warten" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld modifiche in attesa" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "%lld 件の変更が待機中です" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 项更改等待同步" } }
+    } },
     "%lld conflict copies need review." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个冲突副本需要检查。" } } } },
-    "Last synced: %@" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上次同步：%@" } } } },
+    "Last synced: %@" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Last synced: %@" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Zuletzt synchronisiert: %@" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Ultima sincronizzazione: %@" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "最終同期：%@" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上次同步：%@" } }
+    } },
     "OneDrive has never been enabled for this vault." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个密码箱从未开启过 OneDrive 同步。" } } } },
     "The first sync has not finished yet." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "首次同步尚未完成。" } } } },
     "No OneDrive account folder was found. Install OneDrive or sign in, then try again." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未找到 OneDrive 账户目录。请安装 OneDrive 或登录账户后重试。" } } } },
@@ -7180,11 +7217,35 @@
     "Saving the local vault" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存本地密码箱" } } } },
     "Uploading encrypted replica" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在上传加密副本" } } } },
     "Verifying OneDrive copy" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在验证 OneDrive 副本" } } } },
-    "OneDrive is connected" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已连接" } } } },
+    "OneDrive is connected" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive is connected" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive ist verbunden" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive è connesso" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive に接続済みです" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已连接" } }
+    } },
     "OneDrive sync has conflicts" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步存在冲突" } } } },
-    "OneDrive sync needs attention" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步需要处理" } } } },
-    "Sync is waiting for unlock" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步正在等待解锁" } } } },
-    "Syncing with OneDrive" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在与 OneDrive 同步" } } } },
+    "OneDrive sync needs attention" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive sync needs attention" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive-Synchronisierung erfordert Aufmerksamkeit" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "La sincronizzazione OneDrive richiede attenzione" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同期を確認してください" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步需要处理" } }
+    } },
+    "Sync is waiting for unlock" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync is waiting for unlock" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisierung wartet auf das Entsperren" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "La sincronizzazione attende lo sblocco" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "同期はロック解除待ちです" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步正在等待解锁" } }
+    } },
+    "Syncing with OneDrive" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Syncing with OneDrive" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisierung mit OneDrive" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Sincronizzazione con OneDrive" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive と同期中です" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在与 OneDrive 同步" } }
+    } },
     "%lld conflict copies are available." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有 %lld 个冲突副本。" } } } },
     "Queued changes remain on this Mac." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待中的更改仍保存在这台 Mac 上。" } } } },
     "The encrypted replica is up to date." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加密副本已是最新。" } } } },
@@ -7244,6 +7305,41 @@
     "Sync Result" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步结果" } } } },
     "Preparing…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在准备…" } } } },
     "Back" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "返回" } } } },
+    "Password Vault Sync" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Password Vault Sync" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor-Synchronisierung" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Sincronizzazione cassaforte password" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫の同期" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱同步" } }
+    } },
+    "Sync Management" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync Management" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisierungsverwaltung" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Gestione sincronizzazione" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "同期管理" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步管理" } }
+    } },
+    "Manage in Main Window" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage in Main Window" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Im Hauptfenster verwalten" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Gestisci nella finestra principale" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "メインウインドウで管理" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在主窗口中管理" } }
+    } },
+    "Password vault sync is independent from history and snippet sync." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Password vault sync is independent from history and snippet sync." } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Die Passworttresor-Synchronisierung ist von Verlauf und Textbausteinen getrennt." } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "La sincronizzazione della cassaforte password è indipendente da cronologia e frammenti." } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫の同期は、履歴やスニペットの同期とは独立しています。" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱同步与历史记录及片段同步相互独立。" } }
+    } },
+    "Enable, stop, recover, or resolve conflicts in the main window." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable, stop, recover, or resolve conflicts in the main window." } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisierung im Hauptfenster aktivieren, stoppen, wiederherstellen oder Konflikte lösen." } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Attiva, arresta, ripristina o risolvi i conflitti nella finestra principale." } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "有効化、停止、復旧、競合の解決はメインウインドウで行います。" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请在主窗口中开启、停止、恢复同步或处理冲突。" } }
+    } },
     "items" : {
       "localizations" : {
         "en" : {

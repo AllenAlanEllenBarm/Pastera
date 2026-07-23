@@ -29,6 +29,7 @@ struct SyncPreferenceTopSectionTests {
             for anchorID in [
                 "sync.oneDriveStatus",
                 "sync.rootFolder",
+                "sync.passwordVault",
                 "sync.fileTypes",
                 "sync.actions"
             ] {
@@ -39,6 +40,7 @@ struct SyncPreferenceTopSectionTests {
             #expect(labels.contains(pasteraPreferenceString("Sync")))
             #expect(labels.contains(pasteraPreferenceString("OneDrive Status")))
             #expect(labels.contains(pasteraPreferenceString("Sync Location")))
+            #expect(labels.contains(pasteraPreferenceString("Password Vault Sync")))
             #expect(labels.contains(pasteraPreferenceString("File Types")))
             #expect(labels.contains(pasteraPreferenceString("Manual Sync")))
             #expect(!labels.contains("同步口令"))
@@ -105,6 +107,7 @@ struct SyncPreferenceTopSectionTests {
             #expect([
                 pasteraPreferenceString("Sync"),
                 pasteraPreferenceString("OneDrive"),
+                pasteraPreferenceString("Password Vault"),
                 pasteraPreferenceString("Sync Scope"),
                 pasteraPreferenceString("Actions")
             ].allSatisfy(texts.contains))
@@ -348,10 +351,153 @@ struct SyncPreferenceTopSectionTests {
     }
 }
 
+extension SyncPreferenceTopSectionTests {
+    @Test
+    func passwordVaultSummaryIsIndependentFromHistoryAndSnippetSyncControls() throws {
+        try withPreservedSyncDefaults {
+            var vaultMode = PasswordVaultSyncMode.localOnly
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .notFound },
+                passwordVaultSyncSnapshotProvider: {
+                    PasswordVaultSyncSnapshot(
+                        mode: vaultMode,
+                        phase: .disabled,
+                        localVaultAvailable: true,
+                        remoteVaultAvailable: nil,
+                        pendingChangeCount: 0,
+                        conflictCopyCount: 0,
+                        lastSyncAt: nil
+                    )
+                },
+                managePasswordVaultSync: { vaultMode = .oneDrive }
+            )
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            let texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            let buttons = preferenceButtons(in: controller.view)
+            let historyAndSnippetLabels: Set<String> = [
+                pasteraPreferenceString("Upload History"),
+                pasteraPreferenceString("Import History"),
+                pasteraPreferenceString("Upload Snippets"),
+                pasteraPreferenceString("Import Snippets")
+            ]
+
+            #expect(texts.contains(pasteraPreferenceString("Password Vault")))
+            #expect(texts.contains(pasteraPreferenceString("OneDrive sync is off")))
+            #expect(texts.contains(
+                pasteraPreferenceString("Password vault sync is independent from history and snippet sync.")
+            ))
+            #expect(buttons.filter { historyAndSnippetLabels.contains($0.accessibilityLabel() ?? "") }.count == 4)
+            #expect(buttons.filter { $0.title == pasteraPreferenceString("Manage in Main Window") }.count == 1)
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Enable OneDrive Sync") })
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Stop Sync, Keep Copies") })
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Delete Cloud Copy…") })
+            #expect(vaultMode == .localOnly)
+        }
+    }
+
+    @Test
+    func passwordVaultSummaryShowsDisconnectedPendingChangesWithoutDuplicateRecoveryControls() throws {
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .notFound },
+                passwordVaultSyncSnapshotProvider: {
+                    PasswordVaultSyncSnapshot(
+                        mode: .oneDrive,
+                        phase: .disconnected(.oneDriveNotRunning),
+                        localVaultAvailable: true,
+                        remoteVaultAvailable: false,
+                        pendingChangeCount: 3,
+                        conflictCopyCount: 0,
+                        lastSyncAt: nil
+                    )
+                }
+            )
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            let texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            let buttons = preferenceButtons(in: controller.view)
+            let disconnectedSummary = String(
+                format: pasteraPreferenceString("OneDrive is disconnected; %lld changes are waiting"),
+                Int64(3)
+            )
+
+            #expect(texts.contains(disconnectedSummary))
+            #expect(buttons.filter { $0.title == pasteraPreferenceString("Manage in Main Window") }.count == 1)
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Start OneDrive") })
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Try Again") })
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Stop Sync, Keep Copies") })
+            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Delete Cloud Copy…") })
+        }
+    }
+
+    @Test
+    func passwordVaultSummaryShowsLastVerifiedSyncTime() throws {
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .notFound },
+                passwordVaultSyncSnapshotProvider: {
+                    PasswordVaultSyncSnapshot(
+                        mode: .oneDrive,
+                        phase: .synced,
+                        localVaultAvailable: true,
+                        remoteVaultAvailable: true,
+                        pendingChangeCount: 0,
+                        conflictCopyCount: 0,
+                        lastSyncAt: Date(timeIntervalSince1970: 1_800_000_000)
+                    )
+                }
+            )
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            let texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            let lastSyncPrefix = pasteraPreferenceString("Last synced: %@")
+                .components(separatedBy: "%@")
+                .first ?? ""
+            #expect(texts.contains(pasteraPreferenceString("OneDrive is connected")))
+            #expect(texts.contains { $0.hasPrefix(lastSyncPrefix) })
+        }
+    }
+
+    @Test
+    func managePasswordVaultSyncClosesSettingsBeforeOpeningMainWindowExperience() throws {
+        try withPreservedSyncDefaults {
+            var manageCount = 0
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .notFound },
+                managePasswordVaultSync: { manageCount += 1 }
+            )
+            let window = SyncTopSectionVisibilityWindow()
+            window.contentView = controller.view
+            defer { window.contentView = nil }
+            controller.view.layoutSubtreeIfNeeded()
+            let manageButton = try #require(preferenceButtons(in: controller.view).first {
+                $0.title == pasteraPreferenceString("Manage in Main Window")
+            })
+
+            manageButton.performClick(nil)
+
+            #expect(window.didClose)
+            #expect(manageCount == 1)
+        }
+    }
+}
+
 private final class SyncTopSectionVisibilityWindow: NSWindow {
     var testIsVisible = false
+    private(set) var didClose = false
 
     override var isVisible: Bool {
         testIsVisible
+    }
+
+    override func close() {
+        didClose = true
     }
 }

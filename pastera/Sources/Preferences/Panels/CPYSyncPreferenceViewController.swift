@@ -103,6 +103,62 @@ final class PasteraSyncSwitch: NSButton {
     }
 }
 
+private final class PasteraVaultSyncSummaryView: NSStackView {
+    private let symbolView = NSImageView()
+    private let summaryLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 6
+        let textStack = NSStackView()
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 2
+        summaryLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        detailLabel.font = .systemFont(ofSize: 10.5)
+        detailLabel.textColor = .secondaryLabelColor
+        for label in [summaryLabel, detailLabel] {
+            label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            textStack.addArrangedSubview(label)
+        }
+        addArrangedSubview(symbolView)
+        addArrangedSubview(textStack)
+        symbolView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            symbolView.widthAnchor.constraint(equalToConstant: 16),
+            symbolView.heightAnchor.constraint(equalToConstant: 16),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 250)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func update(text: String, detail: String?, symbolName: String, tintColor: NSColor) {
+        symbolView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        symbolView.contentTintColor = tintColor
+        summaryLabel.stringValue = text
+        summaryLabel.textColor = tintColor
+        detailLabel.stringValue = detail ?? ""
+        detailLabel.isHidden = detail == nil
+        let accessibilityText = detail.map { "\(text), \($0)" } ?? text
+        setAccessibilityLabel(accessibilityText)
+    }
+}
+
+private struct PasteraVaultSyncPresentation {
+    let text: String
+    let detail: String?
+    let symbolName: String
+    let tintColor: NSColor
+}
+
 final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController {
     private enum Text {
         static let uploadHistory = pasteraPreferenceString("Upload History")
@@ -121,6 +177,7 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
         static let oneDriveFolder = pasteraPreferenceString("Sync Location")
         static let manualSync = pasteraPreferenceString("Manual Sync")
         static let notDetected = pasteraPreferenceString("OneDrive Not Detected")
+        static let manageInMainWindow = pasteraPreferenceString("Manage in Main Window")
     }
 
     private struct FileTypeOption {
@@ -147,10 +204,14 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
     private let changeFolderButton = NSButton(title: Text.changeFolder, target: nil, action: nil)
     private let showFolderButton = NSButton(title: Text.showInFinder, target: nil, action: nil)
     private let syncNowButton = NSButton(title: Text.syncNow, target: nil, action: nil)
+    private let vaultSyncSummaryView = PasteraVaultSyncSummaryView()
+    private let manageVaultSyncButton = NSButton(title: Text.manageInMainWindow, target: nil, action: nil)
     private let defaultFolderResolutionProvider: () -> SyncDefaultFolderResolution
     private let defaultFolderResolver: SyncDefaultFolderResolver
     private let revealInFinder: (URL) -> Void
     private let chooseSyncRoot: (NSWindow?, URL?) -> URL?
+    private let passwordVaultSyncSnapshotProvider: () -> PasswordVaultSyncSnapshot
+    private let managePasswordVaultSync: () -> Void
     private var infoPopover: NSPopover?
     private let fileTypeOptions: [FileTypeOption] = [
         FileTypeOption(
@@ -183,12 +244,20 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
             panel.message = pasteraPreferenceString("Choose a OneDrive folder for Pastera sync.")
             panel.directoryURL = currentRootURL
             return panel.runModal() == .OK ? panel.url : nil
+        },
+        passwordVaultSyncSnapshotProvider: @escaping () -> PasswordVaultSyncSnapshot = {
+            AppEnvironment.current.passwordVaultSyncService.snapshot
+        },
+        managePasswordVaultSync: @escaping () -> Void = {
+            AppEnvironment.current.menuManager.popUpPasswordVaultSync()
         }
     ) {
         self.defaultFolderResolver = defaultFolderResolver
         self.defaultFolderResolutionProvider = defaultFolderResolutionProvider ?? { defaultFolderResolver.resolve() }
         self.revealInFinder = revealInFinder
         self.chooseSyncRoot = chooseSyncRoot
+        self.passwordVaultSyncSnapshotProvider = passwordVaultSyncSnapshotProvider
+        self.managePasswordVaultSync = managePasswordVaultSync
         super.init(paneID: .sync, title: pasteraPreferenceString("Sync"))
     }
 
@@ -269,6 +338,29 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
         addGroup(accountGroup)
         registerAnchor("sync.oneDriveStatus", view: statusRow)
         registerAnchor("sync.rootFolder", view: folderRow)
+
+        manageVaultSyncButton.bezelStyle = .rounded
+        manageVaultSyncButton.controlSize = .small
+        manageVaultSyncButton.setAccessibilityLabel(Text.manageInMainWindow)
+        let vaultStatusRow = PasteraPreferenceSettingRowView(
+            title: pasteraPreferenceString("Password Vault Sync"),
+            subtitle: pasteraPreferenceString("Password vault sync is independent from history and snippet sync."),
+            control: vaultSyncSummaryView
+        )
+        let vaultManagementRow = PasteraPreferenceSettingRowView(
+            title: pasteraPreferenceString("Sync Management"),
+            subtitle: pasteraPreferenceString("Enable, stop, recover, or resolve conflicts in the main window."),
+            control: manageVaultSyncButton
+        )
+        let vaultGroup = PasteraPreferenceGroupView(
+            title: pasteraPreferenceString("Password Vault"),
+            symbolName: "lock.shield",
+            accentColor: .systemIndigo
+        )
+        vaultGroup.addRow(vaultStatusRow)
+        vaultGroup.addRow(vaultManagementRow)
+        addGroup(vaultGroup)
+        registerAnchor("sync.passwordVault", view: vaultStatusRow)
 
         fileTypeButtons = fileTypeOptions.map(makeFileTypeCheckbox)
         let fileTypeControls = NSStackView(views: fileTypeButtons)
@@ -388,6 +480,8 @@ private extension CPYSyncPreferenceViewController {
         showFolderButton.action = #selector(showFolderInFinder)
         syncNowButton.target = self
         syncNowButton.action = #selector(syncNow)
+        manageVaultSyncButton.target = self
+        manageVaultSyncButton.action = #selector(manageVaultSync)
     }
 
     @objc func showSyncInfo(_ sender: NSButton) {
@@ -444,6 +538,11 @@ private extension CPYSyncPreferenceViewController {
         guard prepareManualSync() else { return }
         syncNowButton.isEnabled = false
         SyncCoordinator.shared.syncNow(reason: .manual)
+    }
+
+    @objc func manageVaultSync() {
+        view.window?.close()
+        managePasswordVaultSync()
     }
 
     @objc func toggleHistoryUpload(_ sender: PasteraSyncSwitch) {
@@ -512,7 +611,99 @@ private extension CPYSyncPreferenceViewController {
         updateSwitch(snippetUploadSwitch, isOn: settings.snippetUploadEnabled)
         updateSwitch(snippetImportSwitch, isOn: settings.snippetImportEnabled)
         updateFileTypeCheckboxes(settings: settings)
+        updatePasswordVaultSyncSummary()
         return rootIsAvailable
+    }
+
+    func updatePasswordVaultSyncSummary() {
+        let snapshot = passwordVaultSyncSnapshotProvider()
+        let presentation = passwordVaultSyncPresentation(for: snapshot)
+        vaultSyncSummaryView.update(
+            text: presentation.text,
+            detail: presentation.detail,
+            symbolName: presentation.symbolName,
+            tintColor: presentation.tintColor
+        )
+    }
+
+    func passwordVaultSyncPresentation(
+        for snapshot: PasswordVaultSyncSnapshot
+    ) -> PasteraVaultSyncPresentation {
+        guard snapshot.mode == .oneDrive else {
+            return PasteraVaultSyncPresentation(
+                text: pasteraPreferenceString("OneDrive sync is off"),
+                detail: nil,
+                symbolName: "cloud",
+                tintColor: .secondaryLabelColor
+            )
+        }
+        let pendingDetail = snapshot.pendingChangeCount > 0
+            ? String(
+                format: pasteraPreferenceString("%lld changes waiting"),
+                Int64(snapshot.pendingChangeCount)
+            )
+            : nil
+        switch snapshot.phase {
+        case .synced:
+            let detail = snapshot.lastSyncAt.map {
+                String(
+                    format: pasteraPreferenceString("Last synced: %@"),
+                    DateFormatter.localizedString(from: $0, dateStyle: .short, timeStyle: .short)
+                )
+            }
+            return PasteraVaultSyncPresentation(
+                text: pasteraPreferenceString("OneDrive is connected"),
+                detail: detail,
+                symbolName: "checkmark.circle.fill",
+                tintColor: .systemBlue
+            )
+        case .syncing:
+            return PasteraVaultSyncPresentation(
+                text: pasteraPreferenceString("Syncing with OneDrive"),
+                detail: pendingDetail,
+                symbolName: "arrow.triangle.2.circlepath",
+                tintColor: .systemBlue
+            )
+        case .disconnected:
+            let text = snapshot.pendingChangeCount > 0
+                ? String(
+                    format: pasteraPreferenceString("OneDrive is disconnected; %lld changes are waiting"),
+                    Int64(snapshot.pendingChangeCount)
+                )
+                : pasteraPreferenceString("OneDrive is disconnected")
+            return PasteraVaultSyncPresentation(
+                text: text,
+                detail: nil,
+                symbolName: "bolt.slash.fill",
+                tintColor: .systemRed
+            )
+        case .waitingForUnlock:
+            return PasteraVaultSyncPresentation(
+                text: pasteraPreferenceString("Sync is waiting for unlock"),
+                detail: pendingDetail,
+                symbolName: "lock.fill",
+                tintColor: .systemOrange
+            )
+        case .conflicts(let count):
+            let conflictCount = max(count, snapshot.conflictCopyCount)
+            let text = String(
+                format: pasteraPreferenceString("OneDrive has %lld conflict copies"),
+                Int64(conflictCount)
+            )
+            return PasteraVaultSyncPresentation(
+                text: text,
+                detail: pendingDetail,
+                symbolName: "exclamationmark.triangle.fill",
+                tintColor: .systemOrange
+            )
+        case .failed, .disabled:
+            return PasteraVaultSyncPresentation(
+                text: pasteraPreferenceString("OneDrive sync needs attention"),
+                detail: pendingDetail,
+                symbolName: "xmark.octagon.fill",
+                tintColor: .systemRed
+            )
+        }
     }
 
     func updateSwitch(_ control: PasteraSyncSwitch, isOn: Bool) {

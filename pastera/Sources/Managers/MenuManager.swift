@@ -209,6 +209,14 @@ extension MenuManager {
         installPanelDismissMonitorsIfNeeded()
     }
 
+    func popUpPasswordVaultSync() {
+        let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
+        mainMenuPanelController = panelController
+        panelController.openPasswordVaultSyncFromMainMenu()
+        panelController.show(at: NSEvent.mouseLocation, pinned: false)
+        installPanelDismissMonitorsIfNeeded()
+    }
+
     func popUpSnippetFolder(_ folderDetail: SnippetFolderDetail, triggerKeyCombo: KeyCombo? = nil) {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController

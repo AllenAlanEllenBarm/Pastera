@@ -53,6 +53,69 @@ Expected result: both commands end with `** TEST SUCCEEDED **`. With Swift
 Testing, verify the console lists the intended suite names; a build-only pass is
 not enough.
 
+## Password Vault Focused Automated Check
+
+Run the complete local-first password-vault and shared UI boundary set:
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera \
+  -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
+  test \
+  -only-testing:pasteraTests/PasswordVaultLocalStorageTests \
+  -only-testing:pasteraTests/PasswordVaultMigrationTests \
+  -only-testing:pasteraTests/PasswordVaultCloudReplicaTests \
+  -only-testing:pasteraTests/PasswordVaultSyncMetadataTests \
+  -only-testing:pasteraTests/PasswordVaultSyncServiceTests \
+  -only-testing:pasteraTests/PasswordVaultStoreTests \
+  -only-testing:pasteraTests/PasswordVaultMasterPasswordTests \
+  -only-testing:pasteraTests/PasswordVaultMenuTests \
+  -only-testing:pasteraTests/PasswordVaultSecuritySettingsTests \
+  -only-testing:pasteraTests/VaultAutomationUnlockKeyStoreTests \
+  -only-testing:pasteraTests/SyncCoordinatorTests \
+  -only-testing:pasteraTests/SyncPreferenceTopSectionTests \
+  -only-testing:pasteraTests/PreferencePaneAlignmentTests \
+  -only-testing:pasteraTests/MainMenuEmbeddedContentTests \
+  -only-testing:pasteraTests/MainMenuVisualPolishTests \
+  -only-testing:pasteraTests/MainMenuVaultSyncFooterTests \
+  -only-testing:pasteraTests/MainMenuOneDriveFooterTests \
+  -only-testing:pasteraTests/MainMenuOneDriveInstallationFooterTests \
+  -only-testing:pasteraTests/MainMenuOneDriveStatusAssetTests \
+  -only-testing:pasteraTests/MainMenuFooterButtonActionTests \
+  -only-testing:pasteraTests/OneDriveProcessStatusServiceTests
+```
+
+Expected result: `** TEST SUCCEEDED **`, with all 21 named Swift Testing suites
+listed in the console.
+
+## Password Vault Manual Lifecycle Matrix
+
+Use a temporary Application Support directory or a test build with an isolated
+bundle identifier, plus a dedicated OneDrive test subdirectory. Never point a
+destructive test at the user's existing `PasteraVault.kdbx`.
+
+| Scenario | Exercise | Required result |
+| --- | --- | --- |
+| No OneDrive | Create a local-only vault, lock, restart, unlock, and perform folder and entry CRUD without a OneDrive account or process. | No OneDrive prompt blocks the vault; mode remains local-only; nothing is created in OneDrive. |
+| Settings separation | Toggle history/snippet upload and import switches, then inspect the password-vault summary. | The password-vault mode does not change. Settings contains only the summary and **Manage in Main Window**; the button closes Settings and opens the inline sync page. |
+| Sudden disconnect | Enable password-vault sync, stop OneDrive, then add, edit, move, and delete entries. | Local operations succeed; the footer shows a red disconnected shape and accessible text; pending count increases; the remote KDBX is unchanged. |
+| Reconnect | Start OneDrive after queued local changes and retry sync. | Only the local delta is uploaded; read-back digest verification clears pending and advances local/remote baselines. |
+| Missing local copy recovery | Start from a compatible remote KDBX with no prepared local copy, first with OneDrive stopped and then running. | No local password error field appears. Inline **Start OneDrive** and **Try Again** recover the local copy; choosing a new local vault first shows the separate-branch warning and does not overwrite remote. |
+| One-sided and concurrent changes | Change only local, only remote, then both sides using independent test copies. | The service selects upload, apply-remote, or entry-level merge; unrelated entries converge; pending clears only after verified remote read-back. |
+| Entry conflict | Change the same entry on both sides with equal modification timestamps. | A `(Conflict)` copy is retained, the conflict count and yellow semantic badge are visible, and the vault stays unlocked for later review. |
+| Locked merge | Lock the local vault, change both sides, and synchronize. | Phase becomes waiting-for-unlock; neither digest baseline advances and no side is overwritten; unlock resumes merge. |
+| Legacy migration | Place a valid compatible remote KDBX at `PasteraSync/vault/PasteraVault.kdbx` with no local file, then restart and interrupt/restart once during migration. | A byte-verified local copy is created, the migration journal resumes safely, and migration version/baselines update only after local read-back succeeds. |
+| Local corruption | Corrupt only the isolated local KDBX while retaining its backup and remote test replica. | Pastera reports a local recovery state rather than a cloud-password error; it does not overwrite the remote replica. |
+| Remote corruption or partial download | Replace the isolated remote KDBX with invalid bytes or simulate a placeholder/short read. | Sync reports remote corruption/unavailability, preserves the usable local vault and all baselines, and does not upload over the suspect remote file. |
+| Different remote master password | Encrypt the remote test copy with a different master password and merge once. | Only the inline remote-credentials page has a secure field; the value is one-shot memory state, clears on submit/leave, and a wrong value does not change local data or baselines. |
+| Stop sync | Stop sync from the inline page after both replicas exist. | Mode becomes local-only; local and remote KDBX files plus comparison baselines remain. |
+| Delete remote copy | Use the dedicated confirmation page, test one forced failure, then a success against the isolated replica. | Failure preserves mode/data/baselines and remains inline; success deletes only the remote KDBX, preserves local, switches local-only, and clears the remote baseline. |
+| Accessibility | With VoiceOver or Accessibility Inspector, traverse footer badge, sync mode, summary, Back, primary/secondary actions, dangerous action, conflict count, and remote secure field. Enable Reduce Motion and repeat syncing. | Every state has a shape plus descriptive label, keyboard order is logical, secrets never appear in labels, and reduced motion uses a static progress symbol and text. |
+
 ## Feature Checks
 
 - History retention: create more histories than the menu display limit and

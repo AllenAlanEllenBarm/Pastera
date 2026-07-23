@@ -846,12 +846,12 @@ git commit -m "feat(vault): add inline sync recovery controls"
 - Modify: `docs/verification/VERIFICATION.md`
 - Modify: `docs/superpowers/plans/2026-07-22-password-vault-local-first-onedrive-sync.md`
 
-- [ ] 先写设置页测试：历史/片段 OneDrive 根目录可复用，但其开关不会自动启用密码箱；设置页只显示密码箱同步摘要与“在主窗口管理”入口，不复制另一套控制逻辑，不用 popover 表示密码箱错误。
-- [ ] 运行设置页测试观察 RED。
-- [ ] 在 `CPYSyncPreferenceViewController` 增加密码箱同步摘要行：模式、最近同步/待同步状态、“在主窗口管理”。点击入口关闭设置页并打开主菜单密码箱同步页；具体启停、恢复、云端主密码和删除仍只在主窗口完成。
-- [ ] 更新 `docs/sync/ONEDRIVE_SYNC.md`，补充密码箱本地工作路径、兼容云端路径、独立 mode、摘要基线、断联语义、条目级合并、停止同步和删除边界。
-- [ ] 更新 `docs/verification/VERIFICATION.md`，加入无 OneDrive、断联、恢复、冲突、迁移、本地损坏、云端损坏和辅助功能手工矩阵。
-- [ ] 运行所有聚焦 suite：
+- [x] 先写设置页测试：历史/片段 OneDrive 根目录可复用，但其开关不会自动启用密码箱；设置页只显示密码箱同步摘要与“在主窗口管理”入口，不复制另一套控制逻辑，不用 popover 表示密码箱错误。
+- [x] 运行设置页测试观察 RED。
+- [x] 在 `CPYSyncPreferenceViewController` 增加密码箱同步摘要行：模式、最近同步/待同步状态、“在主窗口管理”。点击入口关闭设置页并打开主菜单密码箱同步页；具体启停、恢复、云端主密码和删除仍只在主窗口完成。
+- [x] 更新 `docs/sync/ONEDRIVE_SYNC.md`，补充密码箱本地工作路径、兼容云端路径、独立 mode、摘要基线、断联语义、条目级合并、停止同步和删除边界。
+- [x] 更新 `docs/verification/VERIFICATION.md`，加入无 OneDrive、断联、恢复、冲突、迁移、本地损坏、云端损坏和辅助功能手工矩阵。
+- [x] 运行所有聚焦 suite：
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
@@ -877,10 +877,15 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
   -only-testing:pasteraTests/PreferencePaneAlignmentTests \
   -only-testing:pasteraTests/MainMenuEmbeddedContentTests \
   -only-testing:pasteraTests/MainMenuVisualPolishTests \
-  -only-testing:pasteraTests/MainMenuPinFooterTests
+  -only-testing:pasteraTests/MainMenuVaultSyncFooterTests \
+  -only-testing:pasteraTests/MainMenuOneDriveFooterTests \
+  -only-testing:pasteraTests/MainMenuOneDriveInstallationFooterTests \
+  -only-testing:pasteraTests/MainMenuOneDriveStatusAssetTests \
+  -only-testing:pasteraTests/MainMenuFooterButtonActionTests \
+  -only-testing:pasteraTests/OneDriveProcessStatusServiceTests
 ```
 
-- [ ] 运行仓库默认 clean full test：
+- [x] 运行仓库默认 clean full test：
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
@@ -893,29 +898,30 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
   clean test
 ```
 
-- [ ] 运行 Release 构建，捕获 Debug 测试未覆盖的条件编译和链接错误：
+- [x] 运行 Release 构建，捕获 Debug 测试未覆盖的条件编译和链接错误：
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-  -scheme pastera \
   -project pastera.xcodeproj \
+  -target pastera \
   -configuration Release \
-  -destination 'generic/platform=macOS' \
   -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
   -packageCachePath "$PWD/.spm-cache/PackageCache" \
   -skipPackagePluginValidation \
   -skipMacroValidation \
+  SYMROOT="$PWD/.build/release-validation/Products" \
+  OBJROOT="$PWD/.build/release-validation/Intermediates.noindex" \
   build
 ```
 
-- [ ] 使用临时本地目录和独立 OneDrive 测试子目录验证真实生命周期，禁止覆盖用户现有 `PasteraVault.kdbx`：
+- [x] 使用临时本地目录和独立 OneDrive 测试子目录验证真实生命周期，禁止覆盖用户现有 `PasteraVault.kdbx`：
   - localOnly 创建、锁定、重启、解锁和完整 CRUD。
   - OneDrive 未运行时继续 CRUD，footer 出现红色断联徽标，pending 增加。
   - 启动 OneDrive 后只有本地变化自动上传并回读摘要。
   - 在独立测试副本制造远端修改，验证云端单边更新与双边冲突。
   - 锁定时制造双边变化，确认等待解锁且两端摘要均未变化。
   - 停止同步后两端文件仍存在；删除云端只删除独立测试副本。
-- [ ] 安装并启动最新 Debug build：
+- [x] 安装并启动最新 Debug build：
 
 ```bash
 ./script/install_local.sh --verify
@@ -923,7 +929,7 @@ pgrep -fl '/Applications/Pastera.app/Contents/MacOS/Pastera'
 codesign --verify --deep --strict /Applications/Pastera.app
 ```
 
-- [ ] 执行源码与产物安全扫描：
+- [x] 执行源码与产物安全扫描：
 
 ```bash
 git diff --check
@@ -935,8 +941,8 @@ rg -n "password|username|note|website" \
 ```
 
 第一条用户可见英文错误应无生产代码匹配；后一个扫描的每个匹配都必须是明确的凭据边界测试或一次性内存参数，不得出现在元数据字段、日志和 accessibility。
-- [ ] 在本计划末尾填写 Delivery Record：实际文件、提交、RED/GREEN 证据、完整测试结果、Release 结果、真实断联验证、安装 readback、偏差和残余风险。
-- [ ] 提交：
+- [x] 在本计划末尾填写 Delivery Record：实际文件、提交、RED/GREEN 证据、完整测试结果、Release 结果、真实断联验证、安装 readback、偏差和残余风险。
+- [x] 提交：
 
 ```bash
 git add pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift \
@@ -985,13 +991,14 @@ git commit -m "docs(vault): verify local-first OneDrive lifecycle"
 
 ## Delivery Record
 
-- **Plan Status:** confirmed-ready-for-execution
+- **Plan Status:** implemented-verified
 - **Spec:** `docs/superpowers/specs/2026-07-22-password-vault-local-first-onedrive-sync-design.md`
 - **Implementation Branch:** `codex/password-vault-local-first`
 - **Worktree:** `/Users/feeyo/workspace/github.com/pastera-app/Pastera-vault-local-first`
-- **Implementation Commits:** 执行后按 Task 2 至 Task 11 的提交顺序记录。
-- **RED Evidence:** 执行后记录每个新增测试的首个预期失败。
-- **GREEN Evidence:** 执行后记录聚焦 suite、clean full test 与 Release build 结果。
-- **Runtime Evidence:** 执行后记录 localOnly、OneDrive 断联/恢复、冲突、停止同步、独立测试副本删除、安装签名和进程 readback。
-- **Plan Deviations:** 执行期间如需偏离，先对照已确认规格；影响交互或数据语义的偏离必须暂停并重新确认。
-- **Residual Risks:** 执行验证完成后填写，不得用未验证推断代替结果。
+- **Implementation Commits:** `52b7f61..85d4c72` 完成设计、计划和 Task 1 至 Task 10；Task 11 由本次最终提交交付。
+- **RED Evidence:** 设置页测试首次编译失败，明确缺少 `passwordVaultSyncSnapshotProvider` 与 `managePasswordVaultSync` 注入点；实现后转绿。
+- **GREEN Evidence:** 设置/对齐 15 项（2 suites）、本地优先核心 288 项（15 suites）与 footer 27 项（6 suites）通过，共 315 项/21 suites；五语偏好目录 15 项通过；Agent 超时项串行 57 项通过；单 worker `clean test` 在最终兜底文案调整前为 1122 项/101 suites 全通过；调整后直接回归 70 项/4 suites 通过并重新构建安装。
+- **Release Evidence:** 直接用 scheme 的 Release build 会错误包含 `pasteraTests` 并触发 `@testable`/testability 基线问题；按仓库安装与打包脚本的真实 target 边界设置独立 `SYMROOT`/`OBJROOT` 后 `** BUILD SUCCEEDED **`，主程序为 `x86_64 arm64`，最低系统版本 `15.0`。该门禁在最终兜底文案调整前执行；调整后 Debug 目标编译、70 项直接回归与安装签名回读通过。
+- **Runtime Evidence:** 隔离临时目录测试覆盖 localOnly CRUD、断联 pending、重连、单边更新、冲突、锁定等待、迁移、本地/远端损坏、停止同步与删除副本；本机 OneDrive 进程当前未运行，但发现已配置的 CloudStorage 目录，未启动它或修改用户副本。`./script/install_local.sh --verify` 已把 3.0.1 (301) 安装到 `/Applications/Pastera.app`，ad-hoc 深度签名通过，最终进程 PID `83724` 从安装路径运行。
+- **Plan Deviations:** 默认并行 full test 被既有 AppKit 颜色空间日志放大并导致三个无关超时项；对应 suite 独立通过后，以单 worker full test 作为稳定门禁。菜单栏 `LSUIElement` 对 Computer Use 不暴露标准窗口，无法完成无密码的真实点击回放；UI 视觉与入口顺序由截图测试、AX 文本和按钮行为测试验证。Release 命令改用仓库脚本一致的 app target 与显式输出目录，避免 scheme 编译测试 bundle。
+- **Residual Risks:** 本机未运行 OneDrive，未对用户真实云端目录执行重连或破坏性验证；真实 File Provider 占位符/网络时序仍需在独立测试账号下做一次非破坏性冒烟。VoiceOver 人工听读未完成，但 footer、摘要、动作与安全输入均有可访问性断言。
