@@ -40,8 +40,15 @@ struct MainMenuVisualPolishTests {
         controller.show(at: NSPoint(x: 160, y: 640), pinned: false)
         defer { controller.close() }
 
+        let frame = try #require(controller.visibleFrame)
+        let panel = try #require(NSApp.windows.first { $0.frame == frame })
+        let contentLayer = try #require(panel.contentView?.layer)
+
         #expect(abs(controller.contentBackgroundAlphaForTesting - 0.35) < 0.001)
         #expect(controller.contentBackgroundLuminanceForTesting < 0.16)
+        #expect(!panel.hasShadow)
+        #expect(contentLayer.borderWidth == 0.5)
+        #expect((contentLayer.borderColor.flatMap(NSColor.init(cgColor:))?.alphaComponent ?? 1) <= 0.07)
     }
 
     @Test
@@ -295,9 +302,8 @@ struct MainMenuVisualPolishTests {
         let sections = try #require(controller.mainMenuEmbeddedSectionFramesForTesting)
         let contentFrame = try #require(sections["content"])
         let footerFrame = try #require(sections["footer"])
-        let extensionHeight = MainMenuPanelLayout.bottomInset
-            + MainMenuPanelLayout.searchHeight
-            + MainMenuPanelLayout.sectionGap
+        let expectedSearchToolbarGap = MainMenuPanelLayout.searchToolbarGap
+        let extensionHeight = MainMenuPanelLayout.searchHeight + expectedSearchToolbarGap
 
         #expect(expandedFrame.minX == initialFrame.minX)
         #expect(expandedFrame.maxY == initialFrame.maxY)
@@ -309,7 +315,7 @@ struct MainMenuVisualPolishTests {
             width: MainMenuPanelLayout.width - MainMenuPanelLayout.sectionInset * 2,
             height: MainMenuPanelLayout.searchHeight
         ))
-        #expect(extensionHeight - searchFrame.maxY == MainMenuPanelLayout.sectionGap)
+        #expect(footerFrame.minY - searchFrame.maxY == expectedSearchToolbarGap)
         #expect(footerFrame.minY - extensionHeight == MainMenuPanelLayout.bottomInset)
         #expect(contentFrame.minY - footerFrame.maxY >= MainMenuPanelLayout.sectionGap)
         #expect(!searchFrame.intersects(contentFrame))

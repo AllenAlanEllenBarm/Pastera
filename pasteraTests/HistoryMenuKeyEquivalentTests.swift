@@ -19,6 +19,7 @@ import Testing
 
 @MainActor
 @Suite(.serialized)
+// swiftlint:disable:next type_body_length
 struct HistoryMenuKeyEquivalentTests {
     @Test
     func persistentMainMenuPanelBehaviorKeepsPanelVisibleAndMovable() {
@@ -28,6 +29,16 @@ struct HistoryMenuKeyEquivalentTests {
         #expect(behavior.level == .floating)
         #expect(behavior.isMovableByWindowBackground)
         #expect(!behavior.collectionBehavior.contains(.transient))
+    }
+
+    @Test
+    func transientMainMenuPanelBehaviorStillAllowsWindowDragging() {
+        let behavior = MainMenuPanelBehavior(isPinned: false)
+
+        #expect(behavior.hidesOnDeactivate)
+        #expect(behavior.level == .popUpMenu)
+        #expect(behavior.collectionBehavior.contains(.transient))
+        #expect(behavior.isMovableByWindowBackground)
     }
 
     @Test

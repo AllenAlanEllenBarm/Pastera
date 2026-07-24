@@ -160,6 +160,48 @@ struct PasswordVaultMenuTests {
         #expect(controller.passwordVaultAccessSecureFieldCountForTesting == 0)
     }
 
+    @Test("a pending cloud unlock immediately replaces the stale form with busy feedback")
+    func pendingCloudUnlockShowsBusyStateImmediately() {
+        let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)
+        var state = PasswordVaultState.locked
+        var pendingCompletion: ((Result<Void, PasswordVaultError>) -> Void)?
+        let controller = makeVaultController(
+            state: { state },
+            folders: { state == .unlocked ? [folder] : [] },
+            unlock: { _, completion in pendingCompletion = completion }
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        controller.setPasswordVaultAccessValuesForTesting(password: "correct-password")
+        controller.submitPasswordVaultAccessForTesting()
+
+        #expect(controller.mainMenuButtonTitlesForTesting.contains(String(localized: "Unlocking…")))
+        #expect(!controller.mainMenuButtonTitlesForTesting.contains(String(localized: "Unlock Vault")))
+        #expect(!controller.passwordVaultAccessCredentialControlsEnabledForTesting)
+        #expect(!controller.passwordVaultAccessPrimaryButtonEnabledForTesting)
+
+        state = .unlocked
+        pendingCompletion?(.success(()))
+
+        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains("Work"))
+        #expect(!controller.mainMenuButtonTitlesForTesting.contains(String(localized: "Unlocking…")))
+    }
+
+    @Test("an internal vault failure never leaks its raw state code")
+    func internalVaultFailureUsesLocalizedFeedback() {
+        let controller = makeVaultController(state: { .failed("corrupted") }, folders: { [] })
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(controller.mainMenuVisibleRowTitlesForTesting.contains(
+            String(localized: "The password database cannot be read.")
+        ))
+        #expect(!controller.mainMenuVisibleRowTitlesForTesting.contains("corrupted"))
+    }
+
     @Test("a cold quick-unlock capability check cannot block the first locked form")
     func coldQuickUnlockCheckDoesNotBlockFirstOpen() {
         let controller = makeVaultController(

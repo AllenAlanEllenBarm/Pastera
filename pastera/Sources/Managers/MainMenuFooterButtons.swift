@@ -29,7 +29,7 @@ struct MainMenuPanelBehavior {
     var collectionBehavior: NSWindow.CollectionBehavior {
         isPinned ? [.ignoresCycle] : [.transient, .ignoresCycle]
     }
-    var isMovableByWindowBackground: Bool { isPinned }
+    var isMovableByWindowBackground: Bool { true }
 }
 
 struct MainMenuToolbarViewConfiguration {

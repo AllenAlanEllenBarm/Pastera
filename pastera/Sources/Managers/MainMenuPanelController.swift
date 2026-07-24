@@ -26,6 +26,7 @@ enum MainMenuPanelLayout {
     static let headerHeight: CGFloat = 38
     static let toolbarHeight: CGFloat = 40
     static let searchHeight: CGFloat = 28
+    static let searchToolbarGap: CGFloat = 8
     static let sectionInset: CGFloat = 8
     static let sectionGap: CGFloat = 4
     static let sectionRadius: CGFloat = 12
@@ -50,7 +51,7 @@ enum MainMenuPanelLayout {
 
 enum MainMenuVisualColors {
     static let panelBackground = NSColor(calibratedRed: 0.105, green: 0.115, blue: 0.135, alpha: 1.0)
-    static let panelBorder = NSColor(calibratedWhite: 1.0, alpha: 0.10)
+    static let panelBorder = NSColor(calibratedWhite: 1.0, alpha: 0.06)
     static let sectionSurface = NSColor(calibratedWhite: 1.0, alpha: 0.036)
     static let headerSurface = NSColor(calibratedWhite: 1.0, alpha: 0.050)
     static let contentSurface = NSColor(calibratedWhite: 1.0, alpha: 0.035)
@@ -442,6 +443,11 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var visibleMainMenuRowTitles = [String]()
     private var currentSnippetFolderTitle: String?
     private var isSearchVisible = false
+    private var searchQueryChangeTimer: Timer?
+    private let searchQueryDebounceInterval: TimeInterval = 0.12
+#if DEBUG
+    var mainMenuSearchMarkedTextStateProviderForTesting: (() -> Bool)?
+#endif
     private var keepsVisibleWhileChildPanelOpen = false
     private var pasteTargetContext: PasteTargetContext?
     private weak var oneDriveStatusButton: MainMenuOneDriveStatusButton?
@@ -499,6 +505,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     }
 
     deinit {
+        searchQueryChangeTimer?.invalidate()
         if let ocrActivityObserver { NotificationCenter.default.removeObserver(ocrActivityObserver) }
     }
 
@@ -546,6 +553,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     @discardableResult
     func close() -> Bool {
         guard commitInlineEditorFromCurrentDraft() else { return false }
+        searchQueryChangeTimer?.invalidate()
+        searchQueryChangeTimer = nil
         keepsVisibleWhileChildPanelOpen = false
         editingFolderShortcutID = nil
         panel?.orderOut(nil)
@@ -709,7 +718,7 @@ extension MainMenuPanelController {
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.isReleasedWhenClosed = false
         panel.onCancel = { [weak self] in self?.handlePanelCancel() }
         panel.onKeyDown = { [weak self] event in self?.handleKeyboardNavigation(event) ?? false }
@@ -741,7 +750,7 @@ extension MainMenuPanelController {
             .withAlphaComponent(CPYWindowAppearance.opacity())
             .cgColor
         contentView.layer?.borderColor = MainMenuVisualColors.panelBorder.cgColor
-        contentView.layer?.borderWidth = 1
+        contentView.layer?.borderWidth = 0.5
     }
 
     private func reloadContent() {
@@ -755,7 +764,7 @@ extension MainMenuPanelController {
 
     // swiftlint:disable:next function_body_length
     private func reloadLegacyContent() {
-        contentView.subviews.forEach { $0.removeFromSuperview() }
+        removeContentSubviewsForReload()
         keyboardEntries.removeAll()
         selectedKeyboardEntryIndex = nil
         resetVisibleRows()
@@ -771,7 +780,7 @@ extension MainMenuPanelController {
             image: historyImage,
             shortcutText: historyShortcutText
         )
-        headerView.allowsWindowDrag = isPinned
+        headerView.allowsWindowDrag = true
         headerView.frame = NSRect(x: 0, y: currentY, width: MainMenuPanelLayout.width, height: MainMenuPanelLayout.headerHeight)
         headerView.onOpen = { [weak self] in self?.openHistoryFromMainMenu() }
         headerView.onHoverOpen = { [weak self] in self?.openHistoryFromMainMenu() }
@@ -871,7 +880,7 @@ extension MainMenuPanelController {
         HistoryMenuRowView.hidePreviews()
         inlineEditorView = nil
         folderShortcutEditorView = nil
-        contentView.subviews.forEach { $0.removeFromSuperview() }
+        removeContentSubviewsForReload()
         keyboardEntries.removeAll()
         selectedKeyboardEntryIndex = nil
         resetVisibleRows()
@@ -888,6 +897,12 @@ extension MainMenuPanelController {
         }
         addToolbar(frame: footerDockFrame)
         addOCRActivityViewIfNeeded()
+    }
+
+    private func removeContentSubviewsForReload() {
+        contentView.subviews
+            .filter { !isSearchVisible || $0 !== searchField }
+            .forEach { $0.removeFromSuperview() }
     }
 
     private var fixedToolbarY: CGFloat {
@@ -910,9 +925,7 @@ extension MainMenuPanelController {
 
     private var searchDrawerHeight: CGFloat {
         guard isSearchVisible, usesEmbeddedContent else { return 0 }
-        return MainMenuPanelLayout.bottomInset +
-            MainMenuPanelLayout.searchHeight +
-            MainMenuPanelLayout.sectionGap
+        return MainMenuPanelLayout.searchHeight + MainMenuPanelLayout.searchToolbarGap
     }
 
     private var mainContentVerticalOffset: CGFloat {
@@ -1771,7 +1784,10 @@ extension MainMenuPanelController {
         }
         switch passwordVaultDataSource.state() {
         case .notConfigured:
-            return passwordVaultAccessContent(mode: .create, isBusy: false)
+            return passwordVaultAccessContent(
+                mode: .create,
+                isBusy: passwordVaultAccessModeInFlight == .create
+            )
         case .preparingLocalCopy:
             passwordVaultPage = .localCopyRecovery
             return makePasswordVaultLocalCopyRecoveryContent()
@@ -1782,7 +1798,10 @@ extension MainMenuPanelController {
             passwordVaultPage = .localCopyRecovery
             return makePasswordVaultLocalCopyRecoveryContent()
         case .locked:
-            return passwordVaultAccessContent(mode: .unlock, isBusy: false)
+            return passwordVaultAccessContent(
+                mode: .unlock,
+                isBusy: passwordVaultAccessModeInFlight == .unlock
+            )
         case .unlocking:
             return passwordVaultAccessContent(mode: passwordVaultAccessModeInFlight ?? .unlock, isBusy: true)
         case .unlocked, .readOnlyWarning:
@@ -1793,8 +1812,9 @@ extension MainMenuPanelController {
             return passwordVaultFailureContent(message: message.isEmpty
                 ? String(localized: "Password Vault Unavailable") : message)
         case let .failed(message):
-            return passwordVaultFailureContent(message: message.isEmpty
-                ? String(localized: "Password Vault Unavailable") : message)
+            return passwordVaultFailureContent(
+                message: passwordVaultAccessError ?? passwordVaultFailureMessage(message)
+            )
         }
         let folders: [PasswordVaultFolder]
         let entries: [PasswordVaultEntry]
@@ -2314,6 +2334,7 @@ extension MainMenuPanelController {
         case .unlock:
             passwordVaultDataSource?.unlock(password, completion)
         }
+        reloadContentKeepingTopLeft()
     }
 
     private func attemptAutomaticPasswordVaultQuickUnlockIfNeeded() {
@@ -2335,6 +2356,7 @@ extension MainMenuPanelController {
         passwordVaultDataSource?.unlockWithQuickKey { [weak self] result in
             self?.handlePasswordVaultAccessResult(result, mode: .unlock)
         }
+        reloadContentKeepingTopLeft()
     }
 
     private func handlePasswordVaultAccessResult(
@@ -2747,6 +2769,14 @@ extension MainMenuPanelController {
         }
     }
 
+    private func passwordVaultFailureMessage(_ stateCode: String) -> String {
+        switch stateCode {
+        case "corrupted": return passwordVaultMessage(.corruptedData)
+        case "save": return passwordVaultMessage(.saveFailed)
+        default: return String(localized: "Password Vault Unavailable")
+        }
+    }
+
     private func makeFolderShortcutEditorView(for folderID: SnippetFolder.ID, keyCombo: KeyCombo?) -> NSView {
         let view = MainMenuFolderShortcutEditorView(
             keyCombo: keyCombo,
@@ -3051,7 +3081,7 @@ extension MainMenuPanelController {
     }
 
     private func addSearchField(frame: NSRect) {
-        searchField.removeFromSuperview()
+        let hasActiveEditor = searchField.currentEditor() != nil
         searchField.identifier = NSUserInterfaceItemIdentifier("mainMenuSearchField")
         searchField.placeholderString = String(localized: "Search...")
         searchField.font = .systemFont(ofSize: 12, weight: .regular)
@@ -3060,18 +3090,58 @@ extension MainMenuPanelController {
         searchField.delegate = self
         searchField.target = self
         searchField.action = #selector(searchFieldAction(_:))
-        searchField.stringValue = currentSearchQuery()
+        let query = currentSearchQuery()
+        if !hasActiveEditor || searchField.stringValue != query {
+            searchField.stringValue = query
+        }
         searchField.frame = frame
-        contentView.addSubview(searchField, positioned: .above, relativeTo: nil)
+        if searchField.superview !== contentView {
+            searchField.removeFromSuperview()
+            contentView.addSubview(searchField, positioned: .above, relativeTo: nil)
+        }
     }
 
     @objc private func searchFieldAction(_ sender: NSSearchField) {
-        updateSearchQuery(sender.stringValue)
+        guard !searchFieldHasMarkedText else { return }
+        searchQueryChangeTimer?.invalidate()
+        emitSearchQueryChangeIfReady()
     }
 
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSSearchField, field === searchField else { return }
+        guard !searchFieldHasMarkedText else { return }
+        scheduleSearchQueryChange()
+    }
+
+    private func scheduleSearchQueryChange() {
+        searchQueryChangeTimer?.invalidate()
+        searchQueryChangeTimer = Timer.scheduledTimer(
+            withTimeInterval: searchQueryDebounceInterval,
+            repeats: false
+        ) { [weak self] _ in
+            self?.emitSearchQueryChangeIfReady()
+        }
+    }
+
+    private func emitSearchQueryChangeIfReady() {
+        searchQueryChangeTimer?.invalidate()
+        searchQueryChangeTimer = nil
+        guard isSearchVisible, !searchFieldHasMarkedText else { return }
         updateSearchQuery(searchField.stringValue)
+    }
+
+    private var searchFieldHasMarkedText: Bool {
+#if DEBUG
+        if let mainMenuSearchMarkedTextStateProviderForTesting {
+            return mainMenuSearchMarkedTextStateProviderForTesting()
+        }
+#endif
+        guard let editor = searchField.currentEditor() as? NSTextView else { return false }
+        return editor.hasMarkedText()
+    }
+
+    private var searchFieldHasActiveEditor: Bool {
+        isSearchVisible && searchField.currentEditor() != nil
     }
 
     private func currentSearchQuery() -> String {
@@ -3097,7 +3167,7 @@ extension MainMenuPanelController {
             passwordVaultSearchQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         reloadContentKeepingTopLeft()
-        if searchField.superview != nil {
+        if searchField.superview != nil, searchField.currentEditor() == nil {
             panel?.makeFirstResponder(searchField)
         }
     }
@@ -3234,6 +3304,8 @@ extension MainMenuPanelController {
 
     private func hideSearchField() {
         guard isSearchVisible else { return }
+        searchQueryChangeTimer?.invalidate()
+        searchQueryChangeTimer = nil
         isSearchVisible = false
         searchField.removeFromSuperview()
         panel?.makeFirstResponder(nil)
@@ -3501,6 +3573,9 @@ extension MainMenuPanelController {
         if handleInlineEditorKey(event) {
             return true
         }
+        if searchFieldHasMarkedText {
+            return false
+        }
         if handleSearchEscape(event) {
             return true
         }
@@ -3511,6 +3586,9 @@ extension MainMenuPanelController {
         if isSearchShortcut(event) {
             showSearchField()
             return true
+        }
+        if searchFieldHasActiveEditor {
+            return false
         }
         if confirmNumberShortcut(event) {
             return true
@@ -4944,7 +5022,10 @@ private final class PasswordVaultAccessView: NSView, NSTextFieldDelegate {
 
     var passwordIsVisibleForTesting: Bool { passwordField.isHidden }
     var passwordValueForTesting: String { currentPassword }
-
+    var credentialControlsEnabledForTesting: Bool {
+        [passwordField, confirmationField, visiblePasswordField, visibleConfirmationField].allSatisfy(\.isEnabled)
+    }
+    var primaryButtonEnabledForTesting: Bool { primaryButton.isEnabled }
     func togglePasswordVisibilityForTesting() { togglePasswordVisibility(passwordVisibilityButton) }
 
     var storageOptionTitlesForTesting: [String] {
@@ -6072,6 +6153,14 @@ extension MainMenuPanelController {
         passwordVaultAccessView?.passwordValueForTesting
     }
 
+    var passwordVaultAccessCredentialControlsEnabledForTesting: Bool {
+        passwordVaultAccessView?.credentialControlsEnabledForTesting ?? false
+    }
+
+    var passwordVaultAccessPrimaryButtonEnabledForTesting: Bool {
+        passwordVaultAccessView?.primaryButtonEnabledForTesting ?? false
+    }
+
     func togglePasswordVaultAccessPasswordVisibilityForTesting() {
         passwordVaultAccessView?.togglePasswordVisibilityForTesting()
     }
@@ -6155,6 +6244,10 @@ extension MainMenuPanelController {
 
     func updateMainMenuSearchQueryForTesting(_ query: String) {
         updateSearchQuery(query)
+    }
+
+    func flushPendingMainMenuSearchQueryForTesting() {
+        emitSearchQueryChangeIfReady()
     }
 
     var selectedMainMenuTitleForTesting: String? {

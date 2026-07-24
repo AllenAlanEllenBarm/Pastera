@@ -134,14 +134,230 @@ struct MainMenuEmbeddedContentTests {
         #expect(controller.isMainMenuSearchFieldVisibleForTesting)
         #expect(controller.isMainMenuSearchFieldFocusedForTesting)
         let expandedFrame = try #require(controller.visibleFrame)
-        let extensionHeight = MainMenuPanelLayout.bottomInset
-            + MainMenuPanelLayout.searchHeight
-            + MainMenuPanelLayout.sectionGap
+        let extensionHeight = MainMenuPanelLayout.searchHeight + MainMenuPanelLayout.searchToolbarGap
         #expect(expandedFrame.minX == initialFrame.minX)
         #expect(expandedFrame.maxY == initialFrame.maxY)
         #expect(expandedFrame.width == initialFrame.width)
         #expect(expandedFrame.height == initialFrame.height + extensionHeight)
         #expect(fetchCount == 1)
+    }
+
+    @Test
+    func embeddedSearchDefersRefreshUntilIMECompositionFinishes() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-ime"),
+                title: "中文输入",
+                pasteboardTypes: [.string],
+                updateAt: 1,
+                deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var state = HistoryMenuPaginationState()
+        var fetchCount = 0
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { state },
+                updateState: { update in update(&state) },
+                fetchPage: {
+                    fetchCount += 1
+                    return HistoryMenuPage.result([detail], pageSize: 10)
+                },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { _, _ in }
+            )
+        )
+
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+        #expect(controller.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+        let searchField = try #require(mainMenuSearchField())
+        let editor = try #require(searchField.currentEditor() as? NSTextView)
+        let baselineFetchCount = fetchCount
+        editor.setMarkedText(
+            "zhong",
+            selectedRange: NSRange(location: 5, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        controller.controlTextDidChange(
+            Notification(name: NSControl.textDidChangeNotification, object: searchField)
+        )
+
+        #expect(fetchCount == baselineFetchCount)
+        #expect(state.query.isEmpty)
+        #expect(controller.isMainMenuSearchFieldFocusedForTesting)
+
+        editor.unmarkText()
+        searchField.stringValue = "中"
+        controller.controlTextDidChange(
+            Notification(name: NSControl.textDidChangeNotification, object: searchField)
+        )
+        controller.flushPendingMainMenuSearchQueryForTesting()
+
+        #expect(fetchCount > baselineFetchCount)
+        #expect(state.query == "中")
+        #expect(controller.isMainMenuSearchFieldFocusedForTesting)
+    }
+
+    @Test
+    func embeddedSearchRechecksIMECompositionAfterTextChangeNotification() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-ime-event-order"),
+                title: "中文输入",
+                pasteboardTypes: [.string],
+                updateAt: 1,
+                deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var state = HistoryMenuPaginationState()
+        var fetchCount = 0
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { state },
+                updateState: { update in update(&state) },
+                fetchPage: {
+                    fetchCount += 1
+                    return HistoryMenuPage.result([detail], pageSize: 10)
+                },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { _, _ in }
+            )
+        )
+
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+        #expect(controller.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+        let searchField = try #require(mainMenuSearchField())
+        let baselineFetchCount = fetchCount
+        var hasMarkedText = false
+        controller.mainMenuSearchMarkedTextStateProviderForTesting = { hasMarkedText }
+
+        searchField.stringValue = "z"
+        controller.controlTextDidChange(
+            Notification(name: NSControl.textDidChangeNotification, object: searchField)
+        )
+        hasMarkedText = true
+        controller.flushPendingMainMenuSearchQueryForTesting()
+
+        #expect(fetchCount == baselineFetchCount)
+        #expect(state.query.isEmpty)
+
+        hasMarkedText = false
+        searchField.stringValue = "中"
+        controller.controlTextDidChange(
+            Notification(name: NSControl.textDidChangeNotification, object: searchField)
+        )
+        controller.flushPendingMainMenuSearchQueryForTesting()
+
+        #expect(fetchCount > baselineFetchCount)
+        #expect(state.query == "中")
+        #expect(controller.isMainMenuSearchFieldFocusedForTesting)
+    }
+
+    @Test
+    func embeddedSearchRefreshPreservesInsertionPoint() throws {
+        var state = HistoryMenuPaginationState()
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { state },
+                updateState: { update in update(&state) },
+                fetchPage: { HistoryMenuPage.result([], pageSize: 10) },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { _, _ in }
+            )
+        )
+
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+        #expect(controller.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+        let searchField = try #require(mainMenuSearchField())
+        let editor = try #require(searchField.currentEditor() as? NSTextView)
+        searchField.stringValue = "abcd"
+        editor.string = "abcd"
+        editor.setSelectedRange(NSRange(location: 2, length: 0))
+
+        controller.controlTextDidChange(
+            Notification(name: NSControl.textDidChangeNotification, object: searchField)
+        )
+        controller.flushPendingMainMenuSearchQueryForTesting()
+
+        let refreshedField = try #require(mainMenuSearchField())
+        let refreshedEditor = try #require(refreshedField.currentEditor() as? NSTextView)
+        #expect(state.query == "abcd")
+        #expect(refreshedEditor.selectedRange() == NSRange(location: 2, length: 0))
+    }
+
+    @Test
+    func controlSpaceIsNotInterceptedWhileEmbeddedSearchFieldIsEditing() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-input-source"),
+                title: "Input Source",
+                pasteboardTypes: [.string],
+                updateAt: 1,
+                deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var confirmCount = 0
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { HistoryMenuPaginationState() },
+                updateState: { _ in },
+                fetchPage: { HistoryMenuPage.result([detail], pageSize: 10) },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { _, _ in confirmCount += 1 }
+            )
+        )
+
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+        controller.selectMainMenuItemForTesting(title: "Input Source")
+        #expect(controller.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+
+        #expect(!controller.handleMainMenuNavigationForTesting(try makeControlSpaceEvent()))
+        #expect(confirmCount == 0)
+        #expect(controller.isMainMenuSearchFieldFocusedForTesting)
     }
 
     @Test
@@ -1143,6 +1359,39 @@ struct MainMenuEmbeddedContentTests {
             isARepeat: false,
             keyCode: 3
         ))
+    }
+
+    private func makeControlSpaceEvent() throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: " ",
+            charactersIgnoringModifiers: " ",
+            isARepeat: false,
+            keyCode: 49
+        ))
+    }
+
+    private func mainMenuSearchField() -> NSSearchField? {
+        NSApp.windows.lazy.compactMap { searchField(in: $0.contentView) }.first
+    }
+
+    private func searchField(in view: NSView?) -> NSSearchField? {
+        guard let view else { return nil }
+        if let searchField = view as? NSSearchField,
+           searchField.identifier?.rawValue == "mainMenuSearchField" {
+            return searchField
+        }
+        for subview in view.subviews {
+            if let searchField = searchField(in: subview) {
+                return searchField
+            }
+        }
+        return nil
     }
 
     private func makeCommandCommaEvent() throws -> NSEvent {
