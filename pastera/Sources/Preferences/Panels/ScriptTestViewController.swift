@@ -8,6 +8,7 @@ final class ScriptTestViewController: NSViewController {
         static let minimumHeight: CGFloat = 430
         static let idealHeight: CGFloat = 500
     }
+
     private let scripts: [ScriptTransform]
     private let executor: ScriptExecuting
     private let scriptPicker = NSPopUpButton()
@@ -33,84 +34,51 @@ final class ScriptTestViewController: NSViewController {
     required init?(coder: NSCoder) { nil }
 
     override func loadView() {
-        let root = NSView()
-        root.translatesAutoresizingMaskIntoConstraints = false
-        let header = makeHeader()
-        let content = makeContent()
-        root.addSubview(header)
-        root.addSubview(content)
-        let idealWidth = root.widthAnchor.constraint(equalToConstant: Metrics.idealWidth)
-        idealWidth.priority = .defaultHigh
-        let idealHeight = root.heightAnchor.constraint(equalToConstant: Metrics.idealHeight)
-        idealHeight.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumWidth),
-            root.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
-            idealWidth,
-            idealHeight,
-            header.topAnchor.constraint(equalTo: root.topAnchor),
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 82),
-            content.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
-            content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
-            content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
-            content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24)
-        ])
-        view = root
+        let scaffold = PasteraPreferenceSheetScaffold(
+            title: pasteraScriptString("Test Script", "测试脚本"),
+            subtitle: pasteraScriptString(
+                "Preview the result without changing the clipboard.",
+                "预览脚本结果，不会修改剪贴板"
+            ),
+            minimumSize: NSSize(width: Metrics.minimumWidth, height: Metrics.minimumHeight),
+            idealSize: NSSize(width: Metrics.idealWidth, height: Metrics.idealHeight)
+        )
+        scaffold.addBodyView(makeContent())
+
+        let doneButton = NSButton(
+            title: pasteraScriptString("Done", "完成"),
+            target: self,
+            action: #selector(done)
+        )
+        doneButton.bezelStyle = .rounded
+        doneButton.keyEquivalent = "\u{1b}"
+        doneButton.setAccessibilityLabel(pasteraScriptString("Close Script Test", "关闭脚本测试"))
+        scaffold.setFooterActions(trailing: [doneButton])
+
+        view = scaffold
+        scaffold.layoutSubtreeIfNeeded()
     }
 
-    private func makeHeader() -> NSView {
-        let header = NSView()
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let title = NSTextField(labelWithString: pasteraScriptString("Test Script", "测试脚本"))
-        title.font = .systemFont(ofSize: 22, weight: .semibold)
-        let subtitle = NSTextField(labelWithString: pasteraScriptString(
-            "Preview a script result without changing the clipboard.",
-            "预览脚本结果，不会修改剪贴板"
-        ))
-        subtitle.textColor = .secondaryLabelColor
-        let labels = NSStackView(views: [title, subtitle])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = 3
-        labels.translatesAutoresizingMaskIntoConstraints = false
-        let done = NSButton(title: pasteraScriptString("Done", "完成"), target: self, action: #selector(done))
-        done.bezelStyle = .rounded
-        done.translatesAutoresizingMaskIntoConstraints = false
-        done.setAccessibilityLabel(pasteraScriptString("Close Script Test", "关闭脚本测试"))
-        header.addSubview(labels)
-        header.addSubview(done)
-        NSLayoutConstraint.activate([
-            labels.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 24),
-            labels.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            done.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -24),
-            done.centerYAnchor.constraint(equalTo: header.centerYAnchor)
-        ])
-        return header
-    }
-
-    private func makeContent() -> NSStackView {
+    private func makeContent() -> NSView {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 12
-        content.translatesAutoresizingMaskIntoConstraints = false
+        content.spacing = 10
 
-        let pickerLabel = makeFieldLabel(pasteraScriptString("Script", "选择脚本"))
+        content.addArrangedSubview(makeFieldLabel(pasteraScriptString("Script", "选择脚本")))
         scriptPicker.addItems(withTitles: scripts.map(\.name))
         scriptPicker.setAccessibilityLabel(pasteraScriptString("Script to Test", "要测试的脚本"))
-        content.addArrangedSubview(pickerLabel)
         content.addArrangedSubview(scriptPicker)
         scriptPicker.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
 
+        content.setCustomSpacing(18, after: scriptPicker)
         content.addArrangedSubview(makeFieldLabel(pasteraScriptString("Test Input", "测试输入")))
         let inputScroll = NSScrollView()
         inputScroll.hasVerticalScroller = true
         inputScroll.borderType = .bezelBorder
         inputScroll.documentView = inputView
         inputScroll.translatesAutoresizingMaskIntoConstraints = false
-        inputScroll.heightAnchor.constraint(equalToConstant: 170).isActive = true
+        inputScroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
         inputView.font = .systemFont(ofSize: 13)
         inputView.string = "Hello World"
         inputView.setAccessibilityLabel(pasteraScriptString("Test Input", "测试输入"))
@@ -120,7 +88,10 @@ final class ScriptTestViewController: NSViewController {
         runButton.bezelStyle = .rounded
         runButton.bezelColor = .controlAccentColor
         runButton.contentTintColor = .white
+        runButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
+        runButton.imagePosition = .imageLeading
         runButton.keyEquivalent = "\r"
+        runButton.isEnabled = !scripts.isEmpty
         runButton.setAccessibilityLabel(pasteraScriptString("Run Script Test", "运行脚本测试"))
         let actionRow = NSStackView()
         actionRow.orientation = .horizontal
@@ -130,27 +101,44 @@ final class ScriptTestViewController: NSViewController {
         actionRow.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
 
         resultStack.orientation = .horizontal
-        resultStack.alignment = .top
+        resultStack.alignment = .centerY
         resultStack.spacing = 8
-        resultStack.isHidden = true
+        resultStack.edgeInsets = NSEdgeInsets(top: 9, left: 10, bottom: 9, right: 10)
+        resultStack.wantsLayer = true
+        resultStack.layer?.cornerRadius = 7
+        resultStack.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.45).cgColor
+        resultStack.identifier = NSUserInterfaceItemIdentifier("script.test.result")
+        resultStack.setAccessibilityIdentifier("script.test.result")
+        resultStack.translatesAutoresizingMaskIntoConstraints = false
+        resultStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 42).isActive = true
         resultIcon.translatesAutoresizingMaskIntoConstraints = false
         resultIcon.widthAnchor.constraint(equalToConstant: 16).isActive = true
         resultIcon.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        resultLabel.maximumNumberOfLines = 4
+        resultLabel.maximumNumberOfLines = 5
         resultStack.addArrangedSubview(resultIcon)
         resultStack.addArrangedSubview(resultLabel)
         content.addArrangedSubview(resultStack)
         resultStack.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+
+        showResult(
+            scripts.isEmpty
+                ? pasteraScriptString("Create a script before running a test.", "请先创建脚本再运行测试")
+                : pasteraScriptString("Ready to run.", "已准备好运行"),
+            symbol: scripts.isEmpty ? "exclamationmark.circle" : "info.circle",
+            color: .secondaryLabelColor
+        )
         return content
     }
 
     private func makeFieldLabel(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
         return label
     }
 
-    @objc private func done() { dismiss(self) }
+    @objc private func done() {
+        dismissScriptSheet(self)
+    }
 
     @objc private func runTest() {
         Task { await runSelectedScript(input: inputView.string) }
@@ -166,6 +154,7 @@ final class ScriptTestViewController: NSViewController {
             )
             return
         }
+
         runButton.isEnabled = false
         runButton.title = pasteraScriptString("Running…", "正在运行…")
         defer {
@@ -181,7 +170,9 @@ final class ScriptTestViewController: NSViewController {
             testOutputForTesting = output
             testErrorForTesting = nil
             showResult(
-                output.isEmpty ? pasteraScriptString("Success — empty string", "运行成功 — 输出为空字符串") : output,
+                output.isEmpty
+                    ? pasteraScriptString("Success: empty string", "运行成功：输出为空字符串")
+                    : output,
                 symbol: "checkmark.circle.fill",
                 color: .systemGreen
             )
@@ -202,6 +193,7 @@ final class ScriptTestViewController: NSViewController {
         resultLabel.stringValue = message
         resultLabel.textColor = color
         resultStack.isHidden = false
+        resultStack.setAccessibilityLabel(message)
     }
 
     var usesSingleColumnLayoutForTesting: Bool {
@@ -211,5 +203,6 @@ final class ScriptTestViewController: NSViewController {
     func runSelectedScriptForTesting(input: String) async {
         await runSelectedScript(input: input)
     }
+
     var minimumSheetWidthForTesting: CGFloat { Metrics.minimumWidth }
 }

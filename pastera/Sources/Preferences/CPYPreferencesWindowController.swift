@@ -546,7 +546,11 @@ private extension CPYPreferencesWindowController {
             measuredSize = selectedView.fittingSize
             paneSizes[selectedPaneID] = measuredSize
         }
-        let contentHeight = max(1, measuredSize.height)
+        let fillsAvailableHeight = pageControllers[selectedPaneID]?.fillsAvailableHeight == true
+        let minimumContentHeight = fillsAvailableHeight
+            ? max(1, visibleHeight - Metrics.paneDocumentInset * 2)
+            : 1
+        let contentHeight = max(minimumContentHeight, measuredSize.height)
 
         paneDocumentView.frame.size = NSSize(
             width: visibleWidth,

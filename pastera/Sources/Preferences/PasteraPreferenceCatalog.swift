@@ -32,8 +32,13 @@ struct PasteraPreferenceSearchItem: Hashable {
 
 protocol PasteraPreferencePage: AnyObject {
     var paneID: PasteraPreferencePaneID { get }
+    var fillsAvailableHeight: Bool { get }
 
     func revealSetting(anchorID: String, animated: Bool) -> Bool
+}
+
+extension PasteraPreferencePage {
+    var fillsAvailableHeight: Bool { false }
 }
 
 struct PasteraPreferenceCatalogPage: Equatable {

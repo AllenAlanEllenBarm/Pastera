@@ -126,6 +126,7 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
     private struct Item {
         let view: NSView
         let weight: CGFloat
+        let fillsHeight: Bool
     }
 
     static let breakpoint: CGFloat = 760
@@ -135,6 +136,7 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
     private let stack = NSStackView()
     private var items = [Item]()
     private var itemWidthConstraints = [NSLayoutConstraint]()
+    private var itemHeightConstraints = [NSLayoutConstraint]()
     private(set) var columnCount = 1
 
     override init(frame frameRect: NSRect) {
@@ -156,8 +158,8 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
         nil
     }
 
-    func addItem(_ item: NSView, weight: CGFloat = 1) {
-        items.append(Item(view: item, weight: max(0.01, weight)))
+    func addItem(_ item: NSView, weight: CGFloat = 1, fillsHeight: Bool = false) {
+        items.append(Item(view: item, weight: max(0.01, weight), fillsHeight: fillsHeight))
         rebuild(columns: preferredColumnCount(for: bounds.width))
     }
 
@@ -185,7 +187,9 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
     private func rebuild(columns: Int) {
         columnCount = columns
         NSLayoutConstraint.deactivate(itemWidthConstraints)
+        NSLayoutConstraint.deactivate(itemHeightConstraints)
         itemWidthConstraints.removeAll()
+        itemHeightConstraints.removeAll()
         stack.arrangedSubviews.forEach { row in
             stack.removeArrangedSubview(row)
             row.removeFromSuperview()
@@ -201,6 +205,11 @@ final class PasteraPreferenceAdaptiveGridView: NSView {
             row.spacing = Self.columnSpacing
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            for item in rowItems where item.fillsHeight {
+                let constraint = item.view.heightAnchor.constraint(equalTo: row.heightAnchor)
+                constraint.isActive = true
+                itemHeightConstraints.append(constraint)
+            }
             if rowItems.count == 1 {
                 let constraint = rowItems[0].view.widthAnchor.constraint(equalTo: row.widthAnchor)
                 constraint.isActive = true
@@ -227,6 +236,7 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
     let paneID: PasteraPreferencePaneID
     let contentStack = NSStackView()
     var onContentSizeChange: ((NSSize) -> Void)?
+    var fillsAvailableHeight: Bool { false }
 
     private let pageTitle: String
     private let documentView = PasteraPreferencePageDocumentView()
@@ -291,9 +301,9 @@ class PasteraPreferencePageViewController: NSViewController, PasteraPreferencePa
         invalidateContentSize()
     }
 
-    func addAdaptiveContent(_ content: NSView, weight: CGFloat = 1) {
+    func addAdaptiveContent(_ content: NSView, weight: CGFloat = 1, fillsHeight: Bool = false) {
         _ = view
-        adaptiveGrid.addItem(content, weight: weight)
+        adaptiveGrid.addItem(content, weight: weight, fillsHeight: fillsHeight)
         invalidateContentSize()
     }
 
@@ -580,6 +590,282 @@ final class PasteraPreferenceStatusView: NSStackView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+}
+
+final class PasteraPreferenceEmptyStateView: NSView {
+    init(
+        symbolName: String,
+        title: String,
+        message: String,
+        minimumHeight: CGFloat = 108
+    ) {
+        super.init(frame: .zero)
+
+        let imageView = NSImageView(
+            image: NSImage(systemSymbolName: symbolName, accessibilityDescription: title) ?? NSImage()
+        )
+        imageView.contentTintColor = .tertiaryLabelColor
+        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+
+        let messageLabel = NSTextField(wrappingLabelWithString: message)
+        messageLabel.font = .systemFont(ofSize: 11.5)
+        messageLabel.textColor = .secondaryLabelColor
+        messageLabel.alignment = .center
+        messageLabel.maximumNumberOfLines = 2
+
+        let stack = NSStackView(views: [imageView, titleLabel, messageLabel])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 5
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: minimumHeight),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+final class PasteraPreferenceActionBarView: NSStackView {
+    init(primaryAction: NSButton, secondaryActions: [NSButton]) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 8
+        edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+
+        primaryAction.bezelStyle = .rounded
+        primaryAction.bezelColor = .controlAccentColor
+        primaryAction.contentTintColor = .white
+        addArrangedSubview(primaryAction)
+
+        secondaryActions.forEach {
+            $0.bezelStyle = .rounded
+            addArrangedSubview($0)
+        }
+        addArrangedSubview(NSView())
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+final class PasteraPreferenceSheetScaffold: NSView {
+    static let bodyHorizontalInset: CGFloat = 22
+
+    let contentStack = NSStackView()
+    let documentView = PasteraPreferenceFlippedView()
+
+    private let scrollView = NSScrollView()
+    private let footerLeadingStack = NSStackView()
+    private let footerTrailingStack = NSStackView()
+
+    init(
+        title: String,
+        subtitle: String,
+        minimumSize: NSSize,
+        idealSize: NSSize
+    ) {
+        super.init(frame: NSRect(origin: .zero, size: idealSize))
+        identifier = NSUserInterfaceItemIdentifier("preference.sheet.scaffold")
+        setAccessibilityIdentifier("preference.sheet.scaffold")
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let header = makeHeader(title: title, subtitle: subtitle)
+        header.identifier = NSUserInterfaceItemIdentifier("preference.sheet.header")
+        header.setAccessibilityIdentifier("preference.sheet.header")
+        let footer = makeFooter()
+        footer.identifier = NSUserInterfaceItemIdentifier("preference.sheet.footer")
+        footer.setAccessibilityIdentifier("preference.sheet.footer")
+
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.identifier = NSUserInterfaceItemIdentifier("preference.sheet.body")
+        scrollView.setAccessibilityIdentifier("preference.sheet.body")
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        contentStack.orientation = .vertical
+        contentStack.alignment = .leading
+        contentStack.spacing = 18
+        contentStack.frame = NSRect(
+            x: Self.bodyHorizontalInset,
+            y: 18,
+            width: max(1, idealSize.width - Self.bodyHorizontalInset * 2),
+            height: 1_200
+        )
+        contentStack.translatesAutoresizingMaskIntoConstraints = true
+        contentStack.autoresizingMask = [.width]
+        documentView.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: idealSize.width, height: 1_236)
+        )
+        documentView.autoresizingMask = [.width]
+        documentView.addSubview(contentStack)
+        scrollView.documentView = documentView
+
+        addSubview(header)
+        addSubview(scrollView)
+        addSubview(footer)
+
+        let idealWidth = widthAnchor.constraint(equalToConstant: idealSize.width)
+        idealWidth.priority = .defaultHigh
+        let idealHeight = heightAnchor.constraint(equalToConstant: idealSize.height)
+        idealHeight.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(greaterThanOrEqualToConstant: minimumSize.width),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: minimumSize.height),
+            idealWidth,
+            idealHeight,
+            header.topAnchor.constraint(equalTo: topAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: 74),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+            footer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            footer.heightAnchor.constraint(equalToConstant: 56)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func addBodyView(_ bodyView: NSView) {
+        bodyView.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(bodyView)
+        bodyView.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        needsLayout = true
+    }
+
+    func setFooterActions(leading: [NSView] = [], trailing: [NSView]) {
+        replaceArrangedSubviews(in: footerLeadingStack, with: leading)
+        replaceArrangedSubviews(in: footerTrailingStack, with: trailing)
+    }
+
+    override func layout() {
+        super.layout()
+        let availableWidth = max(
+            1,
+            scrollView.contentSize.width - Self.bodyHorizontalInset * 2
+        )
+        contentStack.frame = NSRect(
+            x: Self.bodyHorizontalInset,
+            y: 18,
+            width: availableWidth,
+            height: max(1, contentStack.frame.height)
+        )
+        contentStack.layoutSubtreeIfNeeded()
+        let contentHeight = max(1, contentStack.fittingSize.height)
+        contentStack.frame.size = NSSize(width: availableWidth, height: contentHeight)
+        documentView.frame.size = NSSize(
+            width: scrollView.contentSize.width,
+            height: max(scrollView.contentSize.height, contentHeight + 36)
+        )
+    }
+
+    private func makeHeader(title: String, subtitle: String) -> NSView {
+        let header = NSView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        let subtitleLabel = NSTextField(labelWithString: subtitle)
+        subtitleLabel.font = .systemFont(ofSize: 11.5)
+        subtitleLabel.textColor = .secondaryLabelColor
+
+        let labels = NSStackView(views: [titleLabel, subtitleLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 3
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
+        let separator = makeSeparator()
+        header.addSubview(labels)
+        header.addSubview(separator)
+        NSLayoutConstraint.activate([
+            labels.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: Self.bodyHorizontalInset),
+            labels.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -Self.bodyHorizontalInset),
+            labels.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            separator.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: header.bottomAnchor),
+            separator.heightAnchor.constraint(equalToConstant: PasteraDesignTokens.Metrics.hairlineWidth)
+        ])
+        return header
+    }
+
+    private func makeFooter() -> NSView {
+        let footer = NSView()
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        footerLeadingStack.orientation = .horizontal
+        footerLeadingStack.alignment = .centerY
+        footerLeadingStack.spacing = 8
+        footerLeadingStack.translatesAutoresizingMaskIntoConstraints = false
+        footerTrailingStack.orientation = .horizontal
+        footerTrailingStack.alignment = .centerY
+        footerTrailingStack.spacing = 8
+        footerTrailingStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let separator = makeSeparator()
+        footer.addSubview(separator)
+        footer.addSubview(footerLeadingStack)
+        footer.addSubview(footerTrailingStack)
+        NSLayoutConstraint.activate([
+            separator.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
+            separator.topAnchor.constraint(equalTo: footer.topAnchor),
+            separator.heightAnchor.constraint(equalToConstant: PasteraDesignTokens.Metrics.hairlineWidth),
+            footerLeadingStack.leadingAnchor.constraint(
+                equalTo: footer.leadingAnchor,
+                constant: Self.bodyHorizontalInset
+            ),
+            footerLeadingStack.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            footerTrailingStack.trailingAnchor.constraint(
+                equalTo: footer.trailingAnchor,
+                constant: -Self.bodyHorizontalInset
+            ),
+            footerTrailingStack.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            footerLeadingStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: footerTrailingStack.leadingAnchor,
+                constant: -12
+            )
+        ])
+        return footer
+    }
+
+    private func makeSeparator() -> NSView {
+        let separator = NSView()
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        return separator
+    }
+
+    private func replaceArrangedSubviews(in stack: NSStackView, with views: [NSView]) {
+        stack.arrangedSubviews.forEach {
+            stack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        views.forEach(stack.addArrangedSubview)
     }
 }
 
