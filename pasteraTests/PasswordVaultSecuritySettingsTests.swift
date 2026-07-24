@@ -123,6 +123,16 @@ struct PasswordVaultSecuritySettingsTests {
         #expect(state.quickUnlockAvailable)
         #expect(!state.isBusy)
     }
+
+    @Test("controller startup prepares a locked cloud vault away from the main thread")
+    func controllerStartupPreparesLockedVaultOffMainThread() async {
+        let fixture = ControllerSpyFixture(storeState: .locked)
+        defer { fixture.remove() }
+
+        #expect(await wait(for: fixture.store.prepareForUnlockStarted) == .success)
+        #expect(fixture.store.prepareForUnlockCallCount == 1)
+        #expect(!fixture.store.prepareForUnlockWasOnMainThread)
+    }
 }
 
 private final class SecuritySettingsFixture {
@@ -175,9 +185,10 @@ private final class ControllerSpyFixture {
     let controller: PasswordVaultUIController
     private let suiteName: String
 
-    init() {
+    init(storeState: PasswordVaultState = .unlocked) {
         suiteName = "PasswordVaultSecuritySettingsTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        store.state = storeState
         controller = PasswordVaultUIController(store: store, defaults: defaults)
     }
 
@@ -265,10 +276,18 @@ private final class SecuritySettingsStoreSpy: PasswordVaultStore {
     var changeMasterPasswordCallCount = 0
     var changeResult = PasswordVaultMasterPasswordChangeResult(warnings: [])
     var blockMetadataRead = false
+    var prepareForUnlockCallCount = 0
+    var prepareForUnlockWasOnMainThread = false
+    let prepareForUnlockStarted = DispatchSemaphore(value: 0)
     let metadataStarted = DispatchSemaphore(value: 0)
     let metadataRelease = DispatchSemaphore(value: 0)
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws {}
+    func prepareForUnlock() throws {
+        prepareForUnlockCallCount += 1
+        prepareForUnlockWasOnMainThread = Thread.isMainThread
+        prepareForUnlockStarted.signal()
+    }
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws {}
     func unlockWithQuickKey(reason: String) throws {}
     func enableQuickUnlock() throws {

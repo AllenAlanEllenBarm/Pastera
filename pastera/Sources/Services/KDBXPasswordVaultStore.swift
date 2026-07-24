@@ -3,6 +3,17 @@ import Foundation
 import KDBXKit
 
 final class VaultFileCoordinator {
+    private struct Fingerprint: Equatable {
+        let size: UInt64
+        let modificationDate: Date?
+    }
+
+    private struct PreparedEncryptedVault {
+        let url: URL
+        let fingerprint: Fingerprint
+        let data: Data
+    }
+
     static func vaultURL(for syncRootURL: URL) -> URL {
         syncRootURL
             .appendingPathComponent("PasteraSync", isDirectory: true)
@@ -11,14 +22,57 @@ final class VaultFileCoordinator {
     }
 
     private let fileManager: FileManager
+    private let dataReader: (URL) throws -> Data
+    private let fileAttributesReader: (URL) throws -> [FileAttributeKey: Any]
+    private let preparedVaultLock = NSLock()
+    private var preparedVault: PreparedEncryptedVault?
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        dataReader: ((URL) throws -> Data)? = nil,
+        fileAttributesReader: ((URL) throws -> [FileAttributeKey: Any])? = nil
+    ) {
         self.fileManager = fileManager
+        self.dataReader = dataReader ?? Self.readCoordinatedData
+        self.fileAttributesReader = fileAttributesReader ?? {
+            try fileManager.attributesOfItem(atPath: $0.path)
+        }
     }
 
     func read(from url: URL) throws -> Data {
         guard fileManager.fileExists(atPath: url.path) else { throw PasswordVaultError.databaseNotConfigured }
-        return try Data(contentsOf: url)
+        let standardizedURL = url.standardizedFileURL
+        let expectedFingerprint = try? fingerprint(of: standardizedURL)
+        let data = try dataReader(standardizedURL)
+        try validate(data, against: expectedFingerprint)
+        return data
+    }
+
+    func prepareForUnlock(from url: URL) throws {
+        _ = try readForUnlock(from: url)
+    }
+
+    func readForUnlock(from url: URL) throws -> Data {
+        guard fileManager.fileExists(atPath: url.path) else { throw PasswordVaultError.databaseNotConfigured }
+        let standardizedURL = url.standardizedFileURL
+        let fingerprintBeforeRead = try? fingerprint(of: standardizedURL)
+        if let fingerprintBeforeRead {
+            preparedVaultLock.lock()
+            let cachedData = preparedVault.flatMap { prepared -> Data? in
+                guard prepared.url == standardizedURL, prepared.fingerprint == fingerprintBeforeRead else { return nil }
+                return prepared.data
+            }
+            preparedVaultLock.unlock()
+            if let cachedData { return cachedData }
+        }
+        let data = try dataReader(standardizedURL)
+        try validate(data, against: fingerprintBeforeRead)
+        if let fingerprintBeforeRead,
+           let fingerprintAfterRead = try? fingerprint(of: standardizedURL),
+           fingerprintBeforeRead == fingerprintAfterRead {
+            cacheEncryptedData(data, for: standardizedURL, fingerprint: fingerprintAfterRead)
+        }
+        return data
     }
 
     func revision(of data: Data) -> Data {
@@ -26,6 +80,8 @@ final class VaultFileCoordinator {
     }
 
     func write(_ data: Data, to url: URL) throws {
+        invalidatePreparedVault(for: url)
+        defer { invalidatePreparedVault(for: url) }
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if fileManager.fileExists(atPath: url.path) {
             let backupURL = url.appendingPathExtension("bak")
@@ -60,6 +116,61 @@ final class VaultFileCoordinator {
             destination = resolved.appendingPathComponent("\(UUID().uuidString)-\(conflictURL.lastPathComponent)")
         }
         try fileManager.moveItem(at: conflictURL, to: destination)
+    }
+
+    private func cacheEncryptedData(_ data: Data, for url: URL, fingerprint: Fingerprint) {
+        let standardizedURL = url.standardizedFileURL
+        preparedVaultLock.lock()
+        preparedVault = PreparedEncryptedVault(
+            url: standardizedURL,
+            fingerprint: fingerprint,
+            data: data
+        )
+        preparedVaultLock.unlock()
+    }
+
+    private func invalidatePreparedVault(for url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        preparedVaultLock.lock()
+        if preparedVault?.url == standardizedURL {
+            preparedVault = nil
+        }
+        preparedVaultLock.unlock()
+    }
+
+    private func fingerprint(of url: URL) throws -> Fingerprint? {
+        let attributes = try fileAttributesReader(url)
+        guard let size = (attributes[.size] as? NSNumber)?.uint64Value else { return nil }
+        return Fingerprint(
+            size: size,
+            modificationDate: attributes[.modificationDate] as? Date
+        )
+    }
+
+    private func validate(_ data: Data, against fingerprint: Fingerprint?) throws {
+        if let fingerprint, UInt64(data.count) != fingerprint.size {
+            throw PasswordVaultError.cloudUnavailable
+        }
+        if data.isEmpty {
+            throw PasswordVaultError.corruptedData
+        }
+    }
+
+    private static func readCoordinatedData(from url: URL) throws -> Data {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var readResult: Result<Data, Error>?
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinationError) { coordinatedURL in
+            readResult = Result { try Data(contentsOf: coordinatedURL) }
+        }
+        guard coordinationError == nil, let readResult else {
+            throw PasswordVaultError.cloudUnavailable
+        }
+        do {
+            return try readResult.get()
+        } catch {
+            throw PasswordVaultError.cloudUnavailable
+        }
     }
 }
 
@@ -127,7 +238,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         let bytes = try encoded(newContent, unlockData: unlock)
         do {
             try coordinator.write(bytes, to: url)
-            let written = try coordinator.read(from: url)
+            let written = try coordinator.readForUnlock(from: url)
             _ = try KDBXReader.parse(written, unlockData: unlock)
             lastRevision = coordinator.revision(of: written)
         } catch {
@@ -145,7 +256,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         state = .unlocking
         let unlock = UnlockData(masterPassword: masterPassword)
         do {
-            let data = try coordinator.read(from: try vaultURL())
+            let data = try coordinator.readForUnlock(from: try vaultURL())
             content = try KDBXReader.parse(data, unlockData: unlock)
             lastRevision = coordinator.revision(of: data)
             unlockData = unlock
@@ -156,7 +267,8 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
             state = .locked
             throw PasswordVaultError.wrongMasterPassword
         } catch let error as PasswordVaultError {
-            state = error == .databaseNotConfigured ? .notConfigured : .failed("read")
+            state = error == .databaseNotConfigured ? .notConfigured
+                : error == .cloudUnavailable ? .locked : .failed("read")
             throw error
         } catch {
             state = .failed("corrupted")
@@ -168,7 +280,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
         state = .unlocking
         do {
             let unlock = UnlockData(rawKeyData: try unlockKeyStore.load(reason: reason))
-            let data = try coordinator.read(from: try vaultURL())
+            let data = try coordinator.readForUnlock(from: try vaultURL())
             content = try KDBXReader.parse(data, unlockData: unlock)
             lastRevision = coordinator.revision(of: data)
             unlockData = unlock
@@ -493,6 +605,11 @@ final class KDBXPasswordVaultStore: PasswordVaultStore {
 }
 
 extension KDBXPasswordVaultStore {
+    func prepareForUnlock() throws {
+        guard state == .locked else { return }
+        try coordinator.prepareForUnlock(from: vaultURL())
+    }
+
     private func vaultURL() throws -> URL {
         guard let root = syncRootProvider(), FileManager.default.fileExists(atPath: root.path) else {
             throw PasswordVaultError.cloudUnavailable
@@ -708,7 +825,7 @@ extension KDBXPasswordVaultStore {
             let key = try automationUnlockKeyStore.load()
             guard key.count == 32 else { throw PasswordVaultError.keychainUnavailable }
             let unlock = UnlockData(rawKeyData: key)
-            let data = try coordinator.read(from: try vaultURL())
+            let data = try coordinator.readForUnlock(from: try vaultURL())
             content = try KDBXReader.parse(data, unlockData: unlock)
             lastRevision = coordinator.revision(of: data)
             unlockData = unlock
@@ -719,6 +836,8 @@ extension KDBXPasswordVaultStore {
             throw PasswordVaultError.keychainUnavailable
         } catch let error as PasswordVaultError {
             if error == .keychainUnavailable {
+                state = .locked
+            } else if error == .cloudUnavailable {
                 state = .locked
             } else {
                 state = error == .databaseNotConfigured ? .notConfigured : .failed("read")

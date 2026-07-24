@@ -420,6 +420,7 @@ protocol PasswordVaultStore {
     var canAutomationUnlock: Bool { get }
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws
+    func prepareForUnlock() throws
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws
     func unlockWithQuickKey(reason: String) throws
     func enableQuickUnlock() throws
@@ -455,6 +456,7 @@ extension PasswordVaultStore {
     var canQuickUnlock: Bool { false }
     var canAutomationUnlock: Bool { false }
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
+    func prepareForUnlock() throws {}
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlockWithQuickKey(reason: String) throws { throw PasswordVaultError.keychainUnavailable }
     func enableQuickUnlock() throws { throw PasswordVaultError.keychainUnavailable }

@@ -99,6 +99,9 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
             self?.storeStateDidChange()
         }
         vaultAgentExecutor.sync { refreshSnapshotFromStore() }
+        vaultAgentExecutor.async { [weak self] in
+            try? self?.store.prepareForUnlock()
+        }
     }
 
     var state: PasswordVaultState {

@@ -5,12 +5,124 @@ import Testing
 @testable import Pastera
 
 @Suite("Password vault store")
+// swiftlint:disable:next type_body_length
 struct PasswordVaultStoreTests {
     @Test("KDBX vault lives under the configured Pastera sync root")
     func kdbxVaultUsesDedicatedSyncLocation() {
         let root = URL(fileURLWithPath: "/tmp/OneDrive", isDirectory: true)
 
         #expect(VaultFileCoordinator.vaultURL(for: root).path == "/tmp/OneDrive/PasteraSync/vault/PasteraVault.kdbx")
+    }
+
+    @Test("prefetched encrypted vault bytes avoid a second cloud data read")
+    func prefetchedEncryptedVaultAvoidsSecondRead() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("PasteraVault.kdbx")
+        let encryptedBytes = Data("encrypted-kdbx-payload".utf8)
+        try encryptedBytes.write(to: url)
+        var readCount = 0
+        let coordinator = VaultFileCoordinator(dataReader: { sourceURL in
+            readCount += 1
+            return try Data(contentsOf: sourceURL)
+        })
+
+        try coordinator.prepareForUnlock(from: url)
+        let unlockedBytes = try coordinator.readForUnlock(from: url)
+
+        #expect(unlockedBytes == encryptedBytes)
+        #expect(readCount == 1)
+    }
+
+    @Test("changed cloud metadata invalidates prefetched encrypted vault bytes")
+    func changedCloudMetadataInvalidatesPrefetch() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("PasteraVault.kdbx")
+        try Data("first-encrypted-payload".utf8).write(to: url)
+        var readCount = 0
+        let coordinator = VaultFileCoordinator(dataReader: { sourceURL in
+            readCount += 1
+            return try Data(contentsOf: sourceURL)
+        })
+        try coordinator.prepareForUnlock(from: url)
+
+        let replacementBytes = Data("new-and-longer-encrypted-payload".utf8)
+        try replacementBytes.write(to: url, options: .atomic)
+        let unlockedBytes = try coordinator.readForUnlock(from: url)
+
+        #expect(unlockedBytes == replacementBytes)
+        #expect(readCount == 2)
+    }
+
+    @Test("cloud replacement during prefetch cannot cache stale encrypted bytes")
+    func cloudReplacementDuringPrefetchDoesNotCacheStaleBytes() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("PasteraVault.kdbx")
+        let originalBytes = Data("first-encrypted-payload".utf8)
+        let replacementBytes = Data("new-and-longer-encrypted-payload".utf8)
+        try originalBytes.write(to: url)
+        var readCount = 0
+        let coordinator = VaultFileCoordinator(dataReader: { sourceURL in
+            readCount += 1
+            let data = try Data(contentsOf: sourceURL)
+            if readCount == 1 {
+                try replacementBytes.write(to: sourceURL, options: .atomic)
+            }
+            return data
+        })
+
+        try coordinator.prepareForUnlock(from: url)
+        let unlockedBytes = try coordinator.readForUnlock(from: url)
+
+        #expect(unlockedBytes == replacementBytes)
+        #expect(readCount == 2)
+    }
+
+    @Test("unavailable cloud metadata falls back to a direct encrypted data read")
+    func unavailableCloudMetadataFallsBackToDirectRead() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("PasteraVault.kdbx")
+        let encryptedBytes = Data("encrypted-kdbx-payload".utf8)
+        try encryptedBytes.write(to: url)
+        var readCount = 0
+        let coordinator = VaultFileCoordinator(
+            dataReader: { sourceURL in
+                readCount += 1
+                return try Data(contentsOf: sourceURL)
+            },
+            fileAttributesReader: { _ in throw CocoaError(.fileReadUnknown) }
+        )
+
+        let unlockedBytes = try coordinator.readForUnlock(from: url)
+
+        #expect(unlockedBytes == encryptedBytes)
+        #expect(readCount == 1)
+    }
+
+    @Test("a cloud placeholder short read is unavailable instead of corrupted")
+    func cloudPlaceholderShortReadIsUnavailable() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("PasteraVault.kdbx")
+        try Data("encrypted-kdbx-payload".utf8).write(to: url)
+        let coordinator = VaultFileCoordinator(dataReader: { _ in Data() })
+
+        #expect(throws: PasswordVaultError.cloudUnavailable) {
+            try coordinator.prepareForUnlock(from: url)
+        }
     }
 
     @Test("password vault lifecycle exposes locked and recovery states")
