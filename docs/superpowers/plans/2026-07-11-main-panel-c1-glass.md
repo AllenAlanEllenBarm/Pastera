@@ -159,23 +159,50 @@ Reading this as: 面向键盘优先和高频剪贴操作用户的原生 macOS �
 - 回滚以视觉层提交为单位，不回滚数据源、Repository、KDBX 或同步改动。
 - 上线观察聚焦打开速度、模式切换延迟、搜索展开尺寸、键盘焦点、拖拽插入反馈和不同辅助功能设置下的可读性。
 
+## 2026-07-22 Focused Repair Slice
+
+### Confirmed Root Causes
+
+- 常用主菜单入口以 `pinned: false` 打开，而 `MainMenuPanelBehavior.isMovableByWindowBackground` 只在 pinned 状态返回 `true`，导致真实使用态无法拖动。
+- 主面板同时使用系统窗口阴影、1pt 外描边和深色不透明底板，浅色桌面上会形成明显的黑色外圈。
+- 搜索展开时，`searchDrawerHeight` 与原主内容的 `bottomInset` 重复计入间隔，搜索框与 footer 实际相隔 14pt。
+- 主菜单搜索在每次文本变化时重建整个内容树；中文输入法 marked text 尚未提交时，搜索框被移除、重挂和重新聚焦。`Control+Space` 还可能被面板级空格确认逻辑拦截。
+
+### Focused Tasks
+
+- [ ] 先补失败测试，覆盖 unpinned 拖动、外壳描边与阴影、8pt 搜索间距、marked text 和 `Control+Space` 放行。
+- [ ] 让 pinned 与 unpinned 主面板均保留背景拖动，不改变 level、失焦关闭和 collection behavior。
+- [ ] 关闭系统黑色窗口阴影，将外壳描边减为 0.5pt 的低对比语义边缘，保留 16pt 圆角与实色深色基底。
+- [ ] 将搜索框与 footer 的间距从 14pt 收敛为 8pt，并保持面板顶部、内容与 footer 的屏幕坐标稳定。
+- [ ] 复用现有历史搜索的 IME 规则：marked text 期间不刷新结果，组合完成后再更新；搜索字段编辑时不吞输入法切换组合键。
+- [ ] 运行定向测试、主菜单相关测试、默认全量回归、Release 构建、`git diff --check` 和本地安装验证。
+
+### Focused Acceptance Mapping
+
+| Acceptance | Automated Evidence | Manual Evidence |
+| --- | --- | --- |
+| 常用临时主面板可拖动 | unpinned behavior 与真实 panel 属性测试 | 从空白标题区域拖动并确认窗口位置变化 |
+| 浅色桌面上无明显黑圈 | `hasShadow == false`、0.5pt 低对比边缘断言 | 同尺寸浅色背景截图 |
+| 搜索框与 footer 间距约减半 | 展开布局精确断言为 8pt | 对照用户截图检查底部节奏 |
+| 中文输入法可连续组合输入 | marked text 不刷新、提交后刷新、`Control+Space` 不拦截测试 | 切换中文输入法并输入候选词 |
+
 ## Delivery Metadata
 
 - Plan Path: `docs/superpowers/plans/2026-07-11-main-panel-c1-glass.md`
-- Plan Status: proposed, awaiting design confirmation
+- Plan Status: in progress, focused repair slice requested with direct implementation on 2026-07-22
 - Evidence Profile: standard
 - Story ID: not-synced
 - Task IDs: not-synced
 - ZenTao Sync Status: not-synced, user did not request external synchronization
 - ZenTao Readback Evidence / Time: none
-- Last Updated: 2026-07-17
+- Last Updated: 2026-07-22
 
 ## Delivery Record
 
-- Actual Implementation: not started
-- Plan Deviations: none
-- Impact: planned changes are limited to main-panel presentation, interaction feedback, localization when required, and related tests
-- Verification: plan review only; current installed app process confirmed, but the floating panel could not be captured through the available UI controller in this planning run
-- Remaining Risks: live screenshot baseline and subjective pointer/drag feel must be captured before production edits
-- Follow-ups: after user confirmation, execute Tasks 1 through 5 against the existing dirty worktree without overwriting unrelated changes
+- Actual Implementation: completed the focused repair slice by enabling background drag for pinned and transient panels, removing the system window shadow, reducing the outer edge to a 0.5pt 6%-white hairline, setting the search-to-toolbar gap to 8pt, deferring search refresh while AppKit has marked text, and returning active search-field keyboard handling to the field editor
+- Plan Deviations: the 2026-07-22 request narrowed execution to drag behavior, outer chrome, search spacing, and Chinese IME stability; the broader visual redesign, state catalogue, and screenshot matrix remain outside this repair
+- Impact: limited to main-panel window behavior, legacy header drag permission, outer chrome, search drawer geometry, search input handling, and focused AppKit tests; no data model, repository, KDBX, sync, or password-vault business logic was changed by this slice
+- Verification: TDD red run produced 6 expected failures across 81 focused tests; green focused run passed 81/81; the default clean full run hit 8 unrelated concurrent failures plus an Xcode result-bundle writer error, while all 6 implicated suites passed 135/135 when rerun together; `git diff --check` passed; unsigned universal Release archive succeeded and produced Pastera 3.0.1 (301); `./script/install_local.sh` succeeded, `/Applications/Pastera.app` passed strict deep code-sign verification, and PID 54019 was read back from the installed executable
+- Remaining Risks: real Chinese IME candidate selection and pointer drag feel still require a short human check because Computer Use cannot enumerate or operate this LSUIElement menu-bar panel; the repository full suite remains susceptible to parallel test interference even though the implicated suites pass in grouped rerun
+- Follow-ups: manually open the installed menu-bar panel once, drag from an empty header/background region, switch to a Chinese input source with `Control+Space`, and enter a candidate phrase; no broader visual redesign is included in this focused delivery
 - ZenTao Closeout: not requested and not started

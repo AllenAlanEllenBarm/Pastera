@@ -438,33 +438,52 @@
 - Task IDs: `not-applicable`; Superpowers Tasks 1–6 组成一个本地 UI 与历史脚本交付闭环
 - ZenTao Sync Status: `not-synced`（本需求未要求 ZenTao 归档）
 - ZenTao Readback Evidence / Time: `not-applicable`
-- Last Updated: `2026-07-17 Asia/Shanghai`
+- Last Updated: `2026-07-23 Asia/Shanghai`
 
 ## Delivery Record
 
 ### Actual Implementation
 
-- 尚未开始。
+- 2026-07-23 完成了本轮用户明确要求的脚本设置范围，即 Task 3、Task 4 及对应的 Task 6 验收；整份计划的普通设置页和历史脚本剩余工作未在本轮扩展。
+- 脚本首页改为单一全高“我的脚本”工作区。脚本列表占满剩余高度，操作栏与全局快捷键固定在底部；脚本行使用弱分割列表，尾部直接提供启用、上移、下移、编辑和删除；“新建脚本”为唯一主操作，模板和测试为次操作。
+- `PasteraPreferenceComponents.swift` 增加共享空状态、操作栏和 `PasteraPreferenceSheetScaffold`。三个脚本 Sheet 统一为固定标题区、可滚动正文和固定底部操作区，最小宽度均为 560pt。
+- 编辑器按基本信息、执行配置、代码和保存前验证连续排布；保存继续要求必填项和一次成功验证。模板市场改为弱分割行与固定尾部“添加”按钮；独立测试使用单列布局和稳定的图标加文字结果区。
+- 保留原脚本模型、repository、JavaScript 执行、模板内容、快捷键语义和 Sheet 回调签名；模板选择进入编辑器、编辑器取消、独立测试均沿用真实父窗口 Sheet 生命周期。
 
 ### Plan Deviations
 
-- 尚无。
+- 本轮没有实施 Task 1、Task 2，也没有继续 Task 5 Step 7–8；因此整份计划仍未完成，不能据此宣称七个设置页已统一。
+- `Localizable.xcstrings` 未发生变化；新增短文案继续使用现有 `pasteraScriptString` 双语入口，避免为本轮脚本局部重构扩大本地化文件 diff。
+- Task 4 的编辑器在 760pt 理想宽度下将代码区收紧为 158pt、测试输入区收紧为 64pt，使“保存前验证”在初始视口中可见；正文仍可独立滚动。
+- 完整 `clean test` 在全量并行负载下退出 65，最终列出 8 个非脚本 UI 的超时/性能失败；把对应 6 个 suite 隔离重跑后 125 个测试全部通过。该事实记录为全仓回归缺口，不包装成完整 GREEN。
 
 ### Impact
 
-- 计划影响设置中心共享 UI、六个普通页面、脚本首页、三个脚本二级窗口和历史文本行上下文菜单；不影响业务数据模型和持久化协议。
+- 本轮实际影响脚本设置首页、脚本编辑器、模板市场、独立测试 Sheet 及设置共享组件；没有修改脚本数据模型、SQLite、执行沙箱、剪贴板写回或快捷键持久化。
+- 实施期间工作区原有主菜单、密码箱和其他未提交改动均被保留；脚本设置范围最终由提交 `178af2c` 独立推送，没有混入其他任务。
 
 ### Verification
 
-- 计划阶段已完成仓库规则、历史计划、共享组件、脚本 controller 和测试入口检查；尚未执行实现后测试与截图验收。
+- TDD RED：新增首页共享组/操作层级、排序、Sheet scaffold、编辑器弱分区和模板尾部操作断言后，`ScriptPreferenceTests` 按预期失败。
+- `ScriptPreferenceTests`：14 个测试通过，包含真实 JavaScript、模板筛选、全高工作区、Sheet 响应式契约、行内排序和独立测试不修改剪贴板。
+- `PreferenceWindowInteractionRegressionTests`：3 个测试通过，真实覆盖“设置 → 脚本 → 从模板创建 → 添加 → 编辑器取消”Sheet 链路。
+- Task 6 定向回归：`PreferenceWindowShellTests`、`PreferencePaneAlignmentTests`、`PreferenceWindowInteractionRegressionTests`、`PreferenceSearchTests`、`ScriptPreferenceTests`、`ScriptTemplateCatalogTests`、`ClipboardScriptCoordinatorTests`、`MainMenuEmbeddedContentTests`、`HistoryMenuKeyEquivalentTests` 共 132 个测试、9 个 suite 通过。
+- 静态检查：`git diff --check` 与 `jq empty pastera/Resources/Localizable.xcstrings` 均退出 0；聚焦测试日志未出现 Auto Layout 冲突。
+- 完整回归：全量 `xcodebuild ... clean test` 退出 65，最终失败列表为 8 个 Agent/密码箱/性能测试；对应 6 个 suite 隔离重跑 125 个测试全部通过，说明失败只在全量并行负载中复现。
+- 安装：`./script/install_local.sh --verify` 构建、临时签名、磁盘校验和 `/Applications/Pastera.app` 进程路径校验均通过。
+- 真实 UI：通过 Computer Use 实操模板创建、编辑器测试成功、取消返回、独立“压缩 JSON”测试输出 `{"a":1}`；深色主页/模板/编辑器截图分别位于 `/var/folders/0_/qwspc2w10vg5kh3qp84jcmb80000gn/T/com.openai.sky.CUAService/Pastera Screenshot 2026-07-23 at 4.22.23 PM.jpeg`、`/var/folders/0_/qwspc2w10vg5kh3qp84jcmb80000gn/T/com.openai.sky.CUAService/Pastera Screenshot 2026-07-23 at 4.22.33 PM.jpeg`、`/var/folders/0_/qwspc2w10vg5kh3qp84jcmb80000gn/T/com.openai.sky.CUAService/Pastera Screenshot 2026-07-23 at 4.22.58 PM.jpeg`，浅色主页截图位于 `/var/folders/0_/qwspc2w10vg5kh3qp84jcmb80000gn/T/com.openai.sky.CUAService/Pastera Screenshot 2026-07-23 at 4.26.12 PM.jpeg`。
+- 全高布局补充验收：默认 `760×600` 和最小 `680×480` 均保持操作与快捷键可见；真实执行“从模板创建 → 移除空行 → 运行测试 → 取消返回”未再卡住。
 
 ### Remaining Risks
 
-- 当前环境无法通过 Computer Use 获取 Pastera 窗口截图，实施验收时需确认屏幕录制/辅助功能可用，或明确记录人工截图阻断。
+- 全量并行 `clean test` 尚未取得退出 0；隔离重跑已排除脚本 UI 回归，但 Agent 命令超时、Broker 时序和 10k 搜索性能在全量负载下仍可能抖动。
+- 本轮只对脚本相关页面完成深浅色和理想宽度实机验收；七个普通设置页、脚本空态/多脚本态及所有 560pt 截图仍属于整份计划的后续验收范围。
+- Computer Use 截图位于系统临时目录，后续系统清理后路径可能失效。
 
 ### Follow-ups
 
-- 用户确认执行后按 Tasks 1–6 实施，不另建计划。
+- 后续继续本计划时，先完成 Tasks 1–2 的普通设置页统一、Task 5 Step 7 的非静默反馈，以及 Task 6 的七页/560pt 完整截图矩阵。
+- 将全量并行回归中的 8 个负载型失败作为独立稳定性问题处理，不与本轮脚本 UI diff 混改。
 
 ### ZenTao Closeout
 
