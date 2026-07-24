@@ -1,6 +1,7 @@
 import AppKit
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, NSTextViewDelegate {
     private enum Metrics {
         static let minimumWidth: CGFloat = 560
@@ -8,20 +9,39 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
         static let minimumHeight: CGFloat = 480
         static let idealHeight: CGFloat = 680
     }
+
     private let original: ScriptTransform?
     private let executor: ScriptExecuting
     private let onSave: (ScriptTransform) -> Void
 
     private let nameField = NSTextField(string: "")
-    private let enabledButton = NSButton(checkboxWithTitle: pasteraScriptString("Enable Script", "启用脚本"), target: nil, action: nil)
-    private let copyButton = NSButton(checkboxWithTitle: pasteraScriptString("Run on Copy", "复制时执行"), target: nil, action: nil)
-    private let pasteButton = NSButton(checkboxWithTitle: pasteraScriptString("Run on Pastera Paste", "Pastera 粘贴时执行"), target: nil, action: nil)
-    private let manualButton = NSButton(checkboxWithTitle: pasteraScriptString("Run Manually", "手动运行"), target: nil, action: nil)
+    private let enabledButton = NSButton(
+        checkboxWithTitle: pasteraScriptString("Enable Script", "启用脚本"),
+        target: nil,
+        action: nil
+    )
+    private let copyButton = NSButton(
+        checkboxWithTitle: pasteraScriptString("Run on Copy", "复制时执行"),
+        target: nil,
+        action: nil
+    )
+    private let pasteButton = NSButton(
+        checkboxWithTitle: pasteraScriptString("Run on Pastera Paste", "Pastera 粘贴时执行"),
+        target: nil,
+        action: nil
+    )
+    private let manualButton = NSButton(
+        checkboxWithTitle: pasteraScriptString("Run Manually", "手动运行"),
+        target: nil,
+        action: nil
+    )
     private let codeView = NSTextView()
-    private let testInputField = NSTextField(string: "Hello World")
+    private let testInputView = NSTextView()
+    private let resultIcon = NSImageView()
     private let resultLabel = NSTextField(wrappingLabelWithString: "")
+    private let resultStack = NSStackView()
     private let saveButton = NSButton()
-    private let documentView = PasteraPreferenceFlippedView()
+    private weak var sheetScaffold: PasteraPreferenceSheetScaffold?
     private var validatedSignature: String?
 
     private(set) var testOutputForTesting: String?
@@ -41,58 +61,51 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
     required init?(coder: NSCoder) { nil }
 
     override func loadView() {
-        let root = NSView()
-        root.translatesAutoresizingMaskIntoConstraints = false
+        configureFields()
 
-        let header = makeHeader()
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        let scaffold = PasteraPreferenceSheetScaffold(
+            title: original == nil
+                ? pasteraScriptString("New Script", "新建脚本")
+                : pasteraScriptString("Edit Script", "编辑脚本"),
+            subtitle: pasteraScriptString(
+                "Configure when the script runs, then validate it before saving.",
+                "设置执行时机，并在保存前完成一次运行验证"
+            ),
+            minimumSize: NSSize(width: Metrics.minimumWidth, height: Metrics.minimumHeight),
+            idealSize: NSSize(width: Metrics.idealWidth, height: Metrics.idealHeight)
+        )
+        sheetScaffold = scaffold
+
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 14
-        content.edgeInsets = NSEdgeInsets(top: 18, left: 22, bottom: 22, right: 22)
-        content.translatesAutoresizingMaskIntoConstraints = true
-        content.autoresizingMask = [.width]
-        documentView.frame = NSRect(x: 0, y: 0, width: 760, height: 1_200)
-        documentView.autoresizingMask = [.width]
-        content.frame = NSRect(x: 0, y: 0, width: 760, height: 1_200)
-        documentView.addSubview(content)
-        scrollView.documentView = documentView
+        content.spacing = 16
+        content.addArrangedSubview(basicSection())
+        content.addArrangedSubview(executionSection())
+        content.addArrangedSubview(codeSection())
+        content.addArrangedSubview(testSection())
+        content.arrangedSubviews.forEach {
+            $0.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        }
+        scaffold.addBodyView(content)
 
-        configureFields()
-        content.addArrangedSubview(card(title: pasteraScriptString("Basic Information", "基本信息"), content: nameField))
-        content.addArrangedSubview(executionCard())
-        content.addArrangedSubview(codeCard())
-        content.addArrangedSubview(testCard())
+        let cancelButton = NSButton(
+            title: pasteraScriptString("Cancel", "取消"),
+            target: self,
+            action: #selector(cancel)
+        )
+        cancelButton.bezelStyle = .rounded
+        saveButton.title = pasteraScriptString("Save", "保存")
+        saveButton.target = self
+        saveButton.action = #selector(save)
+        saveButton.bezelStyle = .rounded
+        saveButton.bezelColor = .controlAccentColor
+        saveButton.contentTintColor = .white
+        saveButton.keyEquivalent = "\r"
+        scaffold.setFooterActions(trailing: [cancelButton, saveButton])
 
-        root.addSubview(header)
-        root.addSubview(scrollView)
-        let idealWidth = root.widthAnchor.constraint(equalToConstant: Metrics.idealWidth)
-        idealWidth.priority = .defaultHigh
-        let idealHeight = root.heightAnchor.constraint(equalToConstant: Metrics.idealHeight)
-        idealHeight.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumWidth),
-            root.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
-            idealWidth,
-            idealHeight,
-            header.topAnchor.constraint(equalTo: root.topAnchor),
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 78),
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
-        ])
-        view = root
-        content.layoutSubtreeIfNeeded()
-        let contentHeight = max(1, content.fittingSize.height)
-        content.frame.size = NSSize(width: 760, height: contentHeight)
-        documentView.frame.size = NSSize(width: 760, height: contentHeight)
+        view = scaffold
+        scaffold.layoutSubtreeIfNeeded()
         updateSaveState()
     }
 
@@ -100,6 +113,7 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
         nameField.placeholderString = pasteraScriptString("Script Name", "脚本名称")
         nameField.stringValue = original?.name ?? ""
         nameField.delegate = self
+
         enabledButton.state = original?.isEnabled == false ? .off : .on
         copyButton.state = original?.runOnCopy == true ? .on : .off
         pasteButton.state = original?.runOnPaste == true ? .on : .off
@@ -108,102 +122,198 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
             $0.target = self
             $0.action = #selector(draftChanged)
         }
+
         codeView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         codeView.string = original?.code ?? "function transform(clip) {\n    return clip.text;\n}"
         codeView.delegate = self
-        resultLabel.textColor = .secondaryLabelColor
+        codeView.isAutomaticQuoteSubstitutionEnabled = false
+        codeView.isAutomaticDashSubstitutionEnabled = false
+
+        testInputView.font = .systemFont(ofSize: 13)
+        testInputView.string = "Hello World"
+        testInputView.setAccessibilityLabel(pasteraScriptString("Test Input", "测试输入"))
+
+        updateTestResult(
+            message: pasteraScriptString(
+                "Run a test to validate the current draft.",
+                "运行测试以验证当前脚本"
+            ),
+            symbolName: "info.circle",
+            color: .secondaryLabelColor
+        )
     }
 
-    private func makeHeader() -> NSView {
-        let header = NSView()
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let title = NSTextField(labelWithString: original == nil ? pasteraScriptString("New Script", "新建脚本") : pasteraScriptString("Edit Script", "编辑脚本"))
-        title.font = .systemFont(ofSize: 22, weight: .semibold)
-        title.translatesAutoresizingMaskIntoConstraints = false
-        let cancel = NSButton(title: pasteraScriptString("Cancel", "取消"), target: self, action: #selector(cancel))
-        cancel.bezelStyle = .rounded
-        saveButton.title = pasteraScriptString("Save", "保存")
-        saveButton.target = self
-        saveButton.action = #selector(save)
-        saveButton.bezelStyle = .rounded
-        saveButton.keyEquivalent = "\r"
-        let actions = NSStackView(views: [cancel, saveButton])
-        actions.spacing = 8
-        actions.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(title)
-        header.addSubview(actions)
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 22),
-            title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            actions.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -22),
-            actions.centerYAnchor.constraint(equalTo: header.centerYAnchor)
-        ])
-        return header
-    }
-
-    private func executionCard() -> NSView {
+    private func basicSection() -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
-        stack.addArrangedSubview(enabledButton)
-        let timing = NSTextField(labelWithString: pasteraScriptString("Execution Timing", "执行时机"))
-        timing.font = .systemFont(ofSize: 13, weight: .semibold)
-        stack.addArrangedSubview(timing)
-        let triggers = NSStackView(views: [copyButton, pasteButton, manualButton])
-        triggers.distribution = .fillEqually
-        triggers.spacing = 12
-        stack.addArrangedSubview(triggers)
-        let help = NSTextField(wrappingLabelWithString: pasteraScriptString("Pastera Paste only affects paste actions started from Pastera. It does not intercept system Command-V.", "只转换从 Pastera 发起的粘贴，不会拦截系统 Command-V。"))
-        help.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(help)
-        return card(title: pasteraScriptString("Execution Configuration", "执行配置"), content: stack)
+        stack.spacing = 7
+        stack.addArrangedSubview(makeFieldLabel(pasteraScriptString("Name", "名称")))
+        stack.addArrangedSubview(nameField)
+        nameField.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return makeSection(
+            id: "script.editor.section.basic",
+            title: pasteraScriptString("Basic Information", "基本信息"),
+            content: stack
+        )
     }
 
-    private func codeCard() -> NSView {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        scroll.documentView = codeView
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.heightAnchor.constraint(equalToConstant: 210).isActive = true
-        return card(title: pasteraScriptString("Script Code — implement transform(clip)", "脚本代码 — 必须实现 transform(clip)"), content: scroll)
-    }
-
-    private func testCard() -> NSView {
+    private func executionSection() -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 9
-        stack.addArrangedSubview(testInputField)
-        let run = NSButton(title: pasteraScriptString("Run Test", "运行测试"), target: self, action: #selector(runTest))
-        run.bezelStyle = .rounded
-        stack.addArrangedSubview(run)
-        stack.addArrangedSubview(resultLabel)
-        return card(title: pasteraScriptString("Test Script", "测试脚本"), content: stack)
+        stack.addArrangedSubview(enabledButton)
+        stack.addArrangedSubview(makeFieldLabel(pasteraScriptString("Execution Timing", "执行时机")))
+
+        let triggers = NSStackView(views: [copyButton, pasteButton, manualButton])
+        triggers.orientation = .horizontal
+        triggers.alignment = .centerY
+        triggers.distribution = .fillProportionally
+        triggers.spacing = 18
+        stack.addArrangedSubview(triggers)
+
+        let help = NSTextField(wrappingLabelWithString: pasteraScriptString(
+            "Pastera Paste only affects paste actions started from Pastera. It does not intercept system Command-V.",
+            "Pastera 粘贴只处理由 Pastera 发起的粘贴，不会拦截系统 Command-V。"
+        ))
+        help.font = .systemFont(ofSize: 11.5)
+        help.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(help)
+        help.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return makeSection(
+            id: "script.editor.section.execution",
+            title: pasteraScriptString("Execution Configuration", "执行配置"),
+            content: stack
+        )
     }
 
-    private func card(title: String, content: NSView) -> NSView {
+    private func codeSection() -> NSView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+        scrollView.documentView = codeView
+        scrollView.identifier = NSUserInterfaceItemIdentifier("script.editor.code-scroll")
+        scrollView.setAccessibilityIdentifier("script.editor.code-scroll")
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.heightAnchor.constraint(equalToConstant: 158).isActive = true
+        return makeSection(
+            id: "script.editor.section.code",
+            title: pasteraScriptString("Script Code", "脚本代码"),
+            subtitle: pasteraScriptString(
+                "Implement function transform(clip).",
+                "必须实现 function transform(clip)。"
+            ),
+            content: scrollView
+        )
+    }
+
+    private func testSection() -> NSView {
+        let inputScroll = NSScrollView()
+        inputScroll.hasVerticalScroller = true
+        inputScroll.borderType = .bezelBorder
+        inputScroll.documentView = testInputView
+        inputScroll.translatesAutoresizingMaskIntoConstraints = false
+        inputScroll.heightAnchor.constraint(equalToConstant: 64).isActive = true
+
+        let runButton = NSButton(
+            title: pasteraScriptString("Run Test", "运行测试"),
+            target: self,
+            action: #selector(runTest)
+        )
+        runButton.bezelStyle = .rounded
+        runButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
+        runButton.imagePosition = .imageLeading
+
+        let inputHeader = NSStackView()
+        inputHeader.orientation = .horizontal
+        inputHeader.alignment = .centerY
+        inputHeader.addArrangedSubview(makeFieldLabel(pasteraScriptString("Test Input", "测试输入")))
+        inputHeader.addArrangedSubview(NSView())
+        inputHeader.addArrangedSubview(runButton)
+
+        resultStack.orientation = .horizontal
+        resultStack.alignment = .centerY
+        resultStack.spacing = 8
+        resultStack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        resultStack.wantsLayer = true
+        resultStack.layer?.cornerRadius = 7
+        resultStack.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.45).cgColor
+        resultStack.identifier = NSUserInterfaceItemIdentifier("script.editor.test-result")
+        resultStack.setAccessibilityIdentifier("script.editor.test-result")
+        resultStack.translatesAutoresizingMaskIntoConstraints = false
+        resultStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
+        resultIcon.translatesAutoresizingMaskIntoConstraints = false
+        resultIcon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        resultIcon.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        resultLabel.maximumNumberOfLines = 4
+        resultStack.addArrangedSubview(resultIcon)
+        resultStack.addArrangedSubview(resultLabel)
+
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 16, right: 16)
-        stack.wantsLayer = true
-        stack.layer?.cornerRadius = 12
-        stack.layer?.borderWidth = 1
-        stack.layer?.borderColor = NSColor.separatorColor.cgColor
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 15, weight: .semibold)
-        stack.addArrangedSubview(label)
+        stack.spacing = 8
+        stack.addArrangedSubview(inputHeader)
+        stack.addArrangedSubview(inputScroll)
+        stack.addArrangedSubview(resultStack)
+        [inputHeader, inputScroll, resultStack].forEach {
+            $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return makeSection(
+            id: "script.editor.section.test",
+            title: pasteraScriptString("Validate Before Saving", "保存前验证"),
+            subtitle: pasteraScriptString(
+                "Testing does not modify the clipboard.",
+                "测试不会修改剪贴板"
+            ),
+            content: stack
+        )
+    }
+
+    private func makeSection(
+        id: String,
+        title: String,
+        subtitle: String? = nil,
+        content: NSView
+    ) -> NSView {
+        let section = NSStackView()
+        section.orientation = .vertical
+        section.alignment = .leading
+        section.spacing = 10
+        section.identifier = NSUserInterfaceItemIdentifier(id)
+        section.setAccessibilityIdentifier(id)
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        section.addArrangedSubview(titleLabel)
+        if let subtitle {
+            let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
+            subtitleLabel.font = .systemFont(ofSize: 11.5)
+            subtitleLabel.textColor = .secondaryLabelColor
+            section.addArrangedSubview(subtitleLabel)
+            subtitleLabel.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
+        }
         content.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(content)
-        content.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true
-        return stack
+        section.addArrangedSubview(content)
+        content.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
+        return section
+    }
+
+    private func makeFieldLabel(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        return label
     }
 
     private var draftSignature: String {
-        [nameField.stringValue, codeView.string, String(copyButton.state.rawValue), String(pasteButton.state.rawValue), String(manualButton.state.rawValue)].joined(separator: "|")
+        [
+            nameField.stringValue,
+            codeView.string,
+            String(copyButton.state.rawValue),
+            String(pasteButton.state.rawValue),
+            String(manualButton.state.rawValue)
+        ].joined(separator: "|")
     }
 
     private var hasRequiredFields: Bool {
@@ -234,6 +344,16 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
 
     @objc private func draftChanged() {
         validatedSignature = nil
+        testOutputForTesting = nil
+        testErrorForTesting = nil
+        updateTestResult(
+            message: pasteraScriptString(
+                "Draft changed. Run the test again before saving.",
+                "脚本已修改，请重新运行测试后再保存"
+            ),
+            symbolName: "arrow.clockwise.circle",
+            color: .secondaryLabelColor
+        )
         updateSaveState()
     }
 
@@ -241,17 +361,24 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
     func textDidChange(_ notification: Notification) { draftChanged() }
 
     @objc private func runTest() {
-        let input = testInputField.stringValue
-        Task { await validate(input: input) }
+        Task { await validate(input: testInputView.string) }
     }
 
     private func validate(input: String) async {
         guard hasRequiredFields else {
             validatedSignature = nil
-            resultLabel.stringValue = pasteraPreferenceString("Enter a name, choose a trigger, and define transform(clip).")
+            updateTestResult(
+                message: pasteraScriptString(
+                    "Enter a name, choose a trigger, and define transform(clip).",
+                    "请填写名称、选择执行时机，并定义 transform(clip)"
+                ),
+                symbolName: "exclamationmark.circle.fill",
+                color: .systemRed
+            )
             updateSaveState()
             return
         }
+
         let signature = draftSignature
         let result = await executor.execute(
             scripts: [makeDraft()],
@@ -262,24 +389,44 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
             validatedSignature = signature
             testOutputForTesting = output
             testErrorForTesting = nil
-            resultLabel.stringValue = output.isEmpty ? pasteraPreferenceString("Success — empty string") : output
-            resultLabel.textColor = .systemGreen
+            updateTestResult(
+                message: output.isEmpty
+                    ? pasteraScriptString("Success: empty string", "运行成功：输出为空字符串")
+                    : output,
+                symbolName: "checkmark.circle.fill",
+                color: .systemGreen
+            )
         case let .failure(error):
             validatedSignature = nil
             testOutputForTesting = nil
             testErrorForTesting = error
-            resultLabel.stringValue = pasteraPreferenceString("Script test failed: \(error)")
-            resultLabel.textColor = .systemRed
+            updateTestResult(
+                message: pasteraScriptString("Script test failed: \(error)", "脚本测试失败：\(error)"),
+                symbolName: "xmark.circle.fill",
+                color: .systemRed
+            )
         }
         updateSaveState()
     }
 
-    @objc private func cancel() { dismiss(self) }
+    private func updateTestResult(message: String, symbolName: String, color: NSColor) {
+        resultIcon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        resultIcon.contentTintColor = color
+        resultLabel.stringValue = message
+        resultLabel.textColor = color
+        resultStack.isHidden = false
+        resultStack.setAccessibilityLabel(message)
+    }
+
+    @objc private func cancel() { dismissScriptSheet(self) }
 
     @objc private func save() {
-        guard canSaveForTesting else { NSSound.beep(); return }
+        guard canSaveForTesting else {
+            NSSound.beep()
+            return
+        }
         onSave(makeDraft())
-        dismiss(self)
+        dismissScriptSheet(self)
     }
 
     var canSaveForTesting: Bool {
@@ -312,5 +459,7 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
     }
 
     var minimumSheetWidthForTesting: CGFloat { Metrics.minimumWidth }
-    var usesFlexibleDocumentWidthForTesting: Bool { documentView.autoresizingMask.contains(.width) }
+    var usesFlexibleDocumentWidthForTesting: Bool {
+        sheetScaffold?.documentView.autoresizingMask.contains(.width) == true
+    }
 }

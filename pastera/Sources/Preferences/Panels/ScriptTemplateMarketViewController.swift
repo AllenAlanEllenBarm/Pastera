@@ -8,12 +8,13 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
         static let minimumHeight: CGFloat = 460
         static let idealHeight: CGFloat = 650
     }
+
     private let catalog: ScriptTemplateCatalog
     private let onSelect: (ScriptTemplate) -> Void
     private let searchField = NSSearchField()
     private let categoryControl = NSSegmentedControl()
     private let listStack = NSStackView()
-    private let documentView = PasteraPreferenceFlippedView()
+    private weak var sheetScaffold: PasteraPreferenceSheetScaffold?
     private var visibleTemplates = [ScriptTemplate]()
 
     init(
@@ -28,86 +29,55 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
     required init?(coder: NSCoder) { nil }
 
     override func loadView() {
-        let root = NSView()
-        root.translatesAutoresizingMaskIntoConstraints = false
-        let header = makeHeader()
-        let controls = makeControls()
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        listStack.orientation = .vertical
-        listStack.alignment = .leading
-        listStack.spacing = 10
-        listStack.edgeInsets = NSEdgeInsets(top: 12, left: 18, bottom: 18, right: 18)
-        listStack.translatesAutoresizingMaskIntoConstraints = true
-        listStack.autoresizingMask = [.width]
-        documentView.frame = NSRect(x: 0, y: 0, width: 760, height: 2_000)
-        documentView.autoresizingMask = [.width]
-        listStack.frame = NSRect(x: 0, y: 0, width: 760, height: 2_000)
-        documentView.addSubview(listStack)
-        scroll.documentView = documentView
-        root.addSubview(header)
-        root.addSubview(controls)
-        root.addSubview(scroll)
-        let idealWidth = root.widthAnchor.constraint(equalToConstant: Metrics.idealWidth)
-        idealWidth.priority = .defaultHigh
-        let idealHeight = root.heightAnchor.constraint(equalToConstant: Metrics.idealHeight)
-        idealHeight.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumWidth),
-            root.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
-            idealWidth,
-            idealHeight,
-            header.topAnchor.constraint(equalTo: root.topAnchor),
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 78),
-            controls.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
-            controls.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            controls.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            scroll.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 8),
-            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor)
-        ])
-        view = root
-        reloadTemplates()
-    }
+        let scaffold = PasteraPreferenceSheetScaffold(
+            title: pasteraScriptString("Script Templates", "脚本模板"),
+            subtitle: pasteraScriptString(
+                "Choose a bundled starting point, then review it before saving.",
+                "选择内置模板作为起点，保存前仍可继续编辑"
+            ),
+            minimumSize: NSSize(width: Metrics.minimumWidth, height: Metrics.minimumHeight),
+            idealSize: NSSize(width: Metrics.idealWidth, height: Metrics.idealHeight)
+        )
+        sheetScaffold = scaffold
 
-    private func makeHeader() -> NSView {
-        let view = NSView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        let title = NSTextField(labelWithString: pasteraScriptString("Script Templates", "脚本模板"))
-        title.font = .systemFont(ofSize: 22, weight: .semibold)
-        title.translatesAutoresizingMaskIntoConstraints = false
-        let subtitle = NSTextField(labelWithString: pasteraScriptString("Choose a bundled template to create a script.", "选择预设模板快速创建脚本"))
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
-        let done = NSButton(title: pasteraScriptString("Done", "完成"), target: self, action: #selector(done))
-        done.bezelStyle = .rounded
-        done.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(title)
-        view.addSubview(subtitle)
-        view.addSubview(done)
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 22),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
-            done.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -22),
-            done.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-        return view
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 14
+        content.addArrangedSubview(makeControls())
+        content.addArrangedSubview(makeTemplateList())
+        content.arrangedSubviews.forEach {
+            $0.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        }
+        scaffold.addBodyView(content)
+
+        let doneButton = NSButton(
+            title: pasteraScriptString("Done", "完成"),
+            target: self,
+            action: #selector(done)
+        )
+        doneButton.bezelStyle = .rounded
+        doneButton.keyEquivalent = "\u{1b}"
+        scaffold.setFooterActions(trailing: [doneButton])
+
+        view = scaffold
+        reloadTemplates()
+        scaffold.layoutSubtreeIfNeeded()
     }
 
     private func makeControls() -> NSView {
         let stack = NSStackView()
-        stack.orientation = .horizontal
+        stack.orientation = .vertical
+        stack.alignment = .leading
         stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        searchField.placeholderString = pasteraScriptString("Search templates", "搜索模板名称或用途")
+
+        searchField.placeholderString = pasteraScriptString(
+            "Search by name or purpose",
+            "搜索模板名称或用途"
+        )
         searchField.delegate = self
+        searchField.setAccessibilityLabel(pasteraScriptString("Search Templates", "搜索脚本模板"))
+
         categoryControl.segmentCount = ScriptTemplateCategory.allCases.count
         for (index, category) in ScriptTemplateCategory.allCases.enumerated() {
             categoryControl.setLabel(category.title, forSegment: index)
@@ -115,10 +85,20 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
         categoryControl.selectedSegment = 0
         categoryControl.target = self
         categoryControl.action = #selector(filterChanged)
+        categoryControl.setAccessibilityLabel(pasteraScriptString("Template Category", "模板分类"))
+
         stack.addArrangedSubview(searchField)
         stack.addArrangedSubview(categoryControl)
-        searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
+        searchField.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        categoryControl.setContentHuggingPriority(.required, for: .horizontal)
         return stack
+    }
+
+    private func makeTemplateList() -> NSView {
+        listStack.orientation = .vertical
+        listStack.alignment = .leading
+        listStack.spacing = 0
+        return listStack
     }
 
     private func reloadTemplates() {
@@ -127,80 +107,136 @@ final class ScriptTemplateMarketViewController: NSViewController, NSSearchFieldD
             ? categories[categoryControl.selectedSegment]
             : .all
         visibleTemplates = catalog.search(query: searchField.stringValue, category: category)
-        listStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        listStack.arrangedSubviews.forEach {
+            listStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+
         if visibleTemplates.isEmpty {
-            let empty = NSTextField(labelWithString: pasteraScriptString("No matching templates.", "没有匹配的模板"))
-            empty.textColor = .secondaryLabelColor
+            let empty = PasteraPreferenceEmptyStateView(
+                symbolName: "magnifyingglass",
+                title: pasteraScriptString("No matching templates", "没有匹配的模板"),
+                message: pasteraScriptString(
+                    "Try another keyword or category.",
+                    "请尝试其他关键词或分类"
+                ),
+                minimumHeight: 132
+            )
             listStack.addArrangedSubview(empty)
+            empty.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
         } else {
-            visibleTemplates.forEach {
-                let card = makeTemplateCard($0)
-                listStack.addArrangedSubview(card)
-                card.widthAnchor.constraint(equalTo: listStack.widthAnchor, constant: -36).isActive = true
+            for (index, template) in visibleTemplates.enumerated() {
+                let row = makeTemplateRow(template)
+                listStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
+                guard index < visibleTemplates.count - 1 else { continue }
+                let separator = NSBox()
+                separator.boxType = .separator
+                listStack.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
             }
         }
-        listStack.layoutSubtreeIfNeeded()
-        listStack.frame.size = NSSize(width: 760, height: max(1, listStack.fittingSize.height))
-        documentView.frame.size = NSSize(
-            width: 760,
-            height: max(1, listStack.fittingSize.height)
-        )
+        sheetScaffold?.needsLayout = true
+        sheetScaffold?.layoutSubtreeIfNeeded()
     }
 
-    private func makeTemplateCard(_ template: ScriptTemplate) -> NSView {
-        let card = NSStackView()
-        card.orientation = .horizontal
-        card.alignment = .centerY
-        card.spacing = 14
-        card.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 12
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.separatorColor.cgColor
+    private func makeTemplateRow(_ template: ScriptTemplate) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 14
+        row.edgeInsets = NSEdgeInsets(top: 10, left: 4, bottom: 10, right: 4)
+        row.identifier = NSUserInterfaceItemIdentifier("script.template.row.\(template.id)")
+        row.setAccessibilityIdentifier("script.template.row.\(template.id)")
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 68).isActive = true
+
         let labels = NSStackView()
         labels.orientation = .vertical
         labels.alignment = .leading
-        labels.spacing = 4
-        let title = NSTextField(labelWithString: template.name)
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
-        let summary = NSTextField(labelWithString: template.summary)
-        summary.textColor = .secondaryLabelColor
-        let preview = NSTextField(labelWithString: template.code.split(separator: "\n").dropFirst().first.map(String.init) ?? "")
-        preview.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        preview.textColor = .tertiaryLabelColor
-        labels.addArrangedSubview(title)
-        labels.addArrangedSubview(summary)
-        labels.addArrangedSubview(preview)
-        let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil) ?? NSImage(), target: self, action: #selector(addTemplate(_:)))
-        add.bezelStyle = .circular
-        add.identifier = NSUserInterfaceItemIdentifier(template.id)
-        add.setAccessibilityLabel(pasteraPreferenceString("Add \(template.name) template"))
-        card.addArrangedSubview(labels)
-        card.addArrangedSubview(add)
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.spacing = 3
+        let titleLabel = NSTextField(labelWithString: template.name)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let summaryLabel = NSTextField(wrappingLabelWithString: template.summary)
+        summaryLabel.font = .systemFont(ofSize: 11.5)
+        summaryLabel.textColor = .secondaryLabelColor
+        summaryLabel.maximumNumberOfLines = 2
+        let previewLabel = NSTextField(
+            labelWithString: template.code
+                .split(separator: "\n")
+                .dropFirst()
+                .first
+                .map(String.init) ?? ""
+        )
+        previewLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        previewLabel.textColor = .tertiaryLabelColor
+        previewLabel.lineBreakMode = .byTruncatingTail
+        labels.addArrangedSubview(titleLabel)
+        labels.addArrangedSubview(summaryLabel)
+        labels.addArrangedSubview(previewLabel)
+
+        let addButton = NSButton(
+            title: pasteraScriptString("Add", "添加"),
+            target: self,
+            action: #selector(addTemplate(_:))
+        )
+        addButton.bezelStyle = .rounded
+        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        addButton.imagePosition = .imageLeading
+        addButton.identifier = NSUserInterfaceItemIdentifier("script.template.add.\(template.id)")
+        addButton.setAccessibilityLabel(
+            pasteraScriptString("Add \(template.name) Template", "添加模板 \(template.name)")
+        )
+
+        row.addArrangedSubview(labels)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        row.addArrangedSubview(spacer)
+        row.addArrangedSubview(addButton)
+        labels.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return card
+        addButton.setContentHuggingPriority(.required, for: .horizontal)
+        addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return row
     }
 
-    func controlTextDidChange(_ notification: Notification) { reloadTemplates() }
-    @objc private func filterChanged() { reloadTemplates() }
-    @objc private func done() { dismiss(self) }
+    func controlTextDidChange(_ notification: Notification) {
+        reloadTemplates()
+    }
+
+    @objc private func filterChanged() {
+        reloadTemplates()
+    }
+
+    @objc private func done() {
+        dismissScriptSheet(self)
+    }
 
     @objc private func addTemplate(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue,
+        guard let rawIdentifier = sender.identifier?.rawValue,
+              let id = rawIdentifier.split(separator: ".").last.map(String.init),
               let template = visibleTemplates.first(where: { $0.id == id }) else { return }
         onSelect(template)
+        dismissScriptSheet(self)
     }
 
-    var visibleTemplateIDsForTesting: [String] { visibleTemplates.map(\.id) }
-    func searchForTesting(_ query: String) { searchField.stringValue = query; reloadTemplates() }
+    var visibleTemplateIDsForTesting: [String] {
+        visibleTemplates.map(\.id)
+    }
+
+    func searchForTesting(_ query: String) {
+        searchField.stringValue = query
+        reloadTemplates()
+    }
+
     func selectTemplateForTesting(id: String) {
         guard let template = visibleTemplates.first(where: { $0.id == id }) else { return }
         onSelect(template)
     }
+
     var minimumSheetWidthForTesting: CGFloat { Metrics.minimumWidth }
     var usesFlexibleTemplateRowsForTesting: Bool {
-        documentView.autoresizingMask.contains(.width)
+        sheetScaffold?.documentView.autoresizingMask.contains(.width) == true
     }
 }
 
