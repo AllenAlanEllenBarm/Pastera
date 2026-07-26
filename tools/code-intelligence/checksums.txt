@@ -1,0 +1,4 @@
+b2b93e82a6786f9c7cb89fd4ca0e859a147b292ae8f6f95784f9742f0efec39e  uv-aarch64-apple-darwin.tar.gz
+33ee6bd62b57fcd77a499deb54e4432dc1e1a2f3d34930ba987ad8b43f9c7bc7  uv-x86_64-apple-darwin.tar.gz
+d74f23949fd07be4970f293d06ca99d87cd2a78a341c3d7b7fc0df7bc2d8a145  uv-aarch64-unknown-linux-gnu.tar.gz
+8cc1cd82d434ec565376f98bd938d4b715b5791a80ff2d3aa78821cf85091b4b  uv-x86_64-unknown-linux-gnu.tar.gz

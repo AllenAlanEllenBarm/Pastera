@@ -69,18 +69,42 @@ struct SparkleUpdateFeedTests {
     }
 
     @Test
-    func appcastContainsParseableReleaseItem() throws {
+    func appcastLatestItemMatchesCurrentBundleWithoutExecutablePayload() throws {
         let appcastURL = projectRoot().appendingPathComponent("appcast.xml")
         let data = try Data(contentsOf: appcastURL)
         let document = try XMLDocument(data: data)
         let root = try #require(document.rootElement())
         let item = try #require(try document.nodes(forXPath: "/rss/channel/item").first as? XMLElement)
-        let enclosure = try #require(item.elements(forName: "enclosure").first)
+        let shortVersion = try infoPlistValue(forKey: "CFBundleShortVersionString")
+        let buildVersion = try infoPlistValue(forKey: "CFBundleVersion")
 
         #expect(root.name == "rss")
         #expect(root.attribute(forName: "version")?.stringValue == "2.0")
+        #expect(item.elements(forName: "title").first?.stringValue == "Pastera \(shortVersion)")
+        #expect(item.elements(forName: "sparkle:version").first?.stringValue == buildVersion)
+        #expect(item.elements(forName: "sparkle:shortVersionString").first?.stringValue == shortVersion)
+        #expect(item.elements(forName: "sparkle:informationalUpdate").first != nil)
+        #expect(item.elements(forName: "enclosure").isEmpty)
+        #expect(
+            item.elements(forName: "link").first?.stringValue
+                == "https://github.com/pastera-app/Pastera/releases/tag/v\(shortVersion)-beta"
+        )
+    }
+
+    @Test
+    func appcastPreservesParseableInstallableHistory() throws {
+        let appcastURL = projectRoot().appendingPathComponent("appcast.xml")
+        let data = try Data(contentsOf: appcastURL)
+        let document = try XMLDocument(data: data)
+        let items = try document.nodes(forXPath: "/rss/channel/item").compactMap { $0 as? XMLElement }
+        let item = try #require(items.first { !$0.elements(forName: "enclosure").isEmpty })
+        let enclosure = try #require(item.elements(forName: "enclosure").first)
+
         #expect(item.elements(forName: "title").first?.stringValue?.hasPrefix("Pastera ") == true)
-        #expect(item.elements(forName: "link").first?.stringValue?.hasPrefix("https://github.com/pastera-app/Pastera/releases/tag/") == true)
+        #expect(
+            item.elements(forName: "link").first?.stringValue?
+                .hasPrefix("https://github.com/pastera-app/Pastera/releases/tag/") == true
+        )
         #expect(enclosure.attribute(forName: "url")?.stringValue?.hasPrefix("https://github.com/pastera-app/Pastera/releases/download/") == true)
         #expect(enclosure.attribute(forName: "sparkle:version")?.stringValue?.isEmpty == false)
         #expect(enclosure.attribute(forName: "sparkle:shortVersionString")?.stringValue?.isEmpty == false)

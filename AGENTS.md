@@ -2,40 +2,42 @@
 
 ## Project Context
 
-Pastera is an independent clipboard productivity product. The current macOS app
-is the executable behavior baseline; native Windows work belongs under
-`windows/` and must preserve the shared contracts without copying AppKit UI.
-`origin` is the only product remote; do not recreate a Clipy tracking remote.
+Pastera is an independent clipboard productivity product. The macOS app is the
+executable behavior baseline; native Windows work belongs under `windows/` and
+must preserve shared contracts without copying AppKit UI. `origin` is the only
+product remote; do not recreate a Clipy tracking remote.
 
-The app currently targets macOS 13+ and is built with Xcode 26.5. Dependencies
-are resolved through Xcode Swift Package Manager; do not reintroduce CocoaPods,
-SwiftGen, or BartyCrouch without an explicit product requirement.
+The app targets macOS 13+ and Xcode 26.5. Dependencies use Xcode Swift Package
+Manager; do not reintroduce CocoaPods, SwiftGen, or BartyCrouch without an
+explicit product requirement.
 
 ## Architecture Boundaries
 
-- Runtime entrypoint is `pastera/Sources/AppDelegate.swift`; menu behavior is in
+- Runtime entrypoint: `pastera/Sources/AppDelegate.swift`; menu behavior:
   `pastera/Sources/Managers/MenuManager.swift`.
-- Clipboard capture, pasteback, history cleanup, and app filtering live under
+- Clipboard capture, pasteback, history cleanup, and app filtering:
   `pastera/Sources/Services/`.
-- SQLiteData schema, database bootstrap, and migrations live under
-  `pastera/Sources/Database/`.
-- Snippet persistence already uses SQLiteData via
-  `pastera/Sources/Repositories/SnippetRepository.swift`.
-- SQLiteData is the current fact store. Realm may only remain as a bounded,
-  read-only legacy import path; do not add new Realm-backed product behavior.
+- SQLiteData schema, bootstrap, and migrations: `pastera/Sources/Database/`.
+- Snippet persistence: `pastera/Sources/Repositories/SnippetRepository.swift`.
+- SQLiteData is the fact store. Realm may remain only as a bounded, read-only
+  legacy import path; do not add Realm-backed product behavior.
 
 ## Local Development
 
 Local builds may enable `Configurations/CodeSigning-AdHoc.xcconfig` through
-`Configurations/CodeSigning.xcconfig`. Preserve existing user changes in this
-file unless the user asks to change signing mode.
+`Configurations/CodeSigning.xcconfig`. Preserve user changes unless asked to
+change signing mode. Do not commit `.DS_Store` or SwiftPM cache contents;
+`.spm-cache/` exists only for dependency download stability.
 
-Do not commit `.DS_Store` or SwiftPM cache contents. The project-local
-`.spm-cache/` directory is for dependency download stability only.
+Run `script/codex/code-intelligence.sh bootstrap` once per clone to activate the
+local `pastera_codegraph` MCP and watcher. CodeGraph returns candidates only;
+confirm with `rg`, focused source reads, and real tests—especially for AppKit
+selectors, notifications, target-action, and runtime dispatch. See
+`docs/development/CODE_INTELLIGENCE.md`.
 
 ## Build And Verification
 
-Use this command for the default regression pass:
+Default regression pass:
 
 ```bash
 xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
@@ -51,55 +53,48 @@ xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 Manual clipboard verification for image, file, rich text, and app paste targets
 is tracked in `docs/verification/VERIFICATION.md`.
 
-After a development task changes app behavior, UI, packaging, or tests and the
-requested verification has passed, reinstall the latest local build for manual
-testing unless the user explicitly asks not to:
+After app behavior, UI, packaging, or tests change and requested verification
+passes, reinstall for manual testing unless the user opts out:
 
 ```bash
 ./script/install_local.sh
 ```
 
-The script builds ad-hoc signed `Pastera.app`, replaces the local app under
-`/Applications` by default, and launches it. Use `PASTERA_INSTALL_DIR` only when
-`/Applications` is not writable.
-
-The project also has a Codex Stop hook in `.codex/hooks.json` that runs
-`script/codex_stop_install_if_changed.sh`. It only reinstalls when build-relevant
-paths (`Configurations`, `pastera`, or `pastera.xcodeproj`) changed since the
-last local install.
+The script ad-hoc signs `Pastera.app`, replaces `/Applications/Pastera.app`, and
+launches it. Use `PASTERA_INSTALL_DIR` only when `/Applications` is not writable.
+The `.codex/hooks.json` Stop hook runs
+`script/codex_stop_install_if_changed.sh` only when build-relevant paths changed.
 
 ## Documentation Boundaries
 
-- Independent product roadmap and historical migration boundary:
-  `docs/development/PASTERA_FORK_PLAN.md`.
-- Windows native porting entrypoint:
-  `docs/development/WINDOWS_PORTING_GUIDE.md`.
-- Verification matrix and known manual checks:
-  `docs/verification/VERIFICATION.md`.
-- OneDrive folder-sync protocol and credential boundaries:
-  `docs/sync/ONEDRIVE_SYNC.md`.
+- Product roadmap and migration history: `docs/development/PASTERA_FORK_PLAN.md`.
+- Windows porting: `docs/development/WINDOWS_PORTING_GUIDE.md`.
+- Verification matrix: `docs/verification/VERIFICATION.md`.
+- OneDrive sync and credential boundaries: `docs/sync/ONEDRIVE_SYNC.md`.
 
-Needed local credentials must be looked up through
-`~/.codex/docs/local-credentials.md`, `~/.codex/service-accounts.toml`, and the
-corresponding Keychain items. Never write plaintext passwords, tokens, sync
-passphrases, or OAuth material into this repo, `AGENTS.md`, docs, or chat.
+For reusable local credentials, check `~/.codex/docs/local-credentials.md`,
+`~/.codex/service-accounts.toml`, and the corresponding Keychain items. Never
+write plaintext passwords, tokens, passphrases, or OAuth material into the repo,
+agent rules, docs, or chat.
 
 ## Skill Routing
 
-- Creating or updating `AGENTS.md` / project agent rules: use
-  `$agents-authoring`.
-- Requirements, implementation plans, data/interface changes, UI search flows,
-  or delivery-record decisions: use `$delivery-workflow` first; do not let
-  `$superpowers:writing-plans` replace the spec/confirmation gate.
-- Multi-step implementation after the spec is stable: use
-  `$superpowers:writing-plans`, then `$superpowers:executing-plans` or
-  `$superpowers:subagent-driven-development`.
-- New features or bug fixes: use `$superpowers:test-driven-development` and
-  watch the relevant test fail before production edits.
-- Any code modification, refactor, review, or test-impact assessment: use
-  `$coding-guardrails` before the platform-specific implementation skill.
-- Bugs, build failures, pasteboard regressions, performance issues, or failing
-  tests: use `$superpowers:systematic-debugging` before proposing fixes.
-- Implementation and verification closeout, Delivery Record updates, commit,
-  push, tag, or branch integration: use `$change-sync`; it must reuse the
-  already-confirmed unique plan.
+- Project agent rules: `$agents-authoring`.
+- Only explicit plan/task creation, key Goal/Scope/Architecture/Acceptance
+  changes, or requested plan/Story/Task synchronization triggers
+  `$delivery-workflow`; direct implementation and an existing plan do not.
+- Confirmed multi-step specs: `$superpowers:writing-plans`, then
+  `$superpowers:executing-plans` or explicitly requested subagent execution;
+  reuse the unique plan.
+- Code changes/reviews: `$coding-guardrails` first; new behavior and bug fixes
+  add `$superpowers:test-driven-development`.
+- Bugs, build failures, regressions, performance issues, or failing tests:
+  `$superpowers:systematic-debugging` before production edits.
+- macOS build/run/debug or test triage: `$build-macos-apps:build-run-debug` or
+  `$build-macos-apps:test-triage`; AppKit/SwiftUI bridging:
+  `$build-macos-apps:appkit-interop`.
+- Signing/entitlements or distribution:
+  `$build-macos-apps:signing-entitlements` or
+  `$build-macos-apps:packaging-notarization`.
+- Ordinary Git/release work does not trigger `$change-sync`; use it only for an
+  explicitly requested Delivery Record closeout against one confirmed plan.

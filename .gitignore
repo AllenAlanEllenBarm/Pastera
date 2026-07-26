@@ -100,6 +100,10 @@ iOSInjectionProject/
 /.codex/
 /.superpowers/
 
+# CodeGraphContext keeps reviewed configuration in Git and generated state local.
+/.codegraphcontext/db/
+/.codegraphcontext/runtime/
+
 
 ### https://raw.github.com/github/gitignore/218a941be92679ce67d0484547e3e142b2f5f6f0/Ruby.gitignore
 
