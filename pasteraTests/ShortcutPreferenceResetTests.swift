@@ -37,7 +37,7 @@ struct ShortcutPreferenceResetTests {
 
         #expect(service.mainKeyCombo == KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
         #expect(service.historyKeyCombo == KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
-        #expect(service.snippetKeyCombo == KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        #expect(service.snippetKeyCombo == KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
         #expect(service.passwordVaultKeyCombo == KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey))
         #expect(service.historyPanelKeyCombo(for: .search) == customPanel)
         try expectAllRecordViewsMatchService(in: controller.view, service: service)

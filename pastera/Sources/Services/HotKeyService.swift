@@ -155,7 +155,8 @@ final class HotKeyService: NSObject {
     private static let defaultMainKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey)!
     private static let oldOptionCommandSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey)!
-    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
+    private static let previousDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
+    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultPasswordVaultKeyCombo = KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey)!
     private static let legacyDefaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey)!
     private static let legacyDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey)!
@@ -266,6 +267,7 @@ extension HotKeyService {
         }
         migrateOptionCommandDefaultKeyCombosIfNeeded()
         migrateSnippetDefaultKeyComboToFIfNeeded()
+        migrateSnippetDefaultKeyComboToShiftCommandMIfNeeded()
         migratePasswordVaultDefaultKeyComboIfNeeded()
         migrateHistoryPanelShortcutDefaultsIfNeeded()
         migrateHistoryPanelDefaultsV2IfNeeded()
@@ -405,7 +407,7 @@ extension HotKeyService {
         migrateDefaultKeyComboIfNeeded(
             forKey: Constants.HotKey.snippetKeyCombo,
             legacyDefault: Self.legacyDefaultSnippetKeyCombo,
-            newDefault: Self.defaultSnippetKeyCombo
+            newDefault: Self.previousDefaultSnippetKeyCombo
         )
         defaults.set(true, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
         defaults.synchronize()
@@ -421,9 +423,20 @@ extension HotKeyService {
         migrateDefaultKeyComboIfNeeded(
             forKey: Constants.HotKey.snippetKeyCombo,
             legacyDefault: Self.oldOptionCommandSnippetKeyCombo,
-            newDefault: Self.defaultSnippetKeyCombo
+            newDefault: Self.previousDefaultSnippetKeyCombo
         )
         defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
+        defaults.synchronize()
+    }
+
+    private func migrateSnippetDefaultKeyComboToShiftCommandMIfNeeded() {
+        guard !defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM) else { return }
+        migrateDefaultKeyComboIfNeeded(
+            forKey: Constants.HotKey.snippetKeyCombo,
+            legacyDefault: Self.previousDefaultSnippetKeyCombo,
+            newDefault: Self.defaultSnippetKeyCombo
+        )
+        defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM)
         defaults.synchronize()
     }
 

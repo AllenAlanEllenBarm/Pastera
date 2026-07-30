@@ -136,6 +136,8 @@ struct Constants {
         static let migrateNewKeyCombo = "kCPYMigrateNewKeyCombo"
         static let migrateOptionCommandDefaultKeyCombos = "kCPYMigrateOptionCommandDefaultKeyCombos"
         static let migrateSnippetDefaultKeyComboToF = "kCPYMigrateSnippetDefaultKeyComboToF"
+        static let migrateSnippetDefaultKeyComboToShiftCommandM =
+            "kPasteraMigrateSnippetDefaultKeyComboToShiftCommandM"
         static let migratePasswordVaultDefaultKeyCombo = "kPasteraMigratePasswordVaultDefaultKeyCombo"
         static let historyPanelShortcutDefaultsMigrated = "kCPYHistoryPanelShortcutDefaultsMigrated"
         static let migrateHistoryPanelOptionCommand = "kCPYMigrateHistoryPanelOptionCommand"

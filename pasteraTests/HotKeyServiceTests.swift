@@ -45,17 +45,17 @@ final class HotKeyServiceTests {
         #expect(historyKeyCombo.keyEquivalent.uppercased() == "V")
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
-        #expect(snippetKeyCombo.QWERTYKeyCode == 3)
-        #expect(snippetKeyCombo.modifiers == cmdKey | optionKey)
+        #expect(snippetKeyCombo.QWERTYKeyCode == 46)
+        #expect(snippetKeyCombo.modifiers == cmdKey | shiftKey)
         #expect(snippetKeyCombo.doubledModifiers == false)
-        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "F")
+        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "M")
     }
 
     @Test
     func shortcutFormatterUsesCompactMacSymbols() throws {
         let mainKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
         let historyKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
-        let snippetKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        let snippetKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
         let searchKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey))
         let previousPageKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey))
         let nextPageKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey))
@@ -63,7 +63,7 @@ final class HotKeyServiceTests {
 
         #expect(PasteraShortcutFormatter.string(for: mainKeyCombo) == "⇧⌘V")
         #expect(PasteraShortcutFormatter.string(for: historyKeyCombo) == "⌥⌘V")
-        #expect(PasteraShortcutFormatter.string(for: snippetKeyCombo) == "⌥⌘F")
+        #expect(PasteraShortcutFormatter.string(for: snippetKeyCombo) == "⇧⌘M")
         #expect(PasteraShortcutFormatter.string(for: searchKeyCombo) == "⌘F")
         #expect(PasteraShortcutFormatter.string(for: previousPageKeyCombo) == "⌘←")
         #expect(PasteraShortcutFormatter.string(for: nextPageKeyCombo) == "⌘→")
@@ -227,7 +227,7 @@ final class HotKeyServiceTests {
 
         let defaultMain = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
         let defaultHistory = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
-        let defaultSnippet = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        let defaultSnippet = try #require(KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
         let defaultPasswordVault = try #require(KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey))
         #expect(service.mainKeyCombo == defaultMain)
         #expect(service.historyKeyCombo == defaultHistory)
@@ -454,8 +454,8 @@ final class HotKeyServiceTests {
         #expect(historyCombos?["keyCode"] == 9)
         #expect(historyCombos?["modifiers"] == cmdKey | optionKey)
 
-        #expect(snippetCombos?["keyCode"] == 3)
-        #expect(snippetCombos?["modifiers"] == cmdKey | optionKey)
+        #expect(snippetCombos?["keyCode"] == 46)
+        #expect(snippetCombos?["modifiers"] == cmdKey | shiftKey)
     }
 
     @Test
@@ -476,11 +476,12 @@ final class HotKeyServiceTests {
         #expect(historyKeyCombo.keyEquivalent.uppercased() == "V")
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
-        #expect(snippetKeyCombo.QWERTYKeyCode == 3)
-        #expect(snippetKeyCombo.modifiers == cmdKey | optionKey)
-        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "F")
+        #expect(snippetKeyCombo.QWERTYKeyCode == 46)
+        #expect(snippetKeyCombo.modifiers == cmdKey | shiftKey)
+        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "M")
         #expect(defaults.bool(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos))
         #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF))
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
     }
 
     @Test
@@ -495,10 +496,28 @@ final class HotKeyServiceTests {
         service.setupDefaultHotKeys()
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
-        #expect(snippetKeyCombo.QWERTYKeyCode == 3)
-        #expect(snippetKeyCombo.modifiers == cmdKey | optionKey)
-        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "F")
+        #expect(snippetKeyCombo.QWERTYKeyCode == 46)
+        #expect(snippetKeyCombo.modifiers == cmdKey | shiftKey)
+        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "M")
         #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF))
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
+    }
+
+    @Test
+    func migratesPreviousSnippetDefaultToShiftCommandM() throws {
+        defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
+        defaults.set(true, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
+        defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
+        defaults.set(false, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM)
+        let previousDefault = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        defaults.setArchiveData(previousDefault, forKey: Constants.HotKey.snippetKeyCombo)
+
+        let service = HotKeyService(defaults: defaults)
+        service.setupDefaultHotKeys()
+
+        let expected = try #require(KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
+        #expect(service.snippetKeyCombo == expected)
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
     }
 
     @Test
@@ -517,6 +536,7 @@ final class HotKeyServiceTests {
         #expect(service.snippetKeyCombo == customSnippet)
         #expect(defaults.bool(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos))
         #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF))
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
     }
 
     @Test
@@ -656,6 +676,7 @@ final class HotKeyServiceTests {
             (Constants.HotKey.migrateNewKeyCombo, false),
             (Constants.HotKey.migrateOptionCommandDefaultKeyCombos, true),
             (Constants.HotKey.migrateSnippetDefaultKeyComboToF, false),
+            (Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM, false),
             (Constants.HotKey.historyPanelShortcutDefaultsMigrated, false),
             (Constants.HotKey.migrateHistoryPanelOptionCommand, true),
             (Constants.HotKey.migrateHistoryPanelCanonicalDefaults, false),
