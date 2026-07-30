@@ -99,6 +99,7 @@ iOSInjectionProject/
 # Local Codex/Superpowers runtime policy and generated session state
 /.codex/
 /.superpowers/
+/.worktrees/
 
 # CodeGraphContext keeps reviewed configuration in Git and generated state local.
 /.codegraphcontext/db/
