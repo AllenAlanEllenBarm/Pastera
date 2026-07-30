@@ -1,0 +1,245 @@
+# Windows 功能对齐与界面约束材料刷新设计
+
+## 背景
+
+Windows V1 当前以 `windows-v1-baseline-20260718` 为冻结基线，其 peeled
+commit 为 `745083902114999d98724792ad0d57fd93402377`。现有
+`docs/windows-reference/` 参考包也来自这轮基线，能够说明当时的功能入口和
+信息层级，但没有覆盖后续已经交付的产品功能与界面变化。
+
+本轮确认以 `origin/develop@7b57094ce32cf19ac737d24d10e91ebf121aaed5`
+作为 Windows 对齐增量上限。当前本地 `develop` 在该远端提交之后的快捷键与
+数字导航内容只有设计和实施计划，没有产品实现，因此不进入本轮 Windows
+功能对等范围。仓库维护类提交也不能自动等同于 Windows 产品功能。
+
+## 目标
+
+1. 保留原 Windows V1 基线的可追溯性，不移动或重建既有 baseline tag。
+2. 形成从冻结基线到 `7b57094` 的已交付功能增量清单，并给出 Windows 等价
+   行为、平台替换点、源码入口、测试入口和 UI 证据要求。
+3. 更新 Windows Codex 的薄规则入口、唯一计划、实现手册、视觉规格和可复制
+   交接提示词。
+4. 将“Windows 原生适配”从自由设计空间收紧为受控替换：产品信息架构、
+   功能入口、状态、交互语义和信息密度必须保持一致。
+5. 用同状态截图和差异说明作为 UI 完成门禁，防止只凭构建成功或控件存在就
+   宣称视觉对齐。
+
+## 非目标
+
+- 不移动 `windows-v1-baseline-20260718`，也不把 `7b57094` 重新标记成新的
+  冻结基线。
+- 不把本地尚未实现的快捷键与数字导航计划加入 Windows V1 对等范围。
+- 不在本轮实现 WinUI 3 产品代码，不替 Windows Codex选择具体第三方库。
+- 不把 AppKit 控件、macOS 标题栏、Sparkle、Keychain、LocalAuthentication
+  或 Apple Foundation Models 原样迁移到 Windows。
+- 不使用真实剪贴板、密码箱、OneDrive 路径、账号、Token 或本机凭据制作
+  文档、fixtures 或截图。
+
+## 方案选择
+
+采用“冻结基线 + 有锚点的增量包”。
+
+- 冻结基线继续描述 Windows V1 开工时已经确认的 macOS 行为。
+- 增量包只描述 `7450839..7b57094` 中已经交付且影响产品行为、跨平台契约或
+  Windows 验收的变化。
+- 唯一 Windows V1 计划吸收增量任务与验收要求，不创建平行实施计划。
+- 截图按基线批次与增量批次并存，新增证据不得覆盖 2026-07-18 参考图。
+
+不采用移动 baseline tag 的方案，因为它会让已开始的 Windows 工作失去稳定
+参照；不采用无 commit 锚点的滚动说明，因为它无法区分已实现行为、计划内容
+和一次性仓库维护。
+
+## 功能增量分类
+
+增量矩阵按以下产品域整理，每一项都必须标明 macOS 行为、Windows 等价行为、
+平台专属机制、源码/测试入口和验收证据。
+
+### 进入 Windows 对等范围
+
+1. 主面板交互与后台资源治理
+   - 主面板提示、键盘操作、搜索反馈、密码箱入口和基础外观设置的已交付修正。
+   - OCR 任务单泵、轻量候选、状态反馈，以及历史清理和同步观察的有界资源
+     语义。
+2. 密码箱安全与 Agent 集成
+   - 主密码修改、安全设置、原子 rekey、锁定/解锁状态和失败恢复。
+   - 密码箱 Agent 的授权、一次性票据、限流、脱敏审计、本地 broker、CLI、
+     Codex/Claude MCP、安装事务和偏好页状态。
+   - Windows 必须保留 wire、安全和授权语义，但使用 Windows 原生 IPC、ACL、
+     进程身份、DPAPI/Windows Hello 与 helper 生命周期实现。
+3. 密码箱本地优先 OneDrive 同步
+   - 本地 KDBX 工作副本、旧数据迁移、加密云端副本、事务化写入、合并、
+     冲突、恢复、同步状态机和就地恢复 UI。
+   - “本地文件写入完成”仍不得表述成“OneDrive 云端上传完成”。
+4. 历史提示词美化
+   - 本地格式化、OpenAI-compatible 自备服务、显式优化、撤销和保存边界，
+     以及独立设置页。
+   - Apple Foundation Models 只是 macOS 可选 provider，不是 Windows 必须
+     复制的机制；Windows 可交付 provider 必须遵守相同的显式调用、凭据保护、
+     端点校验和失败回退语义。
+5. 软件更新与设置结构
+   - 独立更新页、自动检查偏好、版本/更新状态和用户确认后的安装流程。
+   - Windows 使用自己的签名安装包和更新元数据，不复用 Sparkle 字段或 DMG
+     流程。
+6. 脚本设置与模板流程
+   - 模板创建、测试、编辑和设置布局的已交付修正。
+   - 继续遵守受限 `transform(clip)` 契约，不扩大到文件、网络、进程或系统
+     API。
+
+### 只作为平台替换或仓库背景
+
+- Sparkle appcast 修正只约束“版本源、签名、更新状态必须一致”的发布语义，
+  不把 Sparkle 实现加入 Windows。
+- CodeGraph、忽略文件和本地 worktree 规则属于开发环境维护，不进入 Windows
+  产品功能清单。
+- macOS 签名 helper、Keychain、LocalAuthentication 和 Apple Intelligence
+  仅用于定位行为边界，Windows 实现不得照搬平台 API。
+
+### 暂不进入本轮对等范围
+
+- `origin/develop@7b57094` 之后只有设计或计划、没有产品实现的快捷键与数字
+  导航。
+- 路线图中的截图捕获、截图翻译等尚未交付功能。
+
+## 文档与材料结构
+
+### 1. Windows 薄规则入口
+
+新增 `windows/AGENTS.md`，只包含：
+
+- 必读顺序和唯一真值入口。
+- 冻结基线与增量 commit。
+- Windows 源码边界和跨平台契约边界。
+- UI 不得擅自重设计的短规则。
+- 构建、测试、截图和证据入口。
+- 与任务匹配的 skill 路由。
+
+详细功能和视觉规则继续放在专题文档中，不复制进 `AGENTS.md`。
+
+### 2. 移植总入口
+
+更新 `docs/development/WINDOWS_PORTING_GUIDE.md`：
+
+- 保留冻结基线说明。
+- 增加 `7b57094` 增量入口和状态说明。
+- 更新功能摘要、源码阅读图、实现顺序和验收清单。
+- 明确计划内容不得当成已交付功能。
+
+### 3. 唯一 Windows V1 计划
+
+更新 `docs/superpowers/plans/2026-07-18-pastera-windows-v1.md`：
+
+- 不创建新的 Windows 实施计划。
+- 更新 Goal、Scope、Architecture、任务和 Acceptance Mapping。
+- 在 Delivery Record 中区分原 M0 已完成证据与本轮材料刷新。
+- Windows 产品代码尚未在本 checkout 开始这一事实继续如实保留。
+
+### 4. 功能增量矩阵
+
+新增 `docs/windows-reference/WINDOWS_PARITY_DELTA_20260726.md`，每项至少包含：
+
+| 字段 | 内容 |
+| --- | --- |
+| Product behavior | 用户可观察行为和错误语义 |
+| macOS source | 当前源码和测试入口 |
+| Windows parity | Windows 必须实现的等价结果 |
+| Platform replacement | 允许替换的平台机制 |
+| UI evidence | 需要的 macOS 与 Windows 状态截图 |
+| Status | 已纳入、Windows 待实现或不适用 |
+
+### 5. 视觉参考与证据清单
+
+更新 `docs/windows-reference/README.md` 和
+`docs/windows-reference/WINDOWS_UI_SPEC.md`，并新增带来源戳的增量截图批次。
+
+每张新增 macOS 参考图必须记录：
+
+- 源提交 `7b57094`。
+- 页面、进入路径和业务状态。
+- 主题、窗口尺寸或浮层尺寸。
+- 合成数据说明。
+- Windows 需要保持的不变量。
+
+无法用合成数据安全形成的状态标记为“缺少安全参考证据”，不得使用真实用户
+数据补图，也不得把缺图解释成允许自由设计。
+
+### 6. Windows Codex 交接提示词
+
+新增 `docs/windows-reference/WINDOWS_CODEX_HANDOFF.md`，提供可直接复制的中文
+提示词，要求 Windows Codex：
+
+1. 先读取 `windows/AGENTS.md` 和其中列出的专题文档。
+2. 报告当前分支、SHA、Windows 计划任务和拟修改文件。
+3. 先复述本任务的固定不变量、允许的平台替换和明确不做内容。
+4. UI 实现前指出对应参考图和状态；没有参考时先补规格或请求确认。
+5. UI 实现后提交同状态 Windows 11 截图、差异说明、自动化测试和实机 smoke。
+6. 未经确认不得改变导航、页面拆分、入口顺序、信息密度或编辑边界。
+
+## UI 漂移约束
+
+### 必须保持一致
+
+- 功能入口、页面分组和主次动作。
+- 信息层级、状态集合、编辑边界和操作结果。
+- 主面板的紧凑信息密度与键盘优先特性。
+- 空、加载、正常、忙碌、成功、可恢复错误和不可恢复错误的反馈语义。
+- 密码、同步、自动粘贴和外部 Agent 授权的安全边界。
+
+### 允许 Windows 原生适配
+
+- 标题栏、窗口 chrome、系统字体、系统图标、焦点环和 DPI 行为。
+- WinUI 3 原生控件、Flyout、ContentDialog、TeachingTip 和 InfoBar。
+- Command 到 Ctrl/Win/Alt、Finder 到文件资源管理器、Keychain/
+  LocalAuthentication 到 DPAPI/Windows Hello 等平台替换。
+
+### 必须先取得用户确认
+
+- 合并或拆分页面。
+- 改变主面板结构、底部模式入口或设置分类。
+- 增加大面积装饰、大卡片、营销式留白或非必要动效。
+- 隐藏现有入口、改变默认编辑态或降低信息密度。
+- 因 WinUI 实现困难而删减状态、错误反馈或键盘路径。
+
+## UI 验收门禁
+
+每个 UI 任务按固定顺序提交证据：
+
+1. 指明对应 macOS 参考图、页面状态和固定不变量。
+2. 使用合成数据实现 Windows 页面。
+3. 在相同业务状态下形成 Windows 11 深色、浅色和 125% 缩放截图。
+4. 逐项记录有意的平台差异和非预期差异。
+5. 修复非预期差异后更新截图验收矩阵。
+6. 同时运行相关 ViewModel/Application 测试和真实 Windows UI smoke。
+
+构建成功、XAML 控件存在、AutomationId 可查询或单元测试通过，都不能单独
+证明视觉验收通过。没有 Windows 实机截图时，状态只能是“待视觉验收”。
+
+## 实施顺序
+
+1. 更新唯一 Windows V1 计划和移植总入口。
+2. 写功能增量矩阵，逐项核对 `7450839..7b57094` 的源码与测试。
+3. 新增 `windows/AGENTS.md` 和 Windows Codex 交接提示词。
+4. 更新 UI 规格和截图索引。
+5. 从 `7b57094` 对应产品源码构建当前 macOS 应用，只用合成状态补充增量截图。
+6. 检查所有文档链接、commit 锚点、范围陈述和图片元数据。
+
+## 验证
+
+- `git diff --check`
+- 检查所有新文档引用的文件、commit 和 tag 均存在。
+- 检查增量矩阵中的每个“已交付”项都有源码或测试证据。
+- 检查计划、移植指南、增量矩阵和交接提示词对范围的表述一致。
+- 使用 `file` 和 `sips` 验证新增截图格式、尺寸和可读性。
+- 人工检查所有截图不含真实密码、Token、账号、OneDrive 绝对路径或私人剪贴板
+  内容。
+- 若为了截图重新构建或安装 macOS 应用，记录实际构建、安装和运行结果；不以
+  历史测试数字代替本轮执行证据。
+
+## 完成标准
+
+- Windows Codex 进入 `windows/` 后能自动获得薄规则入口和明确阅读顺序。
+- 冻结基线、对齐增量和未实现计划三者不会混淆。
+- 后基线已交付功能都有 Windows 等价行为或明确的平台不适用说明。
+- 每个主要 UI 状态都有固定不变量和截图证据要求。
+- 交接提示词可以直接用于启动或校正 Windows Codex 任务。
+- Windows 界面若偏离信息架构、信息密度或交互语义，会在完成门禁前被标记为
+  未通过，而不是被“Windows 原生”理由自动接受。
