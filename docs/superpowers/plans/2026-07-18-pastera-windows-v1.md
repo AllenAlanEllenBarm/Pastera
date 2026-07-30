@@ -135,24 +135,25 @@ windows/
 - Create: `docs/windows-reference/WINDOWS_PARITY_DELTA_20260726.md`
 - Create: `docs/windows-reference/WINDOWS_CODEX_HANDOFF.md`
 - Modify: `docs/windows-reference/README.md`
+- Create: `docs/windows-reference/REFERENCE_GEOMETRY.md`
 - Modify: `docs/windows-reference/WINDOWS_UI_SPEC.md`
-- Create: `docs/windows-reference/current-20260726/`
+- Create: `docs/windows-reference/current-20260726/README.md`
 
 **Interfaces:**
-- Consumes: `windows-v1-baseline-20260718`、`origin/develop@7b57094`、已确认设计 `docs/superpowers/specs/2026-07-30-windows-parity-handoff-refresh-design.md`、当前 macOS 合成 UI 状态。
-- Produces: Windows Codex 薄入口、带 commit 锚点的功能增量矩阵、来源明确的截图包、可执行的 UI 差异门禁和可复制交接提示词。
+- Consumes: `windows-v1-baseline-20260718`、`origin/develop@7b57094`、已确认设计 `docs/superpowers/specs/2026-07-30-windows-parity-handoff-refresh-design.md`、现有脱敏 macOS UI 基线包和增量源码/测试。
+- Produces: Windows Codex 薄入口、带 commit 锚点的功能增量矩阵、来源明确的截图索引与证据缺口、可执行的 UI 差异门禁和可复制交接提示词。
 
-- [ ] 核对 `7450839..7b57094` 的产品提交、源码和测试，区分已交付功能、平台替换和仓库维护。
-- [ ] 更新本 plan 的 Goal、Scope、Architecture、Task 和 Acceptance Mapping，不创建平行 Windows 计划。
-- [ ] 更新 `WINDOWS_PORTING_GUIDE.md`，保留冻结基线并增加批准增量入口。
-- [ ] 新增 `WINDOWS_PARITY_DELTA_20260726.md`，为每个产品域登记 behavior、macOS source、Windows parity、platform replacement、UI evidence 和 status。
-- [ ] 新增 `windows/AGENTS.md`，只保留阅读顺序、范围锚点、源码边界、截图门禁、验证入口和 skill 路由。
-- [ ] 更新 `WINDOWS_UI_SPEC.md`：截图为内容区主基准，固定 `8 epx` / `4 epx` / `3%` 几何容差，并定义 P0-P3 差异分级。
-- [ ] 更新截图索引；对 `7b57094` 中发生界面变化的页面使用合成数据补拍，不覆盖 2026-07-18 基线图。
-- [ ] 为可安全复现的增量状态记录来源 commit、路径、主题、内容区尺寸、合成数据和布局不变量；无法安全补拍的状态明确登记证据缺口。
-- [ ] 新增 `WINDOWS_CODEX_HANDOFF.md`，要求 UI 开工前选图、完成后提交基线/Windows/50% 叠加三联图，未获批准的 P0/P1 偏差不得完成。
-- [ ] 运行 `git diff --check`，核对文档链接、tag/commit、截图格式与脱敏状态，并把实际材料和验证结果回写本 Task 与 Delivery Record。
-- [ ] 仅提交本轮 Windows 对齐材料，不夹带 Windows 产品实现或本机凭据。
+- [x] 核对 `7450839..7b57094` 的产品提交、源码和测试，区分已交付功能、平台替换和仓库维护。
+- [x] 更新本 plan 的 Goal、Scope、Architecture、Task 和 Acceptance Mapping，不创建平行 Windows 计划。
+- [x] 更新 `WINDOWS_PORTING_GUIDE.md`，保留冻结基线并增加批准增量入口。
+- [x] 新增 `WINDOWS_PARITY_DELTA_20260726.md`，为每个产品域登记 behavior、macOS source、Windows parity、platform replacement、UI evidence 和 status。
+- [x] 新增 `windows/AGENTS.md`，只保留阅读顺序、范围锚点、源码边界、截图门禁、验证入口和 skill 路由。
+- [x] 更新 `WINDOWS_UI_SPEC.md` 和 `REFERENCE_GEOMETRY.md`：截图为内容区主基准，固定 `8 epx` / `4 epx` / `3%` 几何容差，并定义 P0-P3 差异分级。
+- [x] 更新截图索引；保留 2026-07-18 的 14 张脱敏基线图，并对无法安全使用合成数据补拍的 `7b57094` 增量页面登记证据缺口。
+- [x] 为现有安全参考图记录来源、路径、主题、内容区尺寸和布局不变量；缺少安全合成截图模式的增量状态明确登记开工门。
+- [x] 新增 `WINDOWS_CODEX_HANDOFF.md`，要求 UI 开工前选图、完成后提交基线/Windows/50% 叠加三联图，未获批准的 P0/P1 偏差不得完成。
+- [x] 运行 `git diff --check`，核对文档链接、tag/commit、截图格式与脱敏边界，并把实际材料和验证结果回写本 Task 与 Delivery Record。
+- [x] 仅提交本轮 Windows 对齐材料，不夹带 Windows 产品实现或本机凭据。
 
 ### Task 2: M1 建立 Windows 分层工程、单实例与生命周期
 
@@ -409,7 +410,7 @@ windows/
 ## Delivery Metadata
 
 - Plan Path: `docs/superpowers/plans/2026-07-18-pastera-windows-v1.md`
-- Plan Status: `M0 baseline prepared; M0.1 parity handoff refresh in progress; Windows implementation not started`
+- Plan Status: `M0 baseline prepared; M0.1 parity handoff refreshed; Windows implementation not started`
 - Evidence Profile: `standard`
 - Baseline Status: `windows-v1-baseline-20260718`
 - Approved Parity Delta: `origin/develop@7b57094ce32cf19ac737d24d10e91ebf121aaed5`
@@ -423,27 +424,27 @@ windows/
 
 ### Actual Implementation
 
-M0 已完成 macOS 基线审计、全量回归、跨平台契约清单和 `docs/windows-reference/` UI 参考包；Windows 客户端尚未开始。UI 参考包包含 14 张脱敏 macOS 界面截图、截图索引、Windows 原生适配规则和实机截图验收矩阵。
+M0 已完成 macOS 基线审计、全量回归、跨平台契约清单和 `docs/windows-reference/` UI 参考包。M0.1 保留冻结 tag，并把 Windows V1 的唯一批准增量固定到 `origin/develop@7b57094ce32cf19ac737d24d10e91ebf121aaed5`；新增 `windows/AGENTS.md`、功能增量矩阵、严格几何清单、P0-P3 截图门禁、证据缺口登记和可直接复制给 Windows Codex 的开工/纠偏提示词。Windows 客户端尚未开始。
 
 ### Plan Deviations
 
-无实现偏差。二进制 SQLite/KDBX 双向 fixtures 将由 Windows 测试从合成数据生成，避免在仓库中保存固定口令或本机保护材料。
+仓库没有可直接复用的安全合成 UI 截图模式，因此 M0.1 没有从用户当前运行环境补拍 `7b57094` 新页面；继续使用 14 张已脱敏基线图，并在 `current-20260726/README.md` 登记缺图页面和开工门。缺图被定义为阻断证据，不是自由设计授权。二进制 SQLite/KDBX 双向 fixtures 仍由 Windows 测试从合成数据生成，避免在仓库中保存固定口令或本机保护材料。
 
 ### Impact
 
-本轮新增 `windows/fixtures/` 契约清单和 `docs/windows-reference/` UI 参考包，并补充 Windows 移植文档，没有修改 macOS 运行时行为。后续影响仍集中在同仓库 Windows 客户端、OneDrive 协议、KDBX、类型映射和 WinUI 3 界面验收。
+M0 新增 `windows/fixtures/` 契约清单和 `docs/windows-reference/` UI 参考包。M0.1 只修改 Windows 开发规则、计划和对齐材料，没有修改 macOS 或 Windows 运行时行为。后续影响集中在同仓库 Windows 客户端、OneDrive 协议、KDBX、Agent wire contract、提示词优化、更新链和 WinUI 3 截图验收。
 
 ### Verification
 
-设计已逐段确认。macOS 基线运行完整 `xcodebuild ... clean test`，673 tests / 75 suites 通过，命令退出码为 0；日志包含 CoreSimulator 版本、AppKit 约束、颜色空间和 xcresult writer 噪声，但测试最终汇总为 `TEST SUCCEEDED`。随后运行 `./script/install_local.sh --clean --verify`，构建成功，应用安装到 `/Applications/Pastera.app`，并确认进程从该安装路径启动。UI 参考包逐页通过 Computer Use 采集和人工脱敏检查，14 个图像文件均确认为有效 JPEG；临时隔离数据库已删除，截图辅助代码已撤销，`git diff --check` 通过。真实 Windows 验证尚未开始。
+M0 设计已逐段确认。macOS 基线曾运行完整 `xcodebuild ... clean test`，673 tests / 75 suites 通过，命令退出码为 0；随后运行 `./script/install_local.sh --clean --verify`，构建成功并从 `/Applications/Pastera.app` 启动。M0.1 核对冻结 tag、`7b57094` commit 和增量矩阵引用的 92 个源码/测试路径；确认 14 个参考图均为有效 JPEG，且 `sips` 尺寸与 `REFERENCE_GEOMETRY.md` 一致；运行 `git diff --check` 和文档引用/敏感占位扫描通过。待交付树首次默认并发 `clean test` 在 1152 tests / 101 suites 中出现 4 个失败；对应三个 Suite 单 worker 聚焦复跑 41 tests 全部通过，随后单 worker 全量复跑 1152 tests / 101 suites 全部通过并输出 `TEST SUCCEEDED`，未为测试抖动修改产品代码。M0.1 是纯文档变更，没有 Windows solution 或真实 Windows 截图，因此 Windows runtime/UI 验证尚未开始。
 
 ### Remaining Risks
 
-M1 开始前仍需在真实 Windows 11 x64 环境确定具体 JS、KDBX 和 MSIX 库版本。macOS 测试日志中的现有 UI/颜色空间噪声不阻断 baseline，但应避免 Windows 测试复制这种无界输出模式。
+M1 开始前仍需在真实 Windows 11 x64 环境确定具体 JS、KDBX 和 MSIX 库版本。`7b57094` 增量页面缺少安全合成参考图；对应 UI Task 在补图或获得用户明确批准前不得开工。macOS 测试日志中的既有 UI/颜色空间噪声不阻断 baseline，但应避免 Windows 测试复制这种无界输出模式。
 
 ### Follow-ups
 
-M1-M5 必须由 Windows 机器上的 Codex/开发者实施并验收；Windows 侧生成的双向 fixtures 需要回到 macOS compatibility tests 复核。每个 UI 里程碑使用合成数据补充 Windows 11 浅色、深色和 125% 缩放截图，不覆盖 macOS 基线图。
+Windows 机器上的 Codex/开发者必须先使用 `WINDOWS_CODEX_HANDOFF.md` 完成 task 前置报告，再按 M1-M5 实施。Windows 侧生成的双向 fixtures 需要回到 macOS compatibility tests 复核。每个 UI 里程碑使用合成数据提交 macOS 参考图、Windows 实图和 50% 叠加图，并补充 Windows 11 浅色、深色和 125% 缩放 smoke，不覆盖 macOS 基线图。
 
 ### ZenTao Closeout
 
