@@ -723,15 +723,15 @@ extension HistoryMenuHeaderView {
         focusSearchFieldImmediately()
     }
 
-    func shouldPreserveSearchFieldEditingCommand(_ event: NSEvent) -> Bool {
+    func shouldPreserveSearchFieldEditingEvent(_ event: NSEvent) -> Bool {
         guard searchFieldOwnsFocus() else { return false }
+        guard event.keyCode != 123, event.keyCode != 124 else { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.command),
               !flags.contains(.control),
               !flags.contains(.option) else { return false }
         return ["a", "c", "v", "x"].contains(searchFieldEditingCommandKey(for: event))
     }
-
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):

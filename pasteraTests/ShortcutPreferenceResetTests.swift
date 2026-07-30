@@ -109,7 +109,16 @@ struct ShortcutPreferenceResetTests {
         #expect(secondRecordViews.allSatisfy { !$0.isDescendant(of: currentView) })
         #expect(secondRecordViews.allSatisfy { $0.delegate == nil })
         #expect(currentViews.compactMap { $0 as? PasteraPreferenceGroupView }.count == 2)
-        #expect(currentRecordViews.count == 7)
+        let currentRecordIdentifiers = Set(currentRecordViews.compactMap { $0.accessibilityIdentifier() })
+        #expect(currentRecordIdentifiers == [
+            "shortcuts.main",
+            "shortcuts.history",
+            "shortcuts.snippet",
+            "shortcuts.passwordVault",
+            "shortcuts.historyPanel.search"
+        ])
+        #expect(!currentRecordIdentifiers.contains("shortcuts.historyPanel.previousPage"))
+        #expect(!currentRecordIdentifiers.contains("shortcuts.historyPanel.nextPage"))
         #expect(Set(currentRecordViews.map(ObjectIdentifier.init)).isDisjoint(
             with: Set(firstRecordViews.map(ObjectIdentifier.init))
         ))
@@ -146,9 +155,7 @@ struct ShortcutPreferenceResetTests {
             "shortcuts.history": service.historyKeyCombo,
             "shortcuts.snippet": service.snippetKeyCombo,
             "shortcuts.passwordVault": service.passwordVaultKeyCombo,
-            "shortcuts.historyPanel.search": service.historyPanelKeyCombo(for: .search),
-            "shortcuts.historyPanel.previousPage": service.historyPanelKeyCombo(for: .previousPage),
-            "shortcuts.historyPanel.nextPage": service.historyPanelKeyCombo(for: .nextPage)
+            "shortcuts.historyPanel.search": service.historyPanelKeyCombo(for: .search)
         ]
         let recordViews = shortcutRecordViews(in: view)
         #expect(recordViews.count == expected.count)

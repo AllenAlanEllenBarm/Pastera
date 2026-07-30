@@ -392,7 +392,7 @@ final class HistoryBrowserPanelController: NSObject, NSWindowDelegate {
     var childPasteTargetContext: PasteTargetContext? { pasteTargetContext }
 
     private func handleHistoryPanelShortcut(_ event: NSEvent) -> Bool {
-        guard !headerView.shouldPreserveSearchFieldEditingCommand(event) else {
+        guard !headerView.shouldPreserveSearchFieldEditingEvent(event) else {
             return false
         }
         guard let shortcut = HistoryPanelShortcut.matching(event, hotKeyService: AppEnvironment.current.hotKeyService) else {

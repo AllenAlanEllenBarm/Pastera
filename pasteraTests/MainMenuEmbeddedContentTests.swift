@@ -51,6 +51,60 @@ struct MainMenuEmbeddedContentTests {
     }
 
     @Test
+    func embeddedHistoryPagingUsesBareArrowsOnlyAndYieldsToSearchEditing() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-paging"),
+                title: "History",
+                pasteboardTypes: [.string],
+                updateAt: 1,
+                deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var state = HistoryMenuPaginationState(pageIndex: 1)
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { state },
+                updateState: { update in update(&state) },
+                fetchPage: {
+                    HistoryMenuPage(details: [detail], hasNextPage: true)
+                },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { _, _ in }
+            )
+        )
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+
+        let bareLeft = try makeArrowEvent(keyCode: 123, modifierFlags: [])
+        let bareRight = try makeArrowEvent(keyCode: 124, modifierFlags: [])
+        let commandLeft = try makeArrowEvent(keyCode: 123, modifierFlags: [.command])
+        let commandRight = try makeArrowEvent(keyCode: 124, modifierFlags: [.command])
+
+        #expect(controller.handleMainMenuNavigationForTesting(bareLeft))
+        #expect(state.pageIndex == 0)
+        #expect(controller.handleMainMenuNavigationForTesting(bareRight))
+        #expect(state.pageIndex == 1)
+        #expect(!controller.handleMainMenuNavigationForTesting(commandLeft))
+        #expect(!controller.handleMainMenuNavigationForTesting(commandRight))
+        #expect(state.pageIndex == 1)
+
+        #expect(controller.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+        #expect(!controller.handleMainMenuNavigationForTesting(bareLeft))
+        #expect(state.pageIndex == 1)
+    }
+
+    @Test
     func embeddedModeSwitchesDoNotTriggerLegacySidePanelCallbacks() {
         let detail = PasteboardHistoryDetail(
             history: PasteboardHistory(
@@ -1440,17 +1494,26 @@ struct MainMenuEmbeddedContentTests {
     }
 
     private func makeLeftArrowEvent() throws -> NSEvent {
-        try #require(NSEvent.keyEvent(
+        try makeArrowEvent(keyCode: 123, modifierFlags: [])
+    }
+
+    private func makeArrowEvent(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) throws -> NSEvent {
+        let character = keyCode == 123 ? NSLeftArrowFunctionKey : NSRightArrowFunctionKey
+        let text = String(UnicodeScalar(character)!)
+        return try #require(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: 0,
             context: nil,
-            characters: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
-            charactersIgnoringModifiers: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+            characters: text,
+            charactersIgnoringModifiers: text,
             isARepeat: false,
-            keyCode: 123
+            keyCode: keyCode
         ))
     }
 

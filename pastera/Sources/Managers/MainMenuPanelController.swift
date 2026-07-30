@@ -3609,7 +3609,11 @@ extension MainMenuPanelController {
                 break
             }
         }
-        if usesEmbeddedContent, selectedMode == .history {
+        let ignoredSystemFlags: NSEvent.ModifierFlags = [.numericPad, .function]
+        let navigationFlags = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(ignoredSystemFlags)
+        if usesEmbeddedContent, selectedMode == .history, navigationFlags.isEmpty {
             switch event.keyCode {
             case 123:
                 goToPreviousHistoryPage()

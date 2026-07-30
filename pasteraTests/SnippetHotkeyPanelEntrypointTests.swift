@@ -142,6 +142,60 @@ struct SnippetHotkeyPanelEntrypointTests {
     }
 
     @Test
+    func historyPagingUsesBareArrowsAndYieldsToSearchEditing() throws {
+        let suiteName = "SnippetHotkeyPanelEntrypointTests.historyPaging.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let service = HotKeyService(defaults: defaults)
+        AppEnvironment.push(hotKeyService: service, defaults: defaults)
+        defer {
+            _ = AppEnvironment.popLast()
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let history = PasteboardHistory(
+            id: PasteboardHistory.ID("history-paging"),
+            title: "History",
+            pasteboardTypes: [.string],
+            updateAt: 1,
+            deviceID: CPYUtilities.deviceID
+        )
+        var state = HistoryMenuPaginationState(pageIndex: 1)
+        let controller = HistoryBrowserPanelController(
+            currentState: { state },
+            updateState: { update in update(&state) },
+            fetchPage: {
+                HistoryMenuPage(
+                    details: [PasteboardHistoryDetail(history: history, thumbnailAsset: nil)],
+                    hasNextPage: true
+                )
+            },
+            makeRowView: { detail, _, onConfirm in
+                HistoryMenuRowView(title: detail.history.title, image: nil, shortcutText: nil, onConfirm: onConfirm)
+            },
+            selectHistory: { _, _ in }
+        )
+        controller.show(at: NSPoint(x: 120, y: 420))
+        defer { controller.close() }
+
+        let bareLeft = try makeArrowEvent(keyCode: 123, modifierFlags: [])
+        let bareRight = try makeArrowEvent(keyCode: 124, modifierFlags: [])
+        let commandLeft = try makeArrowEvent(keyCode: 123, modifierFlags: [.command])
+        let commandRight = try makeArrowEvent(keyCode: 124, modifierFlags: [.command])
+
+        #expect(controller.handleHistoryPanelKeyDownForTesting(bareLeft))
+        #expect(state.pageIndex == 0)
+        #expect(controller.handleHistoryPanelKeyDownForTesting(bareRight))
+        #expect(state.pageIndex == 1)
+        #expect(!controller.handleHistoryPanelKeyDownForTesting(commandLeft))
+        #expect(!controller.handleHistoryPanelKeyDownForTesting(commandRight))
+
+        controller.focusSearchFieldForTesting()
+        #expect(controller.isSearchFieldFocusedForTesting)
+        #expect(!controller.handleHistoryPanelKeyDownForTesting(bareLeft))
+        #expect(state.pageIndex == 1)
+    }
+
+    @Test
     func historyPanelConfirmsThirdRowWithTriggerModifiedNumberShortcut() throws {
         try withNumericShortcutDefaults(enabled: true, startsAtZero: false) {
             let histories = (1...3).map { index in
@@ -271,6 +325,26 @@ struct SnippetHotkeyPanelEntrypointTests {
         modifierFlags: NSEvent.ModifierFlags
     ) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifierFlags,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: text,
+            charactersIgnoringModifiers: text,
+            isARepeat: false,
+            keyCode: keyCode
+        ))
+    }
+
+    private func makeArrowEvent(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) throws -> NSEvent {
+        let character = keyCode == 123 ? NSLeftArrowFunctionKey : NSRightArrowFunctionKey
+        let text = String(UnicodeScalar(character)!)
+        return try #require(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
             modifierFlags: modifierFlags,

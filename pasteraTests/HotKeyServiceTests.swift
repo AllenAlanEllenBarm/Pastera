@@ -86,12 +86,12 @@ final class HotKeyServiceTests {
         #expect(PasteraShortcutFormatter.string(for: searchKeyCombo) == "⌘F")
 
         #expect(previousPageKeyCombo.QWERTYKeyCode == 123)
-        #expect(previousPageKeyCombo.modifiers == cmdKey)
-        #expect(PasteraShortcutFormatter.string(for: previousPageKeyCombo) == "⌘←")
+        #expect(previousPageKeyCombo.modifiers == 0)
+        #expect(PasteraShortcutFormatter.string(for: previousPageKeyCombo) == "←")
 
         #expect(nextPageKeyCombo.QWERTYKeyCode == 124)
-        #expect(nextPageKeyCombo.modifiers == cmdKey)
-        #expect(PasteraShortcutFormatter.string(for: nextPageKeyCombo) == "⌘→")
+        #expect(nextPageKeyCombo.modifiers == 0)
+        #expect(PasteraShortcutFormatter.string(for: nextPageKeyCombo) == "→")
     }
 
     @Test
@@ -129,7 +129,7 @@ final class HotKeyServiceTests {
     }
 
     @Test
-    func preservesCustomizedHistoryPanelShortcutsDuringDefaultMigration() throws {
+    func ignoresStoredPagingShortcutsWhilePreservingCustomizedSearch() throws {
         let customSearch = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | shiftKey))
         let customPreviousPage = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | controlKey))
         let customNextPage = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey | shiftKey))
@@ -143,8 +143,16 @@ final class HotKeyServiceTests {
         service.setupDefaultHotKeys()
 
         #expect(service.historyPanelKeyCombo(for: .search) == customSearch)
-        #expect(service.historyPanelKeyCombo(for: .previousPage) == customPreviousPage)
-        #expect(service.historyPanelKeyCombo(for: .nextPage) == customNextPage)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(
+            KeyCombo.self,
+            key: Constants.HotKey.historyPreviousPageKeyCombo
+        ) == customPreviousPage)
+        #expect(defaults.archiveDataForKey(
+            KeyCombo.self,
+            key: Constants.HotKey.historyNextPageKeyCombo
+        ) == customNextPage)
     }
 
     @Test
@@ -230,11 +238,11 @@ final class HotKeyServiceTests {
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.snippetKeyCombo) == defaultSnippet)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.passwordVaultKeyCombo) == defaultPasswordVault)
         #expect(service.historyPanelKeyCombo(for: .search) == customSearch)
-        #expect(service.historyPanelKeyCombo(for: .previousPage) == customPrevious)
-        #expect(service.historyPanelKeyCombo(for: .nextPage) == customNext)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historySearchKeyCombo) == customSearch)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == customPrevious)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == customNext)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == nil)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == nil)
         #expect(service.clearHistoryKeyCombo == clearHistory)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.clearHistoryKeyCombo) == clearHistory)
         #expect(service.snippetKeyCombo(forIdentifier: folderIdentifier) == folderCombo)
@@ -281,8 +289,8 @@ final class HotKeyServiceTests {
         #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
         #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historySearchKeyCombo) == HistoryPanelShortcut.search.defaultKeyCombo)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == nil)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == nil)
         #expect(service.mainKeyCombo == customMain)
         #expect(service.historyKeyCombo == customHistory)
         #expect(service.snippetKeyCombo == customSnippet)
