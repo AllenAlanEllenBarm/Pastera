@@ -439,6 +439,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private weak var passwordVaultQuickActionsCoachmarkView: PasswordVaultQuickActionsCoachmarkView?
     private var passwordVaultQuickActionsCoachmarkWorkItem: DispatchWorkItem?
     private var visibleHistoryIDs = [PasteboardHistory.ID]()
+    private var visibleSnippetFolderIDs = [SnippetFolder.ID]()
     private var visibleSnippetIDs = [Snippet.ID]()
     private var visibleMainMenuRowTitles = [String]()
     private var currentSnippetFolderTitle: String?
@@ -1602,6 +1603,7 @@ extension MainMenuPanelController {
 
     private func makeSnippetContent() -> EmbeddedContent {
         let details = enabledSnippetFolderDetails()
+        visibleSnippetFolderIDs = details.map(\.folder.id)
         guard !details.isEmpty else {
             expandedSnippetFolderID = nil
             currentSnippetFolderTitle = nil
@@ -1622,7 +1624,7 @@ extension MainMenuPanelController {
         } else if expandedSnippetFolderID == nil && !query.isEmpty {
             expandedSnippetFolderID = details.first?.folder.id
         }
-        let rows = details.flatMap { detail -> [EmbeddedRow] in
+        let rows = details.enumerated().flatMap { folderIndex, detail -> [EmbeddedRow] in
             let isExpanded = detail.folder.id == expandedSnippetFolderID
             let folderTitleMatches = !query.isEmpty && detail.folder.title.localizedCaseInsensitiveContains(query)
             let folderKeyCombo = snippetDataSource?.folderKeyCombo(detail.folder.id)
@@ -1633,6 +1635,7 @@ extension MainMenuPanelController {
                     title: detail.folder.title,
                     image: folderRowImage(),
                     shortcutText: folderShortcutText,
+                    itemNumberText: numericShortcutText(forRowIndex: folderIndex),
                     rowKind: .snippetFolder,
                     rowHeight: MainMenuPanelLayout.snippetFolderRowHeight,
                     showsChevron: true,
@@ -1705,10 +1708,9 @@ extension MainMenuPanelController {
                     view: MainMenuPanelRowView(
                         title: snippet.title,
                         image: nil,
-                        shortcutText: numericShortcutText(forRowIndex: index),
+                        itemNumberText: numericShortcutText(forRowIndex: index),
                         rowKind: .action,
                         indentationLevel: 1,
-                        shortcutPlacement: .leadingItemNumber,
                         onEdit: { [weak self] in
                             self?.beginEditingSnippet(snippet.id)
                         },
@@ -2836,6 +2838,7 @@ extension MainMenuPanelController {
 
     private func resetVisibleRows() {
         visibleHistoryIDs.removeAll()
+        visibleSnippetFolderIDs.removeAll()
         visibleSnippetIDs.removeAll()
         visibleMainMenuRowTitles.removeAll()
         currentSnippetFolderTitle = nil
@@ -3547,10 +3550,19 @@ extension MainMenuPanelController {
             confirmHistorySelection(visibleHistoryIDs[rowIndex])
             return true
         case .snippets:
-            guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
+            if expandedSnippetFolderID == nil {
+                guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
                     for: event,
                     startsAtZero: startsAtZero,
-                    rowCount: visibleSnippetIDs.count
+                    rowCount: visibleSnippetFolderIDs.count
+                ) else { return false }
+                expandSnippetFolder(visibleSnippetFolderIDs[rowIndex])
+                return true
+            }
+            guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
+                for: event,
+                startsAtZero: startsAtZero,
+                rowCount: visibleSnippetIDs.count
             ) else { return false }
             confirmSnippetSelection(visibleSnippetIDs[rowIndex])
             return true
@@ -3572,6 +3584,9 @@ extension MainMenuPanelController {
         }
         if handleInlineEditorKey(event) {
             return true
+        }
+        if inlineEditorState != nil {
+            return false
         }
         if searchFieldHasMarkedText {
             return false
@@ -5137,6 +5152,7 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
     private let imageView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let shortcutBadge = PasteraShortcutBadgeView()
+    private let itemNumberBadge = PasteraShortcutBadgeView(style: .itemNumber)
     private let shortcutButton = NSButton()
     private let quickActionStack = NSStackView()
     private var quickActionButtons = [MainMenuActionButton]()
@@ -5177,6 +5193,7 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         title: String,
         image: NSImage?,
         shortcutText: String? = nil,
+        itemNumberText: String? = nil,
         rowKind: RowKind = .action,
         rowHeight: CGFloat = MainMenuPanelLayout.rowHeight,
         showsChevron: Bool = false,
@@ -5224,7 +5241,12 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         if onDrop != nil {
             registerForDraggedTypes([Self.dragPasteboardType])
         }
-        setup(title: title, image: image, shortcutText: shortcutText)
+        setup(
+            title: title,
+            image: image,
+            shortcutText: shortcutText,
+            itemNumberText: itemNumberText
+        )
     }
 
     required init?(coder: NSCoder) { nil }
@@ -5401,7 +5423,12 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         updateAppearance()
     }
 
-    private func setup(title: String, image: NSImage?, shortcutText: String?) {
+    private func setup(
+        title: String,
+        image: NSImage?,
+        shortcutText: String?,
+        itemNumberText: String?
+    ) {
         wantsLayer = true
         layer?.cornerRadius = PasteraDesignTokens.Metrics.compactRowCornerRadius
         layer?.masksToBounds = true
@@ -5416,11 +5443,14 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        shortcutBadge.shortcutText = shortcutText
-        shortcutBadge.style = shortcutPlacement == .leadingItemNumber ? .itemNumber : .command
-        let itemShortcut = shortcutPlacement == .leadingItemNumber ? shortcutText : nil
+        let resolvedItemNumberText = itemNumberText ?? (
+            shortcutPlacement == .leadingItemNumber ? shortcutText : nil
+        )
+        shortcutBadge.shortcutText = shortcutPlacement == .leadingItemNumber ? nil : shortcutText
+        shortcutBadge.style = .command
+        itemNumberBadge.shortcutText = resolvedItemNumberText
         toolTip = mainMenuShortcutToolTip(title: title, includesPlainText: rowKind == .action,
-                                          itemShortcut: itemShortcut)
+                                          itemShortcut: resolvedItemNumberText)
         setAccessibilityHelp(toolTip)
 
         chevronView.image = NSImage(systemSymbolName: isExpanded ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
@@ -5498,7 +5528,17 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         deleteButton.action = #selector(deleteButtonClicked(_:))
         deleteButton.isHidden = true
 
-        [imageView, titleLabel, shortcutBadge, quickActionStack, shortcutButton, editButton, deleteButton, chevronView].forEach {
+        [
+            imageView,
+            titleLabel,
+            shortcutBadge,
+            itemNumberBadge,
+            quickActionStack,
+            shortcutButton,
+            editButton,
+            deleteButton,
+            chevronView
+        ].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
@@ -5514,9 +5554,8 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         let quickActionWidth = CGFloat(quickActions.count) * Metrics.accessoryButtonSize
             + CGFloat(max(0, quickActions.count - 1)) * quickActionStack.spacing
         let quickActionSpacing: CGFloat = quickActions.isEmpty ? 0 : Metrics.titleAccessorySpacing
-        let trailingAccessoryAnchor = quickActions.isEmpty
-            ? (shortcutPlacement == .leadingItemNumber ? shortcutButton.leadingAnchor : shortcutBadge.leadingAnchor)
-            : quickActionStack.leadingAnchor
+        let trailingAccessoryAnchor = quickActions.isEmpty ? shortcutBadge.leadingAnchor : quickActionStack.leadingAnchor
+        let hasItemNumber = resolvedItemNumberText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
 
         var constraints = [
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -5529,6 +5568,13 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             shortcutBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcutBadge.trailingAnchor.constraint(
+                equalTo: shortcutButton.leadingAnchor,
+                constant: -shortcutButtonSpacing
+            ),
+
+            itemNumberBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingInset),
+            itemNumberBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             quickActionStack.trailingAnchor.constraint(
                 equalTo: shortcutButton.leadingAnchor,
@@ -5568,17 +5614,16 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
             chevronView.heightAnchor.constraint(equalToConstant: showsChevron ? Metrics.chevronSize : 0)
         ]
 
-        if shortcutPlacement == .leadingItemNumber {
-            constraints.append(shortcutBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingInset))
+        if hasItemNumber {
             if image == nil {
-                constraints.append(imageView.leadingAnchor.constraint(equalTo: shortcutBadge.trailingAnchor))
+                constraints.append(imageView.leadingAnchor.constraint(equalTo: itemNumberBadge.trailingAnchor))
                 constraints.append(titleLabel.leadingAnchor.constraint(
-                    equalTo: shortcutBadge.trailingAnchor,
+                    equalTo: itemNumberBadge.trailingAnchor,
                     constant: Metrics.titleAccessorySpacing
                 ))
             } else {
                 constraints.append(imageView.leadingAnchor.constraint(
-                    equalTo: shortcutBadge.trailingAnchor,
+                    equalTo: itemNumberBadge.trailingAnchor,
                     constant: Metrics.iconSpacing
                 ))
                 constraints.append(titleLabel.leadingAnchor.constraint(
@@ -5591,10 +5636,6 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
             constraints.append(titleLabel.leadingAnchor.constraint(
                 equalTo: image == nil ? leadingAnchor : imageView.trailingAnchor,
                 constant: image == nil ? leadingInset : Metrics.iconSpacing
-            ))
-            constraints.append(shortcutBadge.trailingAnchor.constraint(
-                equalTo: shortcutButton.leadingAnchor,
-                constant: -shortcutButtonSpacing
             ))
         }
 
@@ -5946,6 +5987,20 @@ extension MainMenuPanelController {
         rowViewsForTesting
             .first { $0.rowTitleForTesting == title }?
             .shortcutTextForTesting
+    }
+
+    func mainMenuRowItemNumberFrameForTesting(title: String) -> NSRect? {
+        guard let row = rowViewsForTesting.first(where: { $0.rowTitleForTesting == title }) else {
+            return nil
+        }
+        row.layoutSubtreeIfNeeded()
+        return row.itemNumberFrameForTesting
+    }
+
+    func mainMenuRowItemNumberTextForTesting(title: String) -> String? {
+        rowViewsForTesting
+            .first { $0.rowTitleForTesting == title }?
+            .itemNumberTextForTesting
     }
 
     func mainMenuSnippetTitleAvailableWidthForTesting(title: String) -> CGFloat? {
@@ -6554,6 +6609,14 @@ private extension MainMenuPanelRowView {
 
     var shortcutTextForTesting: String? {
         shortcutBadge.shortcutText
+    }
+
+    var itemNumberFrameForTesting: NSRect {
+        itemNumberBadge.frame
+    }
+
+    var itemNumberTextForTesting: String? {
+        itemNumberBadge.shortcutText
     }
 
     var hasImageForTesting: Bool { imageView.image != nil && imageView.superview != nil }
