@@ -65,19 +65,13 @@ struct ShortcutPreferenceLayoutDensityTests {
             (pasteraPreferenceString("History"), "shortcuts.history", menuCard),
             (pasteraPreferenceString("Snippets"), "shortcuts.snippet", menuCard),
             (pasteraPreferenceString("Password Vault"), "shortcuts.passwordVault", menuCard),
-            (pasteraPreferenceString("Search"), "shortcuts.historyPanel.search", historyPanelCard),
-            (
-                pasteraPreferenceString("Previous Page"),
-                "shortcuts.historyPanel.previousPage",
-                historyPanelCard
-            ),
-            (pasteraPreferenceString("Next Page"), "shortcuts.historyPanel.nextPage", historyPanelCard)
+            (pasteraPreferenceString("Search"), "shortcuts.historyPanel.search", historyPanelCard)
         ]
 
         #expect(page.paneID == .shortcuts)
         #expect(groups.count == 2)
-        #expect(recordViews.count == 7)
-        #expect(Set(recordViews.compactMap { $0.accessibilityIdentifier() }).count == 7)
+        #expect(recordViews.count == 5)
+        #expect(Set(recordViews.compactMap { $0.accessibilityIdentifier() }).count == 5)
         for (label, recordIdentifier, card) in expectedRows {
             let matchingLabels = textFields.filter { $0.stringValue == label }
             let matchingRecordViews = recordViews.filter {

@@ -22,8 +22,6 @@ final class CPYShortcutsPreferenceViewController: PasteraPreferencePageViewContr
     private var snippetShortcutRecordView = RecordView(frame: .zero)
     private var passwordVaultShortcutRecordView = RecordView(frame: .zero)
     private var historySearchShortcutRecordView = RecordView(frame: .zero)
-    private var historyPreviousPageShortcutRecordView = RecordView(frame: .zero)
-    private var historyNextPageShortcutRecordView = RecordView(frame: .zero)
     private var restoredStatusView = PasteraPreferenceStatusView(
         text: pasteraPreferenceString("Restored Defaults"),
         style: .success
@@ -69,8 +67,6 @@ final class CPYShortcutsPreferenceViewController: PasteraPreferencePageViewContr
         snippetShortcutRecordView = RecordView(frame: .zero)
         passwordVaultShortcutRecordView = RecordView(frame: .zero)
         historySearchShortcutRecordView = RecordView(frame: .zero)
-        historyPreviousPageShortcutRecordView = RecordView(frame: .zero)
-        historyNextPageShortcutRecordView = RecordView(frame: .zero)
         restoredStatusView = PasteraPreferenceStatusView(
             text: pasteraPreferenceString("Restored Defaults"),
             style: .success
@@ -99,9 +95,7 @@ final class CPYShortcutsPreferenceViewController: PasteraPreferencePageViewContr
             historyShortcutRecordView,
             snippetShortcutRecordView,
             passwordVaultShortcutRecordView,
-            historySearchShortcutRecordView,
-            historyPreviousPageShortcutRecordView,
-            historyNextPageShortcutRecordView
+            historySearchShortcutRecordView
         ]
     }
 
@@ -111,13 +105,7 @@ final class CPYShortcutsPreferenceViewController: PasteraPreferencePageViewContr
             (historyShortcutRecordView, "shortcuts.history", pasteraPreferenceString("History")),
             (snippetShortcutRecordView, "shortcuts.snippet", pasteraPreferenceString("Snippets")),
             (passwordVaultShortcutRecordView, "shortcuts.passwordVault", pasteraPreferenceString("Password Vault")),
-            (historySearchShortcutRecordView, "shortcuts.historyPanel.search", pasteraPreferenceString("Search")),
-            (
-                historyPreviousPageShortcutRecordView,
-                "shortcuts.historyPanel.previousPage",
-                pasteraPreferenceString("Previous Page")
-            ),
-            (historyNextPageShortcutRecordView, "shortcuts.historyPanel.nextPage", pasteraPreferenceString("Next Page"))
+            (historySearchShortcutRecordView, "shortcuts.historyPanel.search", pasteraPreferenceString("Search"))
         ]
         records.forEach { recordView, identifier, accessibilityLabel in
             recordView.delegate = self
@@ -161,14 +149,6 @@ final class CPYShortcutsPreferenceViewController: PasteraPreferencePageViewContr
         )
         lockNaturalHeight(of: group)
         group.addRow(makeShortcutRow(title: pasteraPreferenceString("Search"), recordView: historySearchShortcutRecordView))
-        group.addRow(makeShortcutRow(
-            title: pasteraPreferenceString("Previous Page"),
-            recordView: historyPreviousPageShortcutRecordView
-        ))
-        group.addRow(makeShortcutRow(
-            title: pasteraPreferenceString("Next Page"),
-            recordView: historyNextPageShortcutRecordView
-        ))
         addResetAction(
             to: group,
             identifier: "shortcuts.historyPanel.reset",
@@ -227,8 +207,6 @@ final class CPYShortcutsPreferenceViewController: PasteraPreferencePageViewContr
         snippetShortcutRecordView.keyCombo = service.snippetKeyCombo
         passwordVaultShortcutRecordView.keyCombo = service.passwordVaultKeyCombo
         historySearchShortcutRecordView.keyCombo = service.historyPanelKeyCombo(for: .search)
-        historyPreviousPageShortcutRecordView.keyCombo = service.historyPanelKeyCombo(for: .previousPage)
-        historyNextPageShortcutRecordView.keyCombo = service.historyPanelKeyCombo(for: .nextPage)
     }
 
     private func showRestoredStatus() {
@@ -273,10 +251,6 @@ extension CPYShortcutsPreferenceViewController: RecordViewDelegate {
             AppEnvironment.current.hotKeyService.change(with: .passwordVault, keyCombo: keyCombo)
         case historySearchShortcutRecordView:
             AppEnvironment.current.hotKeyService.changeHistoryPanelKeyCombo(.search, keyCombo: keyCombo)
-        case historyPreviousPageShortcutRecordView:
-            AppEnvironment.current.hotKeyService.changeHistoryPanelKeyCombo(.previousPage, keyCombo: keyCombo)
-        case historyNextPageShortcutRecordView:
-            AppEnvironment.current.hotKeyService.changeHistoryPanelKeyCombo(.nextPage, keyCombo: keyCombo)
         default:
             break
         }

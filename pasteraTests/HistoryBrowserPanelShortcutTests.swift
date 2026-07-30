@@ -37,12 +37,10 @@ struct HistoryBrowserPanelShortcutTests {
     }
 
     @Test
-    func commandArrowsPageWithoutRefreshingAtBounds() throws {
+    func bareArrowsPageWithoutRefreshingAtBounds() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.previousPage, keyCombo: HistoryPanelShortcut.previousPage.defaultKeyCombo)
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -64,17 +62,14 @@ struct HistoryBrowserPanelShortcutTests {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.previousPage, keyCombo: HistoryPanelShortcut.previousPage.defaultKeyCombo)
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
-
         let headerView = HistoryMenuHeaderView()
         headerView.configure(state: HistoryMenuPaginationState(pageIndex: 1), hasNextPage: true)
         let buttons = headerView.subviews.compactMap { $0 as? NSButton }
         let previousButton = try #require(buttons.first)
         let nextButton = try #require(buttons.dropFirst().first)
 
-        #expect(previousButton.toolTip == "Previous Page (⌘←)")
-        #expect(nextButton.toolTip == "Next Page (⌘→)")
+        #expect(previousButton.toolTip == "Previous Page (←)")
+        #expect(nextButton.toolTip == "Next Page (→)")
     }
 
     @Test
@@ -94,11 +89,10 @@ struct HistoryBrowserPanelShortcutTests {
     }
 
     @Test
-    func commandArrowShortcutsTakePriorityOverMainMenuChildNavigation() throws {
+    func bareArrowShortcutsTakePriorityOverMainMenuChildNavigation() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -116,11 +110,10 @@ struct HistoryBrowserPanelShortcutTests {
     }
 
     @Test
-    func commandArrowShortcutsIgnoreSystemArrowModifierFlags() throws {
+    func bareArrowShortcutsIgnoreSystemArrowModifierFlags() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -129,17 +122,16 @@ struct HistoryBrowserPanelShortcutTests {
 
         #expect(controller.dispatchHistoryPanelKeyDownForTesting(try makeArrowEvent(
             keyCode: 124,
-            modifierFlags: [.command, .numericPad, .function]
+            modifierFlags: [.numericPad, .function]
         )))
         #expect(stateBox.state.pageIndex == 1)
     }
 
     @Test
-    func menuTrackingCommandArrowTriggersHistoryPanelShortcut() throws {
+    func menuTrackingBareArrowPreservesSearchFieldEditing() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -149,15 +141,14 @@ struct HistoryBrowserPanelShortcutTests {
         controller.focusSearchFieldForTesting()
 
         #expect(controller.dispatchHistoryHeaderMenuTrackingKeyDownForTesting(try makeArrowEvent(keyCode: 124)))
-        #expect(stateBox.state.pageIndex == 1)
+        #expect(stateBox.state.pageIndex == 0)
     }
 
     @Test
-    func searchFieldCommandArrowTriggersHistoryPanelShortcut() throws {
+    func searchFieldBareArrowPreservesTextEditing() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -166,16 +157,15 @@ struct HistoryBrowserPanelShortcutTests {
 
         controller.focusSearchFieldForTesting()
 
-        #expect(controller.dispatchSearchFieldKeyEquivalentForTesting(try makeArrowEvent(keyCode: 124)))
-        #expect(stateBox.state.pageIndex == 1)
+        #expect(!controller.dispatchSearchFieldKeyEquivalentForTesting(try makeArrowEvent(keyCode: 124)))
+        #expect(stateBox.state.pageIndex == 0)
     }
 
     @Test
-    func focusedHistoryRowCommandArrowTriggersHistoryPanelShortcut() throws {
+    func focusedHistoryRowBareArrowTriggersHistoryPanelShortcut() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: HistoryPanelShortcut.nextPage.defaultKeyCombo)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -222,8 +212,6 @@ struct HistoryBrowserPanelShortcutTests {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
-        let commandA = try #require(KeyCombo(QWERTYKeyCode: 0, carbonModifiers: cmdKey))
-        service.changeHistoryPanelKeyCombo(.nextPage, keyCombo: commandA)
 
         let stateBox = HistoryMenuPaginationStateBox()
         let controller = makeController(stateBox: stateBox, hasNextPage: true)
@@ -270,7 +258,7 @@ struct HistoryBrowserPanelShortcutTests {
 
     private func makeArrowEvent(
         keyCode: UInt16,
-        modifierFlags: NSEvent.ModifierFlags = [.command]
+        modifierFlags: NSEvent.ModifierFlags = []
     ) throws -> NSEvent {
         let character: String
         switch keyCode {

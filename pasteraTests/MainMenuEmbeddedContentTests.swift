@@ -51,6 +51,60 @@ struct MainMenuEmbeddedContentTests {
     }
 
     @Test
+    func embeddedHistoryPagingUsesBareArrowsOnlyAndYieldsToSearchEditing() throws {
+        let detail = PasteboardHistoryDetail(
+            history: PasteboardHistory(
+                id: PasteboardHistory.ID(rawValue: "history-paging"),
+                title: "History",
+                pasteboardTypes: [.string],
+                updateAt: 1,
+                deviceID: nil
+            ),
+            thumbnailAsset: nil
+        )
+        var state = HistoryMenuPaginationState(pageIndex: 1)
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            historyDataSource: MainMenuHistoryDataSource(
+                currentState: { state },
+                updateState: { update in update(&state) },
+                fetchPage: {
+                    HistoryMenuPage(details: [detail], hasNextPage: true)
+                },
+                makeRowView: { detail, _, onConfirm in
+                    HistoryMenuRowView(title: detail.history.title, image: nil, onConfirm: onConfirm)
+                },
+                selectHistory: { _, _ in }
+            )
+        )
+        controller.show(at: NSPoint(x: 100, y: 100))
+        defer { controller.close() }
+
+        let bareLeft = try makeArrowEvent(keyCode: 123, modifierFlags: [])
+        let bareRight = try makeArrowEvent(keyCode: 124, modifierFlags: [])
+        let commandLeft = try makeArrowEvent(keyCode: 123, modifierFlags: [.command])
+        let commandRight = try makeArrowEvent(keyCode: 124, modifierFlags: [.command])
+
+        #expect(controller.handleMainMenuNavigationForTesting(bareLeft))
+        #expect(state.pageIndex == 0)
+        #expect(controller.handleMainMenuNavigationForTesting(bareRight))
+        #expect(state.pageIndex == 1)
+        #expect(!controller.handleMainMenuNavigationForTesting(commandLeft))
+        #expect(!controller.handleMainMenuNavigationForTesting(commandRight))
+        #expect(state.pageIndex == 1)
+
+        #expect(controller.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+        #expect(!controller.handleMainMenuNavigationForTesting(bareLeft))
+        #expect(state.pageIndex == 1)
+    }
+
+    @Test
     func embeddedModeSwitchesDoNotTriggerLegacySidePanelCallbacks() {
         let detail = PasteboardHistoryDetail(
             history: PasteboardHistory(
@@ -697,6 +751,175 @@ struct MainMenuEmbeddedContentTests {
     }
 
     @Test
+    func snippetNumberShortcutOpensFolderThenSelectsEntry() throws {
+        let firstFolderID = SnippetFolder.ID(rawValue: UUID())
+        let secondFolderID = SnippetFolder.ID(rawValue: UUID())
+        let firstFolderSnippets = (0..<2).map { index in
+            Snippet(
+                id: Snippet.ID(rawValue: UUID()),
+                folderID: firstFolderID,
+                title: "AI \(index + 1)",
+                content: "Prompt \(index + 1)",
+                index: index,
+                isEnabled: true
+            )
+        }
+        let secondFolderSnippets = (0..<2).map { index in
+            Snippet(
+                id: Snippet.ID(rawValue: UUID()),
+                folderID: secondFolderID,
+                title: "Workflow \(index + 1)",
+                content: "Step \(index + 1)",
+                index: index,
+                isEnabled: true
+            )
+        }
+        let details = [
+            SnippetFolderDetail(
+                folder: SnippetFolder(id: firstFolderID, title: "AI Prompt", index: 0, isEnabled: true),
+                snippets: firstFolderSnippets
+            ),
+            SnippetFolderDetail(
+                folder: SnippetFolder(id: secondFolderID, title: "Workflows", index: 1, isEnabled: true),
+                snippets: secondFolderSnippets
+            )
+        ]
+        var selectedSnippetID: Snippet.ID?
+        let controller = makeSnippetController(details: details) { snippetID, _ in
+            selectedSnippetID = snippetID
+        }
+        let firstNumber = try makeTextEvent("1", keyCode: 18)
+        let secondNumber = try makeTextEvent("2", keyCode: 19)
+
+        try withMenuTitlesStartingAtOne {
+            controller.show(at: NSPoint(x: 100, y: 100))
+            defer { controller.close() }
+            controller.openSnippetsFromMainMenu()
+
+            #expect(controller.handleMainMenuNavigationForTesting(firstNumber))
+            #expect(controller.mainMenuExpandedSnippetFolderIDForTesting == firstFolderID)
+            #expect(selectedSnippetID == nil)
+
+            #expect(controller.handleMainMenuNavigationForTesting(secondNumber))
+            #expect(selectedSnippetID == firstFolderSnippets[1].id)
+        }
+    }
+
+    @Test
+    func snippetFolderNumberShortcutHonorsZeroBasedPreference() throws {
+        let firstFolderID = SnippetFolder.ID(rawValue: UUID())
+        let secondFolderID = SnippetFolder.ID(rawValue: UUID())
+        let details = [
+            SnippetFolderDetail(
+                folder: SnippetFolder(id: firstFolderID, title: "First", index: 0, isEnabled: true),
+                snippets: []
+            ),
+            SnippetFolderDetail(
+                folder: SnippetFolder(id: secondFolderID, title: "Second", index: 1, isEnabled: true),
+                snippets: []
+            )
+        ]
+        let controller = makeSnippetController(details: details)
+        let zero = try makeTextEvent("0", keyCode: 29)
+
+        try withMenuTitlesStartingAtZero {
+            controller.show(at: NSPoint(x: 100, y: 100))
+            defer { controller.close() }
+            controller.openSnippetsFromMainMenu()
+
+            #expect(controller.mainMenuRowItemNumberTextForTesting(title: "First") == "0")
+            #expect(controller.handleMainMenuNavigationForTesting(zero))
+            #expect(controller.mainMenuExpandedSnippetFolderIDForTesting == firstFolderID)
+        }
+    }
+
+    @Test
+    func zeroSelectsTenthSnippetFolderAndTenthEntry() throws {
+        let folderIDs = (0..<10).map { _ in SnippetFolder.ID(rawValue: UUID()) }
+        let tenthSnippets = (0..<10).map { index in
+            Snippet(
+                id: Snippet.ID(rawValue: UUID()),
+                folderID: folderIDs[9],
+                title: "Tenth Folder Snippet \(index + 1)",
+                content: "Content \(index + 1)",
+                index: index,
+                isEnabled: true
+            )
+        }
+        let details = folderIDs.enumerated().map { index, folderID in
+            SnippetFolderDetail(
+                folder: SnippetFolder(id: folderID, title: "Folder \(index + 1)", index: index, isEnabled: true),
+                snippets: index == 9 ? tenthSnippets : []
+            )
+        }
+        var selectedSnippetID: Snippet.ID?
+        let controller = makeSnippetController(details: details) { snippetID, _ in
+            selectedSnippetID = snippetID
+        }
+        let zero = try makeTextEvent("0", keyCode: 29)
+
+        try withMenuTitlesStartingAtOne {
+            controller.show(at: NSPoint(x: 100, y: 100))
+            defer { controller.close() }
+            controller.openSnippetsFromMainMenu()
+
+            #expect(controller.mainMenuRowItemNumberTextForTesting(title: "Folder 10") == "0")
+            #expect(controller.handleMainMenuNavigationForTesting(zero))
+            #expect(controller.mainMenuExpandedSnippetFolderIDForTesting == folderIDs[9])
+            #expect(controller.mainMenuRowItemNumberTextForTesting(title: "Tenth Folder Snippet 10") == "0")
+
+            #expect(controller.handleMainMenuNavigationForTesting(zero))
+            #expect(selectedSnippetID == tenthSnippets[9].id)
+        }
+    }
+
+    @Test
+    func numberShortcutReturnsFalseInsideEmptyExpandedSnippetFolder() throws {
+        let folderID = SnippetFolder.ID(rawValue: UUID())
+        let detail = SnippetFolderDetail(
+            folder: SnippetFolder(id: folderID, title: "Empty", index: 0, isEnabled: true),
+            snippets: []
+        )
+        let controller = makeSnippetController(details: [detail])
+
+        try withMenuTitlesStartingAtOne {
+            controller.show(at: NSPoint(x: 100, y: 100))
+            defer { controller.close() }
+            controller.openSnippetsFromMainMenu()
+
+            let firstNumber = try makeTextEvent("1", keyCode: 18)
+            #expect(controller.handleMainMenuNavigationForTesting(firstNumber))
+            #expect(controller.mainMenuExpandedSnippetFolderIDForTesting == folderID)
+            #expect(!controller.handleMainMenuNavigationForTesting(firstNumber))
+        }
+    }
+
+    @Test
+    func snippetSearchAndInlineEditorKeepDigitInput() throws {
+        let folderID = SnippetFolder.ID(rawValue: UUID())
+        let detail = SnippetFolderDetail(
+            folder: SnippetFolder(id: folderID, title: "AI Prompt", index: 0, isEnabled: true),
+            snippets: []
+        )
+        let numberEvent = try makeTextEvent("1", keyCode: 18)
+
+        let searchController = makeSnippetController(details: [detail])
+        searchController.show(at: NSPoint(x: 100, y: 100))
+        searchController.openSnippetsFromMainMenu()
+        #expect(searchController.handleMainMenuNavigationForTesting(try makeCommandFEvent()))
+        #expect(!searchController.handleMainMenuNavigationForTesting(numberEvent))
+        #expect(searchController.mainMenuExpandedSnippetFolderIDForTesting == nil)
+        searchController.close()
+
+        let editorController = makeSnippetController(details: [detail])
+        editorController.show(at: NSPoint(x: 100, y: 100))
+        defer { editorController.close() }
+        editorController.openSnippetsFromMainMenu()
+        editorController.beginEditingSnippetFolderForTesting(id: folderID)
+        #expect(!editorController.handleMainMenuNavigationForTesting(numberEvent))
+    }
+
+    @Test
     func historyNumberKeyEquivalentUsesTheSameSelectionPathAsTheRow() throws {
         let detail = PasteboardHistoryDetail(
             history: PasteboardHistory(
@@ -747,11 +970,11 @@ struct MainMenuEmbeddedContentTests {
 
             let rowFrame = try #require(controller.mainMenuActionRowFrameForTesting(title: "Ask GPT"))
             let titleFrame = try #require(controller.mainMenuActionTitleFrameForTesting(title: "Ask GPT"))
-            let shortcutFrame = try #require(controller.mainMenuRowShortcutFrameForTesting(title: "Ask GPT"))
+            let itemNumberFrame = try #require(controller.mainMenuRowItemNumberFrameForTesting(title: "Ask GPT"))
 
-            #expect(controller.mainMenuRowShortcutTextForTesting(title: "Ask GPT") == "1")
-            #expect(shortcutFrame.minX <= rowFrame.minX + 36)
-            #expect(shortcutFrame.maxX < titleFrame.minX)
+            #expect(controller.mainMenuRowItemNumberTextForTesting(title: "Ask GPT") == "1")
+            #expect(itemNumberFrame.minX <= rowFrame.minX + 36)
+            #expect(itemNumberFrame.maxX < titleFrame.minX)
         }
     }
 
@@ -774,6 +997,7 @@ struct MainMenuEmbeddedContentTests {
         defer { controller.close() }
         controller.openSnippetsFromMainMenu()
 
+        #expect(controller.mainMenuRowItemNumberTextForTesting(title: "AI Prompt") == "1")
         #expect(controller.mainMenuRowShortcutTextForTesting(title: "AI Prompt") == "⌥⌘Q")
         #expect(controller.mainMenuRowButtonIdentifiersForTesting(title: "AI Prompt").contains("mainMenuRowShortcutButton"))
         #expect(controller.mainMenuRowContextMenuTitlesForTesting(title: "AI Prompt") == [
@@ -1440,17 +1664,26 @@ struct MainMenuEmbeddedContentTests {
     }
 
     private func makeLeftArrowEvent() throws -> NSEvent {
-        try #require(NSEvent.keyEvent(
+        try makeArrowEvent(keyCode: 123, modifierFlags: [])
+    }
+
+    private func makeArrowEvent(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) throws -> NSEvent {
+        let character = keyCode == 123 ? NSLeftArrowFunctionKey : NSRightArrowFunctionKey
+        let text = String(UnicodeScalar(character)!)
+        return try #require(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: 0,
             context: nil,
-            characters: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
-            charactersIgnoringModifiers: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+            characters: text,
+            charactersIgnoringModifiers: text,
             isARepeat: false,
-            keyCode: 123
+            keyCode: keyCode
         ))
     }
 
@@ -1470,10 +1703,18 @@ struct MainMenuEmbeddedContentTests {
     }
 
     private func withMenuTitlesStartingAtOne(operation: () throws -> Void) rethrows {
+        try withMenuTitles(startingAtZero: false, operation: operation)
+    }
+
+    private func withMenuTitlesStartingAtZero(operation: () throws -> Void) rethrows {
+        try withMenuTitles(startingAtZero: true, operation: operation)
+    }
+
+    private func withMenuTitles(startingAtZero: Bool, operation: () throws -> Void) rethrows {
         let defaults = AppEnvironment.current.defaults
         let key = Constants.UserDefaults.menuItemsTitleStartWithZero
         let previousValue = defaults.object(forKey: key)
-        defaults.set(false, forKey: key)
+        defaults.set(startingAtZero, forKey: key)
         defer {
             if let previousValue {
                 defaults.set(previousValue, forKey: key)

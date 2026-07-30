@@ -175,6 +175,24 @@ struct MenuManagerStatusItemTests {
     }
 
     @Test
+    func mainShortcutReturnsReusedUnifiedPanelToHistory() throws {
+        try withRegisteredDefaultEnvironment { _, _ in
+            let manager = MenuManager()
+
+            manager.popUpMenu(.snippet)
+            #expect(manager.mainMenuSelectedModeForTesting == "snippets")
+            manager.popUpMenu(.main)
+            #expect(manager.mainMenuSelectedModeForTesting == "history")
+
+            manager.popUpMenu(.passwordVault)
+            #expect(manager.mainMenuSelectedModeForTesting == "passwordVault")
+            manager.popUpMenu(.main)
+            #expect(manager.mainMenuSelectedModeForTesting == "history")
+            manager.closeMainMenuPanelForTesting()
+        }
+    }
+
+    @Test
     func setupUsesTemplateStatusItemWhenPreferenceIsLegacyWhite() throws {
         try withRegisteredDefaultEnvironment { defaults, _ in
             defaults.set(2, forKey: Constants.UserDefaults.showStatusItem)

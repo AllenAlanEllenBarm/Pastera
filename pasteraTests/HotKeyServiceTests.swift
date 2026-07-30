@@ -45,17 +45,17 @@ final class HotKeyServiceTests {
         #expect(historyKeyCombo.keyEquivalent.uppercased() == "V")
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
-        #expect(snippetKeyCombo.QWERTYKeyCode == 3)
-        #expect(snippetKeyCombo.modifiers == cmdKey | optionKey)
+        #expect(snippetKeyCombo.QWERTYKeyCode == 46)
+        #expect(snippetKeyCombo.modifiers == cmdKey | shiftKey)
         #expect(snippetKeyCombo.doubledModifiers == false)
-        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "F")
+        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "M")
     }
 
     @Test
     func shortcutFormatterUsesCompactMacSymbols() throws {
         let mainKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
         let historyKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
-        let snippetKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        let snippetKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
         let searchKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey))
         let previousPageKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey))
         let nextPageKeyCombo = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey))
@@ -63,7 +63,7 @@ final class HotKeyServiceTests {
 
         #expect(PasteraShortcutFormatter.string(for: mainKeyCombo) == "⇧⌘V")
         #expect(PasteraShortcutFormatter.string(for: historyKeyCombo) == "⌥⌘V")
-        #expect(PasteraShortcutFormatter.string(for: snippetKeyCombo) == "⌥⌘F")
+        #expect(PasteraShortcutFormatter.string(for: snippetKeyCombo) == "⇧⌘M")
         #expect(PasteraShortcutFormatter.string(for: searchKeyCombo) == "⌘F")
         #expect(PasteraShortcutFormatter.string(for: previousPageKeyCombo) == "⌘←")
         #expect(PasteraShortcutFormatter.string(for: nextPageKeyCombo) == "⌘→")
@@ -86,12 +86,12 @@ final class HotKeyServiceTests {
         #expect(PasteraShortcutFormatter.string(for: searchKeyCombo) == "⌘F")
 
         #expect(previousPageKeyCombo.QWERTYKeyCode == 123)
-        #expect(previousPageKeyCombo.modifiers == cmdKey)
-        #expect(PasteraShortcutFormatter.string(for: previousPageKeyCombo) == "⌘←")
+        #expect(previousPageKeyCombo.modifiers == 0)
+        #expect(PasteraShortcutFormatter.string(for: previousPageKeyCombo) == "←")
 
         #expect(nextPageKeyCombo.QWERTYKeyCode == 124)
-        #expect(nextPageKeyCombo.modifiers == cmdKey)
-        #expect(PasteraShortcutFormatter.string(for: nextPageKeyCombo) == "⌘→")
+        #expect(nextPageKeyCombo.modifiers == 0)
+        #expect(PasteraShortcutFormatter.string(for: nextPageKeyCombo) == "→")
     }
 
     @Test
@@ -129,7 +129,7 @@ final class HotKeyServiceTests {
     }
 
     @Test
-    func preservesCustomizedHistoryPanelShortcutsDuringDefaultMigration() throws {
+    func ignoresStoredPagingShortcutsWhilePreservingCustomizedSearch() throws {
         let customSearch = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | shiftKey))
         let customPreviousPage = try #require(KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey | controlKey))
         let customNextPage = try #require(KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey | shiftKey))
@@ -143,8 +143,16 @@ final class HotKeyServiceTests {
         service.setupDefaultHotKeys()
 
         #expect(service.historyPanelKeyCombo(for: .search) == customSearch)
-        #expect(service.historyPanelKeyCombo(for: .previousPage) == customPreviousPage)
-        #expect(service.historyPanelKeyCombo(for: .nextPage) == customNextPage)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(
+            KeyCombo.self,
+            key: Constants.HotKey.historyPreviousPageKeyCombo
+        ) == customPreviousPage)
+        #expect(defaults.archiveDataForKey(
+            KeyCombo.self,
+            key: Constants.HotKey.historyNextPageKeyCombo
+        ) == customNextPage)
     }
 
     @Test
@@ -219,7 +227,7 @@ final class HotKeyServiceTests {
 
         let defaultMain = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey))
         let defaultHistory = try #require(KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey))
-        let defaultSnippet = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        let defaultSnippet = try #require(KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
         let defaultPasswordVault = try #require(KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey))
         #expect(service.mainKeyCombo == defaultMain)
         #expect(service.historyKeyCombo == defaultHistory)
@@ -230,11 +238,11 @@ final class HotKeyServiceTests {
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.snippetKeyCombo) == defaultSnippet)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.passwordVaultKeyCombo) == defaultPasswordVault)
         #expect(service.historyPanelKeyCombo(for: .search) == customSearch)
-        #expect(service.historyPanelKeyCombo(for: .previousPage) == customPrevious)
-        #expect(service.historyPanelKeyCombo(for: .nextPage) == customNext)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historySearchKeyCombo) == customSearch)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == customPrevious)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == customNext)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == nil)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == nil)
         #expect(service.clearHistoryKeyCombo == clearHistory)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.clearHistoryKeyCombo) == clearHistory)
         #expect(service.snippetKeyCombo(forIdentifier: folderIdentifier) == folderCombo)
@@ -281,8 +289,8 @@ final class HotKeyServiceTests {
         #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
         #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
         #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historySearchKeyCombo) == HistoryPanelShortcut.search.defaultKeyCombo)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
-        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyPreviousPageKeyCombo) == nil)
+        #expect(defaults.archiveDataForKey(KeyCombo.self, key: Constants.HotKey.historyNextPageKeyCombo) == nil)
         #expect(service.mainKeyCombo == customMain)
         #expect(service.historyKeyCombo == customHistory)
         #expect(service.snippetKeyCombo == customSnippet)
@@ -446,8 +454,8 @@ final class HotKeyServiceTests {
         #expect(historyCombos?["keyCode"] == 9)
         #expect(historyCombos?["modifiers"] == cmdKey | optionKey)
 
-        #expect(snippetCombos?["keyCode"] == 3)
-        #expect(snippetCombos?["modifiers"] == cmdKey | optionKey)
+        #expect(snippetCombos?["keyCode"] == 46)
+        #expect(snippetCombos?["modifiers"] == cmdKey | shiftKey)
     }
 
     @Test
@@ -468,11 +476,12 @@ final class HotKeyServiceTests {
         #expect(historyKeyCombo.keyEquivalent.uppercased() == "V")
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
-        #expect(snippetKeyCombo.QWERTYKeyCode == 3)
-        #expect(snippetKeyCombo.modifiers == cmdKey | optionKey)
-        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "F")
+        #expect(snippetKeyCombo.QWERTYKeyCode == 46)
+        #expect(snippetKeyCombo.modifiers == cmdKey | shiftKey)
+        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "M")
         #expect(defaults.bool(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos))
         #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF))
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
     }
 
     @Test
@@ -487,10 +496,28 @@ final class HotKeyServiceTests {
         service.setupDefaultHotKeys()
 
         let snippetKeyCombo = try #require(service.snippetKeyCombo)
-        #expect(snippetKeyCombo.QWERTYKeyCode == 3)
-        #expect(snippetKeyCombo.modifiers == cmdKey | optionKey)
-        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "F")
+        #expect(snippetKeyCombo.QWERTYKeyCode == 46)
+        #expect(snippetKeyCombo.modifiers == cmdKey | shiftKey)
+        #expect(snippetKeyCombo.keyEquivalent.uppercased() == "M")
         #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF))
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
+    }
+
+    @Test
+    func migratesPreviousSnippetDefaultToShiftCommandM() throws {
+        defaults.set(true, forKey: Constants.HotKey.migrateNewKeyCombo)
+        defaults.set(true, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
+        defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
+        defaults.set(false, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM)
+        let previousDefault = try #require(KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey))
+        defaults.setArchiveData(previousDefault, forKey: Constants.HotKey.snippetKeyCombo)
+
+        let service = HotKeyService(defaults: defaults)
+        service.setupDefaultHotKeys()
+
+        let expected = try #require(KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey))
+        #expect(service.snippetKeyCombo == expected)
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
     }
 
     @Test
@@ -509,6 +536,7 @@ final class HotKeyServiceTests {
         #expect(service.snippetKeyCombo == customSnippet)
         #expect(defaults.bool(forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos))
         #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF))
+        #expect(defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM))
     }
 
     @Test
@@ -648,6 +676,7 @@ final class HotKeyServiceTests {
             (Constants.HotKey.migrateNewKeyCombo, false),
             (Constants.HotKey.migrateOptionCommandDefaultKeyCombos, true),
             (Constants.HotKey.migrateSnippetDefaultKeyComboToF, false),
+            (Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM, false),
             (Constants.HotKey.historyPanelShortcutDefaultsMigrated, false),
             (Constants.HotKey.migrateHistoryPanelOptionCommand, true),
             (Constants.HotKey.migrateHistoryPanelCanonicalDefaults, false),

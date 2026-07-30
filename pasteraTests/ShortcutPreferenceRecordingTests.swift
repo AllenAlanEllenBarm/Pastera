@@ -13,7 +13,7 @@ import Testing
 @Suite(.serialized)
 struct ShortcutPreferenceRecordingTests {
     @Test
-    func shortcutRecordViewsRecordCommandArrowCombosWithoutWindowInterception() throws {
+    func searchShortcutRecordViewRecordsWithoutWindowInterception() throws {
         let service = HotKeyService()
         AppEnvironment.push(hotKeyService: service)
         defer { _ = AppEnvironment.popLast() }
@@ -25,42 +25,34 @@ struct ShortcutPreferenceRecordingTests {
         controller.showPreferencePaneForTesting(title: "Shortcuts")
 
         let contentView = try #require(controller.window?.contentView)
-        let previousRecordView = try #require(preferenceRecordView(
+        let searchRecordView = try #require(preferenceRecordView(
+            in: contentView,
+            identifier: "shortcuts.historyPanel.search"
+        ))
+        let searchEvent = try makeKeyEvent(
+            keyCode: 17,
+            characters: "t",
+            modifierFlags: [.command, .option]
+        )
+
+        #expect(preferenceRecordView(
             in: contentView,
             identifier: "shortcuts.historyPanel.previousPage"
-        ))
-        let nextRecordView = try #require(preferenceRecordView(
+        ) == nil)
+        #expect(preferenceRecordView(
             in: contentView,
             identifier: "shortcuts.historyPanel.nextPage"
-        ))
+        ) == nil)
+        #expect(searchRecordView.beginRecording())
+        #expect(!controller.handlePreferenceKeyboardEventForTesting(searchEvent))
+        #expect(searchRecordView.performKeyEquivalent(with: searchEvent))
+        #expect(service.historyPanelKeyCombo(for: .search)?.QWERTYKeyCode == 17)
 
-        let previousEvent = try makeKeyEvent(
-            keyCode: 123,
-            characters: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
-            modifierFlags: [.command]
-        )
-        let nextEvent = try makeKeyEvent(
-            keyCode: 124,
-            characters: String(UnicodeScalar(NSRightArrowFunctionKey)!),
-            modifierFlags: [.command]
-        )
-
-        #expect(previousRecordView.beginRecording())
-        #expect(!controller.handlePreferenceKeyboardEventForTesting(previousEvent))
-        #expect(previousRecordView.performKeyEquivalent(with: previousEvent))
-        #expect(service.historyPanelKeyCombo(for: .previousPage)?.QWERTYKeyCode == 123)
-
-        #expect(nextRecordView.beginRecording())
-        #expect(!controller.handlePreferenceKeyboardEventForTesting(nextEvent))
-        #expect(nextRecordView.performKeyEquivalent(with: nextEvent))
-        #expect(service.historyPanelKeyCombo(for: .nextPage)?.QWERTYKeyCode == 124)
-
-        previousRecordView.clear()
-        nextRecordView.clear()
-        #expect(previousRecordView.keyCombo == nil)
-        #expect(nextRecordView.keyCombo == nil)
-        #expect(service.historyPanelKeyCombo(for: .previousPage) == nil)
-        #expect(service.historyPanelKeyCombo(for: .nextPage) == nil)
+        searchRecordView.clear()
+        #expect(searchRecordView.keyCombo == nil)
+        #expect(service.historyPanelKeyCombo(for: .search) == nil)
+        #expect(service.historyPanelKeyCombo(for: .previousPage) == HistoryPanelShortcut.previousPage.defaultKeyCombo)
+        #expect(service.historyPanelKeyCombo(for: .nextPage) == HistoryPanelShortcut.nextPage.defaultKeyCombo)
     }
 
     private func makeKeyEvent(

@@ -39,6 +39,10 @@ enum HistoryPanelShortcut: CaseIterable, Hashable {
     case previousPage
     case nextPage
 
+    var isUserConfigurable: Bool {
+        self == .search
+    }
+
     var userDefaultsKey: String {
         switch self {
         case .search:
@@ -55,9 +59,9 @@ enum HistoryPanelShortcut: CaseIterable, Hashable {
         case .search:
             return KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey)!
         case .previousPage:
-            return KeyCombo(QWERTYKeyCode: 123, carbonModifiers: cmdKey)!
+            return KeyCombo(QWERTYKeyCode: 123, carbonModifiers: 0)!
         case .nextPage:
-            return KeyCombo(QWERTYKeyCode: 124, carbonModifiers: cmdKey)!
+            return KeyCombo(QWERTYKeyCode: 124, carbonModifiers: 0)!
         }
     }
 
@@ -151,7 +155,8 @@ final class HotKeyService: NSObject {
     private static let defaultMainKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | optionKey)!
     private static let oldOptionCommandSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | optionKey)!
-    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
+    private static let previousDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 3, carbonModifiers: cmdKey | optionKey)!
+    private static let defaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 46, carbonModifiers: cmdKey | shiftKey)!
     private static let defaultPasswordVaultKeyCombo = KeyCombo(QWERTYKeyCode: 35, carbonModifiers: controlKey | optionKey)!
     private static let legacyDefaultHistoryKeyCombo = KeyCombo(QWERTYKeyCode: 9, carbonModifiers: cmdKey | controlKey)!
     private static let legacyDefaultSnippetKeyCombo = KeyCombo(QWERTYKeyCode: 11, carbonModifiers: cmdKey | shiftKey)!
@@ -262,6 +267,7 @@ extension HotKeyService {
         }
         migrateOptionCommandDefaultKeyCombosIfNeeded()
         migrateSnippetDefaultKeyComboToFIfNeeded()
+        migrateSnippetDefaultKeyComboToShiftCommandMIfNeeded()
         migratePasswordVaultDefaultKeyComboIfNeeded()
         migrateHistoryPanelShortcutDefaultsIfNeeded()
         migrateHistoryPanelDefaultsV2IfNeeded()
@@ -337,10 +343,14 @@ extension HotKeyService {
     }
 
     func historyPanelKeyCombo(for shortcut: HistoryPanelShortcut) -> KeyCombo? {
-        historyPanelKeyCombos[shortcut]
+        guard shortcut.isUserConfigurable else {
+            return shortcut.defaultKeyCombo
+        }
+        return historyPanelKeyCombos[shortcut]
     }
 
     func changeHistoryPanelKeyCombo(_ shortcut: HistoryPanelShortcut, keyCombo: KeyCombo?) {
+        guard shortcut.isUserConfigurable else { return }
         if let keyCombo {
             historyPanelKeyCombos[shortcut] = keyCombo
             defaults.set(keyCombo.archive(), forKey: shortcut.userDefaultsKey)
@@ -354,7 +364,7 @@ extension HotKeyService {
 
     func resetHistoryPanelShortcutsToDefaults() {
         let migrationFlag = defaults.object(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated)
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             changeHistoryPanelKeyCombo(shortcut, keyCombo: shortcut.defaultKeyCombo)
         }
         if let migrationFlag {
@@ -373,7 +383,7 @@ extension HotKeyService {
 
     private func setupHistoryPanelKeyCombos() {
         var keyCombos = [HistoryPanelShortcut: KeyCombo]()
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             if let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) {
                 keyCombos[shortcut] = keyCombo
             } else {
@@ -397,7 +407,7 @@ extension HotKeyService {
         migrateDefaultKeyComboIfNeeded(
             forKey: Constants.HotKey.snippetKeyCombo,
             legacyDefault: Self.legacyDefaultSnippetKeyCombo,
-            newDefault: Self.defaultSnippetKeyCombo
+            newDefault: Self.previousDefaultSnippetKeyCombo
         )
         defaults.set(true, forKey: Constants.HotKey.migrateOptionCommandDefaultKeyCombos)
         defaults.synchronize()
@@ -413,9 +423,20 @@ extension HotKeyService {
         migrateDefaultKeyComboIfNeeded(
             forKey: Constants.HotKey.snippetKeyCombo,
             legacyDefault: Self.oldOptionCommandSnippetKeyCombo,
-            newDefault: Self.defaultSnippetKeyCombo
+            newDefault: Self.previousDefaultSnippetKeyCombo
         )
         defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToF)
+        defaults.synchronize()
+    }
+
+    private func migrateSnippetDefaultKeyComboToShiftCommandMIfNeeded() {
+        guard !defaults.bool(forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM) else { return }
+        migrateDefaultKeyComboIfNeeded(
+            forKey: Constants.HotKey.snippetKeyCombo,
+            legacyDefault: Self.previousDefaultSnippetKeyCombo,
+            newDefault: Self.defaultSnippetKeyCombo
+        )
+        defaults.set(true, forKey: Constants.HotKey.migrateSnippetDefaultKeyComboToShiftCommandM)
         defaults.synchronize()
     }
 
@@ -430,7 +451,7 @@ extension HotKeyService {
 
     private func migrateHistoryPanelShortcutDefaultsIfNeeded() {
         guard !defaults.bool(forKey: Constants.HotKey.historyPanelShortcutDefaultsMigrated) else { return }
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             guard savedKeyCombo(forKey: shortcut.userDefaultsKey) == nil else { return }
             defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
         }
@@ -440,7 +461,7 @@ extension HotKeyService {
 
     private func migrateHistoryPanelDefaultsV2IfNeeded() {
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelOptionCommand) else { return }
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             guard savedKeyCombo(forKey: shortcut.userDefaultsKey) == shortcut.commandDefaultKeyCombo else { return }
             defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
         }
@@ -450,7 +471,7 @@ extension HotKeyService {
 
     private func migrateHistoryPanelCanonicalDefaultsIfNeeded() {
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaults) else { return }
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else {
                 defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
                 return
@@ -464,7 +485,7 @@ extension HotKeyService {
 
     private func migrateHistoryPanelCanonicalDefaultsV2IfNeeded() {
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCanonicalDefaultsV2) else { return }
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else { return }
             guard shortcut.shouldMigrateToCanonicalDefault(keyCombo) else { return }
             defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
@@ -475,7 +496,7 @@ extension HotKeyService {
 
     private func migrateHistoryPanelCommandDefaultsIfNeeded() {
         guard !defaults.bool(forKey: Constants.HotKey.migrateHistoryPanelCommandDefaults) else { return }
-        HistoryPanelShortcut.allCases.forEach { shortcut in
+        HistoryPanelShortcut.allCases.filter(\.isUserConfigurable).forEach { shortcut in
             guard let keyCombo = savedKeyCombo(forKey: shortcut.userDefaultsKey) else { return }
             guard shortcut.shouldMigrateToCanonicalDefault(keyCombo) else { return }
             defaults.set(shortcut.defaultKeyCombo.archive(), forKey: shortcut.userDefaultsKey)
