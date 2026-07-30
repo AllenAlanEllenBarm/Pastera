@@ -224,15 +224,11 @@ struct PreferencePaneAlignmentTests {
                 "Main",
                 "History",
                 "Search",
-                "Previous Page",
-                "Next Page",
                 "Snippets",
                 "Password Vault",
                 "主体",
                 "历史",
                 "搜索",
-                "上一页",
-                "下一页",
                 "片段",
                 "密码箱"
             ].contains($0.text)
@@ -248,28 +244,17 @@ struct PreferencePaneAlignmentTests {
         let searchLabel = try #require(rowLabels.first {
             ["Search", "搜索"].contains($0.text)
         })
-        let previousPageLabel = try #require(rowLabels.first {
-            ["Previous Page", "上一页"].contains($0.text)
-        })
-        let nextPageLabel = try #require(rowLabels.first {
-            ["Next Page", "下一页"].contains($0.text)
-        })
-        let nextPageFrameInPane = try #require(controller.selectedPaneTextFrameForTesting(
-            matching: ["Next Page", "下一页"]
-        ))
 
         #expect(sectionTitles.count == 2)
-        #expect(rowLabels.count == 7)
-        #expect(recordFrames.count == 7)
+        #expect(rowLabels.count == 5)
+        #expect(recordFrames.count == 5)
         #expect(!textFrames.contains {
             ["Clear History:", "清空历史：", "清除历史："].contains($0.text)
         })
         #expect(abs(menuTitle.frame.minX - historyPanelTitle.frame.minX) <= 1)
         #expect(menuTitle.frame.maxY > historyPanelTitle.frame.maxY)
-        #expect(searchLabel.frame.maxY > previousPageLabel.frame.maxY)
-        #expect(previousPageLabel.frame.maxY > nextPageLabel.frame.maxY)
-        #expect(nextPageFrameInPane.minY >= -0.5)
-        #expect(nextPageFrameInPane.maxY <= controller.selectedPaneDocumentHeightForTesting + 0.5)
+        #expect(searchLabel.frame.minY >= -0.5)
+        #expect(searchLabel.frame.maxY <= controller.selectedPaneDocumentHeightForTesting + 0.5)
 
         let labelColumns = Set(rowLabels.map { Int(($0.frame.minX / 2).rounded()) })
         let recordColumns = Set(recordFrames.map { Int(($0.minX / 2).rounded()) })
