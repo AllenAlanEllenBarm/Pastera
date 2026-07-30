@@ -196,9 +196,7 @@ extension MenuManager {
         let panelController = mainMenuPanelController ?? makeMainMenuPanelController()
         mainMenuPanelController = panelController
         switch type {
-        case .main:
-            break
-        case .history:
+        case .main, .history:
             panelController.openHistoryFromMainMenu()
         case .snippet:
             panelController.openSnippetsFromMainMenu()
