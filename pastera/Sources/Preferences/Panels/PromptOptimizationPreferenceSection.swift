@@ -615,6 +615,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         let selectedID = profileDraft.selectedProfileID
         var normalizedNames: Set<String> = []
         for profile in profileDraft.settings.remoteProfiles {
+            let validationChangedProfile = profile.id != selectedID
             let displayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             let baseURL = profile.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -627,19 +628,19 @@ final class PromptOptimizationPreferenceSection: NSStackView {
                 allowsInsecureHTTP: profile.allowsInsecureHTTP
             )
             guard !displayName.isEmpty else {
-                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                loadSelectedProfileIntoControls(clearsAPIKey: validationChangedProfile)
                 showValidation(promptPreferenceString("Profile name is required.", "配置名称为必填项。"))
                 window?.makeFirstResponder(profileNameField)
                 return false
             }
             guard normalizedNames.insert(displayName.lowercased()).inserted else {
-                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                loadSelectedProfileIntoControls(clearsAPIKey: validationChangedProfile)
                 showValidation(promptPreferenceString("Profile names must be unique.", "配置名称不能重复。"))
                 window?.makeFirstResponder(profileNameField)
                 return false
             }
             guard !model.isEmpty else {
-                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                loadSelectedProfileIntoControls(clearsAPIKey: validationChangedProfile)
                 showValidation(promptPreferenceString("Model is required.", "模型为必填项。"))
                 window?.makeFirstResponder(modelField)
                 return false
@@ -652,7 +653,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
                     allowsInsecureHTTP: profile.allowsInsecureHTTP
                 ))
             } catch PromptOptimizationError.insecureEndpoint {
-                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                loadSelectedProfileIntoControls(clearsAPIKey: validationChangedProfile)
                 showValidation(promptPreferenceString(
                     "Use HTTPS, a loopback address, or explicitly allow insecure HTTP.",
                     "请使用 HTTPS、回环地址，或显式允许不安全 HTTP。"
@@ -660,7 +661,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
                 window?.makeFirstResponder(baseURLField)
                 return false
             } catch {
-                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                loadSelectedProfileIntoControls(clearsAPIKey: validationChangedProfile)
                 showValidation(promptPreferenceString("Enter a valid Base URL.", "请输入有效的基础地址。"))
                 window?.makeFirstResponder(baseURLField)
                 return false

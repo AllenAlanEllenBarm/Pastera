@@ -184,11 +184,59 @@ struct PromptOptimizationPreferenceTests {
 
         #expect(fixture.section.saveSettingsForTesting())
 
+        #expect(fixture.settingsStore.savedSettings.count == 1)
         #expect(fixture.settingsStore.settings.activeRemoteProfileID == gatewayID)
         #expect(fixture.settingsStore.settings.activeRemoteProfile?.baseURL
             == "https://aigateway.variflight.com/api")
         #expect(fixture.settingsStore.settings.activeRemoteProfile?.model
             == "aliyun/deepseek-v4-flash-0731")
+    }
+
+    @Test
+    func invalidInactiveProfileCannotReceiveAnotherProfilesPendingAPIKey() {
+        let firstID = UUID(uuidString: "60000000-0000-0000-0000-000000000006")!
+        let invalidID = UUID(uuidString: "60000000-0000-0000-0000-000000000007")!
+        let firstProfile = PromptOptimizationRemoteProfile.makeDefault(id: firstID)
+        var invalidProfile = PromptOptimizationRemoteProfile.makeDefault(
+            id: invalidID,
+            preset: .custom,
+            displayName: "Broken Gateway"
+        )
+        invalidProfile.baseURL = "https://broken.example.com/v1"
+        invalidProfile.model = ""
+        let fixture = makeFixture(settings: PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [firstProfile, invalidProfile],
+            activeRemoteProfileID: firstID,
+            confirmedOrigins: []
+        ))
+        fixture.section.setAPIKeyForTesting("source-profile-fake-key")
+
+        #expect(!fixture.section.saveSettingsForTesting())
+        #expect(fixture.section.activeProfileIDForTesting == invalidID)
+        #expect(fixture.settingsStore.savedSettings.isEmpty)
+        #expect(!fixture.section.saveAPIKeyForTesting())
+        #expect(fixture.apiKeyStore.savedProfileIDs.isEmpty)
+    }
+
+    @Test
+    func trimmedCaseInsensitiveDuplicateProfileNamesPreventEverySnapshotSave() {
+        let fixture = makeFixture()
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        fixture.section.setProfileFieldsForTesting(
+            name: " Gateway ",
+            baseURL: "https://first.example.com/v1",
+            model: "first-model"
+        )
+        fixture.section.addProfileForTesting(preset: .custom)
+        fixture.section.setProfileFieldsForTesting(
+            name: "gateway",
+            baseURL: "https://second.example.com/v1",
+            model: "second-model"
+        )
+
+        #expect(!fixture.section.saveSettingsForTesting())
+        #expect(fixture.settingsStore.savedSettings.isEmpty)
     }
 
     @Test
@@ -415,10 +463,11 @@ struct PromptOptimizationPreferenceTests {
     }
 
     private func makeFixture(
+        settings: PromptOptimizationSettings = .defaultValue,
         hasAPIKey: Bool = false,
         service: any PromptOptimizationServicing = PreferencePromptService()
     ) -> PreferenceFixture {
-        let store = PreferenceSettingsStore()
+        let store = PreferenceSettingsStore(settings: settings)
         let keyStore = PreferenceAPIKeyStore(
             hasAPIKey: hasAPIKey,
             profileID: store.settings.activeRemoteProfileID
@@ -446,9 +495,13 @@ private struct PreferenceFixture {
 }
 
 private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
-    var settings = PromptOptimizationSettings.defaultValue
+    var settings: PromptOptimizationSettings
     var pendingLegacyCredentialProfileID: UUID?
     private(set) var savedSettings: [PromptOptimizationSettings] = []
+
+    init(settings: PromptOptimizationSettings = .defaultValue) {
+        self.settings = settings
+    }
 
     func load() -> PromptOptimizationSettings { settings }
     func save(_ settings: PromptOptimizationSettings) {
@@ -468,6 +521,7 @@ private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
 private final class PreferenceAPIKeyStore: PromptOptimizationAPIKeyStoring {
     var values: [UUID: String] = [:]
     private(set) var loadedProfileIDs: [UUID] = []
+    private(set) var savedProfileIDs: [UUID] = []
     var deleteFailures: Set<UUID> = []
 
     init(hasAPIKey: Bool, profileID: UUID) {
@@ -482,6 +536,7 @@ private final class PreferenceAPIKeyStore: PromptOptimizationAPIKeyStoring {
     }
 
     func save(_ apiKey: String, for profileID: UUID) throws {
+        savedProfileIDs.append(profileID)
         values[profileID] = apiKey
     }
 
