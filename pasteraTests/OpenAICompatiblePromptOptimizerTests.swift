@@ -109,6 +109,85 @@ struct OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func deepSeekPresetDisablesThinking() async throws {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Improved"}}]}"#
+        )
+        var configuration = PromptOptimizationRemoteConfiguration.fixture
+        configuration.preset = .deepSeek
+        configuration.baseURL = "https://api.deepseek.com"
+        configuration.model = "deepseek-v4-flash"
+
+        _ = try await client.optimize(
+            text: "Draft",
+            configuration: configuration,
+            apiKey: "gateway-key"
+        ).get()
+
+        let body = try #require(PromptOptimizationURLProtocolStub.lastRequestBody)
+        let payload = try #require(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        #expect((payload["thinking"] as? [String: String])?["type"] == "disabled")
+        #expect(payload["temperature"] as? Int == 0)
+    }
+
+    @Test
+    func customGatewayKeepsPathAndModelWithoutDeepSeekFields() async throws {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Improved"}}]}"#
+        )
+        let configuration = PromptOptimizationRemoteConfiguration(
+            preset: .custom,
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731",
+            allowsInsecureHTTP: false
+        )
+
+        _ = try await client.optimize(
+            text: "Draft",
+            configuration: configuration,
+            apiKey: "gateway-key"
+        ).get()
+
+        #expect(
+            PromptOptimizationURLProtocolStub.lastRequest?.url?.absoluteString
+                == "https://aigateway.variflight.com/api/chat/completions"
+        )
+        let body = try #require(PromptOptimizationURLProtocolStub.lastRequestBody)
+        let payload = try #require(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        #expect(payload["model"] as? String == "aliyun/deepseek-v4-flash-0731")
+        #expect(payload["thinking"] == nil)
+        #expect(
+            PromptOptimizationURLProtocolStub.lastRequest?
+                .value(forHTTPHeaderField: "Authorization") == "Bearer gateway-key"
+        )
+    }
+
+    @Test
+    func emptyAPIKeyOmitsAuthorizationHeader() async throws {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Improved"}}]}"#
+        )
+
+        _ = try await client.optimize(
+            text: "Draft",
+            configuration: .fixture,
+            apiKey: ""
+        ).get()
+
+        #expect(
+            PromptOptimizationURLProtocolStub.lastRequest?
+                .value(forHTTPHeaderField: "Authorization") == nil
+        )
+    }
+
+    @Test
     func removesKnownModelWrappersAndTrailingEmptyListItems() async throws {
         let client = makeClient(
             status: 200,

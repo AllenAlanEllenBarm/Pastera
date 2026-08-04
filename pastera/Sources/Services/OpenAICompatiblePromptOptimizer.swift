@@ -98,7 +98,8 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
                         Message(role: "system", content: PromptRewriteInstruction.text),
                         Message(role: "user", content: "<source_prompt>\n\(text)\n</source_prompt>")
                     ],
-                    maximumOutputTokens: maximumOutputTokens
+                    maximumOutputTokens: maximumOutputTokens,
+                    preset: configuration.preset
                 )
             )
 
@@ -166,6 +167,19 @@ private struct ChatCompletionRequest: Encodable {
     let stream = false
     let temperature = 0
     let maximumOutputTokens: Int?
+    let thinking: ThinkingConfiguration?
+
+    init(
+        model: String,
+        messages: [Message],
+        maximumOutputTokens: Int?,
+        preset: OpenAICompatiblePreset
+    ) {
+        self.model = model
+        self.messages = messages
+        self.maximumOutputTokens = maximumOutputTokens
+        self.thinking = preset.disablesThinking ? ThinkingConfiguration() : nil
+    }
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -173,6 +187,11 @@ private struct ChatCompletionRequest: Encodable {
         case stream
         case temperature
         case maximumOutputTokens = "max_tokens"
+        case thinking
+    }
+
+    struct ThinkingConfiguration: Encodable {
+        let type = "disabled"
     }
 }
 
