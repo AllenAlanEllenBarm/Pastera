@@ -5,6 +5,98 @@ import Testing
 @MainActor
 struct PromptOptimizationPreferenceTests {
     @Test
+    func profileDraftStagesAcrossSwitchesAndGeneratesUniqueNames() {
+        let firstID = UUID(uuidString: "60000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "60000000-0000-0000-0000-000000000002")!
+        var draft = PromptOptimizationRemoteProfileDraft(
+            settings: .makeDefault(profileID: firstID)
+        )
+        draft.updateSelected(
+            displayName: "openai",
+            preset: .openAI,
+            baseURL: "https://api.openai.com/v1",
+            model: "gpt-5.6-luna",
+            allowsInsecureHTTP: false
+        )
+
+        let addedID = draft.addProfile(preset: .openAI, id: secondID)
+        #expect(draft.settings.remoteProfiles.map(\.displayName) == ["openai", "OpenAI 2"])
+        draft.updateSelected(
+            displayName: "Gateway",
+            preset: .custom,
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731",
+            allowsInsecureHTTP: false
+        )
+        draft.selectProfile(id: firstID)
+
+        #expect(addedID == secondID)
+        #expect(draft.selectedProfile?.displayName == "openai")
+        draft.selectProfile(id: secondID)
+        #expect(draft.selectedProfile?.model == "aliyun/deepseek-v4-flash-0731")
+        #expect(!draft.isPersisted(secondID))
+        draft.markSaved()
+        #expect(draft.isPersisted(secondID))
+        draft.setProvider(.openAICompatible)
+
+        let snapshot = draft.snapshot()
+
+        #expect(snapshot.provider == .openAICompatible)
+        #expect(snapshot.activeRemoteProfileID == secondID)
+        draft.removeOrResetSelectedProfile()
+        #expect(draft.selectedProfileID == firstID)
+        #expect(draft.settings.remoteProfiles.count == 1)
+    }
+
+    @Test
+    func lastProfileRemovalResetsItWithoutChangingItsID() {
+        let id = UUID(uuidString: "60000000-0000-0000-0000-000000000003")!
+        var draft = PromptOptimizationRemoteProfileDraft(settings: .makeDefault(profileID: id))
+        draft.updateSelected(
+            displayName: "Gateway",
+            preset: .custom,
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731",
+            allowsInsecureHTTP: false
+        )
+
+        draft.removeOrResetSelectedProfile()
+
+        #expect(draft.settings.remoteProfiles.count == 1)
+        #expect(draft.selectedProfile?.id == id)
+        #expect(draft.selectedProfile?.preset == .openAI)
+        #expect(draft.selectedProfile?.model == "gpt-5.6-luna")
+    }
+
+    @Test
+    func selectingProfilePreservesCustomFieldsUntilPresetDefaultsAreApplied() {
+        let firstID = UUID(uuidString: "60000000-0000-0000-0000-000000000004")!
+        let secondID = UUID(uuidString: "60000000-0000-0000-0000-000000000005")!
+        var draft = PromptOptimizationRemoteProfileDraft(
+            settings: .makeDefault(profileID: firstID)
+        )
+
+        draft.addProfile(preset: .ollama, id: secondID)
+        draft.updateSelected(
+            displayName: "Local Gateway",
+            preset: .ollama,
+            baseURL: "https://staged.example.invalid/api",
+            model: "staged-model",
+            allowsInsecureHTTP: false
+        )
+        draft.selectProfile(id: firstID)
+        draft.selectProfile(id: secondID)
+
+        #expect(draft.selectedProfile?.baseURL == "https://staged.example.invalid/api")
+        #expect(draft.selectedProfile?.model == "staged-model")
+
+        draft.applyPresetDefaults()
+
+        #expect(draft.selectedProfile?.baseURL == "http://127.0.0.1:11434/v1")
+        #expect(draft.selectedProfile?.model == "qwen2.5:7b-instruct")
+    }
+
+    @Test
     func automaticFreeHidesRemoteFieldsAndRemoteProviderRevealsThem() {
         let fixture = makeFixture()
 
