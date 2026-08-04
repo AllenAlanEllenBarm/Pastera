@@ -124,12 +124,18 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
             ).choices.first?.message.content else {
                 return .failure(.invalidResponse)
             }
-            let output = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !output.isEmpty else { return .failure(.invalidResponse) }
-            guard output.count <= PromptOptimizationService.maximumOutputCharacters else {
+            let rawOutput = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawOutput.isEmpty else { return .failure(.invalidResponse) }
+            guard rawOutput.count <= PromptOptimizationService.maximumOutputCharacters else {
                 return .failure(
                     .outputTooLong(maxCharacters: PromptOptimizationService.maximumOutputCharacters)
                 )
+            }
+            guard let output = PromptRewriteOutputSanitizer.sanitize(
+                source: text,
+                output: rawOutput
+            ) else {
+                return .failure(.invalidResponse)
             }
             return .success(output)
         } catch is CancellationError {
@@ -158,12 +164,14 @@ private struct ChatCompletionRequest: Encodable {
     let model: String
     let messages: [Message]
     let stream = false
+    let temperature = 0
     let maximumOutputTokens: Int?
 
     enum CodingKeys: String, CodingKey {
         case model
         case messages
         case stream
+        case temperature
         case maximumOutputTokens = "max_tokens"
     }
 }
@@ -182,5 +190,149 @@ private struct ChatCompletionResponse: Decodable {
 
     struct ResponseMessage: Decodable {
         let content: String
+    }
+}
+
+private enum PromptRewriteOutputSanitizer {
+    private static let openingTag = "<rewritten_prompt>"
+    private static let closingTag = "</rewritten_prompt>"
+    private static let protectedAnchorPatterns = [
+        #"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_.-]*(?![A-Za-z0-9_])"#,
+        #"https?://[^\s<>()，。；、]+"#,
+        #"\$\{[^}\n]+\}|\{\{[^}\n]+\}\}"#,
+        #"[0-9]+(?:\.[0-9]+)?\s*(?:MB|GB|KB|ms|s|%|秒|分钟|小时|天)"#,
+        #"[零〇一二三四五六七八九十百千万两几]+(?:秒|分钟|小时|天)"#
+    ]
+    private static let leadingLabels = [
+        "Rewrite the source prompt:",
+        "Rewritten prompt:",
+        "Optimized prompt:",
+        "改写后的提示词：",
+        "优化后的提示词："
+    ]
+
+    static func sanitize(source: String, output: String) -> String? {
+        var candidate = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate = stripEnclosingRewriteTag(from: candidate)
+        candidate = stripLeadingLabel(from: candidate)
+        candidate = stripTrailingEmptyListItems(from: candidate)
+        candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !candidate.isEmpty,
+              !disclosesRewriteInstruction(candidate),
+              preservesEastAsianLanguage(source: source, output: candidate),
+              preservesProtectedAnchors(source: source, output: candidate) else {
+            return nil
+        }
+        return candidate
+    }
+
+    private static func stripEnclosingRewriteTag(from text: String) -> String {
+        let lowercased = text.lowercased()
+        guard lowercased.hasPrefix(openingTag),
+              lowercased.hasSuffix(closingTag) else {
+            return text
+        }
+        let start = text.index(text.startIndex, offsetBy: openingTag.count)
+        let end = text.index(text.endIndex, offsetBy: -closingTag.count)
+        return String(text[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func stripLeadingLabel(from text: String) -> String {
+        var lines = text.components(separatedBy: .newlines)
+        guard let firstLine = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              leadingLabels.contains(where: {
+                  $0.caseInsensitiveCompare(firstLine) == .orderedSame
+              }) else {
+            return text
+        }
+        lines.removeFirst()
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func stripTrailingEmptyListItems(from text: String) -> String {
+        var lines = text.components(separatedBy: .newlines)
+        while let lastLine = lines.last?.trimmingCharacters(in: .whitespacesAndNewlines),
+              lastLine.isEmpty || lastLine == "-" || lastLine == "*" || lastLine == "•" {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func disclosesRewriteInstruction(_ output: String) -> Bool {
+        let normalizedOutput = normalizeWhitespace(output)
+        return PromptRewriteInstruction.text
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map(normalizeWhitespace)
+            .filter { $0.count >= 32 }
+            .contains { normalizedOutput.contains($0) }
+    }
+
+    private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {
+        let sourceCounts = languageCounts(in: proseOnly(source))
+        guard sourceCounts.eastAsian >= 4,
+              sourceCounts.eastAsian * 2 >= sourceCounts.latin else {
+            return true
+        }
+        let outputCounts = languageCounts(in: proseOnly(output))
+        return outputCounts.eastAsian >= 4
+            && outputCounts.eastAsian * 2 >= outputCounts.latin
+    }
+
+    private static func preservesProtectedAnchors(source: String, output: String) -> Bool {
+        let sourceCounts = languageCounts(in: source)
+        guard sourceCounts.eastAsian >= 4 else {
+            return true
+        }
+        return protectedAnchorPatterns.allSatisfy { pattern in
+            matches(pattern: pattern, in: source).allSatisfy(output.contains)
+        }
+    }
+
+    private static func matches(pattern: String, in text: String) -> Set<String> {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return Set(expression.matches(in: text, range: range).compactMap { match in
+            guard let matchRange = Range(match.range, in: text) else { return nil }
+            return String(text[matchRange])
+        })
+    }
+
+    private static func proseOnly(_ text: String) -> String {
+        text.components(separatedBy: "```")
+            .enumerated()
+            .filter { $0.offset.isMultiple(of: 2) }
+            .map(\.element)
+            .joined(separator: "\n")
+            .split(whereSeparator: \.isWhitespace)
+            .filter { !$0.contains("://") }
+            .joined(separator: " ")
+    }
+
+    private static func languageCounts(in text: String) -> (eastAsian: Int, latin: Int) {
+        var eastAsian = 0
+        var latin = 0
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
+                 0x3040...0x30FF, 0x31F0...0x31FF,
+                 0x1100...0x11FF, 0x3130...0x318F, 0xAC00...0xD7AF:
+                eastAsian += 1
+            case 0x0041...0x005A, 0x0061...0x007A:
+                latin += 1
+            default:
+                break
+            }
+        }
+        return (eastAsian, latin)
+    }
+
+    private static func normalizeWhitespace(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .lowercased()
     }
 }
