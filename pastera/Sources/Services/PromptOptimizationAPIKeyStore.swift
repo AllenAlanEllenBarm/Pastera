@@ -72,10 +72,7 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
 
     func save(_ apiKey: String, for profileID: UUID) throws {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let attributes: [String: Any] = [
-            kSecValueData as String: Data(apiKey.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
+        let attributes = credentialAttributes(for: apiKey)
         let itemQuery = itemQuery(for: profileID)
         switch keychain.update(itemQuery, attributes: attributes) {
         case errSecSuccess:
@@ -113,10 +110,15 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
     }
 
     func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {
-        if try load(for: profileID) == nil, let legacyAPIKey = try loadLegacyAPIKey() {
-            try save(legacyAPIKey, for: profileID)
+        guard let legacyAPIKey = try loadLegacyAPIKey() else { return }
+        var attributes = itemQuery(for: profileID)
+        credentialAttributes(for: legacyAPIKey).forEach { attributes[$0.key] = $0.value }
+        switch keychain.add(attributes) {
+        case errSecSuccess, errSecDuplicateItem:
+            try deleteLegacyAPIKey()
+        default:
+            throw PromptOptimizationError.keychainUnavailable
         }
-        try deleteLegacyAPIKey()
     }
 
     private func itemQuery(for profileID: UUID) -> [String: Any] {
@@ -139,6 +141,13 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
             usesDataProtectionKeychain: usesDataProtectionKeychain
         )
         return query
+    }
+
+    private func credentialAttributes(for apiKey: String) -> [String: Any] {
+        [
+            kSecValueData as String: Data(apiKey.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
     }
 
     private func availabilityQuery(for profileID: UUID) -> [String: Any] {

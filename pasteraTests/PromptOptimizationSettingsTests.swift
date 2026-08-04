@@ -277,6 +277,26 @@ struct PromptOptimizationSettingsTests {
     }
 
     @Test
+    func migrationKeepsAProfileKeyInsertedDuringTheLegacyCopy() throws {
+        let profileID = UUID(uuidString: "30000000-0000-0000-0000-000000000005")!
+        let account = PromptOptimizationAPIKeyStore.account(for: profileID)
+        let keychain = InMemoryPromptOptimizationKeychain(items: [
+            PromptOptimizationAPIKeyStore.legacyAccount: Data("legacy-secret".utf8)
+        ])
+        keychain.itemToInsertBeforeNextAdd = (account, Data("newer-secret".utf8))
+        let store = PromptOptimizationAPIKeyStore(
+            keychain: keychain,
+            usesDataProtectionKeychain: false
+        )
+
+        try store.migrateLegacyAPIKeyIfNeeded(to: profileID)
+
+        #expect(try store.load(for: profileID) == "newer-secret")
+        #expect(!keychain.contains(account: PromptOptimizationAPIKeyStore.legacyAccount))
+        #expect(keychain.updateQueries.isEmpty)
+    }
+
+    @Test
     func failedLegacyCopyKeepsTheMigrationMarkerForRetry() throws {
         let defaults = makeIsolatedDefaults()
         let settingsStore = PromptOptimizationSettingsStore(defaults: defaults)
@@ -555,6 +575,7 @@ private struct LegacyScalarSnapshot: Equatable {
 private final class InMemoryPromptOptimizationKeychain: PromptOptimizationKeychainAccessing {
     var addStatus: OSStatus = errSecSuccess
     var deleteStatus: OSStatus = errSecSuccess
+    var itemToInsertBeforeNextAdd: (account: String, value: Data)?
 
     private var items: [String: Data]
     private(set) var copyQueries: [[String: Any]] = []
@@ -592,6 +613,10 @@ private final class InMemoryPromptOptimizationKeychain: PromptOptimizationKeycha
         guard let account = account(in: attributes),
               let value = attributes[kSecValueData as String] as? Data else {
             return errSecParam
+        }
+        if let itemToInsertBeforeNextAdd {
+            items[itemToInsertBeforeNextAdd.account] = itemToInsertBeforeNextAdd.value
+            self.itemToInsertBeforeNextAdd = nil
         }
         guard items[account] == nil else { return errSecDuplicateItem }
         items[account] = value
