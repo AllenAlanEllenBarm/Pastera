@@ -84,7 +84,10 @@ struct PromptOptimizationPreferenceTests {
         fixture.section.setAPIKeyForTesting("new-secret")
 
         #expect(fixture.section.saveSettingsForTesting())
-        #expect(fixture.apiKeyStore.savedValue == "new-secret")
+        #expect(
+            fixture.apiKeyStore.apiKey(for: fixture.settingsStore.settings.activeRemoteProfileID)
+                == "new-secret"
+        )
         #expect(!fixture.section.credentialStatusForTesting.contains("new-secret"))
     }
 
@@ -109,7 +112,10 @@ struct PromptOptimizationPreferenceTests {
     func closingWindowCancelsInFlightConnectionTest() async throws {
         let service = BlockingConnectionPromptService()
         let settingsStore = PreferenceSettingsStore()
-        let apiKeyStore = PreferenceAPIKeyStore(hasAPIKey: false)
+        let apiKeyStore = PreferenceAPIKeyStore(
+            hasAPIKey: false,
+            profileID: settingsStore.settings.activeRemoteProfileID
+        )
         let promptPage = CPYPromptOptimizationPreferenceViewController(
             settingsStore: settingsStore,
             apiKeyStore: apiKeyStore,
@@ -195,7 +201,10 @@ struct PromptOptimizationPreferenceTests {
         service: any PromptOptimizationServicing = PreferencePromptService()
     ) -> PreferenceFixture {
         let store = PreferenceSettingsStore()
-        let keyStore = PreferenceAPIKeyStore(hasAPIKey: hasAPIKey)
+        let keyStore = PreferenceAPIKeyStore(
+            hasAPIKey: hasAPIKey,
+            profileID: store.settings.activeRemoteProfileID
+        )
         let section = PromptOptimizationPreferenceSection(
             settingsStore: store,
             apiKeyStore: keyStore,
@@ -239,24 +248,34 @@ private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
 }
 
 private final class PreferenceAPIKeyStore: PromptOptimizationAPIKeyStoring {
-    var containsAPIKey: Bool
-    private(set) var savedValue: String?
+    private var apiKeys: [UUID: String] = [:]
 
-    init(hasAPIKey: Bool) {
-        self.containsAPIKey = hasAPIKey
-        self.savedValue = hasAPIKey ? "secret-value" : nil
+    init(hasAPIKey: Bool, profileID: UUID) {
+        if hasAPIKey {
+            apiKeys[profileID] = "secret-value"
+        }
     }
 
-    func save(_ apiKey: String) throws {
-        savedValue = apiKey
-        containsAPIKey = true
+    func containsAPIKey(for profileID: UUID) -> Bool {
+        apiKeys[profileID] != nil
     }
 
-    func load() throws -> String? { savedValue }
+    func save(_ apiKey: String, for profileID: UUID) throws {
+        apiKeys[profileID] = apiKey
+    }
 
-    func delete() throws {
-        savedValue = nil
-        containsAPIKey = false
+    func load(for profileID: UUID) throws -> String? {
+        apiKeys[profileID]
+    }
+
+    func delete(for profileID: UUID) throws {
+        apiKeys[profileID] = nil
+    }
+
+    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {}
+
+    func apiKey(for profileID: UUID) -> String? {
+        apiKeys[profileID]
     }
 }
 

@@ -324,7 +324,9 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         modelField.stringValue = loadedSettings.remote.model
         allowsInsecureHTTPSwitch.state = loadedSettings.remote.allowsInsecureHTTP ? .on : .off
         refreshProviderVisibility()
-        refreshCredentialStatus()
+        if migrateLegacyAPIKeyIfNeeded() {
+            refreshCredentialStatus()
+        }
     }
 
     @objc private func providerChanged(_ sender: NSPopUpButton) {
@@ -377,7 +379,8 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         )
         guard result.confirmed else { return }
         do {
-            try apiKeyStore.delete()
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
+            try apiKeyStore.delete(for: loadedSettings.activeRemoteProfileID)
             refreshCredentialStatus()
             setStatus(promptPreferenceString("Saved API Key removed.", "已移除保存的 API Key。"), announces: true)
         } catch {
@@ -482,7 +485,8 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         let value = apiKeyField.stringValue
         guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
         do {
-            try apiKeyStore.save(value)
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
+            try apiKeyStore.save(value, for: loadedSettings.activeRemoteProfileID)
             apiKeyField.stringValue = ""
             refreshCredentialStatus()
             return true
@@ -519,10 +523,23 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func refreshCredentialStatus() {
-        apiKeyStatusLabel.stringValue = apiKeyStore.containsAPIKey
+        let containsAPIKey = apiKeyStore.containsAPIKey(for: loadedSettings.activeRemoteProfileID)
+        apiKeyStatusLabel.stringValue = containsAPIKey
             ? promptPreferenceString("Saved in Keychain", "已保存至钥匙串")
             : promptPreferenceString("No key saved", "未保存密钥")
-        removeAPIKeyButton.isEnabled = apiKeyStore.containsAPIKey
+        removeAPIKeyButton.isEnabled = containsAPIKey
+    }
+
+    private func migrateLegacyAPIKeyIfNeeded() -> Bool {
+        do {
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
+            return true
+        } catch {
+            setError(promptPreferenceString("Unable to access the API Key.", "无法访问 API Key。"))
+            apiKeyStatusLabel.stringValue = ""
+            removeAPIKeyButton.isEnabled = false
+            return false
+        }
     }
 
     private func scheduleProgressIndicator() {

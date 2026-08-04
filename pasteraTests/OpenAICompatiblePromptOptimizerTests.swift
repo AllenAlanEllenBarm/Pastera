@@ -741,17 +741,25 @@ private final class PromptOptimizationURLProtocolStub: URLProtocol {
 }
 
 private final class RecordingPromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
-    var containsAPIKey = true
+    private var apiKeys: [UUID: String] = [:]
     private(set) var loadCount = 0
 
-    func save(_ apiKey: String) throws {}
+    func containsAPIKey(for profileID: UUID) -> Bool { apiKeys[profileID] != nil }
 
-    func load() throws -> String? {
-        loadCount += 1
-        return "key"
+    func save(_ apiKey: String, for profileID: UUID) throws {
+        apiKeys[profileID] = apiKey
     }
 
-    func delete() throws {}
+    func load(for profileID: UUID) throws -> String? {
+        loadCount += 1
+        return apiKeys[profileID]
+    }
+
+    func delete(for profileID: UUID) throws {
+        apiKeys[profileID] = nil
+    }
+
+    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {}
 }
 
 private final class StubUnavailableAppleOptimizer: ApplePromptOptimizing {

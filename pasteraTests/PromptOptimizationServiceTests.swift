@@ -226,9 +226,11 @@ private final class RecordingLocalPromptFormatter: LocalPromptFormatting {
 }
 
 private final class StubPromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
-    var containsAPIKey = false
+    private var apiKeys: [UUID: String] = [:]
 
-    func save(_ apiKey: String) throws {}
-    func load() throws -> String? { nil }
-    func delete() throws {}
+    func containsAPIKey(for profileID: UUID) -> Bool { apiKeys[profileID] != nil }
+    func save(_ apiKey: String, for profileID: UUID) throws { apiKeys[profileID] = apiKey }
+    func load(for profileID: UUID) throws -> String? { apiKeys[profileID] }
+    func delete(for profileID: UUID) throws { apiKeys[profileID] = nil }
+    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {}
 }

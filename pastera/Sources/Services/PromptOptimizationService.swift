@@ -65,6 +65,11 @@ final class PromptOptimizationService: PromptOptimizationServicing {
         guard settings.provider == .openAICompatible else {
             return .failure(.unavailable(.remoteNotConfigured))
         }
+        do {
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
+        } catch {
+            return .failure(.keychainUnavailable)
+        }
         let endpoint: PromptOptimizationEndpoint
         do {
             endpoint = try endpointPolicy.validate(settings.remote)
@@ -78,7 +83,7 @@ final class PromptOptimizationService: PromptOptimizationServicing {
         }
         let apiKey: String
         do {
-            apiKey = try apiKeyStore.load() ?? ""
+            apiKey = try apiKeyStore.load(for: settings.activeRemoteProfileID) ?? ""
         } catch {
             return .failure(.keychainUnavailable)
         }
@@ -126,6 +131,11 @@ final class PromptOptimizationService: PromptOptimizationServicing {
 
     private func optimizeRemotely(_ text: String) async -> PromptOptimizationOutcome {
         let settings = settingsStore.load()
+        do {
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
+        } catch {
+            return .failed(.keychainUnavailable)
+        }
         guard !settings.remote.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .failed(.missingModel)
         }
@@ -142,7 +152,7 @@ final class PromptOptimizationService: PromptOptimizationServicing {
         }
         let apiKey: String
         do {
-            apiKey = try apiKeyStore.load() ?? ""
+            apiKey = try apiKeyStore.load(for: settings.activeRemoteProfileID) ?? ""
         } catch {
             return .failed(.keychainUnavailable)
         }

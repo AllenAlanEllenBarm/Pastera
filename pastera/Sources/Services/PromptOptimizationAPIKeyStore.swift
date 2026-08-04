@@ -2,11 +2,21 @@ import Foundation
 import Security
 
 protocol PromptOptimizationAPIKeyStoring: AnyObject {
-    var containsAPIKey: Bool { get }
+    func containsAPIKey(for profileID: UUID) -> Bool
+    func save(_ apiKey: String, for profileID: UUID) throws
+    func load(for profileID: UUID) throws -> String?
+    func delete(for profileID: UUID) throws
+    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws
+}
 
-    func save(_ apiKey: String) throws
-    func load() throws -> String?
-    func delete() throws
+extension PromptOptimizationSettingsStoring {
+    func migrateLegacyAPIKeyIfNeeded(
+        using apiKeyStore: any PromptOptimizationAPIKeyStoring
+    ) throws {
+        guard let profileID = pendingLegacyCredentialProfileID else { return }
+        try apiKeyStore.migrateLegacyAPIKeyIfNeeded(to: profileID)
+        completeLegacyCredentialMigration(for: profileID)
+    }
 }
 
 protocol PromptOptimizationKeychainAccessing: AnyObject {
@@ -38,7 +48,11 @@ final class SystemPromptOptimizationKeychainAccess: PromptOptimizationKeychainAc
 
 final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
     static let service = "com.pastera-app.Pastera.prompt-optimization.v1"
-    static let account = "PasteraPromptOptimizationAPIKey"
+    static let legacyAccount = "PasteraPromptOptimizationAPIKey"
+
+    static func account(for profileID: UUID) -> String {
+        "PasteraPromptOptimizationAPIKey.\(profileID.uuidString.lowercased())"
+    }
 
     private let keychain: PromptOptimizationKeychainAccessing
     private let usesDataProtectionKeychain: Bool
@@ -52,16 +66,17 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
         self.usesDataProtectionKeychain = usesDataProtectionKeychain
     }
 
-    var containsAPIKey: Bool {
-        keychain.copyMatching(availabilityQuery).0 == errSecSuccess
+    func containsAPIKey(for profileID: UUID) -> Bool {
+        keychain.copyMatching(availabilityQuery(for: profileID)).0 == errSecSuccess
     }
 
-    func save(_ apiKey: String) throws {
+    func save(_ apiKey: String, for profileID: UUID) throws {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let attributes: [String: Any] = [
             kSecValueData as String: Data(apiKey.utf8),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
+        let itemQuery = itemQuery(for: profileID)
         switch keychain.update(itemQuery, attributes: attributes) {
         case errSecSuccess:
             return
@@ -76,8 +91,8 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
         }
     }
 
-    func load() throws -> String? {
-        let (status, result) = keychain.copyMatching(loadQuery)
+    func load(for profileID: UUID) throws -> String? {
+        let (status, result) = keychain.copyMatching(loadQuery(for: profileID))
         if status == errSecItemNotFound {
             return nil
         }
@@ -90,18 +105,33 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
         return apiKey
     }
 
-    func delete() throws {
-        let status = keychain.delete(itemQuery)
+    func delete(for profileID: UUID) throws {
+        let status = keychain.delete(itemQuery(for: profileID))
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw PromptOptimizationError.keychainUnavailable
         }
     }
 
-    private var itemQuery: [String: Any] {
+    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {
+        if try load(for: profileID) == nil, let legacyAPIKey = try loadLegacyAPIKey() {
+            try save(legacyAPIKey, for: profileID)
+        }
+        try deleteLegacyAPIKey()
+    }
+
+    private func itemQuery(for profileID: UUID) -> [String: Any] {
+        itemQuery(account: Self.account(for: profileID))
+    }
+
+    private func legacyItemQuery() -> [String: Any] {
+        itemQuery(account: Self.legacyAccount)
+    }
+
+    private func itemQuery(account: String) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account,
+            kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: false
         ]
         VaultAgentKeychainBackend.configure(
@@ -111,14 +141,42 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
         return query
     }
 
-    private var availabilityQuery: [String: Any] {
-        var query = itemQuery
+    private func availabilityQuery(for profileID: UUID) -> [String: Any] {
+        var query = itemQuery(for: profileID)
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         return query
     }
 
-    private var loadQuery: [String: Any] {
-        var query = availabilityQuery
+    private func loadQuery(for profileID: UUID) -> [String: Any] {
+        var query = availabilityQuery(for: profileID)
+        query[kSecReturnData as String] = true
+        return query
+    }
+
+    private func loadLegacyAPIKey() throws -> String? {
+        let (status, result) = keychain.copyMatching(legacyLoadQuery)
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let apiKey = String(data: data, encoding: .utf8),
+              !apiKey.isEmpty else {
+            throw PromptOptimizationError.keychainUnavailable
+        }
+        return apiKey
+    }
+
+    private func deleteLegacyAPIKey() throws {
+        let status = keychain.delete(legacyItemQuery())
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw PromptOptimizationError.keychainUnavailable
+        }
+    }
+
+    private var legacyLoadQuery: [String: Any] {
+        var query = legacyItemQuery()
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecReturnData as String] = true
         return query
     }

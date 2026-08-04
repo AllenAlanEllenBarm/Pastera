@@ -212,62 +212,118 @@ struct PromptOptimizationSettingsTests {
     }
 
     @Test
-    func apiKeyUsesDedicatedNonSynchronizingKeychainItem() throws {
-        let keychain = RecordingPromptOptimizationKeychain()
+    func apiKeysUseSeparateNonSynchronizingAccounts() throws {
+        let keychain = InMemoryPromptOptimizationKeychain()
         let store = PromptOptimizationAPIKeyStore(
             keychain: keychain,
             usesDataProtectionKeychain: false
         )
+        let first = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
+        let second = UUID(uuidString: "30000000-0000-0000-0000-000000000002")!
 
-        try store.save("secret")
+        try store.save("first-secret", for: first)
+        try store.save("second-secret", for: second)
 
-        #expect(keychain.lastAddQuery?[kSecAttrSynchronizable as String] as? Bool == false)
-        #expect(
-            keychain.lastAddQuery?[kSecAttrService as String] as? String
-                == PromptOptimizationAPIKeyStore.service
-        )
-        #expect(
-            PromptOptimizationAPIKeyStore.service
-                == "com.pastera-app.Pastera.prompt-optimization.v1"
-        )
-        #expect(
-            keychain.lastAddQuery?[kSecAttrAccessible as String] as? String
+        #expect(try store.load(for: first) == "first-secret")
+        #expect(try store.load(for: second) == "second-secret")
+        #expect(PromptOptimizationAPIKeyStore.account(for: first) !=
+            PromptOptimizationAPIKeyStore.account(for: second))
+        #expect(keychain.addQueries.allSatisfy {
+            $0[kSecAttrSynchronizable as String] as? Bool == false
+        })
+        #expect(keychain.addQueries.allSatisfy {
+            $0[kSecAttrService as String] as? String == PromptOptimizationAPIKeyStore.service
+        })
+        #expect(keychain.addQueries.allSatisfy {
+            $0[kSecAttrAccessible as String] as? String
                 == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
-        )
+        })
     }
 
     @Test
-    func apiKeyUpdatesLoadsAndDeletesWithoutSynchronizing() throws {
-        let keychain = RecordingPromptOptimizationKeychain()
-        keychain.updateStatus = errSecSuccess
-        keychain.copyResult = (errSecSuccess, Data("stored".utf8) as CFTypeRef)
+    func legacyKeyMigrationCopiesThenDeletesAndIsIdempotent() throws {
+        let keychain = InMemoryPromptOptimizationKeychain(items: [
+            PromptOptimizationAPIKeyStore.legacyAccount: Data("legacy-secret".utf8)
+        ])
+        let store = PromptOptimizationAPIKeyStore(
+            keychain: keychain,
+            usesDataProtectionKeychain: false
+        )
+        let profileID = UUID(uuidString: "30000000-0000-0000-0000-000000000003")!
+
+        try store.migrateLegacyAPIKeyIfNeeded(to: profileID)
+        try store.migrateLegacyAPIKeyIfNeeded(to: profileID)
+
+        #expect(try store.load(for: profileID) == "legacy-secret")
+        #expect(!keychain.contains(account: PromptOptimizationAPIKeyStore.legacyAccount))
+    }
+
+    @Test
+    func migrationNeverOverwritesAnExistingProfileKey() throws {
+        let profileID = UUID(uuidString: "30000000-0000-0000-0000-000000000004")!
+        let keychain = InMemoryPromptOptimizationKeychain(items: [
+            PromptOptimizationAPIKeyStore.legacyAccount: Data("legacy-secret".utf8),
+            PromptOptimizationAPIKeyStore.account(for: profileID): Data("new-secret".utf8)
+        ])
         let store = PromptOptimizationAPIKeyStore(
             keychain: keychain,
             usesDataProtectionKeychain: false
         )
 
-        try store.save("replacement")
-        #expect(try store.load() == "stored")
-        try store.delete()
+        try store.migrateLegacyAPIKeyIfNeeded(to: profileID)
 
-        #expect(keychain.lastUpdateQuery?[kSecAttrSynchronizable as String] as? Bool == false)
-        #expect(keychain.lastCopyQuery?[kSecReturnData as String] as? Bool == true)
-        #expect(keychain.lastDeleteQuery?[kSecAttrSynchronizable as String] as? Bool == false)
+        #expect(try store.load(for: profileID) == "new-secret")
+        #expect(!keychain.contains(account: PromptOptimizationAPIKeyStore.legacyAccount))
     }
 
     @Test
-    func emptyAPIKeyInputDoesNotDeleteExistingCredential() throws {
-        let keychain = RecordingPromptOptimizationKeychain()
-        let store = PromptOptimizationAPIKeyStore(
+    func failedLegacyCopyKeepsTheMigrationMarkerForRetry() throws {
+        let defaults = makeIsolatedDefaults()
+        let settingsStore = PromptOptimizationSettingsStore(defaults: defaults)
+        _ = settingsStore.load()
+        let profileID = try #require(settingsStore.pendingLegacyCredentialProfileID)
+        let keychain = InMemoryPromptOptimizationKeychain(items: [
+            PromptOptimizationAPIKeyStore.legacyAccount: Data("legacy-secret".utf8)
+        ])
+        keychain.addStatus = errSecAuthFailed
+        let keyStore = PromptOptimizationAPIKeyStore(
             keychain: keychain,
             usesDataProtectionKeychain: false
         )
 
-        try store.save("   ")
+        #expect(throws: PromptOptimizationError.keychainUnavailable) {
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: keyStore)
+        }
+        #expect(settingsStore.pendingLegacyCredentialProfileID == profileID)
 
-        #expect(keychain.lastAddQuery == nil)
-        #expect(keychain.lastUpdateQuery == nil)
-        #expect(keychain.lastDeleteQuery == nil)
+        keychain.addStatus = errSecSuccess
+        try settingsStore.migrateLegacyAPIKeyIfNeeded(using: keyStore)
+        #expect(settingsStore.pendingLegacyCredentialProfileID == nil)
+    }
+
+    @Test
+    func failedLegacyDeletionKeepsTheMigrationMarkerForRetry() throws {
+        let defaults = makeIsolatedDefaults()
+        let settingsStore = PromptOptimizationSettingsStore(defaults: defaults)
+        _ = settingsStore.load()
+        let profileID = try #require(settingsStore.pendingLegacyCredentialProfileID)
+        let keychain = InMemoryPromptOptimizationKeychain(items: [
+            PromptOptimizationAPIKeyStore.legacyAccount: Data("legacy-secret".utf8)
+        ])
+        keychain.deleteStatus = errSecAuthFailed
+        let keyStore = PromptOptimizationAPIKeyStore(
+            keychain: keychain,
+            usesDataProtectionKeychain: false
+        )
+
+        #expect(throws: PromptOptimizationError.keychainUnavailable) {
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: keyStore)
+        }
+        #expect(settingsStore.pendingLegacyCredentialProfileID == profileID)
+
+        keychain.deleteStatus = errSecSuccess
+        try settingsStore.migrateLegacyAPIKeyIfNeeded(using: keyStore)
+        #expect(settingsStore.pendingLegacyCredentialProfileID == nil)
     }
 
     private func makeIsolatedDefaults() -> UserDefaults {
@@ -496,36 +552,66 @@ private struct LegacyScalarSnapshot: Equatable {
     let confirmedOrigins: [String]?
 }
 
-private final class RecordingPromptOptimizationKeychain: PromptOptimizationKeychainAccessing {
-    var updateStatus: OSStatus = errSecItemNotFound
+private final class InMemoryPromptOptimizationKeychain: PromptOptimizationKeychainAccessing {
     var addStatus: OSStatus = errSecSuccess
     var deleteStatus: OSStatus = errSecSuccess
-    var copyResult: (OSStatus, CFTypeRef?) = (errSecItemNotFound, nil)
 
-    private(set) var lastCopyQuery: [String: Any]?
-    private(set) var lastUpdateQuery: [String: Any]?
-    private(set) var lastUpdateAttributes: [String: Any]?
-    private(set) var lastAddQuery: [String: Any]?
-    private(set) var lastDeleteQuery: [String: Any]?
+    private var items: [String: Data]
+    private(set) var copyQueries: [[String: Any]] = []
+    private(set) var updateQueries: [[String: Any]] = []
+    private(set) var addQueries: [[String: Any]] = []
+    private(set) var deleteQueries: [[String: Any]] = []
+
+    init(items: [String: Data] = [:]) {
+        self.items = items
+    }
 
     func copyMatching(_ query: [String: Any]) -> (OSStatus, CFTypeRef?) {
-        lastCopyQuery = query
-        return copyResult
+        copyQueries.append(query)
+        guard let account = account(in: query), let item = items[account] else {
+            return (errSecItemNotFound, nil)
+        }
+        return (errSecSuccess, item as CFTypeRef)
     }
 
     func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus {
-        lastUpdateQuery = query
-        lastUpdateAttributes = attributes
-        return updateStatus
+        updateQueries.append(query)
+        guard let account = account(in: query), items[account] != nil else {
+            return errSecItemNotFound
+        }
+        guard let value = attributes[kSecValueData as String] as? Data else {
+            return errSecParam
+        }
+        items[account] = value
+        return errSecSuccess
     }
 
     func add(_ attributes: [String: Any]) -> OSStatus {
-        lastAddQuery = attributes
-        return addStatus
+        addQueries.append(attributes)
+        guard addStatus == errSecSuccess else { return addStatus }
+        guard let account = account(in: attributes),
+              let value = attributes[kSecValueData as String] as? Data else {
+            return errSecParam
+        }
+        guard items[account] == nil else { return errSecDuplicateItem }
+        items[account] = value
+        return errSecSuccess
     }
 
     func delete(_ query: [String: Any]) -> OSStatus {
-        lastDeleteQuery = query
-        return deleteStatus
+        deleteQueries.append(query)
+        guard deleteStatus == errSecSuccess else { return deleteStatus }
+        guard let account = account(in: query), items.removeValue(forKey: account) != nil else {
+            return errSecItemNotFound
+        }
+        return errSecSuccess
+    }
+
+    func contains(account: String) -> Bool {
+        items[account] != nil
+    }
+
+    private func account(in query: [String: Any]) -> String? {
+        query[kSecAttrAccount as String] as? String
     }
 }
