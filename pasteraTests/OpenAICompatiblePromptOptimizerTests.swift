@@ -713,10 +713,20 @@ extension OpenAICompatiblePromptOptimizerTests {
             suiteName: "OpenAICompatiblePromptOptimizerTests.\(UUID().uuidString)"
         )!
         let settingsStore = PromptOptimizationSettingsStore(defaults: defaults)
+        let profileID = UUID()
+        let configuration = PromptOptimizationRemoteConfiguration.fixture
         settingsStore.save(
             PromptOptimizationSettings(
                 provider: .openAICompatible,
-                remote: .fixture,
+                remoteProfiles: [PromptOptimizationRemoteProfile(
+                    id: profileID,
+                    displayName: "Fixture",
+                    preset: configuration.preset,
+                    baseURL: configuration.baseURL,
+                    model: configuration.model,
+                    allowsInsecureHTTP: configuration.allowsInsecureHTTP
+                )],
+                activeRemoteProfileID: profileID,
                 confirmedOrigins: []
             )
         )

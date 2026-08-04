@@ -13,7 +13,12 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     private let providerPopup = NSPopUpButton()
     private let availabilityLabel = NSTextField(wrappingLabelWithString: "")
     private let remoteStack = NSStackView()
+    private let profilePopup = NSPopUpButton()
+    private let profileNameField = NSTextField()
+    private let addProfileButton = NSButton()
+    private let deleteProfileButton = NSButton()
     private let presetPopup = NSPopUpButton()
+    private let applyPresetDefaultsButton = NSButton()
     private let baseURLField = NSTextField()
     private let modelField = NSTextField()
     private let apiKeyField = NSSecureTextField()
@@ -27,7 +32,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     private let testButton = NSButton()
     private let progressIndicator = NSProgressIndicator()
 
-    private var loadedSettings: PromptOptimizationSettings
+    private var profileDraft: PromptOptimizationRemoteProfileDraft
     private var connectionTask: Task<Void, Never>?
     private var progressWorkItem: DispatchWorkItem?
     private weak var observedWindow: NSWindow?
@@ -49,7 +54,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         self.optimizationService = optimizationService
         self.endpointPolicy = endpointPolicy
         self.confirmationRunner = confirmationRunner
-        self.loadedSettings = settingsStore.load()
+        self.profileDraft = PromptOptimizationRemoteProfileDraft(settings: settingsStore.load())
         super.init(frame: .zero)
         configureCard()
         loadSettingsIntoControls()
@@ -220,15 +225,55 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         remoteStack.alignment = .leading
         remoteStack.spacing = 10
 
+        profilePopup.target = self
+        profilePopup.action = #selector(profileChanged(_:))
+        profilePopup.setAccessibilityLabel(promptPreferenceString("Model profile", "模型配置"))
+        profilePopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        addProfileButton.title = promptPreferenceString("Add", "添加")
+        addProfileButton.target = self
+        addProfileButton.action = #selector(addProfile(_:))
+        addProfileButton.setAccessibilityLabel(promptPreferenceString("Add model profile", "添加模型配置"))
+        deleteProfileButton.title = promptPreferenceString("Delete", "删除")
+        deleteProfileButton.target = self
+        deleteProfileButton.action = #selector(deleteProfile(_:))
+        deleteProfileButton.setAccessibilityLabel(promptPreferenceString("Delete model profile", "删除模型配置"))
+        let profileActions = NSStackView(views: [profilePopup, addProfileButton, deleteProfileButton])
+        profileActions.orientation = .horizontal
+        profileActions.alignment = .centerY
+        profileActions.spacing = 8
+        remoteStack.addArrangedSubview(makeLabeledControl(
+            label: promptPreferenceString("Model profile", "模型配置"),
+            control: profileActions
+        ))
+
+        profileNameField.setAccessibilityLabel(promptPreferenceString("Profile name", "配置名称"))
+        remoteStack.addArrangedSubview(makeLabeledControl(
+            label: promptPreferenceString("Profile name", "配置名称"),
+            control: profileNameField
+        ))
+
         OpenAICompatiblePreset.allCases.forEach { preset in
             presetPopup.addItem(withTitle: preset.displayName)
             presetPopup.lastItem?.representedObject = preset.rawValue
         }
         presetPopup.target = self
         presetPopup.action = #selector(presetChanged(_:))
+        presetPopup.setAccessibilityLabel(promptPreferenceString("Provider preset", "服务预设"))
+        presetPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        applyPresetDefaultsButton.title = promptPreferenceString("Apply Preset Defaults", "应用预设默认值")
+        applyPresetDefaultsButton.target = self
+        applyPresetDefaultsButton.action = #selector(applyPresetDefaults(_:))
+        applyPresetDefaultsButton.setAccessibilityLabel(promptPreferenceString(
+            "Apply preset defaults",
+            "应用预设默认值"
+        ))
+        let presetActions = NSStackView(views: [presetPopup, applyPresetDefaultsButton])
+        presetActions.orientation = .horizontal
+        presetActions.alignment = .centerY
+        presetActions.spacing = 8
         remoteStack.addArrangedSubview(makeLabeledControl(
             label: promptPreferenceString("Provider preset", "服务预设"),
-            control: presetPopup
+            control: presetActions
         ))
 
         baseURLField.placeholderString = "https://api.example.com/v1"
@@ -314,19 +359,69 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func loadSettingsIntoControls() {
-        loadedSettings = settingsStore.load()
-        selectProvider(loadedSettings.provider)
-        selectPreset(loadedSettings.remote.preset)
-        baseURLField.stringValue = loadedSettings.remote.baseURL
-        if baseURLField.stringValue.isEmpty {
-            baseURLField.stringValue = OpenAICompatiblePreset.presetBaseURLs[loadedSettings.remote.preset] ?? ""
-        }
-        modelField.stringValue = loadedSettings.remote.model
-        allowsInsecureHTTPSwitch.state = loadedSettings.remote.allowsInsecureHTTP ? .on : .off
+        selectProvider(profileDraft.settings.provider)
+        loadSelectedProfileIntoControls()
         refreshProviderVisibility()
         if migrateLegacyAPIKeyIfNeeded() {
             refreshCredentialStatus()
         }
+    }
+
+    private func loadSelectedProfileIntoControls(clearsAPIKey: Bool = true) {
+        refreshProfilePopup()
+        guard let profile = profileDraft.selectedProfile else { return }
+        profileNameField.stringValue = profile.displayName
+        selectPreset(profile.preset)
+        baseURLField.stringValue = profile.baseURL
+        modelField.stringValue = profile.model
+        allowsInsecureHTTPSwitch.state = profile.allowsInsecureHTTP ? .on : .off
+        if clearsAPIKey {
+            apiKeyField.stringValue = ""
+        }
+        refreshCredentialStatus()
+        onContentSizeChange?()
+    }
+
+    private func refreshProfilePopup() {
+        profilePopup.removeAllItems()
+        for profile in profileDraft.settings.remoteProfiles {
+            profilePopup.addItem(withTitle: profile.displayName)
+            profilePopup.lastItem?.representedObject = profile.id.uuidString
+        }
+        if let selectedIndex = profilePopup.itemArray.firstIndex(where: {
+            $0.representedObject as? String == profileDraft.selectedProfileID.uuidString
+        }) {
+            profilePopup.selectItem(at: selectedIndex)
+        }
+    }
+
+    private func stageCurrentControls() {
+        if let provider = selectedProvider {
+            profileDraft.setProvider(provider)
+        }
+        profileDraft.updateSelected(
+            displayName: profileNameField.stringValue,
+            preset: selectedPreset ?? profileDraft.selectedProfile?.preset ?? .custom,
+            baseURL: baseURLField.stringValue,
+            model: modelField.stringValue,
+            allowsInsecureHTTP: allowsInsecureHTTPSwitch.state == .on
+        )
+    }
+
+    private func switchToProfile(id profileID: UUID) {
+        stageCurrentControls()
+        profileDraft.selectProfile(id: profileID)
+        clearProfileTransientState()
+        loadSelectedProfileIntoControls()
+    }
+
+    @discardableResult
+    private func addProfile(preset: OpenAICompatiblePreset, id: UUID) -> UUID {
+        stageCurrentControls()
+        let profileID = profileDraft.addProfile(preset: preset, id: id)
+        clearProfileTransientState()
+        loadSelectedProfileIntoControls()
+        return profileID
     }
 
     @objc private func providerChanged(_ sender: NSPopUpButton) {
@@ -334,12 +429,42 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         refreshProviderVisibility()
     }
 
+    @objc private func profileChanged(_ sender: NSPopUpButton) {
+        guard let rawID = sender.selectedItem?.representedObject as? String,
+              let profileID = UUID(uuidString: rawID) else { return }
+        switchToProfile(id: profileID)
+    }
+
+    @objc private func addProfile(_ sender: NSButton) {
+        _ = addProfile(preset: .custom, id: UUID())
+    }
+
+    @objc private func deleteProfile(_ sender: NSButton) {
+        let confirmation = confirmationRunner(
+            PasteraConfirmationOptions(
+                title: promptPreferenceString("Delete this model profile?", "删除此模型配置？"),
+                message: promptPreferenceString(
+                    "Its saved API Key will also be removed from Keychain.",
+                    "其保存的 API Key 也会从钥匙串中移除。"
+                ),
+                confirmTitle: promptPreferenceString("Delete", "删除"),
+                cancelTitle: promptPreferenceString("Cancel", "取消"),
+                symbolName: "trash"
+            ),
+            window
+        )
+        deleteSelectedProfile(confirmation: confirmation)
+    }
+
     @objc private func presetChanged(_ sender: NSPopUpButton) {
         clearMessages()
-        guard let preset = selectedPreset,
-              preset != .custom,
-              let baseURL = OpenAICompatiblePreset.presetBaseURLs[preset] else { return }
-        baseURLField.stringValue = baseURL
+    }
+
+    @objc private func applyPresetDefaults(_ sender: NSButton) {
+        stageCurrentControls()
+        profileDraft.applyPresetDefaults()
+        clearMessages()
+        loadSelectedProfileIntoControls(clearsAPIKey: false)
     }
 
     @objc private func insecureHTTPChanged(_ sender: NSSwitch) {
@@ -352,15 +477,28 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     @objc private func saveAPIKey(_ sender: NSButton) {
+        _ = saveAPIKeyFromControls()
+    }
+
+    private func saveAPIKeyFromControls() -> Bool {
         clearMessages()
+        guard profileDraft.isPersisted(profileDraft.selectedProfileID) else {
+            setError(promptPreferenceString(
+                "Save Settings before saving a key for this profile.",
+                "请先保存设置，再为此配置保存密钥。"
+            ))
+            return false
+        }
         let value = apiKeyField.stringValue
         guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             showValidation(promptPreferenceString("Enter an API Key before saving.", "请输入 API Key 后再保存。"))
-            return
+            return false
         }
         if savePendingAPIKeyIfNeeded() {
             setStatus(promptPreferenceString("API Key saved securely.", "API Key 已安全保存。"), announces: true)
+            return true
         }
+        return false
     }
 
     @objc private func removeAPIKey(_ sender: NSButton) {
@@ -380,11 +518,30 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         guard result.confirmed else { return }
         do {
             try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
-            try apiKeyStore.delete(for: loadedSettings.activeRemoteProfileID)
+            try apiKeyStore.delete(for: profileDraft.selectedProfileID)
             refreshCredentialStatus()
             setStatus(promptPreferenceString("Saved API Key removed.", "已移除保存的 API Key。"), announces: true)
         } catch {
             setError(promptPreferenceString("Unable to remove the API Key.", "无法移除 API Key。"))
+        }
+    }
+
+    private func deleteSelectedProfile(confirmation: PasteraConfirmationResult) {
+        stageCurrentControls()
+        guard confirmation.confirmed, let profileID = profileDraft.selectedProfile?.id else { return }
+        do {
+            if profileDraft.isPersisted(profileID) {
+                try apiKeyStore.delete(for: profileID)
+            }
+            profileDraft.removeOrResetSelectedProfile()
+            settingsStore.save(profileDraft.snapshot())
+            profileDraft.markSaved()
+            loadSelectedProfileIntoControls()
+        } catch {
+            setError(promptPreferenceString(
+                "Unable to remove this model profile.",
+                "无法移除此模型配置。"
+            ))
         }
     }
 
@@ -444,24 +601,58 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     private func persistSettings() -> Bool {
         clearMessages()
         guard let provider = selectedProvider else { return false }
-        var settings = settingsStore.load()
-        settings.provider = provider
-        if provider == .openAICompatible {
-            let model = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        stageCurrentControls()
+        profileDraft.setProvider(provider)
+        guard normalizeAndValidateProfiles() else { return false }
+        settingsStore.save(profileDraft.snapshot())
+        profileDraft.markSaved()
+        loadSelectedProfileIntoControls(clearsAPIKey: false)
+        refreshProviderVisibility()
+        return true
+    }
+
+    private func normalizeAndValidateProfiles() -> Bool {
+        let selectedID = profileDraft.selectedProfileID
+        var normalizedNames: Set<String> = []
+        for profile in profileDraft.settings.remoteProfiles {
+            let displayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseURL = profile.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            profileDraft.selectProfile(id: profile.id)
+            profileDraft.updateSelected(
+                displayName: displayName,
+                preset: profile.preset,
+                baseURL: baseURL,
+                model: model,
+                allowsInsecureHTTP: profile.allowsInsecureHTTP
+            )
+            guard !displayName.isEmpty else {
+                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                showValidation(promptPreferenceString("Profile name is required.", "配置名称为必填项。"))
+                window?.makeFirstResponder(profileNameField)
+                return false
+            }
+            guard normalizedNames.insert(displayName.lowercased()).inserted else {
+                loadSelectedProfileIntoControls(clearsAPIKey: false)
+                showValidation(promptPreferenceString("Profile names must be unique.", "配置名称不能重复。"))
+                window?.makeFirstResponder(profileNameField)
+                return false
+            }
             guard !model.isEmpty else {
+                loadSelectedProfileIntoControls(clearsAPIKey: false)
                 showValidation(promptPreferenceString("Model is required.", "模型为必填项。"))
                 window?.makeFirstResponder(modelField)
                 return false
             }
-            let configuration = PromptOptimizationRemoteConfiguration(
-                preset: selectedPreset ?? .custom,
-                baseURL: baseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-                model: model,
-                allowsInsecureHTTP: allowsInsecureHTTPSwitch.state == .on
-            )
             do {
-                _ = try endpointPolicy.validate(configuration)
+                _ = try endpointPolicy.validate(PromptOptimizationRemoteConfiguration(
+                    preset: profile.preset,
+                    baseURL: baseURL,
+                    model: model,
+                    allowsInsecureHTTP: profile.allowsInsecureHTTP
+                ))
             } catch PromptOptimizationError.insecureEndpoint {
+                loadSelectedProfileIntoControls(clearsAPIKey: false)
                 showValidation(promptPreferenceString(
                     "Use HTTPS, a loopback address, or explicitly allow insecure HTTP.",
                     "请使用 HTTPS、回环地址，或显式允许不安全 HTTP。"
@@ -469,15 +660,13 @@ final class PromptOptimizationPreferenceSection: NSStackView {
                 window?.makeFirstResponder(baseURLField)
                 return false
             } catch {
+                loadSelectedProfileIntoControls(clearsAPIKey: false)
                 showValidation(promptPreferenceString("Enter a valid Base URL.", "请输入有效的基础地址。"))
                 window?.makeFirstResponder(baseURLField)
                 return false
             }
-            settings.remote = configuration
         }
-        settingsStore.save(settings)
-        loadedSettings = settings
-        refreshProviderVisibility()
+        profileDraft.selectProfile(id: selectedID)
         return true
     }
 
@@ -486,7 +675,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
         do {
             try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
-            try apiKeyStore.save(value, for: loadedSettings.activeRemoteProfileID)
+            try apiKeyStore.save(value, for: profileDraft.selectedProfileID)
             apiKeyField.stringValue = ""
             refreshCredentialStatus()
             return true
@@ -523,11 +712,19 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func refreshCredentialStatus() {
-        let containsAPIKey = apiKeyStore.containsAPIKey(for: loadedSettings.activeRemoteProfileID)
+        let profileID = profileDraft.selectedProfileID
+        let containsAPIKey = apiKeyStore.containsAPIKey(for: profileID)
         apiKeyStatusLabel.stringValue = containsAPIKey
             ? promptPreferenceString("Saved in Keychain", "已保存至钥匙串")
             : promptPreferenceString("No key saved", "未保存密钥")
         removeAPIKeyButton.isEnabled = containsAPIKey
+        saveAPIKeyButton.isEnabled = profileDraft.isPersisted(profileID)
+    }
+
+    private func clearProfileTransientState() {
+        cancelConnectionTest()
+        apiKeyField.stringValue = ""
+        clearMessages()
     }
 
     private func migrateLegacyAPIKeyIfNeeded() -> Bool {
@@ -635,6 +832,10 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     var providerForTesting: PromptOptimizationProviderSelection? { selectedProvider }
     var presetForTesting: OpenAICompatiblePreset? { selectedPreset }
     var baseURLForTesting: String { baseURLField.stringValue }
+    var modelForTesting: String { modelField.stringValue }
+    var profileNameForTesting: String { profileNameField.stringValue }
+    var activeProfileIDForTesting: UUID { profileDraft.selectedProfileID }
+    var saveAPIKeyEnabledForTesting: Bool { saveAPIKeyButton.isEnabled }
     var modelValidationForTesting: String? { validationLabel.isHidden ? nil : validationLabel.stringValue }
     var credentialStatusForTesting: String { apiKeyStatusLabel.stringValue }
     var statusForTesting: String { statusLabel.stringValue }
@@ -652,6 +853,32 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         presetChanged(presetPopup)
     }
 
+    func selectProfileForTesting(_ profileID: UUID) {
+        switchToProfile(id: profileID)
+    }
+
+    @discardableResult
+    func addProfileForTesting(preset: OpenAICompatiblePreset) -> UUID {
+        addProfile(preset: preset, id: UUID())
+    }
+
+    func setProfileFieldsForTesting(name: String, baseURL: String, model: String) {
+        profileNameField.stringValue = name
+        baseURLField.stringValue = baseURL
+        modelField.stringValue = model
+    }
+
+    func applyPresetDefaultsForTesting() {
+        applyPresetDefaults(applyPresetDefaultsButton)
+    }
+
+    func deleteSelectedProfileForTesting(confirmed: Bool) {
+        deleteSelectedProfile(confirmation: PasteraConfirmationResult(
+            confirmed: confirmed,
+            suppressionChecked: false
+        ))
+    }
+
     func setRemoteFieldsForTesting(baseURL: String, model: String) {
         baseURLField.stringValue = baseURL
         modelField.stringValue = model
@@ -659,6 +886,11 @@ final class PromptOptimizationPreferenceSection: NSStackView {
 
     func setAPIKeyForTesting(_ apiKey: String) {
         apiKeyField.stringValue = apiKey
+    }
+
+    @discardableResult
+    func saveAPIKeyForTesting() -> Bool {
+        saveAPIKeyFromControls()
     }
 
     @discardableResult

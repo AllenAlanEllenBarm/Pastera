@@ -3,6 +3,7 @@ import Security
 import Testing
 @testable import Pastera
 
+// swiftlint:disable:next type_body_length
 struct PromptOptimizationSettingsTests {
     @Test
     func presetsExposeEditableProviderDefaults() {
@@ -81,14 +82,18 @@ struct PromptOptimizationSettingsTests {
     func persistsRemoteConfigurationAndConfirmedOrigins() {
         let defaults = makeIsolatedDefaults()
         let store = PromptOptimizationSettingsStore(defaults: defaults)
+        let profile = PromptOptimizationRemoteProfile(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000005")!,
+            displayName: "Private model",
+            preset: .custom,
+            baseURL: "https://models.example.com/v1",
+            model: "private-model",
+            allowsInsecureHTTP: false
+        )
         let settings = PromptOptimizationSettings(
             provider: .openAICompatible,
-            remote: PromptOptimizationRemoteConfiguration(
-                preset: .custom,
-                baseURL: "https://models.example.com/v1",
-                model: "private-model",
-                allowsInsecureHTTP: false
-            ),
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profile.id,
             confirmedOrigins: ["https://models.example.com"]
         )
 
@@ -96,7 +101,7 @@ struct PromptOptimizationSettingsTests {
 
         let loaded = store.load()
         #expect(loaded.provider == settings.provider)
-        #expect(loaded.remote == settings.remote)
+        #expect(loaded.activeRemoteProfile == profile)
         #expect(loaded.confirmedOrigins == settings.confirmedOrigins)
     }
 

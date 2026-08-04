@@ -108,21 +108,6 @@ struct PromptOptimizationSettings: Codable, Equatable, Sendable {
         remoteProfiles.first { $0.id == activeRemoteProfileID }
     }
 
-    @available(*, deprecated, message: "Use activeRemoteProfile for multi-profile settings.")
-    var remote: PromptOptimizationRemoteConfiguration {
-        get { activeRemoteProfile?.configuration ?? .empty }
-        set {
-            repairActiveRemoteProfile()
-            guard let index = remoteProfiles.firstIndex(where: { $0.id == activeRemoteProfileID }) else {
-                return
-            }
-            remoteProfiles[index].preset = newValue.preset
-            remoteProfiles[index].baseURL = newValue.baseURL
-            remoteProfiles[index].model = newValue.model
-            remoteProfiles[index].allowsInsecureHTTP = newValue.allowsInsecureHTTP
-        }
-    }
-
     static var defaultValue: Self { makeDefault() }
 
     static func makeDefault(profileID: UUID = UUID()) -> Self {
@@ -145,30 +130,6 @@ struct PromptOptimizationSettings: Codable, Equatable, Sendable {
             return
         }
         activeRemoteProfileID = remoteProfiles[0].id
-    }
-}
-
-extension PromptOptimizationSettings {
-    @available(*, deprecated, message: "Use remoteProfiles and activeRemoteProfileID for multi-profile settings.")
-    init(
-        provider: PromptOptimizationProviderSelection,
-        remote: PromptOptimizationRemoteConfiguration,
-        confirmedOrigins: Set<String>
-    ) {
-        let profile = PromptOptimizationRemoteProfile(
-            id: UUID(),
-            displayName: remote.preset.defaultProfileName,
-            preset: remote.preset,
-            baseURL: remote.baseURL,
-            model: remote.model,
-            allowsInsecureHTTP: remote.allowsInsecureHTTP
-        )
-        self.init(
-            provider: provider,
-            remoteProfiles: [profile],
-            activeRemoteProfileID: profile.id,
-            confirmedOrigins: confirmedOrigins
-        )
     }
 }
 

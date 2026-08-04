@@ -1,8 +1,10 @@
 import AppKit
 import Testing
 @testable import Pastera
+// swiftlint:disable file_length
 
 @MainActor
+// swiftlint:disable:next type_body_length
 struct PromptOptimizationPreferenceTests {
     @Test
     func profileDraftStagesAcrossSwitchesAndGeneratesUniqueNames() {
@@ -120,15 +122,139 @@ struct PromptOptimizationPreferenceTests {
     }
 
     @Test
-    func providerPresetFillsKnownBaseURLAndCustomPreservesIt() {
+    func presetSelectionPreservesCustomFieldsUntilDefaultsAreApplied() {
         let fixture = makeFixture()
         fixture.section.selectProviderForTesting(.openAICompatible)
+        fixture.section.setProfileFieldsForTesting(
+            name: "Gateway",
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731"
+        )
 
         fixture.section.selectPresetForTesting(.ollama)
-        #expect(fixture.section.baseURLForTesting == "http://127.0.0.1:11434/v1")
+        #expect(fixture.section.baseURLForTesting == "https://aigateway.variflight.com/api")
+        #expect(fixture.section.modelForTesting == "aliyun/deepseek-v4-flash-0731")
 
-        fixture.section.selectPresetForTesting(.custom)
+        fixture.section.applyPresetDefaultsForTesting()
+
         #expect(fixture.section.baseURLForTesting == "http://127.0.0.1:11434/v1")
+        #expect(fixture.section.modelForTesting == "qwen2.5:7b-instruct")
+    }
+
+    @Test
+    func switchingProfilesPreservesDraftFieldsAndShowsTheSelectedKeyStatus() {
+        let fixture = makeFixture()
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        let firstID = fixture.section.activeProfileIDForTesting
+        fixture.section.setProfileFieldsForTesting(
+            name: "OpenAI Work",
+            baseURL: "https://api.openai.com/v1",
+            model: "gpt-5.6-luna"
+        )
+        let gatewayID = fixture.section.addProfileForTesting(preset: .custom)
+        fixture.section.setProfileFieldsForTesting(
+            name: "Gateway",
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731"
+        )
+        fixture.apiKeyStore.values[firstID] = "first-fake-key"
+
+        fixture.section.selectProfileForTesting(firstID)
+
+        #expect(gatewayID != firstID)
+        #expect(fixture.section.profileNameForTesting == "OpenAI Work")
+        #expect(fixture.section.modelForTesting == "gpt-5.6-luna")
+        #expect(fixture.section.activeProfileIDForTesting == firstID)
+        #expect(fixture.apiKeyStore.loadedProfileIDs.last == firstID)
+        #expect(fixture.section.credentialStatusForTesting.contains("saved")
+            || fixture.section.credentialStatusForTesting.contains("保存"))
+        #expect(!fixture.section.credentialStatusForTesting.contains("first-fake-key"))
+    }
+
+    @Test
+    func savingCustomGatewayPersistsExactPathModelAndSelectedProfile() {
+        let fixture = makeFixture()
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        let gatewayID = fixture.section.addProfileForTesting(preset: .custom)
+        fixture.section.setProfileFieldsForTesting(
+            name: "Gateway",
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731"
+        )
+
+        #expect(fixture.section.saveSettingsForTesting())
+
+        #expect(fixture.settingsStore.settings.activeRemoteProfileID == gatewayID)
+        #expect(fixture.settingsStore.settings.activeRemoteProfile?.baseURL
+            == "https://aigateway.variflight.com/api")
+        #expect(fixture.settingsStore.settings.activeRemoteProfile?.model
+            == "aliyun/deepseek-v4-flash-0731")
+    }
+
+    @Test
+    func failedKeyDeletionKeepsTheProfileVisible() {
+        let fixture = makeFixture(hasAPIKey: true)
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        let profileID = fixture.section.activeProfileIDForTesting
+        fixture.apiKeyStore.deleteFailures.insert(profileID)
+
+        fixture.section.deleteSelectedProfileForTesting(confirmed: true)
+
+        #expect(fixture.settingsStore.settings.remoteProfiles.contains { $0.id == profileID })
+        #expect(fixture.apiKeyStore.values[profileID] == "secret-value")
+        #expect(fixture.section.statusForTesting.contains("Unable")
+            || fixture.section.statusForTesting.contains("无法"))
+    }
+
+    @Test
+    func unsavedProfileCannotUseStandaloneSaveKeyAction() {
+        let fixture = makeFixture()
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        let unsavedID = fixture.section.addProfileForTesting(preset: .custom)
+        fixture.section.setAPIKeyForTesting("unsaved-fake-key")
+
+        #expect(!fixture.section.saveAPIKeyEnabledForTesting)
+        #expect(!fixture.section.saveAPIKeyForTesting())
+        #expect(fixture.apiKeyStore.values[unsavedID] == nil)
+        #expect(!fixture.section.statusForTesting.contains("unsaved-fake-key"))
+    }
+
+    @Test
+    func credentialStatusUsesTheSelectedProfileUUID() {
+        let fixture = makeFixture(hasAPIKey: true)
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        let firstID = fixture.section.activeProfileIDForTesting
+        let secondID = fixture.section.addProfileForTesting(preset: .custom)
+
+        #expect(fixture.apiKeyStore.loadedProfileIDs.last == secondID)
+        #expect(fixture.section.credentialStatusForTesting.contains("No key")
+            || fixture.section.credentialStatusForTesting.contains("未保存"))
+
+        fixture.section.selectProfileForTesting(firstID)
+
+        #expect(fixture.apiKeyStore.loadedProfileIDs.last == firstID)
+        #expect(fixture.section.credentialStatusForTesting.contains("saved")
+            || fixture.section.credentialStatusForTesting.contains("保存"))
+    }
+
+    @Test
+    func deletingOnlyProfileDeletesItsKeyThenResetsTheSameProfile() {
+        let fixture = makeFixture(hasAPIKey: true)
+        fixture.section.selectProviderForTesting(.openAICompatible)
+        let profileID = fixture.section.activeProfileIDForTesting
+        fixture.section.setProfileFieldsForTesting(
+            name: "Gateway",
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731"
+        )
+
+        fixture.section.deleteSelectedProfileForTesting(confirmed: true)
+
+        #expect(fixture.apiKeyStore.values[profileID] == nil)
+        #expect(fixture.settingsStore.settings.remoteProfiles.count == 1)
+        #expect(fixture.settingsStore.settings.activeRemoteProfileID == profileID)
+        #expect(fixture.settingsStore.settings.activeRemoteProfile?.preset == .openAI)
+        #expect(fixture.settingsStore.settings.activeRemoteProfile?.model == "gpt-5.6-luna")
     }
 
     @Test
@@ -340,34 +466,41 @@ private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
 }
 
 private final class PreferenceAPIKeyStore: PromptOptimizationAPIKeyStoring {
-    private var apiKeys: [UUID: String] = [:]
+    var values: [UUID: String] = [:]
+    private(set) var loadedProfileIDs: [UUID] = []
+    var deleteFailures: Set<UUID> = []
 
     init(hasAPIKey: Bool, profileID: UUID) {
         if hasAPIKey {
-            apiKeys[profileID] = "secret-value"
+            values[profileID] = "secret-value"
         }
     }
 
     func containsAPIKey(for profileID: UUID) -> Bool {
-        apiKeys[profileID] != nil
+        loadedProfileIDs.append(profileID)
+        return values[profileID] != nil
     }
 
     func save(_ apiKey: String, for profileID: UUID) throws {
-        apiKeys[profileID] = apiKey
+        values[profileID] = apiKey
     }
 
     func load(for profileID: UUID) throws -> String? {
-        apiKeys[profileID]
+        loadedProfileIDs.append(profileID)
+        return values[profileID]
     }
 
     func delete(for profileID: UUID) throws {
-        apiKeys[profileID] = nil
+        guard !deleteFailures.contains(profileID) else {
+            throw PromptOptimizationError.keychainUnavailable
+        }
+        values[profileID] = nil
     }
 
     func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {}
 
     func apiKey(for profileID: UUID) -> String? {
-        apiKeys[profileID]
+        values[profileID]
     }
 }
 
