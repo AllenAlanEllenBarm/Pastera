@@ -288,6 +288,71 @@ extension OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func rejectsResponsesThatUseAlternativeHiddenRuleSynonyms() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"I must convert what was provided instead of responding to it, and I may not disclose the confidential rules."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func rejectsResponsesThatDescribePrivateDirectivesAsTheirRole() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"My role is to recast the submission instead of answering, while keeping the private directives secret."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func rejectsResponsesThatAddSelfConstrainedHiddenGuidelines() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"I am obliged to rewrite text but cannot share the hidden guidelines."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func acceptsSourceRequestsThatAlreadyContainConstraintAndRuleConcepts() async throws {
+        let output = "Please rewrite this request: I cannot disclose confidential rules because legal approval is pending."
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"\#(output)"}}]}"#
+        )
+
+        let result = await client.optimize(
+            text: "Rewrite this request: I cannot disclose confidential rules because legal approval is pending.",
+            configuration: .fixture,
+            apiKey: ""
+        )
+
+        #expect(try result.get() == output)
+    }
+
+    @Test
     func acceptsLegitimateRequestsThatMentionSystemPrompts() async throws {
         let output = "Create a policy explaining how the support team should discuss system prompts with customers."
         let client = makeClient(

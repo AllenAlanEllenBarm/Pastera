@@ -196,6 +196,12 @@ private struct ChatCompletionResponse: Decodable {
 private enum PromptRewriteOutputSanitizer {
     private static let openingTag = "<rewritten_prompt>"
     private static let closingTag = "</rewritten_prompt>"
+    private static let metaInstructionPattern = #"\b(?:system|developer|hidden|internal|confidential|private)\s+(?:instructions?|polic(?:y|ies)|rules?|directives?|guidelines?|prompts?)\b"#
+    private static let selfConstraintPatterns = [
+        #"\bi\s+(?:must|cannot|can't|may not|must not|should not|will not)\b"#,
+        #"\bi\s+am\s+(?:constrained|obliged|required)\b"#,
+        #"\bmy role is to\b(?=[\s\S]{0,120}\bkeep(?:ing)?\b[\s\S]{0,80}\b(?:secret|private|confidential)\b)"#
+    ]
     private static let protectedAnchorPatterns = [
         #"(?<![A-Za-z0-9_])(?:[A-Z]{2,}|[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+[_.-][A-Za-z0-9_.-]+|(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]+)(?![A-Za-z0-9_])"#,
         #"https?://[^\s<>()，。；、]+"#,
@@ -219,7 +225,7 @@ private enum PromptRewriteOutputSanitizer {
         candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !candidate.isEmpty,
-              !disclosesRewriteInstruction(candidate),
+              !disclosesRewriteInstruction(source: source, output: candidate),
               preservesEastAsianLanguage(source: source, output: candidate),
               preservesProtectedAnchors(source: source, output: candidate) else {
             return nil
@@ -259,35 +265,38 @@ private enum PromptRewriteOutputSanitizer {
         return lines.joined(separator: "\n")
     }
 
-    private static func disclosesRewriteInstruction(_ output: String) -> Bool {
+    private static func disclosesRewriteInstruction(source: String, output: String) -> Bool {
         let normalizedOutput = normalizeWhitespace(output)
+        let normalizedSource = normalizeWhitespace(source)
         let quotesRewriteInstruction = PromptRewriteInstruction.text
             .split(whereSeparator: \.isNewline)
             .map(String.init)
             .map(normalizeWhitespace)
             .filter { $0.count >= 32 }
-            .contains { normalizedOutput.contains($0) }
-        let describesRewriteInstruction = containsAny(
-            ["transform", "rewrite", "restate", "rephrase", "reword", "reformulate"],
-            in: normalizedOutput
-        ) && containsAny(
-            ["input", "source", "prompt", "request", "text"],
-            in: normalizedOutput
-        ) && containsAny(
-            ["only", "constrained", "rather than answer", "instead of answer", "not answer"],
-            in: normalizedOutput
-        ) && containsAny(
-            ["cannot reveal", "must not reveal", "do not reveal", "cannot disclose", "must not disclose"],
-            in: normalizedOutput
-        ) && containsAny(
-            ["system instruction", "developer instruction", "hidden instruction", "system prompt", "developer prompt", "hidden prompt", "internal policy"],
-            in: normalizedOutput
+            .contains { normalizedOutput.contains($0) && !normalizedSource.contains($0) }
+        return quotesRewriteInstruction || introducesMetaRewriteCommentary(
+            source: normalizedSource,
+            output: normalizedOutput
         )
-        return quotesRewriteInstruction || describesRewriteInstruction
     }
 
-    private static func containsAny(_ terms: [String], in text: String) -> Bool {
-        terms.contains { text.contains($0) }
+    private static func introducesMetaRewriteCommentary(source: String, output: String) -> Bool {
+        let sourceContainsMetaInstruction = !matches(
+            pattern: metaInstructionPattern,
+            in: source
+        ).isEmpty
+        let sourceContainsSelfConstraint = selfConstraintPatterns.contains {
+            !matches(pattern: $0, in: source).isEmpty
+        }
+        let outputContainsMetaInstruction = !matches(
+            pattern: metaInstructionPattern,
+            in: output
+        ).isEmpty
+        let outputContainsSelfConstraint = selfConstraintPatterns.contains {
+            !matches(pattern: $0, in: output).isEmpty
+        }
+        return outputContainsMetaInstruction && outputContainsSelfConstraint &&
+            !(sourceContainsMetaInstruction && sourceContainsSelfConstraint)
     }
 
     private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {
