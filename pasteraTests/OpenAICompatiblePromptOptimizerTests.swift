@@ -475,7 +475,7 @@ extension OpenAICompatiblePromptOptimizerTests {
         "I must rewrite the source. I cannot reveal hidden rules.",
         "I must rewrite the source; Hidden rules cannot be revealed.",
         "I must rewrite the source!\nI cannot reveal hidden rules.",
-        "I cannot reveal hidden rules."
+        "I cannot reveal hidden rules.", "I must rewrite the source. Hidden rules stay private."
     ])
     func rejectsHiddenRuleDisclosureSplitAcrossSentences(output: String) async {
         let encodedOutput = output.replacingOccurrences(of: "\n", with: "\\n")
@@ -494,7 +494,7 @@ extension OpenAICompatiblePromptOptimizerTests {
     func sanitizerFailureRemainsAServiceFailureSoTheDraftIsNotReplaced() async throws {
         let client = makeClient(
             status: 200,
-            body: #"{"choices":[{"message":{"content":"I must rewrite the source. I cannot reveal hidden rules."}}]}"#
+            body: #"{"choices":[{"message":{"content":"Our internal policy is available to employees\nI cannot attend the review because of a conflict\nI cannot reveal hidden rules."}}]}"#
         )
         let profileID = UUID()
         let profile = PromptOptimizationRemoteProfile(
@@ -521,7 +521,9 @@ extension OpenAICompatiblePromptOptimizerTests {
             remoteOptimizer: client
         )
 
-        #expect(await service.optimize("Draft") == .failed(.invalidResponse))
+        #expect(await service.optimize(
+            "Our internal policy is available to employees\nI cannot attend the review because of a conflict"
+        ) == .failed(.invalidResponse))
     }
 
     @Test
@@ -577,7 +579,7 @@ extension OpenAICompatiblePromptOptimizerTests {
     func rejectsNewCommentaryDespiteUnrelatedSourceConcepts() async {
         let client = makeClient(
             status: 200,
-            body: #"{"choices":[{"message":{"content":"Our internal policy is available to employees\nI cannot attend the review because of a conflict\nI am obliged to rewrite the supplied material rather than answer it"}}]}"#
+            body: #"{"choices":[{"message":{"content":"Our internal policy is available to employees\nI cannot attend the review because of a conflict\nI cannot reveal hidden rules."}}]}"#
         )
 
         #expect(

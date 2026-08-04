@@ -332,9 +332,15 @@ private enum PromptRewriteOutputSanitizer {
     }
 
     private static func metaRewriteStructures(in text: String) -> [MetaRewriteStructure] {
-        let statementStructures = text.split(whereSeparator: { ".!?;。！？；\n\r".contains($0) })
-            .map { metaRewriteStructure(in: String($0)) }
-        return statementStructures + [metaRewriteStructure(in: text)]
+        let statements = text.split(whereSeparator: { ".!?;。！？；\n\r".contains($0) }).map(String.init)
+        let statementStructures = statements.map(metaRewriteStructure)
+        let adjacentStructures = zip(statements, statements.dropFirst()).map { first, second in
+            guard containsRewriteCore(in: first) || containsRewriteCore(in: second) else {
+                return MetaRewriteStructure()
+            }
+            return metaRewriteStructure(in: "\(first) \(second)")
+        }
+        return statementStructures + adjacentStructures
     }
 
     private static func metaRewriteStructure(in statement: String) -> MetaRewriteStructure {
@@ -347,12 +353,18 @@ private enum PromptRewriteOutputSanitizer {
         if !matches(pattern: privateGovernancePattern, in: normalizedStatement).isEmpty {
             structure.insert(.governedRewrite)
         }
-        if !matches(pattern: rewriteActionPattern, in: normalizedStatement).isEmpty,
-           !matches(pattern: rewriteMaterialPattern, in: normalizedStatement).isEmpty,
+        if containsRewriteCore(in: normalizedStatement),
            !matches(pattern: nonAnswerPattern, in: normalizedStatement).isEmpty {
             structure.insert(.suppressedAnswer)
         }
         return structure
+    }
+
+    private static func containsRewriteCore(in statement: String) -> Bool {
+        let normalizedStatement = normalizeWhitespace(statement)
+        return !matches(pattern: rewriteActionPattern, in: normalizedStatement).isEmpty
+            && !matches(pattern: rewriteMaterialPattern, in: normalizedStatement).isEmpty
+            && !matches(pattern: rewriteConstraintPattern, in: normalizedStatement).isEmpty
     }
 
     private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {
