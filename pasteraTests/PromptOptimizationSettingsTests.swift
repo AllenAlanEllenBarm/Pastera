@@ -106,6 +106,20 @@ struct PromptOptimizationSettingsTests {
     }
 
     @Test
+    func stalePreferenceSnapshotCannotEraseOriginConfirmedByServiceStore() {
+        let defaults = makeIsolatedDefaults()
+        let preferenceStore = PromptOptimizationSettingsStore(defaults: defaults)
+        let serviceStore = PromptOptimizationSettingsStore(defaults: defaults)
+        var stalePreferenceSnapshot = preferenceStore.load()
+
+        serviceStore.confirmRemoteOrigin("https://api.example.com")
+        stalePreferenceSnapshot.provider = .openAICompatible
+        preferenceStore.save(stalePreferenceSnapshot)
+
+        #expect(serviceStore.load().confirmedOrigins == ["https://api.example.com"])
+    }
+
+    @Test
     func persistsProfilesAndActiveSelectionAsOneVersionedSnapshot() {
         let defaults = makeIsolatedDefaults()
         let store = PromptOptimizationSettingsStore(defaults: defaults)
@@ -243,6 +257,20 @@ struct PromptOptimizationSettingsTests {
             $0[kSecAttrAccessible as String] as? String
                 == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
         })
+    }
+
+    @Test
+    func keyAvailabilityDistinguishesQueryFailureFromMissingItem() {
+        let keychain = InMemoryPromptOptimizationKeychain()
+        keychain.copyStatus = errSecAuthFailed
+        let store = PromptOptimizationAPIKeyStore(
+            keychain: keychain,
+            usesDataProtectionKeychain: false
+        )
+
+        #expect(throws: PromptOptimizationError.keychainUnavailable) {
+            try store.containsAPIKey(for: UUID())
+        }
     }
 
     @Test
@@ -579,6 +607,7 @@ private struct LegacyScalarSnapshot: Equatable {
 
 private final class InMemoryPromptOptimizationKeychain: PromptOptimizationKeychainAccessing {
     var addStatus: OSStatus = errSecSuccess
+    var copyStatus: OSStatus?
     var deleteStatus: OSStatus = errSecSuccess
     var itemToInsertBeforeNextAdd: (account: String, value: Data)?
 
@@ -594,6 +623,9 @@ private final class InMemoryPromptOptimizationKeychain: PromptOptimizationKeycha
 
     func copyMatching(_ query: [String: Any]) -> (OSStatus, CFTypeRef?) {
         copyQueries.append(query)
+        if let copyStatus {
+            return (copyStatus, nil)
+        }
         guard let account = account(in: query), let item = items[account] else {
             return (errSecItemNotFound, nil)
         }

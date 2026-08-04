@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 protocol PromptOptimizationAPIKeyStoring: AnyObject {
-    func containsAPIKey(for profileID: UUID) -> Bool
+    func containsAPIKey(for profileID: UUID) throws -> Bool
     func save(_ apiKey: String, for profileID: UUID) throws
     func load(for profileID: UUID) throws -> String?
     func delete(for profileID: UUID) throws
@@ -66,8 +66,15 @@ final class PromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
         self.usesDataProtectionKeychain = usesDataProtectionKeychain
     }
 
-    func containsAPIKey(for profileID: UUID) -> Bool {
-        keychain.copyMatching(availabilityQuery(for: profileID)).0 == errSecSuccess
+    func containsAPIKey(for profileID: UUID) throws -> Bool {
+        switch keychain.copyMatching(availabilityQuery(for: profileID)).0 {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
+            return false
+        default:
+            throw PromptOptimizationError.keychainUnavailable
+        }
     }
 
     func save(_ apiKey: String, for profileID: UUID) throws {

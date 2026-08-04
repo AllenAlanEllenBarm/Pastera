@@ -29,6 +29,10 @@ struct PromptOptimizationRemoteProfileDraft {
         settings.provider = provider
     }
 
+    mutating func confirmRemoteOrigin(_ origin: String) {
+        settings.confirmedOrigins.insert(origin)
+    }
+
     mutating func selectProfile(id: UUID) {
         guard settings.remoteProfiles.contains(where: { $0.id == id }) else { return }
         selectedProfileID = id

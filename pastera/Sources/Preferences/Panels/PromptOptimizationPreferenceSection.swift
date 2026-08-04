@@ -587,6 +587,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
                 return
             }
             optimizationService.confirmRemoteOrigin(origin)
+            profileDraft.confirmRemoteOrigin(origin)
             await runConnectionTest(allowsConsentRetry: false)
         case let .failure(error):
             finishConnectionTest()
@@ -714,12 +715,17 @@ final class PromptOptimizationPreferenceSection: NSStackView {
 
     private func refreshCredentialStatus() {
         let profileID = profileDraft.selectedProfileID
-        let containsAPIKey = apiKeyStore.containsAPIKey(for: profileID)
-        apiKeyStatusLabel.stringValue = containsAPIKey
-            ? promptPreferenceString("Saved in Keychain", "已保存至钥匙串")
-            : promptPreferenceString("No key saved", "未保存密钥")
-        removeAPIKeyButton.isEnabled = containsAPIKey
         saveAPIKeyButton.isEnabled = profileDraft.isPersisted(profileID)
+        do {
+            let containsAPIKey = try apiKeyStore.containsAPIKey(for: profileID)
+            apiKeyStatusLabel.stringValue = containsAPIKey
+                ? promptPreferenceString("Saved in Keychain", "已保存至钥匙串")
+                : promptPreferenceString("No key saved", "未保存密钥")
+            removeAPIKeyButton.isEnabled = containsAPIKey
+        } catch {
+            apiKeyStatusLabel.stringValue = promptPreferenceString("Keychain unavailable", "钥匙串不可用")
+            removeAPIKeyButton.isEnabled = false
+        }
     }
 
     private func clearProfileTransientState() {

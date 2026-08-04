@@ -51,6 +51,15 @@ struct PromptOptimizationPreferenceTests {
     }
 
     @Test
+    func profileDraftRetainsAnOriginConfirmedDuringConnectionTesting() {
+        var draft = PromptOptimizationRemoteProfileDraft(settings: .defaultValue)
+
+        draft.confirmRemoteOrigin("https://api.example.com")
+
+        #expect(draft.snapshot().confirmedOrigins == ["https://api.example.com"])
+    }
+
+    @Test
     func lastProfileRemovalResetsItWithoutChangingItsID() {
         let id = UUID(uuidString: "60000000-0000-0000-0000-000000000003")!
         var draft = PromptOptimizationRemoteProfileDraft(settings: .makeDefault(profileID: id))
@@ -340,6 +349,17 @@ struct PromptOptimizationPreferenceTests {
     }
 
     @Test
+    func keychainQueryFailureIsNotReportedAsNoSavedKey() {
+        let fixture = makeFixture(keychainUnavailable: true)
+
+        #expect(fixture.section.credentialStatusForTesting.contains("unavailable")
+            || fixture.section.credentialStatusForTesting.contains("不可用"))
+        #expect(!fixture.section.credentialStatusForTesting.contains("No key")
+            && !fixture.section.credentialStatusForTesting.contains("未保存"))
+        #expect(!fixture.section.credentialStatusForTesting.contains("secret-value"))
+    }
+
+    @Test
     func savingSettingsAlsoStoresANewAPIKeyWithoutReadingItBack() {
         let fixture = makeFixture()
         fixture.section.selectProviderForTesting(.openAICompatible)
@@ -465,6 +485,7 @@ struct PromptOptimizationPreferenceTests {
     private func makeFixture(
         settings: PromptOptimizationSettings = .defaultValue,
         hasAPIKey: Bool = false,
+        keychainUnavailable: Bool = false,
         service: any PromptOptimizationServicing = PreferencePromptService()
     ) -> PreferenceFixture {
         let store = PreferenceSettingsStore(settings: settings)
@@ -472,6 +493,9 @@ struct PromptOptimizationPreferenceTests {
             hasAPIKey: hasAPIKey,
             profileID: store.settings.activeRemoteProfileID
         )
+        if keychainUnavailable {
+            keyStore.unavailableProfileIDs.insert(store.settings.activeRemoteProfileID)
+        }
         let section = PromptOptimizationPreferenceSection(
             settingsStore: store,
             apiKeyStore: keyStore,
@@ -523,6 +547,7 @@ private final class PreferenceAPIKeyStore: PromptOptimizationAPIKeyStoring {
     private(set) var loadedProfileIDs: [UUID] = []
     private(set) var savedProfileIDs: [UUID] = []
     var deleteFailures: Set<UUID> = []
+    var unavailableProfileIDs: Set<UUID> = []
 
     init(hasAPIKey: Bool, profileID: UUID) {
         if hasAPIKey {
@@ -530,8 +555,11 @@ private final class PreferenceAPIKeyStore: PromptOptimizationAPIKeyStoring {
         }
     }
 
-    func containsAPIKey(for profileID: UUID) -> Bool {
+    func containsAPIKey(for profileID: UUID) throws -> Bool {
         loadedProfileIDs.append(profileID)
+        if unavailableProfileIDs.contains(profileID) {
+            throw PromptOptimizationError.keychainUnavailable
+        }
         return values[profileID] != nil
     }
 

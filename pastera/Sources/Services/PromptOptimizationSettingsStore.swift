@@ -38,6 +38,9 @@ final class PromptOptimizationSettingsStore: PromptOptimizationSettingsStoring {
     func save(_ settings: PromptOptimizationSettings) {
         var repairedSettings = settings
         repairedSettings.repairActiveRemoteProfile()
+        if let stored = loadStoredSettings(), stored.version == StoredPromptOptimizationSettings.currentVersion {
+            repairedSettings.confirmedOrigins.formUnion(stored.settings.confirmedOrigins)
+        }
         guard let data = try? JSONEncoder().encode(StoredPromptOptimizationSettings(settings: repairedSettings)) else {
             return
         }

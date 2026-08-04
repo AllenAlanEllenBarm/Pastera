@@ -210,6 +210,7 @@
 		C5F710052FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F710062FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift */; };
 		C5F710072FFF100000B7C0DE /* PromptOptimizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F710082FFF100000B7C0DE /* PromptOptimizationService.swift */; };
 		C5F720012FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720022FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift */; };
+		C5F750012FFF500000B7C0DE /* PromptOptimizationHTTPServerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F750022FFF500000B7C0DE /* PromptOptimizationHTTPServerTestSupport.swift */; };
 		C5F720032FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */; };
 		C5F720052FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */; };
 		C5F730012FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */; };
@@ -342,6 +343,7 @@
 		C5F710062FFF100000B7C0DE /* AppleFoundationModelPromptOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleFoundationModelPromptOptimizer.swift; sourceTree = "<group>"; };
 		C5F710082FFF100000B7C0DE /* PromptOptimizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationService.swift; sourceTree = "<group>"; };
 		C5F720022FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatiblePromptOptimizerTests.swift; sourceTree = "<group>"; };
+		C5F750022FFF500000B7C0DE /* PromptOptimizationHTTPServerTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationHTTPServerTestSupport.swift; sourceTree = "<group>"; };
 		C5F720042FFF200000B7C0DE /* PromptOptimizationEndpointPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationEndpointPolicy.swift; sourceTree = "<group>"; };
 		C5F720062FFF200000B7C0DE /* OpenAICompatiblePromptOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatiblePromptOptimizer.swift; sourceTree = "<group>"; };
 		C5F730022FFF300000B7C0DE /* PromptOptimizationPreferenceSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptOptimizationPreferenceSection.swift; sourceTree = "<group>"; };
@@ -1058,6 +1060,7 @@
 				C5F700022FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift */,
 				C5F710022FFF100000B7C0DE /* PromptOptimizationServiceTests.swift */,
 				C5F720022FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift */,
+				C5F750022FFF500000B7C0DE /* PromptOptimizationHTTPServerTestSupport.swift */,
 				C5F730042FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift */,
 				C5F730062FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift */,
 				C5F510000000000000000002 /* ScriptTemplateCatalogTests.swift */,
@@ -1788,6 +1791,7 @@
 				C5F700012FFF000000B7C0DE /* PromptOptimizationSettingsTests.swift in Sources */,
 				C5F710012FFF100000B7C0DE /* PromptOptimizationServiceTests.swift in Sources */,
 				C5F720012FFF200000B7C0DE /* OpenAICompatiblePromptOptimizerTests.swift in Sources */,
+				C5F750012FFF500000B7C0DE /* PromptOptimizationHTTPServerTestSupport.swift in Sources */,
 				C5F730032FFF300000B7C0DE /* PromptOptimizationPreferenceTests.swift in Sources */,
 				C5F730052FFF300000B7C0DE /* HistoryEditorWindowControllerTests.swift in Sources */,
 				C5F510000000000000000001 /* ScriptTemplateCatalogTests.swift in Sources */,

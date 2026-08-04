@@ -88,6 +88,63 @@ struct OpenAICompatiblePromptOptimizerTests {
         )
     }
 
+    @Test(arguments: [307, 308])
+    func rejectsCrossOriginRedirectWithoutReplayingPromptOrAuthorization(statusCode: Int) async throws {
+        let destination = try LoopbackHTTPServer(response: .json(
+            #"{"choices":[{"message":{"content":"Improved"}}]}"#
+        ))
+        let redirectingOrigin = try LoopbackHTTPServer(response: .redirect(
+            statusCode: statusCode,
+            location: destination.url.appendingPathComponent("redirected")
+        ))
+        let client = OpenAICompatiblePromptOptimizer()
+        let configuration = PromptOptimizationRemoteConfiguration(
+            preset: .custom,
+            baseURL: redirectingOrigin.url.appendingPathComponent("v1").absoluteString,
+            model: "private-model",
+            allowsInsecureHTTP: false
+        )
+
+        let result = await client.optimize(
+            text: "Draft",
+            configuration: configuration,
+            apiKey: "redirect-test-key"
+        )
+
+        #expect(result == .failure(.serverRejected(statusCode: statusCode)))
+        #expect(destination.requests.isEmpty)
+        let originalRequest = try #require(redirectingOrigin.requests.first)
+        #expect(originalRequest.method == "POST")
+        #expect(originalRequest.authorization == "Bearer redirect-test-key")
+        #expect(String(data: originalRequest.body, encoding: .utf8)?.contains("Draft") == true)
+    }
+
+    @Test(arguments: [307, 308])
+    func rejectsSameOriginRedirectWithoutReplayingPromptOrAuthorization(statusCode: Int) async throws {
+        let server = try LoopbackHTTPServer(responses: [
+            .sameOriginRedirect(statusCode: statusCode, path: "redirected"),
+            .json(#"{"choices":[{"message":{"content":"Improved"}}]}"#)
+        ])
+        let client = OpenAICompatiblePromptOptimizer()
+        let configuration = PromptOptimizationRemoteConfiguration(
+            preset: .custom,
+            baseURL: server.url.appendingPathComponent("v1").absoluteString,
+            model: "private-model",
+            allowsInsecureHTTP: false
+        )
+
+        let result = await client.optimize(
+            text: "Draft",
+            configuration: configuration,
+            apiKey: "redirect-test-key"
+        )
+
+        #expect(result == .failure(.serverRejected(statusCode: statusCode)))
+        #expect(server.requests.count == 1)
+        #expect(server.requests.first?.authorization == "Bearer redirect-test-key")
+        #expect(String(data: server.requests.first?.body ?? Data(), encoding: .utf8)?.contains("Draft") == true)
+    }
+
     @Test
     func requestsDeterministicGeneration() async throws {
         let client = makeClient(
@@ -412,6 +469,59 @@ extension OpenAICompatiblePromptOptimizerTests {
                 apiKey: ""
             ) == .failure(.invalidResponse)
         )
+    }
+
+    @Test(arguments: [
+        "I must rewrite the source. I cannot reveal hidden rules.",
+        "I must rewrite the source; Hidden rules cannot be revealed.",
+        "I must rewrite the source!\nI cannot reveal hidden rules.",
+        "I cannot reveal hidden rules."
+    ])
+    func rejectsHiddenRuleDisclosureSplitAcrossSentences(output: String) async {
+        let encodedOutput = output.replacingOccurrences(of: "\n", with: "\\n")
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"\#(encodedOutput)"}}]}"#
+        )
+
+        #expect(
+            await client.optimize(text: "Draft", configuration: .fixture, apiKey: "")
+                == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func sanitizerFailureRemainsAServiceFailureSoTheDraftIsNotReplaced() async throws {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"I must rewrite the source. I cannot reveal hidden rules."}}]}"#
+        )
+        let profileID = UUID()
+        let profile = PromptOptimizationRemoteProfile(
+            id: profileID,
+            displayName: "Fixture",
+            preset: PromptOptimizationRemoteConfiguration.fixture.preset,
+            baseURL: PromptOptimizationRemoteConfiguration.fixture.baseURL,
+            model: PromptOptimizationRemoteConfiguration.fixture.model,
+            allowsInsecureHTTP: false
+        )
+        let settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profileID,
+            confirmedOrigins: ["https://models.example.com"]
+        )
+        let keyStore = RecordingPromptOptimizationAPIKeyStore()
+        try keyStore.save("key", for: profileID)
+        let service = PromptOptimizationService(
+            settingsStore: FixedPromptOptimizationSettingsStore(settings: settings),
+            apiKeyStore: keyStore,
+            appleOptimizer: StubUnavailableAppleOptimizer(),
+            localFormatter: LocalPromptFormatter(),
+            remoteOptimizer: client
+        )
+
+        #expect(await service.optimize("Draft") == .failed(.invalidResponse))
     }
 
     @Test
@@ -849,6 +959,20 @@ private final class RecordingPromptOptimizationAPIKeyStore: PromptOptimizationAP
     }
 
     func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {}
+}
+
+private final class FixedPromptOptimizationSettingsStore: PromptOptimizationSettingsStoring {
+    let pendingLegacyCredentialProfileID: UUID? = nil
+    private let settings: PromptOptimizationSettings
+
+    init(settings: PromptOptimizationSettings) {
+        self.settings = settings
+    }
+
+    func load() -> PromptOptimizationSettings { settings }
+    func save(_ settings: PromptOptimizationSettings) {}
+    func confirmRemoteOrigin(_ origin: String) {}
+    func completeLegacyCredentialMigration(for profileID: UUID) {}
 }
 
 private final class StubUnavailableAppleOptimizer: ApplePromptOptimizing {

@@ -157,7 +157,23 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 30
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration,
+            delegate: PromptOptimizationRedirectRejectingDelegate(),
+            delegateQueue: nil
+        )
+    }
+}
+
+private final class PromptOptimizationRedirectRejectingDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 
@@ -316,15 +332,14 @@ private enum PromptRewriteOutputSanitizer {
     }
 
     private static func metaRewriteStructures(in text: String) -> [MetaRewriteStructure] {
-        text.split(whereSeparator: { ".!?;。！？；\n\r".contains($0) })
+        let statementStructures = text.split(whereSeparator: { ".!?;。！？；\n\r".contains($0) })
             .map { metaRewriteStructure(in: String($0)) }
+        return statementStructures + [metaRewriteStructure(in: text)]
     }
 
     private static func metaRewriteStructure(in statement: String) -> MetaRewriteStructure {
         let normalizedStatement = normalizeWhitespace(statement)
-        guard !matches(pattern: rewriteActionPattern, in: normalizedStatement).isEmpty,
-              !matches(pattern: rewriteMaterialPattern, in: normalizedStatement).isEmpty,
-              !matches(pattern: rewriteConstraintPattern, in: normalizedStatement).isEmpty else {
+        guard !matches(pattern: rewriteConstraintPattern, in: normalizedStatement).isEmpty else {
             return []
         }
 
@@ -332,7 +347,9 @@ private enum PromptRewriteOutputSanitizer {
         if !matches(pattern: privateGovernancePattern, in: normalizedStatement).isEmpty {
             structure.insert(.governedRewrite)
         }
-        if !matches(pattern: nonAnswerPattern, in: normalizedStatement).isEmpty {
+        if !matches(pattern: rewriteActionPattern, in: normalizedStatement).isEmpty,
+           !matches(pattern: rewriteMaterialPattern, in: normalizedStatement).isEmpty,
+           !matches(pattern: nonAnswerPattern, in: normalizedStatement).isEmpty {
             structure.insert(.suppressedAnswer)
         }
         return structure
