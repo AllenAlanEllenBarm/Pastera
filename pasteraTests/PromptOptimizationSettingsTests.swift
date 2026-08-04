@@ -279,10 +279,10 @@ struct PromptOptimizationSettingsTests {
 
 }
 
-struct PromptOptimizationSettingsStoreRecoveryTests {
+extension PromptOptimizationSettingsTests {
     @Test
     func savingV2SettingsDoesNotRewriteLegacyScalars() {
-        let defaults = makeIsolatedDefaults()
+        let defaults = makeRecoveryIsolatedDefaults()
         let legacyBefore = seedLegacyScalars(in: defaults)
         let store = PromptOptimizationSettingsStore(defaults: defaults)
 
@@ -293,7 +293,7 @@ struct PromptOptimizationSettingsStoreRecoveryTests {
 
     @Test
     func repairsRawV2EmptyProfilesAndRewritesThePersistedSnapshot() throws {
-        let defaults = makeIsolatedDefaults()
+        let defaults = makeRecoveryIsolatedDefaults()
         let legacyBefore = seedLegacyScalars(in: defaults)
         let store = PromptOptimizationSettingsStore(defaults: defaults)
         let rawSettings = PromptOptimizationSettings(
@@ -316,7 +316,7 @@ struct PromptOptimizationSettingsStoreRecoveryTests {
 
     @Test
     func repairsRawV2MissingActiveIDWithoutDroppingOtherProfiles() throws {
-        let defaults = makeIsolatedDefaults()
+        let defaults = makeRecoveryIsolatedDefaults()
         let legacyBefore = seedLegacyScalars(in: defaults)
         let store = PromptOptimizationSettingsStore(defaults: defaults)
         let first = PromptOptimizationRemoteProfile.makeDefault(
@@ -347,7 +347,7 @@ struct PromptOptimizationSettingsStoreRecoveryTests {
 
     @Test
     func unsupportedRawV2VersionFallsBackWithoutReturningPartiallyDecodedSettings() throws {
-        let defaults = makeIsolatedDefaults()
+        let defaults = makeRecoveryIsolatedDefaults()
         let legacyBefore = seedLegacyScalars(in: defaults)
         let store = PromptOptimizationSettingsStore(defaults: defaults)
         let unsupportedProfile = PromptOptimizationRemoteProfile.makeDefault(
@@ -378,7 +378,7 @@ struct PromptOptimizationSettingsStoreRecoveryTests {
 
     @Test
     func malformedV2DataFallsBackAndRewritesThePersistedSnapshot() throws {
-        let defaults = makeIsolatedDefaults()
+        let defaults = makeRecoveryIsolatedDefaults()
         let legacyBefore = seedLegacyScalars(in: defaults)
         defaults.set(
             Data("not-json".utf8),
@@ -401,7 +401,7 @@ struct PromptOptimizationSettingsStoreRecoveryTests {
 
     @Test
     func malformedV2DataUsesSafeDefaultWhenNoLegacyConfigurationExists() throws {
-        let defaults = makeIsolatedDefaults()
+        let defaults = makeRecoveryIsolatedDefaults()
         defaults.set(
             Data("not-json".utf8),
             forKey: Constants.UserDefaults.promptOptimizationSettingsV2
@@ -418,8 +418,8 @@ struct PromptOptimizationSettingsStoreRecoveryTests {
         #expect(persisted.settings == settings)
     }
 
-    private func makeIsolatedDefaults() -> UserDefaults {
-        let suiteName = "PromptOptimizationSettingsStoreRecoveryTests.\(UUID().uuidString)"
+    private func makeRecoveryIsolatedDefaults() -> UserDefaults {
+        let suiteName = "PromptOptimizationSettingsTests.Recovery.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
