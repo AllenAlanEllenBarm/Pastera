@@ -196,12 +196,12 @@ private struct ChatCompletionResponse: Decodable {
 private enum PromptRewriteOutputSanitizer {
     private static let openingTag = "<rewritten_prompt>"
     private static let closingTag = "</rewritten_prompt>"
-    private static let firstPersonReferences: Set<String> = [
-        "i", "i'm", "i've", "i'd", "i'll", "me", "my", "mine", "myself",
-        "we", "we're", "we've", "we'd", "we'll", "us", "our", "ours", "ourselves"
-    ]
-    private static let normalizedSelfReference = "__self__"
-    private static let wordPattern = #"[\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?"#
+    // This is a closed structural guard, not an open-ended semantic classifier.
+    private static let rewriteActionPattern = #"\b(?:rewrit(?:e|es|ing|ten)|restat(?:e|es|ed|ing)|transform(?:s|ed|ing)?|convert(?:s|ed|ing)?|recast(?:s|ing)?|reshap(?:e|es|ed|ing))\b"#
+    private static let rewriteMaterialPattern = #"\b(?:source|input|prompts?|requests?|materials?|texts?|submissions?|responses?|what\s+was\s+provided)\b"#
+    private static let rewriteConstraintPattern = #"\b(?:must|cannot|can't|may\s+not|should\s+not|will\s+(?:not|only)|(?:am|is|are|be|been|being)\s+(?:constrained|obliged|required|bound)|(?:my\s+)?role\s+is\s+to)\b"#
+    private static let privateGovernancePattern = #"\b(?:system|developer|hidden|internal|confidential|private|nonpublic)\s+(?:operating\s+)?(?:instructions?|polic(?:y|ies)|rules?|directives?|guidelines?|prompts?|frameworks?)\b"#
+    private static let nonAnswerPattern = #"\b(?:instead\s+of|rather\s+than)\s+(?:answer(?:s|ed|ing)?|respond(?:s|ed|ing)?)\b"#
     private static let protectedAnchorPatterns = [
         #"(?<![A-Za-z0-9_])(?:[A-Z]{2,}|[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+[_.-][A-Za-z0-9_.-]+|(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]+)(?![A-Za-z0-9_])"#,
         #"https?://[^\s<>()，。；、]+"#,
@@ -216,6 +216,13 @@ private enum PromptRewriteOutputSanitizer {
         "改写后的提示词：",
         "优化后的提示词："
     ]
+
+    private struct MetaRewriteStructure: OptionSet {
+        let rawValue: UInt8
+
+        static let governedRewrite = MetaRewriteStructure(rawValue: 1 << 0)
+        static let suppressedAnswer = MetaRewriteStructure(rawValue: 1 << 1)
+    }
 
     static func sanitize(source: String, output: String) -> String? {
         var candidate = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -281,41 +288,35 @@ private enum PromptRewriteOutputSanitizer {
     }
 
     private static func introducesMetaRewriteCommentary(source: String, output: String) -> Bool {
-        let sourceStatements = firstPersonStatements(in: source)
-        return firstPersonStatements(in: output).contains { outputStatement in
-            !sourceStatements.contains { sourceStatement in
-                isSourceDerived(outputStatement, from: sourceStatement)
+        let sourceStructures = metaRewriteStructures(in: source)
+        return metaRewriteStructures(in: output).contains { outputStructure in
+            !outputStructure.isEmpty && !sourceStructures.contains { sourceStructure in
+                sourceStructure.isSuperset(of: outputStructure)
             }
         }
     }
 
-    private static func firstPersonStatements(in text: String) -> [[String]] {
+    private static func metaRewriteStructures(in text: String) -> [MetaRewriteStructure] {
         text.split(whereSeparator: { ".!?;。！？；\n\r".contains($0) })
-            .map { wordTokens(in: String($0)) }
-            .filter { $0.contains(normalizedSelfReference) }
+            .map { metaRewriteStructure(in: String($0)) }
     }
 
-    private static func wordTokens(in text: String) -> [String] {
-        guard let expression = try? NSRegularExpression(pattern: wordPattern) else {
+    private static func metaRewriteStructure(in statement: String) -> MetaRewriteStructure {
+        let normalizedStatement = normalizeWhitespace(statement)
+        guard !matches(pattern: rewriteActionPattern, in: normalizedStatement).isEmpty,
+              !matches(pattern: rewriteMaterialPattern, in: normalizedStatement).isEmpty,
+              !matches(pattern: rewriteConstraintPattern, in: normalizedStatement).isEmpty else {
             return []
         }
-        let normalizedText = text.lowercased().replacingOccurrences(of: "’", with: "'")
-        let range = NSRange(normalizedText.startIndex..<normalizedText.endIndex, in: normalizedText)
-        return expression.matches(in: normalizedText, range: range).compactMap { match in
-            guard let matchRange = Range(match.range, in: normalizedText) else { return nil }
-            let token = String(normalizedText[matchRange])
-            return firstPersonReferences.contains(token) ? normalizedSelfReference : token
-        }
-    }
 
-    private static func isSourceDerived(_ output: [String], from source: [String]) -> Bool {
-        let outputTokens = Set(output)
-        let sourceTokens = Set(source)
-        let sharedTokens = outputTokens.intersection(sourceTokens)
-        guard sharedTokens.contains(where: { $0 != normalizedSelfReference }) else {
-            return false
+        var structure: MetaRewriteStructure = []
+        if !matches(pattern: privateGovernancePattern, in: normalizedStatement).isEmpty {
+            structure.insert(.governedRewrite)
         }
-        return sharedTokens.count * 4 >= outputTokens.count + sourceTokens.count
+        if !matches(pattern: nonAnswerPattern, in: normalizedStatement).isEmpty {
+            structure.insert(.suppressedAnswer)
+        }
+        return structure
     }
 
     private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {

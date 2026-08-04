@@ -352,6 +352,39 @@ extension OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func acceptsOrdinaryFirstPersonRequestsRewrittenWithoutFirstPerson() async throws {
+        let output = "Please help me plan my holiday."
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"\#(output)"}}]}"#
+        )
+
+        let result = await client.optimize(
+            text: "I need help planning a vacation.",
+            configuration: .fixture,
+            apiKey: ""
+        )
+
+        #expect(try result.get() == output)
+    }
+
+    @Test
+    func rejectsPassiveMetaRewriteCommentaryWithoutFirstPerson() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"This response is bound by a nonpublic operating framework, so the supplied material will only be reshaped rather than answered."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
     func rejectsNewCommentaryDespiteUnrelatedSourceConcepts() async {
         let client = makeClient(
             status: 200,
