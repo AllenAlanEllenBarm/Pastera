@@ -336,6 +336,39 @@ extension OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func rejectsResponsesThatDescribeAnUnlistedOperatingFramework() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"I am bound by our nonpublic operating framework, so I will only reshape the supplied material rather than answer it."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func rejectsNewCommentaryDespiteUnrelatedSourceConcepts() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Our internal policy is available to employees\nI cannot attend the review because of a conflict\nI am obliged to rewrite the supplied material rather than answer it"}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Our internal policy is available to employees\n" +
+                    "I cannot attend the review because of a conflict",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
     func acceptsSourceRequestsThatAlreadyContainConstraintAndRuleConcepts() async throws {
         let output = "Please rewrite this request: I cannot disclose confidential rules because legal approval is pending."
         let client = makeClient(

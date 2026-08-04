@@ -196,12 +196,12 @@ private struct ChatCompletionResponse: Decodable {
 private enum PromptRewriteOutputSanitizer {
     private static let openingTag = "<rewritten_prompt>"
     private static let closingTag = "</rewritten_prompt>"
-    private static let metaInstructionPattern = #"\b(?:system|developer|hidden|internal|confidential|private)\s+(?:instructions?|polic(?:y|ies)|rules?|directives?|guidelines?|prompts?)\b"#
-    private static let selfConstraintPatterns = [
-        #"\bi\s+(?:must|cannot|can't|may not|must not|should not|will not)\b"#,
-        #"\bi\s+am\s+(?:constrained|obliged|required)\b"#,
-        #"\bmy role is to\b(?=[\s\S]{0,120}\bkeep(?:ing)?\b[\s\S]{0,80}\b(?:secret|private|confidential)\b)"#
+    private static let firstPersonReferences: Set<String> = [
+        "i", "i'm", "i've", "i'd", "i'll", "me", "my", "mine", "myself",
+        "we", "we're", "we've", "we'd", "we'll", "us", "our", "ours", "ourselves"
     ]
+    private static let normalizedSelfReference = "__self__"
+    private static let wordPattern = #"[\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)?"#
     private static let protectedAnchorPatterns = [
         #"(?<![A-Za-z0-9_])(?:[A-Z]{2,}|[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+[_.-][A-Za-z0-9_.-]+|(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]+)(?![A-Za-z0-9_])"#,
         #"https?://[^\s<>()，。；、]+"#,
@@ -275,28 +275,47 @@ private enum PromptRewriteOutputSanitizer {
             .filter { $0.count >= 32 }
             .contains { normalizedOutput.contains($0) && !normalizedSource.contains($0) }
         return quotesRewriteInstruction || introducesMetaRewriteCommentary(
-            source: normalizedSource,
-            output: normalizedOutput
+            source: source,
+            output: output
         )
     }
 
     private static func introducesMetaRewriteCommentary(source: String, output: String) -> Bool {
-        let sourceContainsMetaInstruction = !matches(
-            pattern: metaInstructionPattern,
-            in: source
-        ).isEmpty
-        let sourceContainsSelfConstraint = selfConstraintPatterns.contains {
-            !matches(pattern: $0, in: source).isEmpty
+        let sourceStatements = firstPersonStatements(in: source)
+        return firstPersonStatements(in: output).contains { outputStatement in
+            !sourceStatements.contains { sourceStatement in
+                isSourceDerived(outputStatement, from: sourceStatement)
+            }
         }
-        let outputContainsMetaInstruction = !matches(
-            pattern: metaInstructionPattern,
-            in: output
-        ).isEmpty
-        let outputContainsSelfConstraint = selfConstraintPatterns.contains {
-            !matches(pattern: $0, in: output).isEmpty
+    }
+
+    private static func firstPersonStatements(in text: String) -> [[String]] {
+        text.split(whereSeparator: { ".!?;。！？；\n\r".contains($0) })
+            .map { wordTokens(in: String($0)) }
+            .filter { $0.contains(normalizedSelfReference) }
+    }
+
+    private static func wordTokens(in text: String) -> [String] {
+        guard let expression = try? NSRegularExpression(pattern: wordPattern) else {
+            return []
         }
-        return outputContainsMetaInstruction && outputContainsSelfConstraint &&
-            !(sourceContainsMetaInstruction && sourceContainsSelfConstraint)
+        let normalizedText = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        let range = NSRange(normalizedText.startIndex..<normalizedText.endIndex, in: normalizedText)
+        return expression.matches(in: normalizedText, range: range).compactMap { match in
+            guard let matchRange = Range(match.range, in: normalizedText) else { return nil }
+            let token = String(normalizedText[matchRange])
+            return firstPersonReferences.contains(token) ? normalizedSelfReference : token
+        }
+    }
+
+    private static func isSourceDerived(_ output: [String], from source: [String]) -> Bool {
+        let outputTokens = Set(output)
+        let sourceTokens = Set(source)
+        let sharedTokens = outputTokens.intersection(sourceTokens)
+        guard sharedTokens.contains(where: { $0 != normalizedSelfReference }) else {
+            return false
+        }
+        return sharedTokens.count * 4 >= outputTokens.count + sourceTokens.count
     }
 
     private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {
