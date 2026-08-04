@@ -113,6 +113,7 @@ final class CPYUtilities {
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.syncPollInterval)
         defaultValues.updateValue(NSNumber(value: 300), forKey: Constants.UserDefaults.passwordVaultAutoLockInterval)
         defaultValues.updateValue(NSNumber(value: true), forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
+        // Retain the scalar defaults while Prompt Optimization settings migrate to V2.
         defaultValues.updateValue(
             PromptOptimizationProviderSelection.automaticFree.rawValue,
             forKey: Constants.UserDefaults.promptOptimizationProvider

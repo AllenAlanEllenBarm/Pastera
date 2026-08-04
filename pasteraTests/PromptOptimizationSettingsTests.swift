@@ -65,16 +65,16 @@ struct PromptOptimizationSettingsTests {
     }
 
     @Test
-    func defaultsToFreeAutomaticWithoutRemoteConfiguration() {
+    func defaultsToFreeAutomaticWithOnePrefilledOpenAIProfile() {
         let store = PromptOptimizationSettingsStore(defaults: makeIsolatedDefaults())
 
         let settings = store.load()
 
         #expect(settings.provider == .automaticFree)
-        #expect(settings.remote.model.isEmpty)
-        #expect(settings.remote.baseURL.isEmpty)
+        #expect(settings.activeRemoteProfile?.model == "gpt-5.6-luna")
+        #expect(settings.activeRemoteProfile?.baseURL == "https://api.openai.com/v1")
         #expect(settings.confirmedOrigins.isEmpty)
-        #expect(!settings.remote.allowsInsecureHTTP)
+        #expect(settings.activeRemoteProfile?.allowsInsecureHTTP == false)
     }
 
     @Test
@@ -98,6 +98,147 @@ struct PromptOptimizationSettingsTests {
         #expect(loaded.provider == settings.provider)
         #expect(loaded.remote == settings.remote)
         #expect(loaded.confirmedOrigins == settings.confirmedOrigins)
+    }
+
+    @Test
+    func persistsProfilesAndActiveSelectionAsOneVersionedSnapshot() {
+        let defaults = makeIsolatedDefaults()
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+        let first = PromptOptimizationRemoteProfile.makeDefault(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
+            preset: .ollama
+        )
+        let second = PromptOptimizationRemoteProfile(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000002")!,
+            displayName: "Gateway",
+            preset: .custom,
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731",
+            allowsInsecureHTTP: false
+        )
+        let settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [first, second],
+            activeRemoteProfileID: second.id,
+            confirmedOrigins: ["https://aigateway.variflight.com"]
+        )
+
+        store.save(settings)
+
+        #expect(store.load() == settings)
+        #expect(defaults.data(forKey: Constants.UserDefaults.promptOptimizationSettingsV2) != nil)
+    }
+
+    @Test
+    func migratesLegacyOllamaSettingsOnceWithStableProfileID() {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(
+            OpenAICompatiblePreset.ollama.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationPreset
+        )
+        defaults.set(
+            "http://127.0.0.1:11434/v1",
+            forKey: Constants.UserDefaults.promptOptimizationBaseURL
+        )
+        defaults.set(
+            "qwen2.5:7b-instruct",
+            forKey: Constants.UserDefaults.promptOptimizationModel
+        )
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+
+        let firstLoad = store.load()
+        let secondLoad = store.load()
+
+        #expect(firstLoad == secondLoad)
+        #expect(firstLoad.activeRemoteProfile?.preset == .ollama)
+        #expect(firstLoad.activeRemoteProfile?.model == "qwen2.5:7b-instruct")
+        #expect(store.pendingLegacyCredentialProfileID == firstLoad.activeRemoteProfileID)
+    }
+
+    @Test
+    func migratesLegacyConfigurationWithoutChangingProviderHTTPOrOrigins() {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(
+            PromptOptimizationProviderSelection.openAICompatible.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationProvider
+        )
+        defaults.set(
+            OpenAICompatiblePreset.custom.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationPreset
+        )
+        defaults.set(
+            "http://models.example.com/v1",
+            forKey: Constants.UserDefaults.promptOptimizationBaseURL
+        )
+        defaults.set(
+            "legacy-model",
+            forKey: Constants.UserDefaults.promptOptimizationModel
+        )
+        defaults.set(
+            true,
+            forKey: Constants.UserDefaults.promptOptimizationAllowsInsecureHTTP
+        )
+        defaults.set(
+            ["http://models.example.com"],
+            forKey: Constants.UserDefaults.promptOptimizationConfirmedOrigins
+        )
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+
+        let settings = store.load()
+
+        #expect(settings.provider == .openAICompatible)
+        #expect(settings.activeRemoteProfile?.preset == .custom)
+        #expect(settings.activeRemoteProfile?.baseURL == "http://models.example.com/v1")
+        #expect(settings.activeRemoteProfile?.model == "legacy-model")
+        #expect(settings.activeRemoteProfile?.allowsInsecureHTTP == true)
+        #expect(settings.confirmedOrigins == ["http://models.example.com"])
+    }
+
+    @Test
+    func repairsMissingActiveProfileWithoutDroppingOtherProfiles() {
+        let defaults = makeIsolatedDefaults()
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+        var settings = PromptOptimizationSettings.makeDefault()
+        settings.activeRemoteProfileID = UUID()
+        store.save(settings)
+
+        let repaired = store.load()
+
+        #expect(repaired.activeRemoteProfileID == repaired.remoteProfiles.first?.id)
+        #expect(repaired.remoteProfiles.count == 1)
+    }
+
+    @Test
+    func malformedV2DataFallsBackToOneSafeDefaultProfile() {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(
+            Data("not-json".utf8),
+            forKey: Constants.UserDefaults.promptOptimizationSettingsV2
+        )
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+
+        let settings = store.load()
+
+        #expect(settings.provider == .automaticFree)
+        #expect(settings.remoteProfiles.count == 1)
+        #expect(settings.activeRemoteProfile?.preset == .openAI)
+    }
+
+    @Test
+    func completesLegacyCredentialMigrationOnlyForThePendingProfile() {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(
+            OpenAICompatiblePreset.ollama.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationPreset
+        )
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+        let pendingID = store.load().activeRemoteProfileID
+
+        store.completeLegacyCredentialMigration(for: UUID())
+        #expect(store.pendingLegacyCredentialProfileID == pendingID)
+
+        store.completeLegacyCredentialMigration(for: pendingID)
+        #expect(store.pendingLegacyCredentialProfileID == nil)
     }
 
     @Test

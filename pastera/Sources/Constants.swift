@@ -105,6 +105,9 @@ struct Constants {
         static let promptOptimizationModel = "kPasteraPromptOptimizationModel"
         static let promptOptimizationAllowsInsecureHTTP = "kPasteraPromptOptimizationAllowsInsecureHTTP"
         static let promptOptimizationConfirmedOrigins = "kPasteraPromptOptimizationConfirmedOrigins"
+        static let promptOptimizationSettingsV2 = "kPasteraPromptOptimizationSettingsV2"
+        static let promptOptimizationLegacyCredentialProfileID =
+            "kPasteraPromptOptimizationLegacyCredentialProfileID"
         static let thumbnailCompactionVersion = "kCPYThumbnailCompactionVersion"
     }
 

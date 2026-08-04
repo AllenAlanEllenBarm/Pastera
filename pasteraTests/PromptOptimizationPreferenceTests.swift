@@ -220,6 +220,7 @@ private struct PreferenceFixture {
 
 private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
     var settings = PromptOptimizationSettings.defaultValue
+    var pendingLegacyCredentialProfileID: UUID?
     private(set) var savedSettings: [PromptOptimizationSettings] = []
 
     func load() -> PromptOptimizationSettings { settings }
@@ -229,6 +230,11 @@ private final class PreferenceSettingsStore: PromptOptimizationSettingsStoring {
     }
     func confirmRemoteOrigin(_ origin: String) {
         settings.confirmedOrigins.insert(origin)
+    }
+
+    func completeLegacyCredentialMigration(for profileID: UUID) {
+        guard pendingLegacyCredentialProfileID == profileID else { return }
+        pendingLegacyCredentialProfileID = nil
     }
 }
 
