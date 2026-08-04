@@ -197,7 +197,7 @@ private enum PromptRewriteOutputSanitizer {
     private static let openingTag = "<rewritten_prompt>"
     private static let closingTag = "</rewritten_prompt>"
     private static let protectedAnchorPatterns = [
-        #"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_.-]*(?![A-Za-z0-9_])"#,
+        #"(?<![A-Za-z0-9_])(?:[A-Z]{2,}|[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+[_.-][A-Za-z0-9_.-]+)(?![A-Za-z0-9_])"#,
         #"https?://[^\s<>()，。；、]+"#,
         #"\$\{[^}\n]+\}|\{\{[^}\n]+\}\}"#,
         #"[0-9]+(?:\.[0-9]+)?\s*(?:MB|GB|KB|ms|s|%|秒|分钟|小时|天)"#,
@@ -261,12 +261,23 @@ private enum PromptRewriteOutputSanitizer {
 
     private static func disclosesRewriteInstruction(_ output: String) -> Bool {
         let normalizedOutput = normalizeWhitespace(output)
-        return PromptRewriteInstruction.text
+        let quotesRewriteInstruction = PromptRewriteInstruction.text
             .split(whereSeparator: \.isNewline)
             .map(String.init)
             .map(normalizeWhitespace)
             .filter { $0.count >= 32 }
             .contains { normalizedOutput.contains($0) }
+        let describesRewriteInstruction = (normalizedOutput.contains("only restate") ||
+            normalizedOutput.contains("only rewrite") ||
+            normalizedOutput.contains("rewrite the source") ||
+            normalizedOutput.contains("rewrite source")) &&
+            (normalizedOutput.contains("system instruction") ||
+                normalizedOutput.contains("developer instruction") ||
+                normalizedOutput.contains("hidden instruction") ||
+                normalizedOutput.contains("system prompt") ||
+                normalizedOutput.contains("developer prompt") ||
+                normalizedOutput.contains("hidden prompt"))
+        return quotesRewriteInstruction || describesRewriteInstruction
     }
 
     private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {
@@ -281,10 +292,6 @@ private enum PromptRewriteOutputSanitizer {
     }
 
     private static func preservesProtectedAnchors(source: String, output: String) -> Bool {
-        let sourceCounts = languageCounts(in: source)
-        guard sourceCounts.eastAsian >= 4 else {
-            return true
-        }
         return protectedAnchorPatterns.allSatisfy { pattern in
             matches(pattern: pattern, in: source).allSatisfy(output.contains)
         }

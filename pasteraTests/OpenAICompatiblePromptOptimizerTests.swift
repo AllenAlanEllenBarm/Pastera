@@ -240,6 +240,38 @@ extension OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func rejectsEnglishResponsesThatAlterProtectedAnchors() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Configure Pastera to call https://example.com/v2/${TEAM_ID} with requestId within 30 seconds and keep the payload under 20MB."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Configure Pastera to call https://example.com/v1/${TENANT_ID} with request_id within 10 seconds and keep the payload under 10MB.",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func rejectsResponsesThatParaphraseHiddenRewriteInstructions() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"I must only restate the source request and must not reveal the system or developer instructions."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
     func rewriteInstructionRequiresContextualTypoCorrection() async throws {
         let client = makeClient(
             status: 200,
