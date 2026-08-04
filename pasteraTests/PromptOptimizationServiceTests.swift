@@ -150,6 +150,129 @@ struct PromptOptimizationServiceTests {
         )
     }
 
+    @Test
+    func remoteOptimizationUsesOnlyTheActiveProfileAndItsKey() async {
+        let first = PromptOptimizationRemoteProfile.makeDefault(
+            id: UUID(uuidString: "50000000-0000-0000-0000-000000000001")!,
+            preset: .ollama
+        )
+        let second = PromptOptimizationRemoteProfile(
+            id: UUID(uuidString: "50000000-0000-0000-0000-000000000002")!,
+            displayName: "Gateway",
+            preset: .custom,
+            baseURL: "https://aigateway.variflight.com/api",
+            model: "aliyun/deepseek-v4-flash-0731",
+            allowsInsecureHTTP: false
+        )
+        let settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [first, second],
+            activeRemoteProfileID: second.id,
+            confirmedOrigins: ["https://aigateway.variflight.com"]
+        )
+        let keyStore = StubPromptOptimizationAPIKeyStore(values: [second.id: "gateway-key"])
+        let remote = RecordingRemotePromptOptimizer(result: .failure(.requestTimedOut))
+        let service = makeRemoteService(settings: settings, keyStore: keyStore, remote: remote)
+
+        #expect(await service.optimize("Draft") == .failed(.requestTimedOut))
+        #expect(keyStore.loadedProfileIDs == [second.id])
+        #expect(remote.configurations.map(\.model) == ["aliyun/deepseek-v4-flash-0731"])
+        #expect(remote.apiKeys == ["gateway-key"])
+    }
+
+    @Test
+    func connectionConsentIsCheckedBeforeTheActiveProfileKeyIsRead() async {
+        var settings = PromptOptimizationSettings.makeDefault()
+        settings.provider = .openAICompatible
+        let keyStore = StubPromptOptimizationAPIKeyStore()
+        let service = makeRemoteService(
+            settings: settings,
+            keyStore: keyStore,
+            remote: RecordingRemotePromptOptimizer(result: .success("OK")),
+            pendingLegacyCredentialProfileID: settings.activeRemoteProfileID
+        )
+
+        let result = await service.testRemoteConnection()
+
+        if case let .failure(error) = result {
+            #expect(error == .originNotConfirmed(origin: "https://api.openai.com"))
+        } else {
+            Issue.record("Expected the unconfirmed origin to prevent the connection test.")
+        }
+        #expect(keyStore.migratedProfileIDs.isEmpty)
+        #expect(keyStore.loadedProfileIDs.isEmpty)
+    }
+
+    @Test
+    func remoteProfileWithoutAKeyDoesNotCallTheOptimizer() async {
+        let profile = PromptOptimizationRemoteProfile.makeDefault(preset: .openAI)
+        let settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profile.id,
+            confirmedOrigins: ["https://api.openai.com"]
+        )
+        let remote = RecordingRemotePromptOptimizer(result: .success("Improved"))
+        let service = makeRemoteService(
+            settings: settings,
+            keyStore: StubPromptOptimizationAPIKeyStore(),
+            remote: remote
+        )
+
+        #expect(await service.optimize("Draft") == .failed(.missingAPIKey))
+        #expect(remote.configurations.isEmpty)
+    }
+
+    @Test
+    func remoteConnectionWithoutAKeyDoesNotCallTheOptimizer() async {
+        let profile = PromptOptimizationRemoteProfile.makeDefault(preset: .openAI)
+        let settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profile.id,
+            confirmedOrigins: ["https://api.openai.com"]
+        )
+        let remote = RecordingRemotePromptOptimizer(result: .success("OK"))
+        let service = makeRemoteService(
+            settings: settings,
+            keyStore: StubPromptOptimizationAPIKeyStore(),
+            remote: remote
+        )
+
+        let result = await service.testRemoteConnection()
+
+        if case let .failure(error) = result {
+            #expect(error == .missingAPIKey)
+        } else {
+            Issue.record("Expected the missing remote credential to prevent the connection test.")
+        }
+        #expect(remote.configurations.isEmpty)
+    }
+
+    @Test
+    func ollamaProfileWithoutAKeyCallsTheOptimizer() async {
+        let profile = PromptOptimizationRemoteProfile.makeDefault(preset: .ollama)
+        let settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profile.id,
+            confirmedOrigins: ["http://127.0.0.1:11434"]
+        )
+        let remote = RecordingRemotePromptOptimizer(result: .success("Improved"))
+        let service = makeRemoteService(
+            settings: settings,
+            keyStore: StubPromptOptimizationAPIKeyStore(),
+            remote: remote
+        )
+
+        #expect(
+            await service.optimize("Draft")
+                == .optimized(text: "Improved", source: .openAICompatible)
+        )
+        #expect(remote.configurations.map(\.preset) == [.ollama])
+        #expect(remote.apiKeys == [""])
+    }
+
     private func makeService(
         appleAvailability: PromptOptimizationAvailability,
         appleResult: Result<String, Error>
@@ -177,6 +300,27 @@ struct PromptOptimizationServiceTests {
             apiKeyStore: StubPromptOptimizationAPIKeyStore(),
             appleOptimizer: apple,
             localFormatter: formatter
+        )
+    }
+
+    private func makeRemoteService(
+        settings: PromptOptimizationSettings,
+        keyStore: StubPromptOptimizationAPIKeyStore,
+        remote: RecordingRemotePromptOptimizer,
+        pendingLegacyCredentialProfileID: UUID? = nil
+    ) -> PromptOptimizationService {
+        PromptOptimizationService(
+            settingsStore: StubPromptOptimizationSettingsStore(
+                settings: settings,
+                pendingLegacyCredentialProfileID: pendingLegacyCredentialProfileID
+            ),
+            apiKeyStore: keyStore,
+            appleOptimizer: StubApplePromptOptimizer(
+                availability: .unavailable(.deviceNotEligible),
+                result: .success("unused")
+            ),
+            localFormatter: RecordingLocalPromptFormatter(result: "unused"),
+            remoteOptimizer: remote
         )
     }
 }
@@ -225,12 +369,65 @@ private final class RecordingLocalPromptFormatter: LocalPromptFormatting {
     }
 }
 
+private final class StubPromptOptimizationSettingsStore: PromptOptimizationSettingsStoring {
+    private var settings: PromptOptimizationSettings
+    let pendingLegacyCredentialProfileID: UUID?
+
+    init(
+        settings: PromptOptimizationSettings,
+        pendingLegacyCredentialProfileID: UUID? = nil
+    ) {
+        self.settings = settings
+        self.pendingLegacyCredentialProfileID = pendingLegacyCredentialProfileID
+    }
+
+    func load() -> PromptOptimizationSettings { settings }
+    func save(_ settings: PromptOptimizationSettings) { self.settings = settings }
+
+    func confirmRemoteOrigin(_ origin: String) {
+        settings.confirmedOrigins.insert(origin)
+    }
+
+    func completeLegacyCredentialMigration(for profileID: UUID) {}
+}
+
 private final class StubPromptOptimizationAPIKeyStore: PromptOptimizationAPIKeyStoring {
-    private var apiKeys: [UUID: String] = [:]
+    private var apiKeys: [UUID: String]
+    private(set) var loadedProfileIDs: [UUID] = []
+    private(set) var migratedProfileIDs: [UUID] = []
+
+    init(values: [UUID: String] = [:]) {
+        apiKeys = values
+    }
 
     func containsAPIKey(for profileID: UUID) -> Bool { apiKeys[profileID] != nil }
     func save(_ apiKey: String, for profileID: UUID) throws { apiKeys[profileID] = apiKey }
-    func load(for profileID: UUID) throws -> String? { apiKeys[profileID] }
+    func load(for profileID: UUID) throws -> String? {
+        loadedProfileIDs.append(profileID)
+        return apiKeys[profileID]
+    }
     func delete(for profileID: UUID) throws { apiKeys[profileID] = nil }
-    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {}
+    func migrateLegacyAPIKeyIfNeeded(to profileID: UUID) throws {
+        migratedProfileIDs.append(profileID)
+    }
+}
+
+private final class RecordingRemotePromptOptimizer: OpenAICompatiblePromptOptimizing {
+    let result: Result<String, PromptOptimizationError>
+    private(set) var configurations: [PromptOptimizationRemoteConfiguration] = []
+    private(set) var apiKeys: [String] = []
+
+    init(result: Result<String, PromptOptimizationError>) {
+        self.result = result
+    }
+
+    func optimize(
+        text: String,
+        configuration: PromptOptimizationRemoteConfiguration,
+        apiKey: String
+    ) async -> Result<String, PromptOptimizationError> {
+        configurations.append(configuration)
+        apiKeys.append(apiKey)
+        return result
+    }
 }

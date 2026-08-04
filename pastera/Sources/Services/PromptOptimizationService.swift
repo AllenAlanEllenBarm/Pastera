@@ -28,13 +28,12 @@ final class PromptOptimizationService: PromptOptimizationServicing {
     }
 
     var availability: PromptOptimizationAvailability {
-        switch settingsStore.load().provider {
+        let settings = settingsStore.load()
+        switch settings.provider {
         case .automaticFree:
             return appleOptimizer.availability
         case .openAICompatible:
-            let settings = settingsStore.load()
-            guard !settings.remote.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  (try? endpointPolicy.validate(settings.remote)) != nil else {
+            guard (try? activeRemoteContext(from: settings)) != nil else {
                 return .unavailable(.remoteNotConfigured)
             }
             return .available
@@ -48,11 +47,12 @@ final class PromptOptimizationService: PromptOptimizationServicing {
             return .failed(.inputTooLong(maxCharacters: Self.maximumInputCharacters))
         }
 
-        switch settingsStore.load().provider {
+        let settings = settingsStore.load()
+        switch settings.provider {
         case .automaticFree:
             return await optimizeAutomatically(text)
         case .openAICompatible:
-            return await optimizeRemotely(text)
+            return await optimizeRemotely(text, settings: settings)
         }
     }
 
@@ -65,32 +65,27 @@ final class PromptOptimizationService: PromptOptimizationServicing {
         guard settings.provider == .openAICompatible else {
             return .failure(.unavailable(.remoteNotConfigured))
         }
+        let context: ActiveRemoteContext
         do {
-            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
-        } catch {
-            return .failure(.keychainUnavailable)
-        }
-        let endpoint: PromptOptimizationEndpoint
-        do {
-            endpoint = try endpointPolicy.validate(settings.remote)
+            context = try activeRemoteContext(from: settings)
         } catch let error as PromptOptimizationError {
             return .failure(error)
         } catch {
             return .failure(.invalidEndpoint)
         }
-        guard settings.confirmedOrigins.contains(endpoint.origin) else {
-            return .failure(.originNotConfirmed(origin: endpoint.origin))
+        guard settings.confirmedOrigins.contains(context.endpoint.origin) else {
+            return .failure(.originNotConfirmed(origin: context.endpoint.origin))
         }
-        let apiKey: String
-        do {
-            apiKey = try apiKeyStore.load(for: settings.activeRemoteProfileID) ?? ""
-        } catch {
-            return .failure(.keychainUnavailable)
+        let apiKeyResult = loadRemoteAPIKey(for: context.profile)
+        switch apiKeyResult {
+        case let .success(apiKey):
+            return await remoteOptimizer.testConnection(
+                configuration: context.profile.configuration,
+                apiKey: apiKey
+            )
+        case let .failure(error):
+            return .failure(error)
         }
-        return await remoteOptimizer.testConnection(
-            configuration: settings.remote,
-            apiKey: apiKey
-        )
     }
 
     private func optimizeAutomatically(_ text: String) async -> PromptOptimizationOutcome {
@@ -129,36 +124,32 @@ final class PromptOptimizationService: PromptOptimizationServicing {
         return .optimized(text: output, source: .localFormatter)
     }
 
-    private func optimizeRemotely(_ text: String) async -> PromptOptimizationOutcome {
-        let settings = settingsStore.load()
+    private func optimizeRemotely(
+        _ text: String,
+        settings: PromptOptimizationSettings
+    ) async -> PromptOptimizationOutcome {
+        let context: ActiveRemoteContext
         do {
-            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
-        } catch {
-            return .failed(.keychainUnavailable)
-        }
-        guard !settings.remote.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return .failed(.missingModel)
-        }
-        let endpoint: PromptOptimizationEndpoint
-        do {
-            endpoint = try endpointPolicy.validate(settings.remote)
+            context = try activeRemoteContext(from: settings)
         } catch let error as PromptOptimizationError {
             return .failed(error)
         } catch {
             return .failed(.invalidEndpoint)
         }
-        guard settings.confirmedOrigins.contains(endpoint.origin) else {
-            return .consentRequired(origin: endpoint.origin)
+        guard settings.confirmedOrigins.contains(context.endpoint.origin) else {
+            return .consentRequired(origin: context.endpoint.origin)
         }
+        let apiKeyResult = loadRemoteAPIKey(for: context.profile)
         let apiKey: String
-        do {
-            apiKey = try apiKeyStore.load(for: settings.activeRemoteProfileID) ?? ""
-        } catch {
-            return .failed(.keychainUnavailable)
+        switch apiKeyResult {
+        case let .success(value):
+            apiKey = value
+        case let .failure(error):
+            return .failed(error)
         }
         let result = await remoteOptimizer.optimize(
             text: text,
-            configuration: settings.remote,
+            configuration: context.profile.configuration,
             apiKey: apiKey
         )
         switch result {
@@ -169,6 +160,39 @@ final class PromptOptimizationService: PromptOptimizationServicing {
             return .optimized(text: output, source: .openAICompatible)
         case let .failure(error):
             return .failed(error)
+        }
+    }
+
+    private struct ActiveRemoteContext {
+        let profile: PromptOptimizationRemoteProfile
+        let endpoint: PromptOptimizationEndpoint
+    }
+
+    private func activeRemoteContext(
+        from settings: PromptOptimizationSettings
+    ) throws -> ActiveRemoteContext {
+        guard let profile = settings.activeRemoteProfile,
+              !profile.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PromptOptimizationError.missingModel
+        }
+        return ActiveRemoteContext(
+            profile: profile,
+            endpoint: try endpointPolicy.validate(profile.configuration)
+        )
+    }
+
+    private func loadRemoteAPIKey(
+        for profile: PromptOptimizationRemoteProfile
+    ) -> Result<String, PromptOptimizationError> {
+        do {
+            try settingsStore.migrateLegacyAPIKeyIfNeeded(using: apiKeyStore)
+            let apiKey = try apiKeyStore.load(for: profile.id) ?? ""
+            guard !apiKey.isEmpty || profile.preset == .ollama || profile.preset == .lmStudio else {
+                return .failure(.missingAPIKey)
+            }
+            return .success(apiKey)
+        } catch {
+            return .failure(.keychainUnavailable)
         }
     }
 }
