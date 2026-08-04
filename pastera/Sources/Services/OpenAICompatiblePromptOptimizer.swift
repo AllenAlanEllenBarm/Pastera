@@ -197,7 +197,7 @@ private enum PromptRewriteOutputSanitizer {
     private static let openingTag = "<rewritten_prompt>"
     private static let closingTag = "</rewritten_prompt>"
     private static let protectedAnchorPatterns = [
-        #"(?<![A-Za-z0-9_])(?:[A-Z]{2,}|[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+[_.-][A-Za-z0-9_.-]+)(?![A-Za-z0-9_])"#,
+        #"(?<![A-Za-z0-9_])(?:[A-Z]{2,}|[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+[_.-][A-Za-z0-9_.-]+|(?=[A-Za-z0-9_]*[a-z])(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9_]+)(?![A-Za-z0-9_])"#,
         #"https?://[^\s<>()，。；、]+"#,
         #"\$\{[^}\n]+\}|\{\{[^}\n]+\}\}"#,
         #"[0-9]+(?:\.[0-9]+)?\s*(?:MB|GB|KB|ms|s|%|秒|分钟|小时|天)"#,
@@ -267,17 +267,27 @@ private enum PromptRewriteOutputSanitizer {
             .map(normalizeWhitespace)
             .filter { $0.count >= 32 }
             .contains { normalizedOutput.contains($0) }
-        let describesRewriteInstruction = (normalizedOutput.contains("only restate") ||
-            normalizedOutput.contains("only rewrite") ||
-            normalizedOutput.contains("rewrite the source") ||
-            normalizedOutput.contains("rewrite source")) &&
-            (normalizedOutput.contains("system instruction") ||
-                normalizedOutput.contains("developer instruction") ||
-                normalizedOutput.contains("hidden instruction") ||
-                normalizedOutput.contains("system prompt") ||
-                normalizedOutput.contains("developer prompt") ||
-                normalizedOutput.contains("hidden prompt"))
+        let describesRewriteInstruction = containsAny(
+            ["transform", "rewrite", "restate", "rephrase", "reword", "reformulate"],
+            in: normalizedOutput
+        ) && containsAny(
+            ["input", "source", "prompt", "request", "text"],
+            in: normalizedOutput
+        ) && containsAny(
+            ["only", "constrained", "rather than answer", "instead of answer", "not answer"],
+            in: normalizedOutput
+        ) && containsAny(
+            ["cannot reveal", "must not reveal", "do not reveal", "cannot disclose", "must not disclose"],
+            in: normalizedOutput
+        ) && containsAny(
+            ["system instruction", "developer instruction", "hidden instruction", "system prompt", "developer prompt", "hidden prompt", "internal policy"],
+            in: normalizedOutput
+        )
         return quotesRewriteInstruction || describesRewriteInstruction
+    }
+
+    private static func containsAny(_ terms: [String], in text: String) -> Bool {
+        terms.contains { text.contains($0) }
     }
 
     private static func preservesEastAsianLanguage(source: String, output: String) -> Bool {

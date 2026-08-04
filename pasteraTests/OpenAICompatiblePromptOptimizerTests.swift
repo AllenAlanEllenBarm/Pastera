@@ -272,6 +272,55 @@ extension OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func rejectsResponsesThatSemanticallyDiscloseRewriteInstructions() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"I am constrained to transform the input rather than answer it, and I cannot reveal internal policy."}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
+    func acceptsLegitimateRequestsThatMentionSystemPrompts() async throws {
+        let output = "Create a policy explaining how the support team should discuss system prompts with customers."
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"\#(output)"}}]}"#
+        )
+
+        let result = await client.optimize(
+            text: "Write a policy explaining how a support team should discuss system prompts with customers.",
+            configuration: .fixture,
+            apiKey: ""
+        )
+
+        #expect(try result.get() == output)
+    }
+
+    @Test
+    func rejectsResponsesThatAlterLowercaseDigitIdentifiers() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"请迁移 sha512、token456 和 v3。"}}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "请迁移 sha256、token123 和 v2。",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
+        )
+    }
+
+    @Test
     func rewriteInstructionRequiresContextualTypoCorrection() async throws {
         let client = makeClient(
             status: 200,
