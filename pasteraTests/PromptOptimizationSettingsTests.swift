@@ -195,36 +195,6 @@ struct PromptOptimizationSettingsTests {
     }
 
     @Test
-    func repairsMissingActiveProfileWithoutDroppingOtherProfiles() {
-        let defaults = makeIsolatedDefaults()
-        let store = PromptOptimizationSettingsStore(defaults: defaults)
-        var settings = PromptOptimizationSettings.makeDefault()
-        settings.activeRemoteProfileID = UUID()
-        store.save(settings)
-
-        let repaired = store.load()
-
-        #expect(repaired.activeRemoteProfileID == repaired.remoteProfiles.first?.id)
-        #expect(repaired.remoteProfiles.count == 1)
-    }
-
-    @Test
-    func malformedV2DataFallsBackToOneSafeDefaultProfile() {
-        let defaults = makeIsolatedDefaults()
-        defaults.set(
-            Data("not-json".utf8),
-            forKey: Constants.UserDefaults.promptOptimizationSettingsV2
-        )
-        let store = PromptOptimizationSettingsStore(defaults: defaults)
-
-        let settings = store.load()
-
-        #expect(settings.provider == .automaticFree)
-        #expect(settings.remoteProfiles.count == 1)
-        #expect(settings.activeRemoteProfile?.preset == .openAI)
-    }
-
-    @Test
     func completesLegacyCredentialMigrationOnlyForThePendingProfile() {
         let defaults = makeIsolatedDefaults()
         defaults.set(
@@ -306,6 +276,224 @@ struct PromptOptimizationSettingsTests {
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
     }
+
+}
+
+struct PromptOptimizationSettingsStoreRecoveryTests {
+    @Test
+    func savingV2SettingsDoesNotRewriteLegacyScalars() {
+        let defaults = makeIsolatedDefaults()
+        let legacyBefore = seedLegacyScalars(in: defaults)
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+
+        store.save(.makeDefault())
+
+        #expect(legacyScalars(in: defaults) == legacyBefore)
+    }
+
+    @Test
+    func repairsRawV2EmptyProfilesAndRewritesThePersistedSnapshot() throws {
+        let defaults = makeIsolatedDefaults()
+        let legacyBefore = seedLegacyScalars(in: defaults)
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+        let rawSettings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [],
+            activeRemoteProfileID: UUID(uuidString: "30000000-0000-0000-0000-000000000001")!,
+            confirmedOrigins: []
+        )
+        try seedRawV2Snapshot(rawSettings, version: 2, in: defaults)
+
+        let repaired = store.load()
+        let persisted = try persistedV2Snapshot(in: defaults)
+
+        #expect(repaired.activeRemoteProfileID == repaired.remoteProfiles.first?.id)
+        #expect(repaired.remoteProfiles.count == 1)
+        #expect(persisted.version == 2)
+        #expect(persisted.settings == repaired)
+        #expect(legacyScalars(in: defaults) == legacyBefore)
+    }
+
+    @Test
+    func repairsRawV2MissingActiveIDWithoutDroppingOtherProfiles() throws {
+        let defaults = makeIsolatedDefaults()
+        let legacyBefore = seedLegacyScalars(in: defaults)
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+        let first = PromptOptimizationRemoteProfile.makeDefault(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+            preset: .ollama
+        )
+        let second = PromptOptimizationRemoteProfile.makeDefault(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000003")!,
+            preset: .deepSeek
+        )
+        let rawSettings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [first, second],
+            activeRemoteProfileID: UUID(uuidString: "30000000-0000-0000-0000-000000000004")!,
+            confirmedOrigins: []
+        )
+        try seedRawV2Snapshot(rawSettings, version: 2, in: defaults)
+
+        let repaired = store.load()
+        let persisted = try persistedV2Snapshot(in: defaults)
+
+        #expect(repaired.activeRemoteProfileID == first.id)
+        #expect(repaired.remoteProfiles == [first, second])
+        #expect(persisted.version == 2)
+        #expect(persisted.settings == repaired)
+        #expect(legacyScalars(in: defaults) == legacyBefore)
+    }
+
+    @Test
+    func unsupportedRawV2VersionFallsBackWithoutReturningPartiallyDecodedSettings() throws {
+        let defaults = makeIsolatedDefaults()
+        let legacyBefore = seedLegacyScalars(in: defaults)
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+        let unsupportedProfile = PromptOptimizationRemoteProfile.makeDefault(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000005")!,
+            preset: .ollama
+        )
+        let unsupportedSettings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [unsupportedProfile],
+            activeRemoteProfileID: unsupportedProfile.id,
+            confirmedOrigins: []
+        )
+        try seedRawV2Snapshot(unsupportedSettings, version: 3, in: defaults)
+
+        let settings = store.load()
+        let persisted = try persistedV2Snapshot(in: defaults)
+
+        #expect(settings.provider == .openAICompatible)
+        #expect(settings.remoteProfiles.count == 1)
+        #expect(settings.activeRemoteProfile?.preset == .custom)
+        #expect(settings.activeRemoteProfile?.baseURL == "https://legacy.example.com/v1")
+        #expect(settings.activeRemoteProfile?.model == "legacy-model")
+        #expect(settings.activeRemoteProfile?.id != unsupportedProfile.id)
+        #expect(persisted.version == 2)
+        #expect(persisted.settings == settings)
+        #expect(legacyScalars(in: defaults) == legacyBefore)
+    }
+
+    @Test
+    func malformedV2DataFallsBackAndRewritesThePersistedSnapshot() throws {
+        let defaults = makeIsolatedDefaults()
+        let legacyBefore = seedLegacyScalars(in: defaults)
+        defaults.set(
+            Data("not-json".utf8),
+            forKey: Constants.UserDefaults.promptOptimizationSettingsV2
+        )
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+
+        let settings = store.load()
+        let persisted = try persistedV2Snapshot(in: defaults)
+
+        #expect(settings.provider == .openAICompatible)
+        #expect(settings.remoteProfiles.count == 1)
+        #expect(settings.activeRemoteProfile?.preset == .custom)
+        #expect(settings.activeRemoteProfile?.baseURL == "https://legacy.example.com/v1")
+        #expect(settings.activeRemoteProfile?.model == "legacy-model")
+        #expect(persisted.version == 2)
+        #expect(persisted.settings == settings)
+        #expect(legacyScalars(in: defaults) == legacyBefore)
+    }
+
+    @Test
+    func malformedV2DataUsesSafeDefaultWhenNoLegacyConfigurationExists() throws {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(
+            Data("not-json".utf8),
+            forKey: Constants.UserDefaults.promptOptimizationSettingsV2
+        )
+        let store = PromptOptimizationSettingsStore(defaults: defaults)
+
+        let settings = store.load()
+        let persisted = try persistedV2Snapshot(in: defaults)
+
+        #expect(settings.provider == .automaticFree)
+        #expect(settings.remoteProfiles.count == 1)
+        #expect(settings.activeRemoteProfile?.preset == .openAI)
+        #expect(persisted.version == 2)
+        #expect(persisted.settings == settings)
+    }
+
+    private func makeIsolatedDefaults() -> UserDefaults {
+        let suiteName = "PromptOptimizationSettingsStoreRecoveryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
+    private func seedRawV2Snapshot(
+        _ settings: PromptOptimizationSettings,
+        version: Int,
+        in defaults: UserDefaults
+    ) throws {
+        let data = try JSONEncoder().encode(RawV2Snapshot(version: version, settings: settings))
+        defaults.set(data, forKey: Constants.UserDefaults.promptOptimizationSettingsV2)
+    }
+
+    private func persistedV2Snapshot(in defaults: UserDefaults) throws -> RawV2Snapshot {
+        let data = try #require(defaults.data(
+            forKey: Constants.UserDefaults.promptOptimizationSettingsV2
+        ))
+        return try JSONDecoder().decode(RawV2Snapshot.self, from: data)
+    }
+
+    private func seedLegacyScalars(in defaults: UserDefaults) -> LegacyScalarSnapshot {
+        defaults.set(
+            PromptOptimizationProviderSelection.openAICompatible.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationProvider
+        )
+        defaults.set(
+            OpenAICompatiblePreset.custom.rawValue,
+            forKey: Constants.UserDefaults.promptOptimizationPreset
+        )
+        defaults.set(
+            "https://legacy.example.com/v1",
+            forKey: Constants.UserDefaults.promptOptimizationBaseURL
+        )
+        defaults.set("legacy-model", forKey: Constants.UserDefaults.promptOptimizationModel)
+        defaults.set(
+            true,
+            forKey: Constants.UserDefaults.promptOptimizationAllowsInsecureHTTP
+        )
+        defaults.set(
+            ["https://legacy.example.com"],
+            forKey: Constants.UserDefaults.promptOptimizationConfirmedOrigins
+        )
+        return legacyScalars(in: defaults)
+    }
+
+    private func legacyScalars(in defaults: UserDefaults) -> LegacyScalarSnapshot {
+        LegacyScalarSnapshot(
+            provider: defaults.string(forKey: Constants.UserDefaults.promptOptimizationProvider),
+            preset: defaults.string(forKey: Constants.UserDefaults.promptOptimizationPreset),
+            baseURL: defaults.string(forKey: Constants.UserDefaults.promptOptimizationBaseURL),
+            model: defaults.string(forKey: Constants.UserDefaults.promptOptimizationModel),
+            allowsInsecureHTTP: defaults.bool(
+                forKey: Constants.UserDefaults.promptOptimizationAllowsInsecureHTTP
+            ),
+            confirmedOrigins: defaults.stringArray(
+                forKey: Constants.UserDefaults.promptOptimizationConfirmedOrigins
+            )
+        )
+    }
+}
+
+private struct RawV2Snapshot: Codable, Equatable {
+    let version: Int
+    let settings: PromptOptimizationSettings
+}
+
+private struct LegacyScalarSnapshot: Equatable {
+    let provider: String?
+    let preset: String?
+    let baseURL: String?
+    let model: String?
+    let allowsInsecureHTTP: Bool
+    let confirmedOrigins: [String]?
 }
 
 private final class RecordingPromptOptimizationKeychain: PromptOptimizationKeychainAccessing {
