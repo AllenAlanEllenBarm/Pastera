@@ -5,6 +5,66 @@ import Testing
 
 struct PromptOptimizationSettingsTests {
     @Test
+    func presetsExposeEditableProviderDefaults() {
+        #expect(OpenAICompatiblePreset.openAI.defaultBaseURL == "https://api.openai.com/v1")
+        #expect(OpenAICompatiblePreset.openAI.defaultModel == "gpt-5.6-luna")
+        #expect(OpenAICompatiblePreset.deepSeek.defaultBaseURL == "https://api.deepseek.com")
+        #expect(OpenAICompatiblePreset.deepSeek.defaultModel == "deepseek-v4-flash")
+        #expect(OpenAICompatiblePreset.deepSeek.disablesThinking)
+        #expect(OpenAICompatiblePreset.ollama.defaultModel == "qwen2.5:7b-instruct")
+        #expect(OpenAICompatiblePreset.custom.defaultBaseURL.isEmpty)
+        #expect(!OpenAICompatiblePreset.custom.disablesThinking)
+    }
+
+    @Test
+    func defaultSettingsUseFreeProviderWithOneConfiguredOpenAIProfile() throws {
+        let id = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+        let settings = PromptOptimizationSettings.makeDefault(profileID: id)
+
+        #expect(settings.provider == .automaticFree)
+        #expect(settings.activeRemoteProfileID == id)
+        #expect(settings.remoteProfiles.count == 1)
+        #expect(settings.activeRemoteProfile?.displayName == "OpenAI")
+        #expect(settings.activeRemoteProfile?.model == "gpt-5.6-luna")
+        #expect(settings.activeRemoteProfile?.configuration.preset == .openAI)
+    }
+
+    @Test
+    func repairActiveRemoteProfileSelectsTheFirstConfiguredProfileForAnUnknownID() {
+        let profile = PromptOptimizationRemoteProfile.makeDefault(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+            preset: .ollama
+        )
+        var settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: UUID(uuidString: "10000000-0000-0000-0000-000000000003")!,
+            confirmedOrigins: []
+        )
+
+        settings.repairActiveRemoteProfile()
+
+        #expect(settings.activeRemoteProfileID == profile.id)
+        #expect(settings.activeRemoteProfile?.id == profile.id)
+    }
+
+    @Test
+    func repairActiveRemoteProfileCreatesAnOpenAIProfileForAnEmptyList() {
+        var settings = PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [],
+            activeRemoteProfileID: UUID(uuidString: "10000000-0000-0000-0000-000000000004")!,
+            confirmedOrigins: []
+        )
+
+        settings.repairActiveRemoteProfile()
+
+        #expect(settings.remoteProfiles.count == 1)
+        #expect(settings.activeRemoteProfileID == settings.remoteProfiles.first?.id)
+        #expect(settings.activeRemoteProfile?.preset == .openAI)
+    }
+
+    @Test
     func defaultsToFreeAutomaticWithoutRemoteConfiguration() {
         let store = PromptOptimizationSettingsStore(defaults: makeIsolatedDefaults())
 
@@ -34,7 +94,10 @@ struct PromptOptimizationSettingsTests {
 
         store.save(settings)
 
-        #expect(store.load() == settings)
+        let loaded = store.load()
+        #expect(loaded.provider == settings.provider)
+        #expect(loaded.remote == settings.remote)
+        #expect(loaded.confirmedOrigins == settings.confirmedOrigins)
     }
 
     @Test

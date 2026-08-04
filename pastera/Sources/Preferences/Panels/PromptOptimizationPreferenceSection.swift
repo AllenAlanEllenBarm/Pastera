@@ -661,6 +661,7 @@ private extension OpenAICompatiblePreset {
     var displayName: String {
         switch self {
         case .openAI: return "OpenAI"
+        case .deepSeek: return "DeepSeek"
         case .gemini: return "Gemini"
         case .ollama: return "Ollama"
         case .lmStudio: return "LM Studio"
