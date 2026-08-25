@@ -3846,6 +3846,74 @@
         }
       }
     },
+    "Select a OneDrive Folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive-Ordner auswählen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a OneDrive Folder"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleziona una cartella OneDrive"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDriveフォルダを選択"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请选择 OneDrive 文件夹"
+          }
+        }
+      }
+    },
+    "Select a OneDrive Folder Description" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wählen Sie das OneDrive-Konto aus, das Pastera verwenden soll."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose the OneDrive account that Pastera should use."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scegli l’account OneDrive che Pastera deve usare."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pasteraで使用するOneDriveアカウントを選択してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请选择 Pastera 要使用的 OneDrive 账户。"
+          }
+        }
+      }
+    },
     "OneDrive Status" : {
       "localizations" : {
         "en" : {
@@ -7206,7 +7274,13 @@
     "The first sync has not finished yet." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "首次同步尚未完成。" } } } },
     "No OneDrive account folder was found. Install OneDrive or sign in, then try again." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未找到 OneDrive 账户目录。请安装 OneDrive 或登录账户后重试。" } } } },
     "Choose the OneDrive account that should hold the encrypted replica." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择用于保存加密副本的 OneDrive 账户。" } } } },
-    "Enable OneDrive Sync" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启 OneDrive 同步" } } } },
+    "Enable OneDrive Sync" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable OneDrive Sync" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive-Synchronisierung aktivieren" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Abilita sincronizzazione OneDrive" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同期を有効にする" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启 OneDrive 同步" } }
+    } },
     "Enabling…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在开启…" } } } },
     "Start OneDrive" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启动 OneDrive" } } } },
     "Try Again" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试" } } } },
@@ -7258,7 +7332,9 @@
     "OneDrive sync is currently off." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步当前已关闭。" } } } },
     "Nothing is uploaded." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不会上传任何数据。" } } } },
     "OneDrive is not installed." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未安装 OneDrive。" } } } },
+    "OneDrive is not installed; password vault sync is not enabled" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未安装 OneDrive · 密码箱同步未开启" } } } },
     "OneDrive is not running." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 未运行。" } } } },
+    "OneDrive is not running; password vault sync is not enabled" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 未运行 · 密码箱同步未开启" } } } },
     "The selected OneDrive folder is unavailable." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选 OneDrive 目录不可用。" } } } },
     "The selected OneDrive folder is read-only." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选 OneDrive 目录为只读。" } } } },
     "The OneDrive replica is temporarily unavailable." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 副本暂时不可用。" } } } },
@@ -7269,10 +7345,6 @@
     "OneDrive could not be started." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法启动 OneDrive。" } } } },
     "OneDrive sync is unavailable" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 同步不可用" } } } },
     "Review Sync Result" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看同步结果" } } } },
-    "Stop Sync and Keep Both Copies" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止同步并保留两端副本" } } } },
-    "Delete OneDrive Copy…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除 OneDrive 副本…" } } } },
-    "Stop Sync, Keep Copies" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止同步，保留副本" } } } },
-    "Delete Cloud Copy…" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除云端副本…" } } } },
     "Create a Separate Local Vault?" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建独立的本地密码箱？" } } } },
     "Creating a new local vault starts a separate data branch." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建新的本地密码箱会形成一条独立的数据分支。" } } } },
     "The previous OneDrive vault will not be overwritten. You can reconnect it later and decide how to merge the two copies." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原有 OneDrive 密码箱不会被覆盖。你可以稍后重新连接，再决定如何合并两端副本。" } } } },
@@ -7282,6 +7354,7 @@
     "Pastera is creating a local working copy. No password is needed yet." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Pastera 正在创建本地工作副本，此时无需输入密码。" } } } },
     "The local password vault could not be prepared." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法准备本地密码箱。" } } } },
     "If OneDrive was disconnected, start it and retry. Your cloud copy remains unchanged." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "如果 OneDrive 已断开，请启动后重试。云端副本不会被更改。" } } } },
+    "OneDrive is running; password vault sync is not enabled" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 正在运行 · 密码箱同步未开启" } } } },
     "OneDrive is running, but the cloud vault has not finished downloading. Wait for OneDrive to finish syncing, then try again. Your cloud copy remains unchanged." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 已启动，但云端密码箱尚未下载完成。请等待 OneDrive 完成同步后重试。云端副本不会被更改。" } } } },
     "Local Vault Recovery" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复本地密码箱" } } } },
     "Unlock the OneDrive Copy" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁 OneDrive 副本" } } } },
@@ -7293,10 +7366,6 @@
     "Unlock and Merge" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁并合并" } } } },
     "OneDrive copy credentials" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OneDrive 副本凭据" } } } },
     "Unlock the OneDrive copy and merge" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "解锁 OneDrive 副本并合并" } } } },
-    "Delete the OneDrive Copy?" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除 OneDrive 副本？" } } } },
-    "Your local vault will remain. The encrypted OneDrive copy will be deleted." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地密码箱会保留，加密的 OneDrive 副本将被删除。" } } } },
-    "Sync will switch off. This action does not delete passwords from this Mac." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步将关闭。此操作不会删除这台 Mac 上的密码。" } } } },
-    "Delete OneDrive Copy" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除 OneDrive 副本" } } } },
     "Sync Merge Complete" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步合并完成" } } } },
     "Pastera automatically combined compatible local and OneDrive changes." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Pastera 已自动合并可以安全合并的本地与 OneDrive 更改。" } } } },
     "%lld conflict copies were kept for review." : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保留 %lld 个冲突副本供你检查。" } } } },
@@ -7313,19 +7382,19 @@
       "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫の同期" } },
       "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱同步" } }
     } },
-    "Sync Management" : { "localizations" : {
-      "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync Management" } },
-      "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisierungsverwaltung" } },
-      "it" : { "stringUnit" : { "state" : "translated", "value" : "Gestione sincronizzazione" } },
-      "ja" : { "stringUnit" : { "state" : "translated", "value" : "同期管理" } },
-      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步管理" } }
+    "Enable Password Vault Sync" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable Password Vault Sync" } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Passworttresor-Synchronisierung aktivieren" } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Abilita sincronizzazione cassaforte password" } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫の同期を有効にする" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启密码箱同步" } }
     } },
-    "Manage in Main Window" : { "localizations" : {
-      "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage in Main Window" } },
-      "de" : { "stringUnit" : { "state" : "translated", "value" : "Im Hauptfenster verwalten" } },
-      "it" : { "stringUnit" : { "state" : "translated", "value" : "Gestisci nella finestra principale" } },
-      "ja" : { "stringUnit" : { "state" : "translated", "value" : "メインウインドウで管理" } },
-      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在主窗口中管理" } }
+    "Create an encrypted OneDrive replica using the selected folder." : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Create an encrypted OneDrive replica using the selected folder." } },
+      "de" : { "stringUnit" : { "state" : "translated", "value" : "Erstellt ein verschlüsseltes OneDrive-Replikat im ausgewählten Ordner." } },
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Crea una replica OneDrive crittografata nella cartella selezionata." } },
+      "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択したフォルダに暗号化された OneDrive レプリカを作成します。" } },
+      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用所选文件夹创建加密的 OneDrive 副本。" } }
     } },
     "Password vault sync is independent from history and snippet sync." : { "localizations" : {
       "en" : { "stringUnit" : { "state" : "translated", "value" : "Password vault sync is independent from history and snippet sync." } },
@@ -7333,13 +7402,6 @@
       "it" : { "stringUnit" : { "state" : "translated", "value" : "La sincronizzazione della cassaforte password è indipendente da cronologia e frammenti." } },
       "ja" : { "stringUnit" : { "state" : "translated", "value" : "パスワード保管庫の同期は、履歴やスニペットの同期とは独立しています。" } },
       "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码箱同步与历史记录及片段同步相互独立。" } }
-    } },
-    "Enable, stop, recover, or resolve conflicts in the main window." : { "localizations" : {
-      "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable, stop, recover, or resolve conflicts in the main window." } },
-      "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisierung im Hauptfenster aktivieren, stoppen, wiederherstellen oder Konflikte lösen." } },
-      "it" : { "stringUnit" : { "state" : "translated", "value" : "Attiva, arresta, ripristina o risolvi i conflitti nella finestra principale." } },
-      "ja" : { "stringUnit" : { "state" : "translated", "value" : "有効化、停止、復旧、競合の解決はメインウインドウで行います。" } },
-      "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请在主窗口中开启、停止、恢复同步或处理冲突。" } }
     } },
     "items" : {
       "localizations" : {

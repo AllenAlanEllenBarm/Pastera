@@ -215,12 +215,6 @@ private final class SecuritySettingsSyncController: PasswordVaultSyncControlling
         remoteMasterPassword: String?, // swiftlint:disable:this inclusive_language
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     ) { completion(.success(())) }
-    func switchToLocalOnly(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) { completion(.success(())) }
-    func deleteRemoteReplica(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) { completion(.success(())) }
 }
 
 private func makeSecuritySettingsLocalStorage(at root: URL) -> FilePasswordVaultLocalStorage {

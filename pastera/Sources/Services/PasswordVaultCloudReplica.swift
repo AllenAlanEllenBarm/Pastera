@@ -18,7 +18,6 @@ protocol PasswordVaultCloudReplica {
         rootURL: URL,
         expecting expectation: PasswordVaultRemoteExpectation
     ) throws -> String
-    func delete(rootURL: URL) throws
 }
 
 enum PasswordVaultCloudItemStatus: Equatable {
@@ -164,29 +163,6 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
             throw PasswordVaultSyncFailure.remoteVerificationFailed
         }
         return expectedDigest
-    }
-
-    func delete(rootURL: URL) throws {
-        try validateRoot(rootURL, requiresWriteAccess: true)
-        let targetURL = VaultFileCoordinator.vaultURL(for: rootURL)
-        do {
-            try coordinateWrite(at: targetURL, options: .forDeleting) { coordinatedURL in
-                switch try itemStatus(at: coordinatedURL) {
-                case .missing:
-                    return
-                case .regular:
-                    try operations.removeItem(coordinatedURL)
-                case .other:
-                    throw PasswordVaultSyncFailure.remoteCorrupted
-                }
-            }
-        } catch let error where Self.isNoSuchFile(error) {
-            return
-        } catch let failure as PasswordVaultSyncFailure {
-            throw failure
-        } catch {
-            throw PasswordVaultSyncFailure.remoteWriteFailed
-        }
     }
 
     private func validateRoot(_ rootURL: URL, requiresWriteAccess: Bool) throws {

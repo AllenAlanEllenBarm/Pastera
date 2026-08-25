@@ -45,25 +45,6 @@ extension PasswordVaultCloudReplicaTests {
         }
     }
 
-    @Test("raw Foundation missing error after removal keeps delete idempotent")
-    func foundationMissingAfterRemovalSucceeds() throws {
-        try withFoundationMissingCloudRoot { rootURL in
-            let data = foundationMissingKDBXData("delete-before-error")
-            let targetURL = try writeFoundationMissingCloudVault(data, rootURL: rootURL)
-            var operations = PasswordVaultCloudFileOperations.live
-            let liveRemove = operations.removeItem
-            operations.removeItem = { url in
-                try liveRemove(url)
-                if url.standardizedFileURL == targetURL.standardizedFileURL {
-                    throw NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError)
-                }
-            }
-
-            try OneDrivePasswordVaultCloudReplica(operations: operations).delete(rootURL: rootURL)
-            #expect(!FileManager.default.fileExists(atPath: targetURL.path))
-            #expect(FileManager.default.fileExists(atPath: rootURL.path))
-        }
-    }
 }
 
 private let foundationMissingKDBXSignature = Data([

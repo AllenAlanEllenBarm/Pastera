@@ -177,7 +177,7 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
         static let oneDriveFolder = pasteraPreferenceString("Sync Location")
         static let manualSync = pasteraPreferenceString("Manual Sync")
         static let notDetected = pasteraPreferenceString("OneDrive Not Detected")
-        static let manageInMainWindow = pasteraPreferenceString("Manage in Main Window")
+        static let enableVaultSync = pasteraPreferenceString("Enable OneDrive Sync")
     }
 
     private struct FileTypeOption {
@@ -205,13 +205,18 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
     private let showFolderButton = NSButton(title: Text.showInFinder, target: nil, action: nil)
     private let syncNowButton = NSButton(title: Text.syncNow, target: nil, action: nil)
     private let vaultSyncSummaryView = PasteraVaultSyncSummaryView()
-    private let manageVaultSyncButton = NSButton(title: Text.manageInMainWindow, target: nil, action: nil)
+    private let enableVaultSyncButton = NSButton(title: Text.enableVaultSync, target: nil, action: nil)
     private let defaultFolderResolutionProvider: () -> SyncDefaultFolderResolution
     private let defaultFolderResolver: SyncDefaultFolderResolver
     private let revealInFinder: (URL) -> Void
     private let chooseSyncRoot: (NSWindow?, URL?) -> URL?
+    private let injectedSyncRootProbe: ((URL) -> Bool)?
     private let passwordVaultSyncSnapshotProvider: () -> PasswordVaultSyncSnapshot
-    private let managePasswordVaultSync: () -> Void
+    private let enablePasswordVaultSync: (
+        URL,
+        @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) -> Void
+    private var requiresOneDriveSelection = false
     private var infoPopover: NSPopover?
     private let fileTypeOptions: [FileTypeOption] = [
         FileTypeOption(
@@ -245,19 +250,28 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
             panel.directoryURL = currentRootURL
             return panel.runModal() == .OK ? panel.url : nil
         },
+        syncRootProbe: ((URL) -> Bool)? = nil,
         passwordVaultSyncSnapshotProvider: @escaping () -> PasswordVaultSyncSnapshot = {
             AppEnvironment.current.passwordVaultSyncService.snapshot
         },
-        managePasswordVaultSync: @escaping () -> Void = {
-            AppEnvironment.current.menuManager.popUpPasswordVaultSync()
+        enablePasswordVaultSync: @escaping (
+            URL,
+            @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+        ) -> Void = { rootURL, completion in
+            AppEnvironment.current.passwordVaultSyncService.enableOneDrive(
+                rootURL: rootURL,
+                remoteMasterPassword: nil,
+                completion: completion
+            )
         }
     ) {
         self.defaultFolderResolver = defaultFolderResolver
         self.defaultFolderResolutionProvider = defaultFolderResolutionProvider ?? { defaultFolderResolver.resolve() }
         self.revealInFinder = revealInFinder
         self.chooseSyncRoot = chooseSyncRoot
+        self.injectedSyncRootProbe = syncRootProbe
         self.passwordVaultSyncSnapshotProvider = passwordVaultSyncSnapshotProvider
-        self.managePasswordVaultSync = managePasswordVaultSync
+        self.enablePasswordVaultSync = enablePasswordVaultSync
         super.init(paneID: .sync, title: pasteraPreferenceString("Sync"))
     }
 
@@ -339,18 +353,18 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
         registerAnchor("sync.oneDriveStatus", view: statusRow)
         registerAnchor("sync.rootFolder", view: folderRow)
 
-        manageVaultSyncButton.bezelStyle = .rounded
-        manageVaultSyncButton.controlSize = .small
-        manageVaultSyncButton.setAccessibilityLabel(Text.manageInMainWindow)
+        enableVaultSyncButton.bezelStyle = .rounded
+        enableVaultSyncButton.controlSize = .small
+        enableVaultSyncButton.setAccessibilityLabel(Text.enableVaultSync)
         let vaultStatusRow = PasteraPreferenceSettingRowView(
             title: pasteraPreferenceString("Password Vault Sync"),
             subtitle: pasteraPreferenceString("Password vault sync is independent from history and snippet sync."),
             control: vaultSyncSummaryView
         )
         let vaultManagementRow = PasteraPreferenceSettingRowView(
-            title: pasteraPreferenceString("Sync Management"),
-            subtitle: pasteraPreferenceString("Enable, stop, recover, or resolve conflicts in the main window."),
-            control: manageVaultSyncButton
+            title: pasteraPreferenceString("Enable Password Vault Sync"),
+            subtitle: pasteraPreferenceString("Create an encrypted OneDrive replica using the selected folder."),
+            control: enableVaultSyncButton
         )
         let vaultGroup = PasteraPreferenceGroupView(
             title: pasteraPreferenceString("Password Vault"),
@@ -480,8 +494,8 @@ private extension CPYSyncPreferenceViewController {
         showFolderButton.action = #selector(showFolderInFinder)
         syncNowButton.target = self
         syncNowButton.action = #selector(syncNow)
-        manageVaultSyncButton.target = self
-        manageVaultSyncButton.action = #selector(manageVaultSync)
+        enableVaultSyncButton.target = self
+        enableVaultSyncButton.action = #selector(enableVaultSync)
     }
 
     @objc func showSyncInfo(_ sender: NSButton) {
@@ -540,9 +554,18 @@ private extension CPYSyncPreferenceViewController {
         SyncCoordinator.shared.syncNow(reason: .manual)
     }
 
-    @objc func manageVaultSync() {
-        view.window?.close()
-        managePasswordVaultSync()
+    @objc func enableVaultSync() {
+        guard passwordVaultSyncSnapshotProvider().mode == .localOnly,
+              ensureDefaultFolderAvailable(),
+              let rootURL = settingsStore.settings().rootURL else {
+            return
+        }
+        enableVaultSyncButton.isEnabled = false
+        enablePasswordVaultSync(rootURL) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.updateControls()
+            }
+        }
     }
 
     @objc func toggleHistoryUpload(_ sender: PasteraSyncSwitch) {
@@ -617,6 +640,10 @@ private extension CPYSyncPreferenceViewController {
 
     func updatePasswordVaultSyncSummary() {
         let snapshot = passwordVaultSyncSnapshotProvider()
+        let rootIsAvailable = settingsStore.settings().rootURL.map(isSyncRootAvailable) ?? false
+        enableVaultSyncButton.isHidden = snapshot.mode == .oneDrive
+        enableVaultSyncButton.isEnabled = snapshot.mode == .localOnly
+            && rootIsAvailable
         let presentation = passwordVaultSyncPresentation(for: snapshot)
         vaultSyncSummaryView.update(
             text: presentation.text,
@@ -730,7 +757,7 @@ private extension CPYSyncPreferenceViewController {
     @discardableResult
     func updateOneDriveStatus(rootURL: URL?) -> Bool {
         guard let rootURL else {
-            oneDriveStatusBadge.state = .notDetected
+            oneDriveStatusBadge.state = requiresOneDriveSelection ? .selectionRequired : .notDetected
             folderRow?.toolTip = nil
             changeFolderButton.toolTip = nil
             showFolderButton.toolTip = nil
@@ -775,6 +802,7 @@ private extension CPYSyncPreferenceViewController {
 
     func applyDefaultFolder() {
         if let rootURL = settingsStore.settings().rootURL {
+            requiresOneDriveSelection = false
             if !isSyncRootAvailable(rootURL) {
                 updateControls()
             }
@@ -782,20 +810,25 @@ private extension CPYSyncPreferenceViewController {
         }
         switch defaultFolderResolutionProvider() {
         case .found(let candidate):
+            requiresOneDriveSelection = false
             useDefaultFolder(candidate)
         case .notFound:
+            requiresOneDriveSelection = false
             settingsStore.setRootURL(nil)
         case .multiple(let candidates):
             guard let candidate = defaultFolderResolver.preferredCandidate(from: candidates) else {
+                requiresOneDriveSelection = true
                 settingsStore.setRootURL(nil)
                 return
             }
+            requiresOneDriveSelection = false
             useDefaultFolder(candidate)
         }
     }
 
     func useDefaultFolder(_ candidate: SyncDefaultFolderCandidate) {
-        guard let preparedCandidate = defaultFolderResolver.prepare(candidate) else {
+        guard let preparedCandidate = defaultFolderResolver.prepare(candidate),
+              canWriteSyncProbe(at: preparedCandidate.syncRootURL) else {
             settingsStore.setRootURL(nil)
             return
         }
@@ -821,20 +854,16 @@ private extension CPYSyncPreferenceViewController {
     }
 
     func isOneDriveBacked(_ rootURL: URL) -> Bool {
-        let components = rootURL.standardizedFileURL.pathComponents
-        if let cloudStorageIndex = components.firstIndex(of: "CloudStorage"),
-           components.indices.contains(cloudStorageIndex + 1) {
-            let oneDriveName = components[cloudStorageIndex + 1]
-            guard oneDriveName.range(of: "OneDrive", options: [.anchored, .caseInsensitive]) != nil else {
-                return false
-            }
-            return oneDriveName.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil
-                && oneDriveName.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
+        if rootURL.standardizedFileURL.pathComponents.contains("CloudStorage") {
+            return SyncDefaultFolderResolver.isUsableOneDriveBackedURL(rootURL)
         }
         return defaultFolderResolver.oneDriveCandidate(containing: rootURL) != nil
     }
 
     func canWriteSyncProbe(at rootURL: URL) -> Bool {
+        if let injectedSyncRootProbe {
+            return injectedSyncRootProbe(rootURL)
+        }
         let probeURL = rootURL.appendingPathComponent(".pastera-sync-check", isDirectory: false)
         let payload = UUID().uuidString
         do {

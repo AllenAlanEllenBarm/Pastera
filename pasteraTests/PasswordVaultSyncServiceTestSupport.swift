@@ -143,10 +143,8 @@ final class FakePasswordVaultCloudReplica: PasswordVaultCloudReplica {
     var snapshot: PasswordVaultCloudSnapshot?
     var readError: PasswordVaultSyncFailure?
     var writeError: PasswordVaultSyncFailure?
-    var deleteError: PasswordVaultSyncFailure?
     var readCount = 0
     var writes = [Write]()
-    var deleteCount = 0
 
     func read(rootURL: URL) throws -> PasswordVaultCloudSnapshot? {
         readCount += 1
@@ -166,11 +164,6 @@ final class FakePasswordVaultCloudReplica: PasswordVaultCloudReplica {
         return digest
     }
 
-    func delete(rootURL: URL) throws {
-        deleteCount += 1
-        if let deleteError { throw deleteError }
-        snapshot = nil
-    }
 }
 
 final class FakeOneDriveProcessStatusService: OneDriveProcessStatusServicing {

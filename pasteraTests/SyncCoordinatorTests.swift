@@ -109,6 +109,43 @@ struct SyncCoordinatorTests {
     }
 
     @Test
+    func defaultFolderResolverRequiresSelectionForSingleNamedAccount() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let workURL = oneDriveRootURL(homeURL: homeURL, name: "OneDrive-公司名称")
+        try FileManager.default.createDirectory(at: workURL, withIntermediateDirectories: true)
+
+        let resolution = SyncDefaultFolderResolver(fileManager: .default).resolve(homeDirectory: homeURL)
+
+        guard case .multiple(let candidates) = resolution else {
+            #expect(Bool(false), "Expected explicit selection for a named OneDrive account, got \(resolution)")
+            return
+        }
+        #expect(candidates.map(\.displayName) == ["OneDrive-公司名称"])
+        #expect(!FileManager.default.fileExists(atPath: syncRootURL(oneDriveRootURL: workURL).path))
+    }
+
+    @Test
+    func defaultFolderResolverRequiresSelectionForMultipleNamedAccounts() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let firstURL = oneDriveRootURL(homeURL: homeURL, name: "OneDrive-公司甲")
+        let secondURL = oneDriveRootURL(homeURL: homeURL, name: "OneDrive-公司乙")
+        try FileManager.default.createDirectory(at: firstURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondURL, withIntermediateDirectories: true)
+
+        let resolution = SyncDefaultFolderResolver(fileManager: .default).resolve(homeDirectory: homeURL)
+
+        guard case .multiple(let candidates) = resolution else {
+            #expect(Bool(false), "Expected explicit selection for multiple OneDrive accounts, got \(resolution)")
+            return
+        }
+        #expect(Set(candidates.map(\.displayName)) == ["OneDrive-公司甲", "OneDrive-公司乙"])
+        #expect(!FileManager.default.fileExists(atPath: syncRootURL(oneDriveRootURL: firstURL).path))
+        #expect(!FileManager.default.fileExists(atPath: syncRootURL(oneDriveRootURL: secondURL).path))
+    }
+
+    @Test
     func defaultFolderResolverDoesNotFallbackToDocumentsFolder() throws {
         let homeURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: homeURL) }
@@ -155,6 +192,48 @@ struct SyncCoordinatorTests {
         let resolution = SyncDefaultFolderResolver(fileManager: .default).resolve(homeDirectory: homeURL)
 
         #expect(resolution == .notFound)
+    }
+
+    @Test
+    func defaultFolderResolverIgnoresLocalizedSharedLibraryDirectories() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let sharedLibraryURL = oneDriveRootURL(
+            homeURL: homeURL,
+            name: "OneDrive-共享的库-oneDrive"
+        )
+        try FileManager.default.createDirectory(at: sharedLibraryURL, withIntermediateDirectories: true)
+
+        let resolver = SyncDefaultFolderResolver(fileManager: .default)
+
+        #expect(resolver.resolve(homeDirectory: homeURL) == .notFound)
+        #expect(resolver.oneDriveCandidates(homeDirectory: homeURL).isEmpty)
+    }
+
+    @Test
+    func passwordVaultRootValidationRejectsPreviouslySavedLocalizedSharedLibrary() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let rootURL = syncRootURL(oneDriveRootURL: oneDriveRootURL(
+            homeURL: homeURL,
+            name: "OneDrive-共享的库-oneDrive"
+        ))
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        #expect(Environment.validatePasswordVaultSyncRoot(rootURL) == .folderUnavailable)
+    }
+
+    @Test
+    func passwordVaultRootValidationAllowsExplicitlySelectedWorkAccount() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let rootURL = syncRootURL(oneDriveRootURL: oneDriveRootURL(
+            homeURL: homeURL,
+            name: "OneDrive-公司名称"
+        ))
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        #expect(Environment.validatePasswordVaultSyncRoot(rootURL) == nil)
     }
 
     @Test
@@ -1038,18 +1117,6 @@ private final class CoordinatorPasswordVaultSyncController: PasswordVaultSyncCon
     func enableOneDrive(
         rootURL _: URL,
         remoteMasterPassword _: String?, // swiftlint:disable:this inclusive_language
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) {
-        completion(.success(()))
-    }
-
-    func switchToLocalOnly(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) {
-        completion(.success(()))
-    }
-
-    func deleteRemoteReplica(
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     ) {
         completion(.success(()))

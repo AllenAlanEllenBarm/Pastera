@@ -18,14 +18,19 @@ The settings UI shows a friendly path such as `OneDrive > Pastera > sync`
 instead of exposing the hidden `Library` path. Pastera detects usable
 `~/Library/CloudStorage/OneDrive*` folders, filters shared-library/temp
 locations, and creates `<OneDrive>/Pastera/sync` only for the selected default
-candidate. If multiple OneDrive roots exist, Pastera prefers the personal
-`OneDrive` folder; otherwise it uses the first usable OneDrive root by name.
+candidate. Only the exact personal root named `OneDrive` is selected
+automatically. Every `OneDrive-*` work/account root requires an explicit
+selection even when it is the only candidate. English and localized shared
+libraries, including `Shared Libraries`, `共享的库`, and `共享库`, are
+never candidates.
 
 The settings UI allows the user to choose a sync location. On macOS the chosen
-location must be inside a usable OneDrive folder and writable; otherwise Pastera
-does not save it. If no usable OneDrive folder is detected, sync controls report
-that the user must install and log in to OneDrive. Pastera does not fall back to
-`~/Documents`.
+location must be inside a usable OneDrive folder and pass a write, read-back,
+and cleanup probe; otherwise Pastera does not save it. A previously saved root
+that is missing or points into a shared library is treated as unavailable before
+new cloud writes begin. If no usable OneDrive folder is detected, sync controls
+report that the user must install and log in to OneDrive. Pastera does not fall
+back to `~/Documents`.
 
 Sync is intentionally non-destructive:
 
@@ -46,9 +51,11 @@ Password vault storage has its own lifecycle and is independent from history,
 snippet, and file-asset sync. Creating a password vault defaults to
 `localOnly`; the OneDrive root and the four history/snippet switches do not
 enable password-vault sync. The Sync settings pane only shows a password-vault
-summary and a **Manage in Main Window** entrance. Enabling, stopping, recovery,
-remote credentials, conflict review, and remote deletion stay in the main
-password-vault window.
+summary plus a one-way **Enable OneDrive Sync** action while the vault is still
+local-only. After enabling, Settings retains the account/root, status summary,
+and manual sync controls; the product UI does not offer stopping password-vault
+sync or deleting its OneDrive copy. Context-specific local-copy recovery,
+remote credentials, and conflict review remain in the password-vault window.
 
 The production local working copy is stored outside OneDrive:
 
@@ -105,13 +112,11 @@ remove older matching entries or groups. A different remote master password is
 accepted only as a one-shot in-memory merge credential and is cleared when the
 page is submitted or left.
 
-Stopping sync changes the mode to `localOnly` and stops remote observation and
-writes. It preserves the local KDBX, the OneDrive KDBX, and both digest
-baselines so a later re-enable can compare both branches. **Delete OneDrive
-Copy** is a separate, in-window confirmed action: it preserves the local vault,
-deletes only the compatible remote KDBX, switches to `localOnly`, and clears the
-remote baseline only after deletion succeeds. A failed deletion leaves the
-mode, data, and baselines unchanged.
+Once password-vault sync is enabled, the mode remains `oneDrive`. The main
+OneDrive footer icon reports the desktop client's process state together with
+the vault-sync badge; clicking it launches or activates OneDrive without
+navigating away from the current Pastera content. If OneDrive is missing, the
+icon reports that state without opening a download page.
 
 ## Directory Layout
 

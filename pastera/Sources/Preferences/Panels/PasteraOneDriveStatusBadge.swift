@@ -17,6 +17,7 @@ final class PasteraOneDriveStatusBadge: NSView {
         case available
         case unavailable
         case notDetected
+        case selectionRequired
 
         var displayText: String {
             switch self {
@@ -26,6 +27,8 @@ final class PasteraOneDriveStatusBadge: NSView {
                 return pasteraPreferenceString("OneDrive Unavailable")
             case .notDetected:
                 return pasteraPreferenceString("OneDrive Not Detected")
+            case .selectionRequired:
+                return pasteraPreferenceString("Select a OneDrive Folder")
             }
         }
 
@@ -37,6 +40,8 @@ final class PasteraOneDriveStatusBadge: NSView {
                 return pasteraPreferenceString("OneDrive Unavailable Description")
             case .notDetected:
                 return pasteraPreferenceString("OneDrive Not Detected Description")
+            case .selectionRequired:
+                return pasteraPreferenceString("Select a OneDrive Folder Description")
             }
         }
 
@@ -46,7 +51,7 @@ final class PasteraOneDriveStatusBadge: NSView {
                 return .systemGreen
             case .unavailable:
                 return .systemRed
-            case .notDetected:
+            case .notDetected, .selectionRequired:
                 return .secondaryLabelColor
             }
         }

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将密码箱从“直接读写 OneDrive KDBX”改为“本地加密 KDBX 是唯一工作副本，OneDrive 是用户主动开启的可选同步副本”，保证无 OneDrive、OneDrive 断联和云端错误时仍可完整使用本地密码箱，并在当前主窗口内完成状态查看、恢复、停止同步和冲突处理。
+**Goal:** 将密码箱从“直接读写 OneDrive KDBX”改为“本地加密 KDBX 是唯一工作副本，OneDrive 是用户主动开启的可选同步副本”，保证无 OneDrive、OneDrive 断联和云端错误时仍可完整使用本地密码箱；主界面 OneDrive 图标只显示状态并打开或激活客户端，账户与单向启用留在设置页，密码箱内只保留必要恢复与冲突处理。
 
 **Architecture:** `KDBXPasswordVaultStore` 只访问 Application Support 下的本地 KDBX；一次性迁移服务负责把旧版云端工作文件安全复制到本地；独立的 `PasswordVaultSyncService` 维护同步模式、基线、待同步计数和 OneDrive 副本，通过现有 `SyncCoordinator` 的串行调度执行摘要比较、单向复制或条目级合并。密码箱状态与同步状态独立，云端错误只进入同步状态，不得进入主密码字段错误。
 
@@ -19,8 +19,9 @@
 - OneDrive 未运行、目录不可用、文件仍是占位符、空间不足、无权限或云端损坏时，本地写入必须成功或只报告本地写入错误；不得报告主密码错误。
 - 恢复连接时禁止整库“最后写入覆盖”。两端变化必须在密码箱解锁后按 UUID、修改时间、历史记录和 tombstone 规则合并；无法判定时生成冲突副本。
 - 云端临时写入、原子替换和重新读取摘要全部成功后，才允许清除待同步状态。
-- 点击底部 OneDrive 图标只切换当前主窗口内容，不打开 OneDrive、不打开 popover、不打开 sheet、不打开向导。只有用户点击页面内“启动 OneDrive”时才调用 `openOneDrive()`。
-- 停止同步默认保留本地和云端副本；删除云端副本是独立的页面内危险确认流程。
+- 2026-08-04 交互修订覆盖 Task 9/10 的旧入口：点击底部 OneDrive 图标只调用 `openOneDrive()` 以启动或激活客户端，不切换密码箱页面，不打开 popover、sheet 或向导。
+- 产品界面删除停止同步、删除云端副本及其确认页；设置页只允许 localOnly 单向启用密码箱同步。
+- 只有精确名为 `OneDrive` 的个人根目录可自动选择；任何 `OneDrive-*` 候选都要求用户明确选择，已知共享资料库与 `CloudTemp` 不得作为候选。
 - 新增 Swift 源文件与测试文件必须加入 `pastera.xcodeproj/project.pbxproj` 的正确 group、target membership 和 Sources phase。
 - 所有功能和修复遵循 TDD：先运行新增测试观察预期 RED，再写最小生产代码，最后运行聚焦测试观察 GREEN。
 - 每个任务提交前运行 `git diff --check`，提交只包含该任务文件，不得提交 `.codex/`、`.superpowers/`、`.spm-cache/` 或用户的无关改动。
@@ -954,6 +955,30 @@ git add pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift
 git commit -m "docs(vault): verify local-first OneDrive lifecycle"
 ```
 
+### Task 12: 简化 OneDrive 入口并阻止共享资料库误选（2026-08-04 修订）
+
+本任务覆盖 Task 9/10/11 中已经交付、但被本次产品确认取消的通用同步页面、停止同步、删除云端副本和“在主窗口管理”交互；不回退本地优先、自动同步、合并、冲突与迁移能力。
+
+**Files:**
+- Modify: `pastera/Sources/Services/SyncCoordinator.swift`
+- Modify: `pastera/Sources/Services/PasswordVaultSyncService.swift`
+- Modify: `pastera/Sources/Services/LocalOnlyPasswordVaultSyncController.swift`
+- Modify: `pastera/Sources/Managers/MainMenuFooterButtons.swift`
+- Modify: `pastera/Sources/Managers/MainMenuPanelController.swift`
+- Modify: `pastera/Sources/Managers/MenuManager.swift`
+- Modify: `pastera/Sources/Managers/PasswordVaultSyncView.swift`
+- Modify: `pastera/Sources/Preferences/Panels/CPYSyncPreferenceViewController.swift`
+- Modify: `pastera/Resources/Localizable.xcstrings`
+- Modify: relevant tests and this specification/plan
+
+- [x] 先修改 resolver 测试观察 RED：精确 `OneDrive` 仍可自动选；单个或多个 `OneDrive-*` 返回需选择结果；中文/英文共享资料库与 `CloudTemp` 不进入候选；设置页面对需选择结果不保存排序后的第一个目录。
+- [x] 实现账户选择规则。已保存根目录失效或未通过设置页写入、回读、删除探针时不创建同步目录、不执行新云端写入，保留所有数据并提示重新选择。
+- [x] 先修改 footer/menu 测试观察 RED：点击图标在 OneDrive 已运行和未运行时均调用 `openOneDrive()`，不切换密码箱内部页面；未安装时只呈现状态且不打开下载页；图标同时表达客户端运行状态与密码箱同步 badge。
+- [x] 删除通用 `PasswordVaultSyncView`、`.sync`、`.confirmRemoteDeletion` 和导航链路；保留 local-copy recovery、remote credentials、conflict summary 三类上下文页面。
+- [x] 删除 `switchToLocalOnly`、`deleteRemoteReplica` 的用户动作、data source、service API、实现和对应测试；保留 `PasswordVaultSyncMode.localOnly` 作为首次默认模式和单向启用前状态。
+- [x] 设置页删除“在主窗口管理”，localOnly 且根目录有效时显示单向启用；保留账户/根目录、状态摘要与“立即同步”。首次创建选择 OneDrive 时先创建本地 KDBX，再尝试使用已经明确选择且可写的设置根目录启用；失败不回滚本地密码箱。
+- [x] 清理已无调用方的停止/删除文案与 UI 测试，运行 `git diff --check`、聚焦 suite、单 worker 完整测试与本地安装。
+
 ---
 
 ## Acceptance Mapping
@@ -964,15 +989,15 @@ git commit -m "docs(vault): verify local-first OneDrive lifecycle"
 | 创建默认仅本机且不自动启用 | Task 8、9 | Menu 与 SyncCoordinator tests |
 | OneDrive 断联不阻塞本地操作 | Task 3、6、8、9 | Store、SyncService、footer tests；停止进程验证 |
 | 红色断联徽标且不能只靠颜色 | Task 9 | Visual、footer、accessibility tests |
-| 点击图标在当前窗口打开同步页面 | Task 9 | fake openOneDrive 调用次数为 0 |
+| 点击图标启动或激活 OneDrive 且不导航 | Task 12 | process service fake 与 menu/page state tests |
 | 断联期间完整新增、修改、删除 | Task 3、6 | Store 与 pending revision tests |
 | 单边变化自动同步 | Task 6 | SyncService decision tests |
 | 双边变化条目级合并 | Task 7 | KDBX merge 与 service tests |
 | 同条目冲突保留历史或副本 | Task 7、10 | conflict count、history、UI tests |
 | 锁定时等待解锁且不覆盖 | Task 6、7、8 | digest 不变与 retry tests |
 | 云端验证成功前不清 pending | Task 5、6、7 | write/verify failure tests |
-| 停止同步保留两端 | Task 10 | service 与 page tests |
-| 删除云端是独立页面内危险操作 | Task 10 | inline confirmation tests |
+| 工作/共享候选不被静默选中 | Task 12 | resolver 与 settings tests |
+| UI 不提供停止同步或删除云端副本 | Task 12 | menu、settings 与 service contract tests |
 | 旧版云端工作文件安全迁移 | Task 4 | migration matrix tests |
 | 新设备本地未准备好不显示密码错误 | Task 4、10 | recovery page tests |
 | 云端错误不进入密码字段 | Task 3、8、9、10 | local wrong-password boundary tests |
@@ -987,7 +1012,7 @@ git commit -m "docs(vault): verify local-first OneDrive lifecycle"
 - **不同主密码：** 云端主密码只做一次性内存参数；失败不改变本地库、同步基线和 pending。
 - **双边写入部分成功：** 本地先生成备份并原子落盘；云端失败保留本地合并结果和 pending，下次按本地变化重试。
 - **现有未提交实现冲突：** 隔离 worktree 实施；合并前逐文件比较当前用户工作区，不使用 reset 或 checkout 覆盖。
-- **回滚：** 保留本地 KDBX 与 `.bak`；可以将 mode 切回 localOnly 停止云端访问。禁止通过回滚删除本地或云端密码箱。
+- **回滚：** 保留本地 KDBX 与 `.bak`。产品 UI 不提供切回 localOnly 或删除云端；需要工程恢复时先保存两端副本并禁止通过回滚删除任何密码箱。
 
 ## Delivery Record
 
@@ -1002,3 +1027,15 @@ git commit -m "docs(vault): verify local-first OneDrive lifecycle"
 - **Runtime Evidence:** 隔离临时目录测试覆盖 localOnly CRUD、断联 pending、重连、单边更新、冲突、锁定等待、迁移、本地/远端损坏、停止同步与删除副本。真实 follow-up 中 OneDrive 主进程 PID `89274` 与 File Provider 均已运行；远端 `PasteraVault.kdbx` 初始为 `dataless` 占位文件，Pastera 日志在 13:58 记录系统读取错误 60（超时）。文件完成下载后重启 Pastera，Application Support 本地 KDBX 与远端 KDBX 的 SHA-256 均为 `a26f69a3622511e7c581d52c05fbbace12d746cab202f69f757b4616d3002854`，元数据回读为 `migrationVersion=1`、`mode=oneDrive`、`pendingChangeCount=0`。`./script/install_local.sh --verify` 已重新安装 3.0.1 (301)，ad-hoc 深度签名通过，最终进程 PID `99552` 从 `/Applications/Pastera.app` 运行。
 - **Plan Deviations:** 默认并行 full test 被既有 AppKit 颜色空间日志放大并导致三个无关超时项；对应 suite 独立通过后，以单 worker full test 作为稳定门禁。菜单栏 `LSUIElement` 对 Computer Use 不暴露标准窗口，无法完成无密码的真实点击回放；UI 视觉与入口顺序由截图测试、AX 文本和按钮行为测试验证。Release 命令改用仓库脚本一致的 app target 与显式输出目录，避免 scheme 编译测试 bundle。真实 File Provider 冒烟发现“已安装”和“已运行”在恢复页被混为一谈；follow-up 只调整恢复文案与动作展示，不改变显式重试和非破坏性迁移语义。
 - **Residual Risks:** OneDrive 已运行但云端占位文件尚未下载完成时，恢复仍依赖用户在下载完成后显式重试；当前界面会准确说明该状态且不再重复提供“启动 OneDrive”。未执行删除远端副本等破坏性真实目录验证。VoiceOver 人工听读未完成，但 footer、摘要、动作与安全输入均有可访问性断言。
+
+### 2026-08-04 Task 12 Follow-up
+
+- **Actual Implementation:** 在 `codex/onedrive-status-simplification`、`/Users/feeyo/workspace/github.com/pastera-app/Pastera/.worktrees/onedrive-status-simplification` 完成。主界面 OneDrive 图标现在按客户端进程状态着色，点击只启动或激活 OneDrive，不再进入通用同步页；保留密码箱同步 badge、自动同步、合并、冲突与三类上下文恢复页。设置页改为仅从 localOnly 单向启用，并在保存新根目录前执行写入、回读、删除探针。
+- **Root Selection:** 仅精确名称 `OneDrive` 可自动选择；任何 `OneDrive-*` 账户均要求明确选择。英文 `Shared Libraries`、中文 `共享的库`/`共享库` 和 `CloudTemp` 根目录会被候选发现、已保存根目录校验与新写入路径共同拒绝。因此用户诊断中的 `OneDrive-共享的库-oneDrive` 不再能成为密码箱云端写入根目录。
+- **Removed Surface:** 删除通用 `PasswordVaultSyncView` 类型、`.sync`/`.confirmRemoteDeletion` 导航、设置页“在主窗口管理”、停止同步、删除云端副本、确认页及 `switchToLocalOnly`、`deleteRemoteReplica`、cloud replica delete 契约和实现；`PasswordVaultSyncMode.localOnly` 仍作为首次默认和单向启用前状态存在。
+- **Implementation Commits:** 无；本次未获授权创建提交或推送。
+- **RED Evidence:** resolver 测试先证明单个命名工作账户会被静默选中，且本地化共享资料库会进入候选；footer/menu 测试先证明图标动作没有满足“运行和未运行均 open、且不导航”；设置页探针测试先以缺少注入点编译失败。对应生产实现完成后这些断言转绿。
+- **GREEN Evidence:** OneDrive/menu/settings/service/cloud replica 聚焦回归 150 项（9 suites）通过；完整门禁首次发现新增设置文案缺少完整语言覆盖，同时 OCR 搜索用例出现一次共享状态波动。补齐五语文案后，PreferenceSearch 与 OCR 两个 suite 串行 29 项通过；最终使用全新 DerivedData、单 worker 的 `clean test` 为 1150 项（101 suites）全通过。`git diff --check` 与 `jq empty pastera/Resources/Localizable.xcstrings` 通过。
+- **Installation Evidence:** `./script/install_local.sh` 构建、ad-hoc 签名并替换 `/Applications/Pastera.app`；回读版本为 3.0.1 (301)，`codesign --verify --deep --strict` 通过，进程 PID `60049` 从 `/Applications/Pastera.app/Contents/MacOS/Pastera` 运行。
+- **Plan Deviations:** 真实问题机器不可从当前环境远程操作，本次以用户提供的 defaults/path 证据、跨语言 resolver 测试和本机安装回读闭环。shell 输出里的 `\u5171...` 可能只是 defaults 对 Unicode 的转义显示，不能单独证明路径不存在；解码后的目录名明确是共享资料库，旧选择规则仍不应把它当个人或工作账户根目录。
+- **Remaining Risks:** 已保存的共享资料库路径会安全失败并阻止新云端写入，但该 Mac 仍需用户在设置页重新明确选择自己的 OneDrive 账户目录。当前环境未对问题 Mac 做真实 File Provider readback，也未执行任何删除云端数据的破坏性验证。

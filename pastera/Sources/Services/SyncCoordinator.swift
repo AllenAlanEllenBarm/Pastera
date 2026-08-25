@@ -273,8 +273,11 @@ struct SyncDefaultFolderResolver {
 
     func resolve(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> SyncDefaultFolderResolution {
         let candidates = oneDriveCandidates(homeDirectory: homeDirectory)
-        guard let candidate = preferredCandidate(from: candidates) else {
+        guard !candidates.isEmpty else {
             return .notFound
+        }
+        guard let candidate = preferredCandidate(from: candidates) else {
+            return .multiple(candidates)
         }
         guard let preparedCandidate = prepare(candidate) else {
             return .notFound
@@ -286,8 +289,9 @@ struct SyncDefaultFolderResolver {
         let sortedCandidates = candidates.sorted {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
-        return sortedCandidates.first { $0.displayName.compare("OneDrive", options: [.caseInsensitive]) == .orderedSame }
-            ?? sortedCandidates.first
+        return sortedCandidates.first {
+            $0.displayName.compare("OneDrive", options: [.caseInsensitive]) == .orderedSame
+        }
     }
 
     func prepare(_ candidate: SyncDefaultFolderCandidate) -> SyncDefaultFolderCandidate? {
@@ -359,13 +363,27 @@ struct SyncDefaultFolderResolver {
             .appendingPathComponent("sync", isDirectory: true)
     }
 
-    private func isUsableOneDriveRoot(_ url: URL) -> Bool {
-        let name = url.lastPathComponent
+    static func isUsableOneDriveBackedURL(_ url: URL) -> Bool {
+        let components = url.standardizedFileURL.pathComponents
+        guard let cloudStorageIndex = components.firstIndex(of: "CloudStorage"),
+              components.indices.contains(cloudStorageIndex + 1) else {
+            return false
+        }
+        return isUsableOneDriveRootName(components[cloudStorageIndex + 1])
+    }
+
+    static func isUsableOneDriveRootName(_ name: String) -> Bool {
         guard name.range(of: "OneDrive", options: [.anchored, .caseInsensitive]) != nil else {
             return false
         }
-        guard name.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil,
-              name.range(of: "CloudTemp", options: [.caseInsensitive]) == nil else {
+        return name.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil
+            && name.range(of: "共享的库", options: [.caseInsensitive]) == nil
+            && name.range(of: "共享库", options: [.caseInsensitive]) == nil
+            && name.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
+    }
+
+    private func isUsableOneDriveRoot(_ url: URL) -> Bool {
+        guard Self.isUsableOneDriveRootName(url.lastPathComponent) else {
             return false
         }
         let values = try? url.resourceValues(forKeys: [.isDirectoryKey])

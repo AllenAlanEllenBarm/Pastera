@@ -21,12 +21,6 @@ protocol PasswordVaultSyncControlling: AnyObject {
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     )
     // swiftlint:enable inclusive_language
-    func switchToLocalOnly(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    )
-    func deleteRemoteReplica(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    )
 }
 
 extension PasswordVaultSyncControlling {
@@ -167,47 +161,6 @@ extension PasswordVaultSyncService {
     }
     // swiftlint:enable inclusive_language
 
-    func switchToLocalOnly(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            var candidate = self.metadata
-            candidate.mode = .localOnly
-            candidate.lastFailure = nil
-            do {
-                try self.save(candidate)
-                self.publish(phase: .disabled, remoteVaultAvailable: nil)
-                self.complete(.success(()), completion: completion)
-            } catch {
-                self.complete(.failure(.remoteWriteFailed), completion: completion)
-            }
-        }
-    }
-
-    func deleteRemoteReplica(
-        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
-    ) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            do {
-                let rootURL = try self.resolvedRootURL()
-                try self.cloudReplica.delete(rootURL: rootURL)
-                var candidate = self.metadata
-                candidate.mode = .localOnly
-                candidate.lastObservedRemoteDigest = nil
-                candidate.pendingChangeCount = 0
-                candidate.lastFailure = nil
-                try self.save(candidate)
-                self.publish(phase: .disabled, remoteVaultAvailable: false)
-                self.complete(.success(()), completion: completion)
-            } catch {
-                let failure = Self.syncFailure(from: error)
-                self.fail(failure, remoteVaultAvailable: nil)
-                self.complete(.failure(failure), completion: completion)
-            }
-        }
-    }
 }
 
 private extension PasswordVaultSyncService {

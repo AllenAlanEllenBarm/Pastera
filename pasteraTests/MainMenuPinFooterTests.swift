@@ -17,15 +17,31 @@ import Testing
 @Suite(.serialized)
 struct MainMenuVaultSyncFooterTests {
     @Test
-    func passwordVaultSyncDisabledUsesNeutralOneDrivePresentationWithoutBadge() {
+    func missingOneDriveWithVaultSyncDisabledUsesNeutralPresentationWithoutBadge() {
         let presentation = MainMenuOneDriveStatusPresentation(
             snapshot: makePasswordVaultSyncSnapshot(mode: .localOnly, phase: .disabled),
             processStatus: .notInstalled
         )
 
         #expect(presentation.badge == .none)
-        #expect(presentation.tintColor.isEqual(NSColor.secondaryLabelColor))
-        #expect(presentation.accessibilityLabel == String(localized: "OneDrive sync is not enabled"))
+        #expect(presentation.tintColor.isEqual(NSColor.tertiaryLabelColor))
+        #expect(presentation.accessibilityLabel == String(
+            localized: "OneDrive is not installed; password vault sync is not enabled"
+        ))
+    }
+
+    @Test
+    func runningOneDriveStaysBlueWhenPasswordVaultSyncIsDisabled() {
+        let presentation = MainMenuOneDriveStatusPresentation(
+            snapshot: makePasswordVaultSyncSnapshot(mode: .localOnly, phase: .disabled),
+            processStatus: .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+        )
+
+        #expect(presentation.badge == .none)
+        #expect(presentation.tintColor.isEqual(NSColor.systemBlue))
+        #expect(presentation.accessibilityLabel == String(
+            localized: "OneDrive is running; password vault sync is not enabled"
+        ))
     }
 
     @Test
@@ -670,7 +686,7 @@ struct MainMenuOneDriveStatusAssetTests {
 @Suite(.serialized)
 struct MainMenuFooterButtonActionTests {
     @Test
-    func mainMenuFooterOneDriveStatusDoesNotStartOneDriveOrOpenHistory() {
+    func mainMenuFooterOneDriveStatusStartsInstalledOneDriveWithoutNavigating() {
         let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notRunning(
             appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
         ))
@@ -691,8 +707,60 @@ struct MainMenuFooterButtonActionTests {
 
         controller.performMainMenuOneDriveStatusClickForTesting()
 
-        #expect(oneDriveService.openCallCount == 0)
+        #expect(oneDriveService.openCallCount == 1)
+        #expect(controller.mainMenuSelectedModeForTesting == "history")
+        #expect(controller.passwordVaultPageForTesting == "vault")
         #expect(!didOpenHistory)
+    }
+
+    @Test
+    func mainMenuFooterOneDriveStatusActivatesRunningOneDriveWithoutNavigating() {
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .running(
+            appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
+        ))
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            oneDriveStatusService: oneDriveService
+        )
+
+        controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
+        defer { controller.close() }
+
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        #expect(oneDriveService.openCallCount == 1)
+        #expect(controller.mainMenuSelectedModeForTesting == "history")
+        #expect(controller.passwordVaultPageForTesting == "vault")
+    }
+
+    @Test
+    func mainMenuFooterOneDriveStatusDoesNotOpenAnythingWhenOneDriveIsMissing() {
+        let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .notInstalled)
+        let controller = MainMenuPanelController(
+            historyTitle: "History",
+            historyImage: nil,
+            snippetTitle: "Snippet",
+            snippetImage: nil,
+            itemsProvider: { [] },
+            onOpenHistory: {},
+            onOpenSnippets: {},
+            oneDriveStatusService: oneDriveService
+        )
+
+        controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
+        defer { controller.close() }
+
+        controller.performMainMenuOneDriveStatusClickForTesting()
+
+        #expect(oneDriveService.openCallCount == 0)
+        #expect(controller.mainMenuSelectedModeForTesting == "history")
+        #expect(controller.passwordVaultPageForTesting == "vault")
     }
 
     @Test
@@ -776,6 +844,30 @@ struct OneDriveProcessStatusServiceTests {
             return
         }
         #expect(statusAppURL == appURL)
+    }
+
+    @Test
+    func installedOneDriveOpensTheResolvedApplicationURL() {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        var openedURL: URL?
+        let service = OneDriveProcessStatusService(
+            applicationURLProvider: { bundleIdentifier in
+                bundleIdentifier == "com.microsoft.OneDrive-mac" ? appURL : nil
+            },
+            fallbackApplicationURLs: [],
+            fileExists: { path in
+                appURL.standardizedFileURL.path == URL(fileURLWithPath: path).standardizedFileURL.path
+            },
+            runningApplicationsProvider: { [] },
+            openApplication: { url in
+                openedURL = url
+                return true
+            },
+            notificationCenter: NotificationCenter()
+        )
+
+        #expect(service.openOneDrive())
+        #expect(openedURL == appURL)
     }
 
     @Test

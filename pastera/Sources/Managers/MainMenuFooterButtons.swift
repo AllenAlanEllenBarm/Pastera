@@ -705,9 +705,24 @@ struct MainMenuOneDriveStatusPresentation {
 
         guard snapshot.mode == .oneDrive else {
             badge = .none
-            tintColor = .secondaryLabelColor
             badgeColor = .clear
-            accessibilityLabel = String(localized: "OneDrive sync is not enabled")
+            switch processStatus {
+            case .running:
+                tintColor = .systemBlue
+                accessibilityLabel = String(
+                    localized: "OneDrive is running; password vault sync is not enabled"
+                )
+            case .notRunning:
+                tintColor = .secondaryLabelColor
+                accessibilityLabel = String(
+                    localized: "OneDrive is not running; password vault sync is not enabled"
+                )
+            case .notInstalled:
+                tintColor = .tertiaryLabelColor
+                accessibilityLabel = String(
+                    localized: "OneDrive is not installed; password vault sync is not enabled"
+                )
+            }
             return
         }
 

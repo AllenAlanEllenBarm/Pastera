@@ -101,7 +101,8 @@ destructive test at the user's existing `PasteraVault.kdbx`.
 | Scenario | Exercise | Required result |
 | --- | --- | --- |
 | No OneDrive | Create a local-only vault, lock, restart, unlock, and perform folder and entry CRUD without a OneDrive account or process. | No OneDrive prompt blocks the vault; mode remains local-only; nothing is created in OneDrive. |
-| Settings separation | Toggle history/snippet upload and import switches, then inspect the password-vault summary. | The password-vault mode does not change. Settings contains only the summary and **Manage in Main Window**; the button closes Settings and opens the inline sync page. |
+| Settings separation | Toggle history/snippet upload and import switches, then inspect the password-vault summary. | The password-vault mode does not change. A local-only vault shows one **Enable OneDrive Sync** action when the selected root is valid; an enabled vault shows no disable or delete action. |
+| Main OneDrive icon | Click the footer icon with OneDrive running, stopped, and missing while different Pastera pages are open. | Running activates OneDrive, stopped launches it, and missing only reports status. Pastera stays on the current page in every case. |
 | Sudden disconnect | Enable password-vault sync, stop OneDrive, then add, edit, move, and delete entries. | Local operations succeed; the footer shows a red disconnected shape and accessible text; pending count increases; the remote KDBX is unchanged. |
 | Reconnect | Start OneDrive after queued local changes and retry sync. | Only the local delta is uploaded; read-back digest verification clears pending and advances local/remote baselines. |
 | Missing local copy recovery | Start from a compatible remote KDBX with no prepared local copy, first with OneDrive stopped and then running. | No local password error field appears. Inline **Start OneDrive** and **Try Again** recover the local copy; choosing a new local vault first shows the separate-branch warning and does not overwrite remote. |
@@ -112,9 +113,7 @@ destructive test at the user's existing `PasteraVault.kdbx`.
 | Local corruption | Corrupt only the isolated local KDBX while retaining its backup and remote test replica. | Pastera reports a local recovery state rather than a cloud-password error; it does not overwrite the remote replica. |
 | Remote corruption or partial download | Replace the isolated remote KDBX with invalid bytes or simulate a placeholder/short read. | Sync reports remote corruption/unavailability, preserves the usable local vault and all baselines, and does not upload over the suspect remote file. |
 | Different remote master password | Encrypt the remote test copy with a different master password and merge once. | Only the inline remote-credentials page has a secure field; the value is one-shot memory state, clears on submit/leave, and a wrong value does not change local data or baselines. |
-| Stop sync | Stop sync from the inline page after both replicas exist. | Mode becomes local-only; local and remote KDBX files plus comparison baselines remain. |
-| Delete remote copy | Use the dedicated confirmation page, test one forced failure, then a success against the isolated replica. | Failure preserves mode/data/baselines and remains inline; success deletes only the remote KDBX, preserves local, switches local-only, and clears the remote baseline. |
-| Accessibility | With VoiceOver or Accessibility Inspector, traverse footer badge, sync mode, summary, Back, primary/secondary actions, dangerous action, conflict count, and remote secure field. Enable Reduce Motion and repeat syncing. | Every state has a shape plus descriptive label, keyboard order is logical, secrets never appear in labels, and reduced motion uses a static progress symbol and text. |
+| Accessibility | With VoiceOver or Accessibility Inspector, traverse footer badge, settings summary, contextual recovery actions, conflict count, and remote secure field. Enable Reduce Motion and repeat syncing. | Every state has a shape plus descriptive label, keyboard order is logical, secrets never appear in labels, and reduced motion uses a static progress symbol and text. |
 
 ## Feature Checks
 
@@ -138,8 +137,10 @@ destructive test at the user's existing `PasteraVault.kdbx`.
   `~/Library/CloudStorage/<OneDrive>/Pastera/sync`.
 - OneDrive multiple accounts: when both personal and work OneDrive folders are
   present, open the Sync pane and confirm Pastera automatically uses the
-  personal `OneDrive` root when present; otherwise it uses the first usable
-  OneDrive root by name. There is no account chooser in v1 beta.
+  personal `OneDrive` root when present. With only one or several `OneDrive-*`
+  work roots, confirm Pastera requires explicit folder selection and does not
+  create `Pastera/sync` under the first name. Confirm English and Chinese shared
+  library roots never appear as candidates.
 - OneDrive missing install/login: temporarily make
   `~/Library/CloudStorage/OneDrive*` unavailable, open the Sync pane, and click
   `自动同步`, `立即同步`, and each detailed scope switch. Each sync entry point

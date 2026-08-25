@@ -214,6 +214,65 @@ struct SyncPreferenceTopSectionTests {
     }
 
     @Test
+    func syncPaneDoesNotSilentlyChooseNamedOneDriveAccount() throws {
+        let oneDriveRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OneDrive-公司名称", isDirectory: true)
+        let candidate = SyncDefaultFolderCandidate(
+            oneDriveRootURL: oneDriveRootURL,
+            syncRootURL: SyncDefaultFolderResolver.defaultFolderURL(oneDriveRootURL: oneDriveRootURL),
+            displayName: "OneDrive-公司名称",
+            isOneDriveBacked: true
+        )
+
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .multiple([candidate]) }
+            )
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            let texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(AppEnvironment.current.defaults.string(forKey: Constants.UserDefaults.syncRootPath) == nil)
+            #expect(texts.contains("请选择 OneDrive 文件夹"))
+        }
+    }
+
+    @Test
+    func syncPaneDoesNotSaveAnAutomaticallyPreparedRootWhenTheProbeFails() throws {
+        try withPreservedSyncDefaults {
+            let homeURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: homeURL) }
+            let oneDriveRootURL = homeURL
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("CloudStorage", isDirectory: true)
+                .appendingPathComponent("OneDrive", isDirectory: true)
+            try FileManager.default.createDirectory(at: oneDriveRootURL, withIntermediateDirectories: true)
+            let candidate = SyncDefaultFolderCandidate(
+                oneDriveRootURL: oneDriveRootURL,
+                syncRootURL: SyncDefaultFolderResolver.defaultFolderURL(oneDriveRootURL: oneDriveRootURL),
+                displayName: "OneDrive",
+                isOneDriveBacked: true
+            )
+            var probedURL: URL?
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .found(candidate) },
+                syncRootProbe: { rootURL in
+                    probedURL = rootURL
+                    return false
+                }
+            )
+
+            controller.loadView()
+            controller.viewDidLoad()
+
+            #expect(probedURL == candidate.syncRootURL.standardizedFileURL)
+            #expect(UserDefaultsSyncSettingsStore().settings().rootURL == nil)
+        }
+    }
+
+    @Test
     func hiddenSyncPaneDoesNotRefreshSavedFolderStatusOnApplicationActivation() throws {
         let defaults = AppEnvironment.current.defaults
         let homeURL = FileManager.default.temporaryDirectory
@@ -355,12 +414,11 @@ extension SyncPreferenceTopSectionTests {
     @Test
     func passwordVaultSummaryIsIndependentFromHistoryAndSnippetSyncControls() throws {
         try withPreservedSyncDefaults {
-            var vaultMode = PasswordVaultSyncMode.localOnly
             let controller = CPYSyncPreferenceViewController(
                 defaultFolderResolutionProvider: { .notFound },
                 passwordVaultSyncSnapshotProvider: {
                     PasswordVaultSyncSnapshot(
-                        mode: vaultMode,
+                        mode: .localOnly,
                         phase: .disabled,
                         localVaultAvailable: true,
                         remoteVaultAvailable: nil,
@@ -368,8 +426,7 @@ extension SyncPreferenceTopSectionTests {
                         conflictCopyCount: 0,
                         lastSyncAt: nil
                     )
-                },
-                managePasswordVaultSync: { vaultMode = .oneDrive }
+                }
             )
             controller.loadView()
             controller.viewDidLoad()
@@ -390,11 +447,7 @@ extension SyncPreferenceTopSectionTests {
                 pasteraPreferenceString("Password vault sync is independent from history and snippet sync.")
             ))
             #expect(buttons.filter { historyAndSnippetLabels.contains($0.accessibilityLabel() ?? "") }.count == 4)
-            #expect(buttons.filter { $0.title == pasteraPreferenceString("Manage in Main Window") }.count == 1)
-            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Enable OneDrive Sync") })
-            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Stop Sync, Keep Copies") })
-            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Delete Cloud Copy…") })
-            #expect(vaultMode == .localOnly)
+            #expect(buttons.filter { $0.title == pasteraPreferenceString("Enable OneDrive Sync") }.count == 1)
         }
     }
 
@@ -427,11 +480,11 @@ extension SyncPreferenceTopSectionTests {
             )
 
             #expect(texts.contains(disconnectedSummary))
-            #expect(buttons.filter { $0.title == pasteraPreferenceString("Manage in Main Window") }.count == 1)
+            #expect(buttons.first {
+                $0.title == pasteraPreferenceString("Enable OneDrive Sync")
+            }?.isHidden == true)
             #expect(!buttons.contains { $0.title == pasteraPreferenceString("Start OneDrive") })
             #expect(!buttons.contains { $0.title == pasteraPreferenceString("Try Again") })
-            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Stop Sync, Keep Copies") })
-            #expect(!buttons.contains { $0.title == pasteraPreferenceString("Delete Cloud Copy…") })
         }
     }
 
@@ -466,25 +519,56 @@ extension SyncPreferenceTopSectionTests {
     }
 
     @Test
-    func managePasswordVaultSyncClosesSettingsBeforeOpeningMainWindowExperience() throws {
+    func enablePasswordVaultSyncUsesTheConfiguredOneDriveFolder() throws {
         try withPreservedSyncDefaults {
-            var manageCount = 0
+            let oneDriveRootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("CloudStorage", isDirectory: true)
+                .appendingPathComponent("OneDrive", isDirectory: true)
+            let syncRootURL = SyncDefaultFolderResolver.defaultFolderURL(oneDriveRootURL: oneDriveRootURL)
+            try FileManager.default.createDirectory(at: syncRootURL, withIntermediateDirectories: true)
+            defer {
+                try? FileManager.default.removeItem(
+                    at: oneDriveRootURL
+                        .deletingLastPathComponent()
+                        .deletingLastPathComponent()
+                        .deletingLastPathComponent()
+                )
+            }
+            AppEnvironment.current.defaults.set(
+                syncRootURL.standardizedFileURL.path,
+                forKey: Constants.UserDefaults.syncRootPath
+            )
+            var enabledRootURL: URL?
             let controller = CPYSyncPreferenceViewController(
                 defaultFolderResolutionProvider: { .notFound },
-                managePasswordVaultSync: { manageCount += 1 }
+                passwordVaultSyncSnapshotProvider: {
+                    PasswordVaultSyncSnapshot(
+                        mode: .localOnly,
+                        phase: .disabled,
+                        localVaultAvailable: true,
+                        remoteVaultAvailable: nil,
+                        pendingChangeCount: 0,
+                        conflictCopyCount: 0,
+                        lastSyncAt: nil
+                    )
+                },
+                enablePasswordVaultSync: { rootURL, completion in
+                    enabledRootURL = rootURL
+                    completion(.success(()))
+                }
             )
-            let window = SyncTopSectionVisibilityWindow()
-            window.contentView = controller.view
-            defer { window.contentView = nil }
+            controller.loadView()
+            controller.viewDidLoad()
             controller.view.layoutSubtreeIfNeeded()
-            let manageButton = try #require(preferenceButtons(in: controller.view).first {
-                $0.title == pasteraPreferenceString("Manage in Main Window")
+            let enableButton = try #require(preferenceButtons(in: controller.view).first {
+                $0.title == pasteraPreferenceString("Enable OneDrive Sync")
             })
 
-            manageButton.performClick(nil)
+            enableButton.performClick(nil)
 
-            #expect(window.didClose)
-            #expect(manageCount == 1)
+            #expect(enabledRootURL == syncRootURL.standardizedFileURL)
         }
     }
 }

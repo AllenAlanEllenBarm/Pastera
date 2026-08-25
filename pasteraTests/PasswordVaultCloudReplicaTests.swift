@@ -335,106 +335,6 @@ extension PasswordVaultCloudReplicaTests {
 }
 
 extension PasswordVaultCloudReplicaTests {
-
-    @Test("delete failure preserves the cloud vault and all neighboring data")
-    func deleteFailurePreservesEverything() throws {
-        try withCloudRoot { rootURL in
-            let targetURL = try writeCloudVault(kdbxData("keep-on-failure"), rootURL: rootURL)
-            let siblingURL = rootURL.appendingPathComponent("history/device.sqlite")
-            try FileManager.default.createDirectory(
-                at: siblingURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try Data("history".utf8).write(to: siblingURL)
-            var operations = PasswordVaultCloudFileOperations.live
-            let liveRemove = operations.removeItem
-            operations.removeItem = { url in
-                if url.standardizedFileURL == targetURL.standardizedFileURL {
-                    throw CloudReplicaFixtureError.deleteFailed
-                }
-                try liveRemove(url)
-            }
-            let replica = OneDrivePasswordVaultCloudReplica(operations: operations)
-
-            #expect(throws: PasswordVaultSyncFailure.remoteWriteFailed) {
-                try replica.delete(rootURL: rootURL)
-            }
-            #expect(FileManager.default.fileExists(atPath: targetURL.path))
-            #expect(FileManager.default.fileExists(atPath: siblingURL.path))
-            #expect(FileManager.default.fileExists(atPath: rootURL.path))
-        }
-    }
-
-    @Test("target query permission failure does not make delete idempotently succeed")
-    func deleteTargetQueryFailureFailsClosed() throws {
-        try withCloudRoot { rootURL in
-            let data = kdbxData("preserve-on-query-failure")
-            let targetURL = try writeCloudVault(data, rootURL: rootURL)
-            var operations = PasswordVaultCloudFileOperations.live
-            let liveItemStatus = operations.itemStatus
-            operations.itemStatus = { url in
-                if url.standardizedFileURL == targetURL.standardizedFileURL {
-                    throw CocoaError(.fileReadNoPermission)
-                }
-                return try liveItemStatus(url)
-            }
-            let replica = OneDrivePasswordVaultCloudReplica(operations: operations)
-
-            #expect(throws: PasswordVaultSyncFailure.remoteWriteFailed) {
-                try replica.delete(rootURL: rootURL)
-            }
-            let storedData = try Data(contentsOf: targetURL)
-            #expect(storedData == data)
-        }
-    }
-
-    @Test("delete rejects a directory at the cloud vault path without removing it")
-    func deleteRejectsNonRegularTarget() throws {
-        try withCloudRoot { rootURL in
-            let fixture = try writeDirectoryTarget(rootURL: rootURL)
-
-            #expect(throws: PasswordVaultSyncFailure.remoteCorrupted) {
-                try OneDrivePasswordVaultCloudReplica().delete(rootURL: rootURL)
-            }
-            #expect(FileManager.default.fileExists(atPath: fixture.targetURL.path))
-            let sentinelData = try Data(contentsOf: fixture.sentinelURL)
-            #expect(sentinelData == Data("sentinel".utf8))
-        }
-    }
-
-    @Test("delete removes only the compatible cloud KDBX")
-    func deleteRemovesOnlyMainCloudVault() throws {
-        try withCloudRoot { rootURL in
-            let targetURL = try writeCloudVault(kdbxData("delete-me"), rootURL: rootURL)
-            let conflictURL = targetURL.deletingLastPathComponent()
-                .appendingPathComponent("PasteraVault-Mac-conflict.kdbx")
-            try kdbxData("preserve-conflict").write(to: conflictURL)
-            let siblingURL = rootURL.appendingPathComponent("snippets/device.sqlite")
-            try FileManager.default.createDirectory(
-                at: siblingURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try Data("snippets".utf8).write(to: siblingURL)
-
-            try OneDrivePasswordVaultCloudReplica().delete(rootURL: rootURL)
-
-            #expect(!FileManager.default.fileExists(atPath: targetURL.path))
-            #expect(FileManager.default.fileExists(atPath: conflictURL.path))
-            #expect(FileManager.default.fileExists(atPath: siblingURL.path))
-            #expect(FileManager.default.fileExists(atPath: rootURL.path))
-        }
-    }
-
-    @Test("deleting a missing cloud vault is idempotent")
-    func deletingMissingVaultSucceeds() throws {
-        try withCloudRoot { rootURL in
-            try OneDrivePasswordVaultCloudReplica().delete(rootURL: rootURL)
-
-            let rootContents = try FileManager.default.contentsOfDirectory(atPath: rootURL.path)
-            #expect(rootContents.isEmpty)
-        }
-    }
-
     @Test("unavailable OneDrive root fails without creating replacement directories")
     func unavailableRootFailsClosed() throws {
         let parent = FileManager.default.temporaryDirectory
@@ -496,5 +396,4 @@ private extension PasswordVaultCloudReplicaTests {
 private enum CloudReplicaFixtureError: Error {
     case writeFailed
     case replaceFailed
-    case deleteFailed
 }
