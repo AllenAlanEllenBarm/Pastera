@@ -6,6 +6,16 @@
         <description>Release feed for Pastera macOS updates.</description>
         <language>zh-Hans</language>
         <item>
+            <title>Pastera 3.0.2</title>
+            <link>https://github.com/pastera-app/Pastera/releases/tag/v3.0.2-beta</link>
+            <sparkle:releaseNotesLink>https://github.com/pastera-app/Pastera/releases/tag/v3.0.2-beta</sparkle:releaseNotesLink>
+            <pubDate>Thu, 27 Aug 2026 03:24:22 +0000</pubDate>
+            <sparkle:version>302</sparkle:version>
+            <sparkle:shortVersionString>3.0.2</sparkle:shortVersionString>
+            <sparkle:informationalUpdate />
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+        </item>
+        <item>
             <title>Pastera 3.0.1</title>
             <link>https://github.com/pastera-app/Pastera/releases/tag/v3.0.1-beta</link>
             <sparkle:releaseNotesLink>https://github.com/pastera-app/Pastera/releases/tag/v3.0.1-beta</sparkle:releaseNotesLink>
