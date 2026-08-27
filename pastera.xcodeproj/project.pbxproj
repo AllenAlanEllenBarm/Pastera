@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C5B200002FD800000B7C0DE /* PasteraManualUpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B200012FD800000B7C0DE /* PasteraManualUpdateService.swift */; };
+		C5B200022FD800000B7C0DE /* PasteraManualUpdateWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B200032FD800000B7C0DE /* PasteraManualUpdateWindowController.swift */; };
+		C5B200042FD800000B7C0DE /* PasteraUpdaterController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B200052FD800000B7C0DE /* PasteraUpdaterController.swift */; };
 		A61000000000000000000001 /* VaultAgentProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000002 /* VaultAgentProtocolTests.swift */; };
 		A61000000000000000000012 /* VaultAgentProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000010 /* VaultAgentProtocol.swift */; };
 		A61000000000000000000013 /* VaultAgentFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61000000000000000000011 /* VaultAgentFrames.swift */; };
@@ -309,6 +312,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C5B200012FD800000B7C0DE /* PasteraManualUpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraManualUpdateService.swift; sourceTree = "<group>"; };
+		C5B200032FD800000B7C0DE /* PasteraManualUpdateWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraManualUpdateWindowController.swift; sourceTree = "<group>"; };
+		C5B200052FD800000B7C0DE /* PasteraUpdaterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteraUpdaterController.swift; sourceTree = "<group>"; };
 		314B299D1EC49AD5004DD070 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/CPYSnippetsEditorWindowController.xib; sourceTree = "<group>"; };
 		314B299E1EC49AEF004DD070 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/CPYSnippetsEditorWindowController.strings; sourceTree = "<group>"; };
 		31ACA9F81EC5B85C00BD34C0 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/CPYSnippetsEditorWindowController.strings; sourceTree = "<group>"; };
@@ -729,6 +735,7 @@
 		FA0D5CE61DDCC5D000AC9052 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				C5B200012FD800000B7C0DE /* PasteraManualUpdateService.swift */,
 				C5F700062FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift */,
 				C5F700082FFF000000B7C0DE /* PromptOptimizationAPIKeyStore.swift */,
 				C5F710042FFF100000B7C0DE /* LocalPromptFormatter.swift */,
@@ -846,6 +853,8 @@
 		FA1DB4BE1DDCB460007F95C8 /* Managers */ = {
 			isa = PBXGroup;
 			children = (
+				C5B200032FD800000B7C0DE /* PasteraManualUpdateWindowController.swift */,
+				C5B200052FD800000B7C0DE /* PasteraUpdaterController.swift */,
 				FA1DB4C31DDCB460007F95C8 /* MenuManager.swift */,
 				C5A901012FD0B00000B7C0DE /* HistoryMenuPaginationState.swift */,
 				C5A909012FD1100000B7C0DE /* HistoryMenuRowView.swift */,
@@ -1577,6 +1586,9 @@
 		FAC43DC21B35D8B100C06102 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
+				C5B200002FD800000B7C0DE /* PasteraManualUpdateService.swift in Sources */,
+				C5B200022FD800000B7C0DE /* PasteraManualUpdateWindowController.swift in Sources */,
+				C5B200042FD800000B7C0DE /* PasteraUpdaterController.swift in Sources */,
 				A6A000000000000000000003 /* CPYAgentIntegrationPreferenceViewController.swift in Sources */,
 				C5F700032FFF000000B7C0DE /* PromptOptimization.swift in Sources */,
 				C5F700052FFF000000B7C0DE /* PromptOptimizationSettingsStore.swift in Sources */,

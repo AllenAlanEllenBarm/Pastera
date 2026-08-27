@@ -101,7 +101,7 @@ private enum ThumbnailCompactionMaintenance {
 class AppDelegate: NSObject, NSMenuItemValidation {
 
     // MARK: - Properties
-    private(set) var updaterController: SPUStandardUpdaterController?
+    private(set) var updaterController: PasteraUpdaterController?
     private let screenshotObserver = PasteraScreenshotObserver()
     private let disposeBag = DisposeBag()
     private var historySearchWindowController: HistorySearchWindowController?
@@ -463,11 +463,7 @@ extension AppDelegate: NSApplicationDelegate {
         let automaticallyChecksForUpdates = AppEnvironment.current.defaults.bool(
             forKey: Constants.Update.enableAutomaticCheck
         )
-        self.updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
+        self.updaterController = PasteraUpdaterController(startingUpdater: true)
         updaterController?.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
         updaterController?.updater.updateCheckInterval = TimeInterval(
             AppEnvironment.current.defaults.integer(forKey: Constants.Update.checkInterval)
