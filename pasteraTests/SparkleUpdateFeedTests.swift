@@ -83,6 +83,7 @@ struct SparkleUpdateFeedTests {
         #expect(item.elements(forName: "title").first?.stringValue == "Pastera \(shortVersion)")
         #expect(item.elements(forName: "sparkle:version").first?.stringValue == buildVersion)
         #expect(item.elements(forName: "sparkle:shortVersionString").first?.stringValue == shortVersion)
+        #expect(item.elements(forName: "sparkle:minimumSystemVersion").first?.stringValue == "15.0")
         #expect(item.elements(forName: "sparkle:informationalUpdate").first != nil)
         #expect(item.elements(forName: "enclosure").isEmpty)
         #expect(

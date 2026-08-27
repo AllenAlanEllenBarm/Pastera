@@ -13,7 +13,7 @@
             <sparkle:version>302</sparkle:version>
             <sparkle:shortVersionString>3.0.2</sparkle:shortVersionString>
             <sparkle:informationalUpdate />
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
         </item>
         <item>
             <title>Pastera 3.0.1</title>
