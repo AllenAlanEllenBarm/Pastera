@@ -78,6 +78,9 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
         "com.microsoft.OneDrive-mac",
         "com.microsoft.OneDrive"
     ]
+    private static let supportedRuntimeBundleIdentifiers = supportedBundleIdentifiers + [
+        "com.microsoft.OneDrive-mac.FileProvider"
+    ]
 
     private let applicationURLProvider: (String) -> URL?
     private let fallbackApplicationURLs: [URL]
@@ -108,12 +111,12 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
 
     func currentStatus() -> OneDriveProcessStatus {
         let runningApplications = runningApplicationsProvider()
-        let runningMainApplication = runningApplications.first(where: isMainOneDriveApplication)
-        guard let appURL = installedApplicationURL() ?? appURL(from: runningMainApplication) else {
+        let runningApplication = runningApplications.first(where: isOneDriveRuntimeApplication)
+        guard let appURL = installedApplicationURL() ?? appURL(from: runningApplication) else {
             return .notInstalled
         }
 
-        if runningMainApplication != nil {
+        if runningApplication != nil {
             return .running(appURL: appURL)
         }
         return .notRunning(appURL: appURL)
@@ -167,32 +170,35 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
         return url
     }
 
-    private func isMainOneDriveApplication(_ application: OneDriveRunningApplicationSnapshot) -> Bool {
+    private func isOneDriveRuntimeApplication(_ application: OneDriveRunningApplicationSnapshot) -> Bool {
         if let bundleIdentifier = application.bundleIdentifier,
-           Self.supportedBundleIdentifiers.contains(bundleIdentifier) {
+           Self.supportedRuntimeBundleIdentifiers.contains(bundleIdentifier) {
             return true
         }
 
         guard let executableURL = application.executableURL?.standardizedFileURL else { return false }
         return executableURL.path.hasSuffix("/OneDrive.app/Contents/MacOS/OneDrive")
+            || executableURL.path.hasSuffix(
+                "/OneDrive.app/Contents/PlugIns/OneDrive File Provider.appex/Contents/MacOS/OneDrive File Provider"
+            )
     }
 
     private func appURL(from application: OneDriveRunningApplicationSnapshot?) -> URL? {
-        guard let executableURL = application?.executableURL?.standardizedFileURL,
-              executableURL.path.hasSuffix("/Contents/MacOS/OneDrive") else {
-            return nil
+        guard var candidateURL = application?.executableURL?.standardizedFileURL else { return nil }
+        while candidateURL.path != "/" {
+            candidateURL.deleteLastPathComponent()
+            if candidateURL.lastPathComponent.compare("OneDrive.app", options: [.caseInsensitive]) == .orderedSame {
+                return candidateURL
+            }
         }
-        return executableURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        return nil
     }
 
     private func isOneDriveApplicationNotification(_ notification: Notification) -> Bool {
         guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
             return false
         }
-        return isMainOneDriveApplication(OneDriveRunningApplicationSnapshot(application: application))
+        return isOneDriveRuntimeApplication(OneDriveRunningApplicationSnapshot(application: application))
     }
 
     private static func defaultFallbackApplicationURLs() -> [URL] {

@@ -148,6 +148,13 @@ class AppDelegate: NSObject, NSMenuItemValidation {
         controller.showPreferencePane(.about)
     }
 
+    @objc func showSyncPreferencePane() {
+        NSApp.activate(ignoringOtherApps: true)
+        let controller = CPYPreferencesWindowController.sharedController
+        controller.showWindow(self)
+        controller.showPreferencePane(.sync)
+    }
+
     @objc func checkForUpdatesFromMenu() {
         guard updaterController?.updater.canCheckForUpdates == true else { return }
         updaterController?.updater.checkForUpdates()

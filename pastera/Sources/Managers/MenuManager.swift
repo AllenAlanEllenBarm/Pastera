@@ -713,6 +713,9 @@ extension MenuManager {
             onOpenPreferences: {
                 (NSApp.delegate as? AppDelegate)?.showPreferenceWindow()
             },
+            onOpenOneDriveStatus: {
+                (NSApp.delegate as? AppDelegate)?.showSyncPreferencePane()
+            },
             onCloseChildPanels: {}
         )
     }

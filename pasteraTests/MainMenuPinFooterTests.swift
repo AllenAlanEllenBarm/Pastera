@@ -714,10 +714,11 @@ struct MainMenuFooterButtonActionTests {
     }
 
     @Test
-    func mainMenuFooterOneDriveStatusActivatesRunningOneDriveWithoutNavigating() {
+    func mainMenuFooterOneDriveStatusDoesNotReactivateRunningOneDrive() {
         let oneDriveService = MainMenuFakeOneDriveProcessStatusService(status: .running(
             appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
         ))
+        var didOpenOneDriveStatus = false
         let controller = MainMenuPanelController(
             historyTitle: "History",
             historyImage: nil,
@@ -726,7 +727,8 @@ struct MainMenuFooterButtonActionTests {
             itemsProvider: { [] },
             onOpenHistory: {},
             onOpenSnippets: {},
-            oneDriveStatusService: oneDriveService
+            oneDriveStatusService: oneDriveService,
+            onOpenOneDriveStatus: { didOpenOneDriveStatus = true }
         )
 
         controller.show(at: NSPoint(x: 180, y: 700), pinned: false)
@@ -734,7 +736,8 @@ struct MainMenuFooterButtonActionTests {
 
         controller.performMainMenuOneDriveStatusClickForTesting()
 
-        #expect(oneDriveService.openCallCount == 1)
+        #expect(oneDriveService.openCallCount == 0)
+        #expect(didOpenOneDriveStatus)
         #expect(controller.mainMenuSelectedModeForTesting == "history")
         #expect(controller.passwordVaultPageForTesting == "vault")
     }
@@ -812,7 +815,7 @@ struct OneDriveProcessStatusServiceTests {
     }
 
     @Test
-    func fileProviderProcessAloneDoesNotCountAsRunning() throws {
+    func fileProviderProcessAloneCountsAsRunning() throws {
         let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
         let service = makeService(
             applicationURL: appURL,
@@ -827,8 +830,31 @@ struct OneDriveProcessStatusServiceTests {
             ]
         )
 
-        guard case let .notRunning(statusAppURL) = service.currentStatus() else {
-            Issue.record("Expected OneDrive main app to be offline")
+        guard case let .running(statusAppURL) = service.currentStatus() else {
+            Issue.record("Expected the official OneDrive File Provider to be running")
+            return
+        }
+        #expect(statusAppURL == appURL)
+    }
+
+    @Test
+    func fileProviderProcessRecoversAppURLWhenBundleLookupMisses() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let service = makeService(
+            applicationURL: nil,
+            runningApplications: [
+                OneDriveRunningApplicationSnapshot(
+                    bundleIdentifier: "com.microsoft.OneDrive-mac.FileProvider",
+                    executableURL: appURL.appendingPathComponent(
+                        "Contents/PlugIns/OneDrive File Provider.appex/Contents/MacOS/OneDrive File Provider"
+                    ),
+                    localizedName: "OneDrive File Provider"
+                )
+            ]
+        )
+
+        guard case let .running(statusAppURL) = service.currentStatus() else {
+            Issue.record("Expected the File Provider executable to resolve OneDrive.app")
             return
         }
         #expect(statusAppURL == appURL)

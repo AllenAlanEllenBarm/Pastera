@@ -395,6 +395,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private let passwordVaultSyncDataSource: MainMenuPasswordVaultSyncDataSource?
     private let oneDriveStatusService: OneDriveProcessStatusServicing
     private let onOpenPreferences: () -> Void
+    private let onOpenOneDriveStatus: () -> Void
     private let onCloseChildPanels: () -> Void
     private var deleteConfirmationRunner: (PasteraConfirmationOptions, NSWindow?) -> PasteraConfirmationResult = {
         PasteraConfirmationController.runModal(options: $0, sourceWindow: $1)
@@ -473,6 +474,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         onOpenPreferences: @escaping () -> Void = {
             (NSApp.delegate as? AppDelegate)?.showPreferenceWindow()
         },
+        onOpenOneDriveStatus: (() -> Void)? = nil,
         onCloseChildPanels: @escaping () -> Void = {}
     ) {
         self.historyTitle = historyTitle
@@ -489,6 +491,7 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
         self.passwordVaultSyncDataSource = passwordVaultSyncDataSource
         self.oneDriveStatusService = oneDriveStatusService
         self.onOpenPreferences = onOpenPreferences
+        self.onOpenOneDriveStatus = onOpenOneDriveStatus ?? onOpenPreferences
         self.onCloseChildPanels = onCloseChildPanels
         super.init()
         ocrActivityObserver = NotificationCenter.default.addObserver(
@@ -3250,10 +3253,14 @@ extension MainMenuPanelController {
     }
 
     private func openOneDriveFromToolbar() {
-        if case .notInstalled = oneDriveStatusService.currentStatus() {
-            return
+        switch oneDriveStatusService.currentStatus() {
+        case .running:
+            onOpenOneDriveStatus()
+        case .notRunning:
+            _ = oneDriveStatusService.openOneDrive()
+        case .notInstalled:
+            break
         }
-        _ = oneDriveStatusService.openOneDrive()
     }
 
     private func returnFromPasswordVaultContextPage() {

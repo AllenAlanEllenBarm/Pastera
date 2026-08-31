@@ -311,17 +311,19 @@ struct PasswordVaultMenuTests {
         #expect(enableCallCount == 1)
     }
 
-    @Test("the footer activates OneDrive and keeps the current vault content")
-    func footerActivatesOneDriveWithoutNavigation() {
+    @Test("the footer opens OneDrive status and keeps the current vault content")
+    func footerOpensOneDriveStatusWithoutNavigation() {
         let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)
         let oneDriveService = PasswordVaultMenuOneDriveProcessStatusService(status: .running(
             appURL: URL(fileURLWithPath: "/Applications/OneDrive.app")
         ))
+        var didOpenOneDriveStatus = false
         let controller = makeVaultController(
             state: { .unlocked },
             folders: { [folder] },
             syncDataSource: menuSyncDataSource(),
-            oneDriveStatusService: oneDriveService
+            oneDriveStatusService: oneDriveService,
+            onOpenOneDriveStatus: { didOpenOneDriveStatus = true }
         )
         controller.openPasswordVaultFromMainMenu()
         controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
@@ -331,7 +333,8 @@ struct PasswordVaultMenuTests {
         controller.performMainMenuOneDriveStatusClickForTesting()
 
         #expect(controller.passwordVaultPageForTesting == "vault")
-        #expect(oneDriveService.openCallCount == 1)
+        #expect(oneDriveService.openCallCount == 0)
+        #expect(didOpenOneDriveStatus)
         #expect(controller.mainMenuVisibleRowTitlesForTesting.contains("Work"))
     }
 
@@ -1527,7 +1530,8 @@ struct PasswordVaultMenuTests {
         syncDataSource: MainMenuPasswordVaultSyncDataSource? = nil,
         oneDriveStatusService: OneDriveProcessStatusServicing = PasswordVaultMenuOneDriveProcessStatusService(
             status: .notInstalled
-        )
+        ),
+        onOpenOneDriveStatus: (() -> Void)? = nil
     ) -> MainMenuPanelController {
         MainMenuPanelController(
             historyTitle: "History", historyImage: nil, snippetTitle: "Snippet", snippetImage: nil,
@@ -1558,7 +1562,8 @@ struct PasswordVaultMenuTests {
                 deleteFolder: { _ in }
             ),
             passwordVaultSyncDataSource: syncDataSource,
-            oneDriveStatusService: oneDriveStatusService
+            oneDriveStatusService: oneDriveStatusService,
+            onOpenOneDriveStatus: onOpenOneDriveStatus
         )
     }
 }

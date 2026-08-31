@@ -181,13 +181,11 @@ struct SyncCoordinatorTests {
     }
 
     @Test
-    func defaultFolderResolverIgnoresSharedLibraryAndCloudTempDirectories() throws {
+    func defaultFolderResolverIgnoresEnglishSharedLibraryWithoutFileProviderIdentity() throws {
         let homeURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: homeURL) }
         let sharedLibraryURL = oneDriveRootURL(homeURL: homeURL, name: "OneDrive - Shared Libraries - Work")
-        let cloudTempURL = oneDriveRootURL(homeURL: homeURL, name: "OneDriveCloudTemp")
         try FileManager.default.createDirectory(at: sharedLibraryURL, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: cloudTempURL, withIntermediateDirectories: true)
 
         let resolution = SyncDefaultFolderResolver(fileManager: .default).resolve(homeDirectory: homeURL)
 
@@ -195,7 +193,21 @@ struct SyncCoordinatorTests {
     }
 
     @Test
-    func defaultFolderResolverIgnoresLocalizedSharedLibraryDirectories() throws {
+    func defaultFolderResolverRejectsCloudTempEvenWhenFileProviderBacked() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let cloudTempURL = oneDriveRootURL(homeURL: homeURL, name: "OneDriveCloudTemp")
+        try FileManager.default.createDirectory(at: cloudTempURL, withIntermediateDirectories: true)
+        let resolver = SyncDefaultFolderResolver(
+            fileManager: .default,
+            fileProviderIdentityChecker: { _ in true }
+        )
+
+        #expect(resolver.resolve(homeDirectory: homeURL) == .notFound)
+    }
+
+    @Test
+    func defaultFolderResolverIgnoresLocalizedSharedLibraryWithoutFileProviderIdentity() throws {
         let homeURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: homeURL) }
         let sharedLibraryURL = oneDriveRootURL(
@@ -211,7 +223,28 @@ struct SyncCoordinatorTests {
     }
 
     @Test
-    func passwordVaultRootValidationRejectsPreviouslySavedLocalizedSharedLibrary() throws {
+    func defaultFolderResolverIncludesLocalizedFileProviderSharedLibrary() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let sharedLibraryURL = oneDriveRootURL(
+            homeURL: homeURL,
+            name: "OneDrive-共享的库-oneDrive"
+        )
+        try FileManager.default.createDirectory(at: sharedLibraryURL, withIntermediateDirectories: true)
+        let expectedRootURL = sharedLibraryURL.standardizedFileURL
+        let resolver = SyncDefaultFolderResolver(
+            fileManager: .default,
+            fileProviderIdentityChecker: { $0.standardizedFileURL == expectedRootURL }
+        )
+
+        let candidates = resolver.oneDriveCandidates(homeDirectory: homeURL)
+
+        #expect(candidates.map(\.oneDriveRootURL) == [expectedRootURL])
+        #expect(candidates.map(\.displayName) == ["OneDrive-共享的库-oneDrive"])
+    }
+
+    @Test
+    func passwordVaultRootValidationRejectsLocalizedSharedLibraryWithoutFileProviderIdentity() throws {
         let homeURL = try makeRootURL()
         defer { try? FileManager.default.removeItem(at: homeURL) }
         let rootURL = syncRootURL(oneDriveRootURL: oneDriveRootURL(
@@ -221,6 +254,26 @@ struct SyncCoordinatorTests {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
         #expect(Environment.validatePasswordVaultSyncRoot(rootURL) == .folderUnavailable)
+    }
+
+    @Test
+    func passwordVaultRootValidationAllowsLocalizedFileProviderSharedLibrary() throws {
+        let homeURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        let sharedLibraryURL = oneDriveRootURL(
+            homeURL: homeURL,
+            name: "OneDrive-共享的库-oneDrive"
+        )
+        let rootURL = syncRootURL(oneDriveRootURL: sharedLibraryURL)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let expectedRootURL = sharedLibraryURL.standardizedFileURL
+
+        let failure = Environment.validatePasswordVaultSyncRoot(
+            rootURL,
+            fileProviderIdentityChecker: { $0.standardizedFileURL == expectedRootURL }
+        )
+
+        #expect(failure == nil)
     }
 
     @Test

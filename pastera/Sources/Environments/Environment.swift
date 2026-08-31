@@ -151,12 +151,25 @@ struct Environment {
     }
 
     static func validatePasswordVaultSyncRoot(_ url: URL) -> PasswordVaultSyncFailure? {
+        validatePasswordVaultSyncRoot(
+            url,
+            fileProviderIdentityChecker: SyncDefaultFolderResolver.isFileProviderBacked
+        )
+    }
+
+    static func validatePasswordVaultSyncRoot(
+        _ url: URL,
+        fileProviderIdentityChecker: SyncDefaultFolderResolver.FileProviderIdentityChecker
+    ) -> PasswordVaultSyncFailure? {
         var isDirectory = ObjCBool(false)
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
             return .folderUnavailable
         }
-        guard SyncDefaultFolderResolver.isUsableOneDriveBackedURL(url) else {
+        guard SyncDefaultFolderResolver.isUsableOneDriveBackedURL(
+            url,
+            fileProviderIdentityChecker: fileProviderIdentityChecker
+        ) else {
             return .folderUnavailable
         }
         return FileManager.default.isWritableFile(atPath: url.path) ? nil : .folderNotWritable

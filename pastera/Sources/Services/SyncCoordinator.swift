@@ -11,6 +11,7 @@
 //
 
 import Combine
+import FileProvider
 import Foundation
 
 // swiftlint:disable file_length
@@ -265,10 +266,19 @@ enum SyncDefaultFolderResolution: Equatable {
 }
 
 struct SyncDefaultFolderResolver {
-    let fileManager: FileManager
+    typealias FileProviderIdentityChecker = (URL) -> Bool
 
-    init(fileManager: FileManager = .default) {
+    let fileManager: FileManager
+    private let fileProviderIdentityChecker: FileProviderIdentityChecker
+
+    init(
+        fileManager: FileManager = .default,
+        fileProviderIdentityChecker: @escaping FileProviderIdentityChecker = {
+            SyncDefaultFolderResolver.isFileProviderBacked($0)
+        }
+    ) {
         self.fileManager = fileManager
+        self.fileProviderIdentityChecker = fileProviderIdentityChecker
     }
 
     func resolve(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> SyncDefaultFolderResolution {
@@ -364,26 +374,62 @@ struct SyncDefaultFolderResolver {
     }
 
     static func isUsableOneDriveBackedURL(_ url: URL) -> Bool {
+        isUsableOneDriveBackedURL(url, fileProviderIdentityChecker: isFileProviderBacked)
+    }
+
+    static func isUsableOneDriveBackedURL(
+        _ url: URL,
+        fileProviderIdentityChecker: FileProviderIdentityChecker
+    ) -> Bool {
         let components = url.standardizedFileURL.pathComponents
         guard let cloudStorageIndex = components.firstIndex(of: "CloudStorage"),
               components.indices.contains(cloudStorageIndex + 1) else {
             return false
         }
-        return isUsableOneDriveRootName(components[cloudStorageIndex + 1])
+        let rootName = components[cloudStorageIndex + 1]
+        guard isUsableOneDriveRootName(rootName) else {
+            return false
+        }
+        guard isSharedLibraryRootName(rootName) else {
+            return true
+        }
+        let rootPath = NSString.path(withComponents: Array(components.prefix(cloudStorageIndex + 2)))
+        return fileProviderIdentityChecker(URL(fileURLWithPath: rootPath, isDirectory: true))
     }
 
     static func isUsableOneDriveRootName(_ name: String) -> Bool {
         guard name.range(of: "OneDrive", options: [.anchored, .caseInsensitive]) != nil else {
             return false
         }
-        return name.range(of: "Shared Libraries", options: [.caseInsensitive]) == nil
-            && name.range(of: "共享的库", options: [.caseInsensitive]) == nil
-            && name.range(of: "共享库", options: [.caseInsensitive]) == nil
-            && name.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
+        return name.range(of: "CloudTemp", options: [.caseInsensitive]) == nil
+    }
+
+    static func isFileProviderBacked(_ url: URL) -> Bool {
+        let completion = DispatchSemaphore(value: 0)
+        let success = DispatchSemaphore(value: 0)
+        NSFileProviderManager.getIdentifierForUserVisibleFile(at: url) { itemIdentifier, domainIdentifier, error in
+            if itemIdentifier != nil, domainIdentifier != nil, error == nil {
+                success.signal()
+            }
+            completion.signal()
+        }
+        guard completion.wait(timeout: .now() + 1) == .success else {
+            return false
+        }
+        return success.wait(timeout: .now()) == .success
+    }
+
+    private static func isSharedLibraryRootName(_ name: String) -> Bool {
+        name.range(of: "Shared Libraries", options: [.caseInsensitive]) != nil
+            || name.range(of: "共享的库", options: [.caseInsensitive]) != nil
+            || name.range(of: "共享库", options: [.caseInsensitive]) != nil
     }
 
     private func isUsableOneDriveRoot(_ url: URL) -> Bool {
-        guard Self.isUsableOneDriveRootName(url.lastPathComponent) else {
+        guard Self.isUsableOneDriveBackedURL(
+            url,
+            fileProviderIdentityChecker: fileProviderIdentityChecker
+        ) else {
             return false
         }
         let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
