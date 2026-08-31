@@ -131,6 +131,7 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
 
         testInputView.font = .systemFont(ofSize: 13)
         testInputView.string = "Hello World"
+        testInputView.isAutomaticQuoteSubstitutionEnabled = false
         testInputView.setAccessibilityLabel(pasteraScriptString("Test Input", "测试输入"))
 
         updateTestResult(
@@ -401,7 +402,10 @@ final class ScriptEditorViewController: NSViewController, NSTextFieldDelegate, N
             testOutputForTesting = nil
             testErrorForTesting = error
             updateTestResult(
-                message: pasteraScriptString("Script test failed: \(error)", "脚本测试失败：\(error)"),
+                message: pasteraScriptString(
+                    "Script test failed: \(error.shortDescription)",
+                    "脚本测试失败：\(error.shortDescription)"
+                ),
                 symbolName: "xmark.circle.fill",
                 color: .systemRed
             )

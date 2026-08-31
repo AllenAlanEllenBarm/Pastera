@@ -26,8 +26,58 @@ struct ScriptTemplateCatalog {
         template("extract-url", "提取 URL", "从文本中提取网页链接", .extract, ["网址", "链接", "URL"], "const matches = clip.text.match(/https?:\\/\\/[^\\s<>\"]+/g) || []; return matches.join('\\n');"),
         template("extract-phone", "提取手机号", "从文本中提取中国大陆手机号", .extract, ["手机", "电话"], "const matches = clip.text.match(/1[3-9]\\d{9}/g) || []; return matches.join('\\n');"),
         template("extract-ip", "提取 IP 地址", "从文本中提取 IPv4 地址", .extract, ["IP", "IPv4"], "const matches = clip.text.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g) || []; return matches.join('\\n');"),
-        template("base64-encode", "Base64 编码", "将 UTF-8 文本编码为 Base64", .text, ["Base64", "编码"], "return btoa(unescape(encodeURIComponent(clip.text)));"),
-        template("base64-decode", "Base64 解码", "将 Base64 解码为 UTF-8 文本", .text, ["Base64", "解码"], "return decodeURIComponent(escape(atob(clip.text.trim())));"),
+        template(
+            "base64-encode",
+            "Base64 编码",
+            "将 UTF-8 文本编码为 Base64",
+            .text,
+            ["Base64", "编码"],
+            """
+            const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+            const bytes = encodeURIComponent(clip.text).replace(
+                /%([0-9A-F]{2})/g,
+                (_, hex) => String.fromCharCode(parseInt(hex, 16))
+            );
+            let output = '';
+            for (let index = 0; index < bytes.length; index += 3) {
+                const first = bytes.charCodeAt(index);
+                const second = index + 1 < bytes.length ? bytes.charCodeAt(index + 1) : 0;
+                const third = index + 2 < bytes.length ? bytes.charCodeAt(index + 2) : 0;
+                output += alphabet[first >> 2];
+                output += alphabet[((first & 3) << 4) | (second >> 4)];
+                output += index + 1 < bytes.length ? alphabet[((second & 15) << 2) | (third >> 6)] : '=';
+                output += index + 2 < bytes.length ? alphabet[third & 63] : '=';
+            }
+            return output;
+            """
+        ),
+        template(
+            "base64-decode",
+            "Base64 解码",
+            "将 Base64 解码为 UTF-8 文本",
+            .text,
+            ["Base64", "解码"],
+            """
+            const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+            const value = clip.text.trim();
+            const validBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+            if (!validBase64.test(value)) throw new Error('Invalid Base64');
+            let encodedBytes = '';
+            for (let index = 0; index < value.length; index += 4) {
+                const first = alphabet.indexOf(value[index]);
+                const second = alphabet.indexOf(value[index + 1]);
+                const third = value[index + 2] === '=' ? 0 : alphabet.indexOf(value[index + 2]);
+                const fourth = value[index + 3] === '=' ? 0 : alphabet.indexOf(value[index + 3]);
+                const bytes = [(first << 2) | (second >> 4)];
+                if (value[index + 2] !== '=') bytes.push(((second & 15) << 4) | (third >> 2));
+                if (value[index + 3] !== '=') bytes.push(((third & 3) << 6) | fourth);
+                encodedBytes += bytes
+                    .map(byte => '%' + byte.toString(16).padStart(2, '0'))
+                    .join('');
+            }
+            return decodeURIComponent(encodedBytes);
+            """
+        )
     ])
 
     private static func template(

@@ -39,7 +39,7 @@ enum HistoryScriptFeedback {
     }
 }
 
-private extension ScriptExecutionError {
+extension ScriptExecutionError {
     var shortDescription: String {
         switch self {
         case .inputTooLarge: return pasteraScriptString("input is too large", "输入内容过大")

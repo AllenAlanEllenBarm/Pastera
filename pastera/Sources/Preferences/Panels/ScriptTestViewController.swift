@@ -81,6 +81,7 @@ final class ScriptTestViewController: NSViewController {
         inputScroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
         inputView.font = .systemFont(ofSize: 13)
         inputView.string = "Hello World"
+        inputView.isAutomaticQuoteSubstitutionEnabled = false
         inputView.setAccessibilityLabel(pasteraScriptString("Test Input", "测试输入"))
         content.addArrangedSubview(inputScroll)
         inputScroll.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
@@ -180,7 +181,10 @@ final class ScriptTestViewController: NSViewController {
             testOutputForTesting = nil
             testErrorForTesting = error
             showResult(
-                pasteraScriptString("Test failed: \(error)", "测试失败：\(error)"),
+                pasteraScriptString(
+                    "Test failed: \(error.shortDescription)",
+                    "测试失败：\(error.shortDescription)"
+                ),
                 symbol: "xmark.circle.fill",
                 color: .systemRed
             )

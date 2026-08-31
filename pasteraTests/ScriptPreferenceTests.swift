@@ -328,6 +328,52 @@ struct ScriptPreferenceTests {
     private func allSubviews(in root: NSView) -> [NSView] {
         [root] + root.subviews.flatMap { allSubviews(in: $0) }
     }
+
+    private func testInputView(in root: NSView) -> NSTextView? {
+        allSubviews(in: root)
+            .compactMap { $0 as? NSTextView }
+            .first {
+                $0.accessibilityLabel() == pasteraScriptString("Test Input", "测试输入")
+            }
+    }
+}
+
+extension ScriptPreferenceTests {
+    @Test
+    func scriptTestInputsPreserveLiteralQuotes() throws {
+        let editor = ScriptEditorViewController(script: nil, onSave: { _ in })
+        let sheet = ScriptTestViewController(scripts: [], executor: ScriptExecutionService())
+        _ = editor.view
+        _ = sheet.view
+
+        let editorInput = try #require(testInputView(in: editor.view))
+        let sheetInput = try #require(testInputView(in: sheet.view))
+
+        #expect(!editorInput.isAutomaticQuoteSubstitutionEnabled)
+        #expect(!sheetInput.isAutomaticQuoteSubstitutionEnabled)
+    }
+
+    @Test
+    func editorShowsReadableJavaScriptFailureWithoutInternalScriptID() async throws {
+        let editor = ScriptEditorViewController(
+            script: nil,
+            executor: ScriptExecutionService(),
+            onSave: { _ in }
+        )
+        _ = editor.view
+        editor.setNameForTesting("Broken")
+        editor.setTriggerForTesting(.manual, enabled: true)
+        editor.setCodeForTesting("function transform(clip) { JSON.parse(clip.text); }")
+
+        await editor.validateForTesting(input: #"{"broken":}"#)
+
+        let result = try #require(
+            views(in: editor.view, identifierPrefix: "script.editor.test-result").first
+        )
+        let message = try #require(result.accessibilityLabel())
+        #expect(message.contains(pasteraScriptString("JavaScript error", "JavaScript 运行错误")))
+        #expect(!message.contains("scriptID"))
+    }
 }
 
 private struct ScriptEditorExecutor: ScriptExecuting {
