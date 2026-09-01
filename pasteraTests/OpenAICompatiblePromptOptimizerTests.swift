@@ -146,23 +146,24 @@ struct OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
-    func requestsDeterministicGeneration() async throws {
+    func longOptimizationRequestsDeterministicBoundedGenerationWithAdaptiveTimeout() async throws {
         let client = makeClient(
             status: 200,
             body: #"{"choices":[{"message":{"content":"Improved"}}]}"#
         )
-
         _ = try await client.optimize(
-            text: "Draft",
+            text: String(repeating: "Preserve every constraint and improve the structure. ", count: 60),
             configuration: .fixture,
             apiKey: ""
         ).get()
-
         let body = try #require(PromptOptimizationURLProtocolStub.lastRequestBody)
         let payload = try #require(
             JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         #expect(payload["temperature"] as? Int == 0)
+        #expect((256...4_096).contains(payload["max_tokens"] as? Int ?? -1))
+        let timeout = PromptOptimizationURLProtocolStub.lastRequest?.timeoutInterval ?? 0
+        #expect(timeout > 30 && timeout <= 180)
     }
 
     @Test
@@ -771,18 +772,17 @@ extension OpenAICompatiblePromptOptimizerTests {
             status: 200,
             body: #"{"choices":[{"message":{"content":"OK"}}]}"#
         )
-
         let result = await client.testConnection(
             configuration: .fixture,
             apiKey: "key"
         )
-
         _ = try result.get()
         let body = try #require(PromptOptimizationURLProtocolStub.lastRequestBody)
         let payload = try #require(
             JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         #expect(payload["max_tokens"] as? Int == 8)
+        #expect(PromptOptimizationURLProtocolStub.lastRequest?.timeoutInterval == 30)
         let messages = try #require(payload["messages"] as? [[String: Any]])
         #expect(messages.last?["content"] as? String == "<source_prompt>\nReturn OK\n</source_prompt>")
     }

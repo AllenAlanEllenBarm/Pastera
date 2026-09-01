@@ -43,11 +43,12 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
         configuration: PromptOptimizationRemoteConfiguration,
         apiKey: String
     ) async -> Result<String, PromptOptimizationError> {
-        await send(
+        let budget = RequestBudget.optimization(for: text)
+        return await send(
             text: text,
             configuration: configuration,
             apiKey: apiKey,
-            maximumOutputTokens: nil
+            budget: budget
         )
     }
 
@@ -59,7 +60,7 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
             text: "Return OK",
             configuration: configuration,
             apiKey: apiKey,
-            maximumOutputTokens: 8
+            budget: .connectionTest
         ).map { _ in () }
     }
 
@@ -67,7 +68,7 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
         text: String,
         configuration: PromptOptimizationRemoteConfiguration,
         apiKey: String,
-        maximumOutputTokens: Int?
+        budget: RequestBudget
     ) async -> Result<String, PromptOptimizationError> {
         let model = configuration.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return .failure(.missingModel) }
@@ -86,7 +87,7 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
             var request = URLRequest(url: endpoint.chatCompletionsURL)
             request.httpMethod = "POST"
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.timeoutInterval = 30
+            request.timeoutInterval = budget.timeoutInterval
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if !apiKey.isEmpty {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -98,7 +99,7 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
                         Message(role: "system", content: PromptRewriteInstruction.text),
                         Message(role: "user", content: "<source_prompt>\n\(text)\n</source_prompt>")
                     ],
-                    maximumOutputTokens: maximumOutputTokens,
+                    maximumOutputTokens: budget.maximumOutputTokens,
                     preset: configuration.preset
                 )
             )
@@ -155,13 +156,32 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = RequestBudget.minimumTimeout
+        configuration.timeoutIntervalForResource = RequestBudget.maximumTimeout
         return URLSession(
             configuration: configuration,
             delegate: PromptOptimizationRedirectRejectingDelegate(),
             delegateQueue: nil
         )
+    }
+
+    private struct RequestBudget {
+        static let minimumTimeout: TimeInterval = 30
+        static let maximumTimeout: TimeInterval = 180
+        static let connectionTest = RequestBudget(maximumOutputTokens: 8, timeoutInterval: 30)
+
+        let maximumOutputTokens: Int
+        let timeoutInterval: TimeInterval
+
+        static func optimization(for text: String) -> Self {
+            let estimatedOutputTokens = Int(ceil(Double(text.count) * 0.75))
+            let maximumOutputTokens = min(4_096, max(256, estimatedOutputTokens))
+            let estimatedDuration = 15 + Double(maximumOutputTokens) / 16
+            return Self(
+                maximumOutputTokens: maximumOutputTokens,
+                timeoutInterval: min(maximumTimeout, max(minimumTimeout, estimatedDuration))
+            )
+        }
     }
 }
 
