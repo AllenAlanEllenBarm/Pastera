@@ -6,7 +6,7 @@
 
 import Cocoa
 
-enum OneDriveProcessStatus {
+enum OneDriveProcessStatus: Equatable {
     case running(appURL: URL)
     case notRunning(appURL: URL)
     case notInstalled
@@ -24,6 +24,29 @@ enum OneDriveProcessStatus {
             return appURL
         case .notInstalled:
             return nil
+        }
+    }
+}
+
+private struct OneDriveProcessMonitoringSnapshot: Equatable {
+    let status: OneDriveProcessStatus
+    let runtimeIdentifiers: [String]
+}
+
+private final class OneDriveProcessMonitoringState {
+    private let lock = NSLock()
+    private var snapshot: OneDriveProcessMonitoringSnapshot
+
+    init(snapshot: OneDriveProcessMonitoringSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    @discardableResult
+    func update(_ snapshot: OneDriveProcessMonitoringSnapshot) -> Bool {
+        lock.withLock {
+            guard self.snapshot != snapshot else { return false }
+            self.snapshot = snapshot
+            return true
         }
     }
 }
@@ -88,6 +111,7 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
     private let runningApplicationsProvider: () -> [OneDriveRunningApplicationSnapshot]
     private let openApplication: (URL) -> Bool
     private let notificationCenter: NotificationCenter
+    private let monitoringPollInterval: TimeInterval
 
     init(
         applicationURLProvider: @escaping (String) -> URL? = {
@@ -99,7 +123,8 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
             NSWorkspace.shared.runningApplications.map(OneDriveRunningApplicationSnapshot.init(application:))
         },
         openApplication: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
-        notificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
+        notificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        monitoringPollInterval: TimeInterval = 0.5
     ) {
         self.applicationURLProvider = applicationURLProvider
         self.fallbackApplicationURLs = fallbackApplicationURLs
@@ -107,10 +132,16 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
         self.runningApplicationsProvider = runningApplicationsProvider
         self.openApplication = openApplication
         self.notificationCenter = notificationCenter
+        self.monitoringPollInterval = monitoringPollInterval
     }
 
     func currentStatus() -> OneDriveProcessStatus {
-        let runningApplications = runningApplicationsProvider()
+        currentStatus(runningApplications: runningApplicationsProvider())
+    }
+
+    private func currentStatus(
+        runningApplications: [OneDriveRunningApplicationSnapshot]
+    ) -> OneDriveProcessStatus {
         let runningApplication = runningApplications.first(where: isOneDriveRuntimeApplication)
         guard let appURL = installedApplicationURL() ?? appURL(from: runningApplication) else {
             return .notInstalled
@@ -128,12 +159,14 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
     }
 
     func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {
+        let monitoringState = OneDriveProcessMonitoringState(snapshot: monitoringSnapshot())
         let launchObserver = notificationCenter.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard self?.isOneDriveApplicationNotification(notification) == true else { return }
+            guard let self, self.isOneDriveApplicationNotification(notification) else { return }
+            monitoringState.update(self.monitoringSnapshot())
             onChange()
         }
         let terminateObserver = notificationCenter.addObserver(
@@ -141,14 +174,43 @@ final class OneDriveProcessStatusService: OneDriveProcessStatusServicing {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard self?.isOneDriveApplicationNotification(notification) == true else { return }
+            guard let self, self.isOneDriveApplicationNotification(notification) else { return }
+            monitoringState.update(self.monitoringSnapshot())
             onChange()
         }
 
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        let pollInterval = max(0.001, monitoringPollInterval)
+        timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval)
+        timer.setEventHandler { [weak self] in
+            guard let self,
+                  monitoringState.update(self.monitoringSnapshot()) else { return }
+            onChange()
+        }
+        timer.resume()
+
         return OneDriveProcessStatusObservation { [weak notificationCenter] in
+            timer.cancel()
             notificationCenter?.removeObserver(launchObserver)
             notificationCenter?.removeObserver(terminateObserver)
         }
+    }
+
+    private func monitoringSnapshot() -> OneDriveProcessMonitoringSnapshot {
+        let runningApplications = runningApplicationsProvider()
+        let runtimeIdentifiers = Set(
+            runningApplications
+                .filter(isOneDriveRuntimeApplication)
+                .map { application in
+                    let bundleIdentifier = application.bundleIdentifier ?? ""
+                    let executablePath = application.executableURL?.standardizedFileURL.path ?? ""
+                    return "\(bundleIdentifier)\u{0}\(executablePath)"
+                }
+        ).sorted()
+        return OneDriveProcessMonitoringSnapshot(
+            status: currentStatus(runningApplications: runningApplications),
+            runtimeIdentifiers: runtimeIdentifiers
+        )
     }
 
     private func installedApplicationURL() -> URL? {

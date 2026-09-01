@@ -951,6 +951,54 @@ struct OneDriveProcessStatusServiceTests {
         #expect(statusAppURL == appURL)
     }
 
+    @Test
+    func monitoringPollsForRuntimeMilestonesWhenWorkspaceNotificationIsMissing() async throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        var runningApplications = [OneDriveRunningApplicationSnapshot]()
+        var callbackCount = 0
+        let service = OneDriveProcessStatusService(
+            applicationURLProvider: { bundleIdentifier in
+                bundleIdentifier == "com.microsoft.OneDrive-mac" ? appURL : nil
+            },
+            fallbackApplicationURLs: [],
+            fileExists: { path in
+                URL(fileURLWithPath: path).standardizedFileURL.path == appURL.standardizedFileURL.path
+            },
+            runningApplicationsProvider: { runningApplications },
+            openApplication: { _ in true },
+            notificationCenter: NotificationCenter(),
+            monitoringPollInterval: 0.01
+        )
+        let observation = service.startMonitoring {
+            callbackCount += 1
+        }
+        defer { observation.cancel() }
+
+        runningApplications = [
+            OneDriveRunningApplicationSnapshot(
+                bundleIdentifier: "com.microsoft.OneDrive-mac",
+                executableURL: appURL.appendingPathComponent("Contents/MacOS/OneDrive"),
+                localizedName: "OneDrive"
+            )
+        ]
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(callbackCount == 1)
+
+        runningApplications.append(
+            OneDriveRunningApplicationSnapshot(
+                bundleIdentifier: "com.microsoft.OneDrive-mac.FileProvider",
+                executableURL: appURL.appendingPathComponent(
+                    "Contents/PlugIns/OneDrive File Provider.appex/Contents/MacOS/OneDrive File Provider"
+                ),
+                localizedName: "OneDrive File Provider"
+            )
+        )
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(callbackCount == 2)
+    }
+
     private func makeService(
         applicationURL: URL?,
         runningApplications: [OneDriveRunningApplicationSnapshot]

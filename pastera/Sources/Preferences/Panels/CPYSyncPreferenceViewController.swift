@@ -191,6 +191,7 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
     private let settingsStore = UserDefaultsSyncSettingsStore()
     private var syncActivityObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
+    private var oneDriveProcessStatusObservation: OneDriveProcessStatusObservation?
     private var switchRows = [(stateLabel: NSTextField, control: PasteraSyncSwitch)]()
     private weak var folderRow: PasteraPreferenceSettingRowView?
 
@@ -212,6 +213,7 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
     private let chooseSyncRoot: (NSWindow?, URL?) -> URL?
     private let injectedSyncRootProbe: ((URL) -> Bool)?
     private let passwordVaultSyncSnapshotProvider: () -> PasswordVaultSyncSnapshot
+    private let oneDriveProcessStatusService: OneDriveProcessStatusServicing
     private let enablePasswordVaultSync: (
         URL,
         @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
@@ -251,6 +253,7 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
             return panel.runModal() == .OK ? panel.url : nil
         },
         syncRootProbe: ((URL) -> Bool)? = nil,
+        oneDriveProcessStatusService: OneDriveProcessStatusServicing = AppEnvironment.current.oneDriveProcessStatusService,
         passwordVaultSyncSnapshotProvider: @escaping () -> PasswordVaultSyncSnapshot = {
             AppEnvironment.current.passwordVaultSyncService.snapshot
         },
@@ -270,6 +273,7 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
         self.revealInFinder = revealInFinder
         self.chooseSyncRoot = chooseSyncRoot
         self.injectedSyncRootProbe = syncRootProbe
+        self.oneDriveProcessStatusService = oneDriveProcessStatusService
         self.passwordVaultSyncSnapshotProvider = passwordVaultSyncSnapshotProvider
         self.enablePasswordVaultSync = enablePasswordVaultSync
         super.init(paneID: .sync, title: pasteraPreferenceString("Sync"))
@@ -308,6 +312,10 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
         ) { [weak self] _ in
             guard let self, self.isViewLoaded, self.view.window?.isVisible == true else { return }
             self.refreshSavedFolderStatus()
+        }
+        oneDriveProcessStatusObservation = oneDriveProcessStatusService.startMonitoring { [weak self] in
+            guard let self, self.isViewLoaded, self.view.window?.isVisible == true else { return }
+            self.refreshDefaultFolderAvailability()
         }
     }
 
@@ -451,6 +459,8 @@ final class CPYSyncPreferenceViewController: PasteraPreferencePageViewController
     }
 
     private func removeObservers() {
+        oneDriveProcessStatusObservation?.cancel()
+        oneDriveProcessStatusObservation = nil
         if let syncActivityObserver {
             NotificationCenter.default.removeObserver(syncActivityObserver)
             self.syncActivityObserver = nil

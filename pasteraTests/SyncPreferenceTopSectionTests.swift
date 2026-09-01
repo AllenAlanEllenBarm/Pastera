@@ -214,6 +214,48 @@ struct SyncPreferenceTopSectionTests {
     }
 
     @Test
+    func visibleSyncPaneRefreshesWhenOneDriveProcessStatusChanges() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let oneDriveRootURL = cloudStorageURL(homeURL: homeURL).appendingPathComponent("OneDrive", isDirectory: true)
+        let defaultRootURL = SyncDefaultFolderResolver.defaultFolderURL(oneDriveRootURL: oneDriveRootURL)
+        try FileManager.default.createDirectory(at: oneDriveRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+        var resolution = SyncDefaultFolderResolution.notFound
+        let processStatusService = SyncPreferenceOneDriveProcessStatusService()
+
+        try withPreservedSyncDefaults {
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { resolution },
+                oneDriveProcessStatusService: processStatusService
+            )
+            let window = SyncTopSectionVisibilityWindow()
+            window.contentView = controller.view
+            window.testIsVisible = true
+            defer { window.contentView = nil }
+            controller.view.layoutSubtreeIfNeeded()
+
+            var texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(texts.contains("未检测到 OneDrive"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == nil)
+
+            resolution = .found(SyncDefaultFolderCandidate(
+                oneDriveRootURL: oneDriveRootURL,
+                syncRootURL: defaultRootURL,
+                displayName: "OneDrive",
+                isOneDriveBacked: true
+            ))
+            processStatusService.sendLifecycleChange()
+            controller.view.layoutSubtreeIfNeeded()
+
+            texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(texts.contains("OneDrive 可用"))
+            #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
+        }
+    }
+
+    @Test
     func syncPaneDoesNotSilentlyChooseNamedOneDriveAccount() throws {
         let oneDriveRootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("OneDrive-公司名称", isDirectory: true)
@@ -583,5 +625,26 @@ private final class SyncTopSectionVisibilityWindow: NSWindow {
 
     override func close() {
         didClose = true
+    }
+}
+
+private final class SyncPreferenceOneDriveProcessStatusService: OneDriveProcessStatusServicing {
+    private var onChange: (() -> Void)?
+
+    func currentStatus() -> OneDriveProcessStatus {
+        .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
+    }
+
+    func openOneDrive() -> Bool { true }
+
+    func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {
+        self.onChange = onChange
+        return OneDriveProcessStatusObservation { [weak self] in
+            self?.onChange = nil
+        }
+    }
+
+    func sendLifecycleChange() {
+        onChange?()
     }
 }
