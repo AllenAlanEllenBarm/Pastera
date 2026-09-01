@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import Pastera
 
+// swiftlint:disable file_length
+
 @Suite(.serialized)
 struct OpenAICompatiblePromptOptimizerTests {
     @Test
@@ -85,6 +87,22 @@ struct OpenAICompatiblePromptOptimizerTests {
         #expect(
             PromptOptimizationURLProtocolStub.lastRequest?.url?.absoluteString
                 == "https://models.example.com/v1/chat/completions"
+        )
+    }
+
+    @Test
+    func rejectsContentTruncatedByTheRemoteOutputLimit() async {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Improved but incomplete"},"finish_reason":"length"}]}"#
+        )
+
+        #expect(
+            await client.optimize(
+                text: "Draft",
+                configuration: .fixture,
+                apiKey: ""
+            ) == .failure(.invalidResponse)
         )
     }
 

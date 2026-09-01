@@ -120,12 +120,16 @@ final class OpenAICompatiblePromptOptimizer: OpenAICompatiblePromptOptimizing {
                 return .failure(.serverRejected(statusCode: httpResponse.statusCode))
             }
 
-            guard let content = try? JSONDecoder().decode(
+            guard let choice = try? JSONDecoder().decode(
                 ChatCompletionResponse.self,
                 from: data
-            ).choices.first?.message.content else {
+            ).choices.first else {
                 return .failure(.invalidResponse)
             }
+            guard choice.finishReason?.caseInsensitiveCompare("length") != .orderedSame else {
+                return .failure(.invalidResponse)
+            }
+            let content = choice.message.content
             let rawOutput = content.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !rawOutput.isEmpty else { return .failure(.invalidResponse) }
             guard rawOutput.count <= PromptOptimizationService.maximumOutputCharacters else {
@@ -241,6 +245,12 @@ private struct ChatCompletionResponse: Decodable {
 
     struct Choice: Decodable {
         let message: ResponseMessage
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case message
+            case finishReason = "finish_reason"
+        }
     }
 
     struct ResponseMessage: Decodable {
