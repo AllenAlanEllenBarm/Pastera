@@ -1,5 +1,10 @@
 import Foundation
 
+enum PromptOptimizationModelChoice: Equatable {
+    case automaticFree
+    case remoteProfile(UUID)
+}
+
 struct PromptOptimizationRemoteProfileDraft {
     private(set) var settings: PromptOptimizationSettings
     private(set) var selectedProfileID: UUID
@@ -17,6 +22,15 @@ struct PromptOptimizationRemoteProfileDraft {
         settings.remoteProfiles.first { $0.id == selectedProfileID }
     }
 
+    var selectedModelChoice: PromptOptimizationModelChoice {
+        switch settings.provider {
+        case .automaticFree:
+            return .automaticFree
+        case .openAICompatible:
+            return .remoteProfile(selectedProfileID)
+        }
+    }
+
     func isPersisted(_ profileID: UUID) -> Bool {
         persistedProfileIDs.contains(profileID)
     }
@@ -25,8 +39,15 @@ struct PromptOptimizationRemoteProfileDraft {
         persistedProfileIDs = Set(settings.remoteProfiles.map(\.id))
     }
 
-    mutating func setProvider(_ provider: PromptOptimizationProviderSelection) {
-        settings.provider = provider
+    mutating func selectModelChoice(_ choice: PromptOptimizationModelChoice) {
+        switch choice {
+        case .automaticFree:
+            settings.provider = .automaticFree
+        case let .remoteProfile(profileID):
+            guard settings.remoteProfiles.contains(where: { $0.id == profileID }) else { return }
+            settings.provider = .openAICompatible
+            selectedProfileID = profileID
+        }
     }
 
     mutating func confirmRemoteOrigin(_ origin: String) {

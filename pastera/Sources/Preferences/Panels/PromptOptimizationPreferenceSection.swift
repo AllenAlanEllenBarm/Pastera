@@ -10,10 +10,9 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     private let endpointPolicy: PromptOptimizationEndpointPolicy
     private let confirmationRunner: (PasteraConfirmationOptions, NSWindow?) -> PasteraConfirmationResult
 
-    private let providerPopup = NSPopUpButton()
+    private let modelChoicePopup = NSPopUpButton()
     private let availabilityLabel = NSTextField(wrappingLabelWithString: "")
     private let remoteStack = NSStackView()
-    private let profilePopup = NSPopUpButton()
     private let profileNameField = NSTextField()
     private let addProfileButton = NSButton()
     private let deleteProfileButton = NSButton()
@@ -127,13 +126,17 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         addArrangedSubview(header)
         header.widthAnchor.constraint(equalTo: widthAnchor, constant: -32).isActive = true
 
-        configureProviderControls()
-        let providerRow = makeLabeledControl(
-            label: promptPreferenceString("Processing", "处理方式"),
-            control: providerPopup
+        configureModelChoiceControls()
+        let modelActions = NSStackView(views: [modelChoicePopup, addProfileButton, deleteProfileButton])
+        modelActions.orientation = .horizontal
+        modelActions.alignment = .centerY
+        modelActions.spacing = 8
+        let modelChoiceRow = makeLabeledControl(
+            label: promptPreferenceString("Optimization model", "优化模型"),
+            control: modelActions
         )
-        addArrangedSubview(providerRow)
-        providerRow.widthAnchor.constraint(equalTo: widthAnchor, constant: -32).isActive = true
+        addArrangedSubview(modelChoiceRow)
+        modelChoiceRow.widthAnchor.constraint(equalTo: widthAnchor, constant: -32).isActive = true
 
         availabilityLabel.font = .systemFont(ofSize: 12)
         availabilityLabel.textColor = .secondaryLabelColor
@@ -193,17 +196,20 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         return header
     }
 
-    private func configureProviderControls() {
-        providerPopup.addItem(withTitle: promptPreferenceString("Automatic — Free", "免费自动"))
-        providerPopup.lastItem?.representedObject = PromptOptimizationProviderSelection.automaticFree.rawValue
-        providerPopup.addItem(withTitle: promptPreferenceString(
-            "OpenAI-compatible — Custom provider",
-            "OpenAI 兼容 — 自备服务"
-        ))
-        providerPopup.lastItem?.representedObject = PromptOptimizationProviderSelection.openAICompatible.rawValue
-        providerPopup.target = self
-        providerPopup.action = #selector(providerChanged(_:))
-        providerPopup.setAccessibilityLabel(promptPreferenceString("Processing provider", "提示词处理方式"))
+    private func configureModelChoiceControls() {
+        modelChoicePopup.target = self
+        modelChoicePopup.action = #selector(modelChoiceChanged(_:))
+        modelChoicePopup.setAccessibilityLabel(promptPreferenceString("Optimization model", "优化模型"))
+        modelChoicePopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        addProfileButton.title = promptPreferenceString("Add", "添加")
+        addProfileButton.target = self
+        addProfileButton.action = #selector(addProfile(_:))
+        addProfileButton.setAccessibilityLabel(promptPreferenceString("Add model profile", "添加模型配置"))
+        deleteProfileButton.title = promptPreferenceString("Delete", "删除")
+        deleteProfileButton.target = self
+        deleteProfileButton.action = #selector(deleteProfile(_:))
+        deleteProfileButton.setAccessibilityLabel(promptPreferenceString("Delete model profile", "删除模型配置"))
 
         saveButton.title = promptPreferenceString("Save Settings", "保存设置")
         saveButton.bezelStyle = .rounded
@@ -224,27 +230,6 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         remoteStack.orientation = .vertical
         remoteStack.alignment = .leading
         remoteStack.spacing = 10
-
-        profilePopup.target = self
-        profilePopup.action = #selector(profileChanged(_:))
-        profilePopup.setAccessibilityLabel(promptPreferenceString("Model profile", "模型配置"))
-        profilePopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        addProfileButton.title = promptPreferenceString("Add", "添加")
-        addProfileButton.target = self
-        addProfileButton.action = #selector(addProfile(_:))
-        addProfileButton.setAccessibilityLabel(promptPreferenceString("Add model profile", "添加模型配置"))
-        deleteProfileButton.title = promptPreferenceString("Delete", "删除")
-        deleteProfileButton.target = self
-        deleteProfileButton.action = #selector(deleteProfile(_:))
-        deleteProfileButton.setAccessibilityLabel(promptPreferenceString("Delete model profile", "删除模型配置"))
-        let profileActions = NSStackView(views: [profilePopup, addProfileButton, deleteProfileButton])
-        profileActions.orientation = .horizontal
-        profileActions.alignment = .centerY
-        profileActions.spacing = 8
-        remoteStack.addArrangedSubview(makeLabeledControl(
-            label: promptPreferenceString("Model profile", "模型配置"),
-            control: profileActions
-        ))
 
         profileNameField.setAccessibilityLabel(promptPreferenceString("Profile name", "配置名称"))
         remoteStack.addArrangedSubview(makeLabeledControl(
@@ -359,7 +344,6 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func loadSettingsIntoControls() {
-        selectProvider(profileDraft.settings.provider)
         loadSelectedProfileIntoControls()
         refreshProviderVisibility()
         if migrateLegacyAPIKeyIfNeeded() {
@@ -368,7 +352,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func loadSelectedProfileIntoControls(clearsAPIKey: Bool = true) {
-        refreshProfilePopup()
+        refreshModelChoicePopup()
         guard let profile = profileDraft.selectedProfile else { return }
         profileNameField.stringValue = profile.displayName
         selectPreset(profile.preset)
@@ -382,23 +366,44 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         onContentSizeChange?()
     }
 
-    private func refreshProfilePopup() {
-        profilePopup.removeAllItems()
+    private func refreshModelChoicePopup() {
+        modelChoicePopup.removeAllItems()
+        modelChoicePopup.addItem(withTitle: automaticModelChoiceTitle)
+        modelChoicePopup.lastItem?.representedObject = PromptOptimizationProviderSelection.automaticFree.rawValue
         for profile in profileDraft.settings.remoteProfiles {
-            profilePopup.addItem(withTitle: profile.displayName)
-            profilePopup.lastItem?.representedObject = profile.id.uuidString
+            modelChoicePopup.addItem(withTitle: modelChoiceTitle(for: profile))
+            modelChoicePopup.lastItem?.representedObject = profile.id.uuidString
         }
-        if let selectedIndex = profilePopup.itemArray.firstIndex(where: {
-            $0.representedObject as? String == profileDraft.selectedProfileID.uuidString
+        let selectedRepresentation: String
+        switch profileDraft.selectedModelChoice {
+        case .automaticFree:
+            selectedRepresentation = PromptOptimizationProviderSelection.automaticFree.rawValue
+        case let .remoteProfile(profileID):
+            selectedRepresentation = profileID.uuidString
+        }
+        if let selectedIndex = modelChoicePopup.itemArray.firstIndex(where: {
+            $0.representedObject as? String == selectedRepresentation
         }) {
-            profilePopup.selectItem(at: selectedIndex)
+            modelChoicePopup.selectItem(at: selectedIndex)
         }
     }
 
-    private func stageCurrentControls() {
-        if let provider = selectedProvider {
-            profileDraft.setProvider(provider)
+    private var automaticModelChoiceTitle: String {
+        switch optimizationService.availability {
+        case .available:
+            return promptPreferenceString("Automatic · Apple On-device", "自动 · Apple 设备端")
+        case .unavailable:
+            return promptPreferenceString("Automatic · Local Formatting", "自动 · 本地整理")
         }
+    }
+
+    private func modelChoiceTitle(for profile: PromptOptimizationRemoteProfile) -> String {
+        let name = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.isEmpty ? name : "\(name) · \(model)"
+    }
+
+    private func stageCurrentControls() {
         profileDraft.updateSelected(
             displayName: profileNameField.stringValue,
             preset: selectedPreset ?? profileDraft.selectedProfile?.preset ?? .custom,
@@ -410,29 +415,35 @@ final class PromptOptimizationPreferenceSection: NSStackView {
 
     private func switchToProfile(id profileID: UUID) {
         stageCurrentControls()
-        profileDraft.selectProfile(id: profileID)
+        profileDraft.selectModelChoice(.remoteProfile(profileID))
         clearProfileTransientState()
         loadSelectedProfileIntoControls()
+        refreshProviderVisibility()
     }
 
     @discardableResult
     private func addProfile(preset: OpenAICompatiblePreset, id: UUID) -> UUID {
         stageCurrentControls()
         let profileID = profileDraft.addProfile(preset: preset, id: id)
+        profileDraft.selectModelChoice(.remoteProfile(profileID))
         clearProfileTransientState()
         loadSelectedProfileIntoControls()
+        refreshProviderVisibility()
         return profileID
     }
 
-    @objc private func providerChanged(_ sender: NSPopUpButton) {
-        clearMessages()
+    @objc private func modelChoiceChanged(_ sender: NSPopUpButton) {
+        stageCurrentControls()
+        guard let choice = selectedModelChoice else { return }
+        profileDraft.selectModelChoice(choice)
+        clearProfileTransientState()
+        switch choice {
+        case .automaticFree:
+            refreshModelChoicePopup()
+        case .remoteProfile:
+            loadSelectedProfileIntoControls()
+        }
         refreshProviderVisibility()
-    }
-
-    @objc private func profileChanged(_ sender: NSPopUpButton) {
-        guard let rawID = sender.selectedItem?.representedObject as? String,
-              let profileID = UUID(uuidString: rawID) else { return }
-        switchToProfile(id: profileID)
     }
 
     @objc private func addProfile(_ sender: NSButton) {
@@ -537,6 +548,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
             settingsStore.save(profileDraft.snapshot())
             profileDraft.markSaved()
             loadSelectedProfileIntoControls()
+            refreshProviderVisibility()
         } catch {
             setError(promptPreferenceString(
                 "Unable to remove this model profile.",
@@ -601,10 +613,13 @@ final class PromptOptimizationPreferenceSection: NSStackView {
 
     private func persistSettings() -> Bool {
         clearMessages()
-        guard let provider = selectedProvider else { return false }
         stageCurrentControls()
-        profileDraft.setProvider(provider)
-        guard normalizeAndValidateProfiles() else { return false }
+        guard let choice = selectedModelChoice else { return false }
+        profileDraft.selectModelChoice(choice)
+        if case .remoteProfile = choice,
+           !normalizeAndValidateProfiles() {
+            return false
+        }
         settingsStore.save(profileDraft.snapshot())
         profileDraft.markSaved()
         loadSelectedProfileIntoControls(clearsAPIKey: false)
@@ -688,9 +703,10 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func refreshProviderVisibility() {
-        let usesRemote = selectedProvider == .openAICompatible
+        let usesRemote = profileDraft.settings.provider == .openAICompatible
         remoteStack.isHidden = !usesRemote
         testButton.isHidden = !usesRemote
+        deleteProfileButton.isEnabled = usesRemote
         if usesRemote {
             availabilityLabel.stringValue = promptPreferenceString(
                 "Uses your configured provider. Prompt text leaves this Mac only after confirmation.",
@@ -817,10 +833,26 @@ final class PromptOptimizationPreferenceSection: NSStackView {
         }
     }
 
+    private var selectedModelChoice: PromptOptimizationModelChoice? {
+        guard let representation = modelChoicePopup.selectedItem?.representedObject as? String else {
+            return nil
+        }
+        if representation == PromptOptimizationProviderSelection.automaticFree.rawValue {
+            return .automaticFree
+        }
+        guard let profileID = UUID(uuidString: representation) else { return nil }
+        return .remoteProfile(profileID)
+    }
+
     private var selectedProvider: PromptOptimizationProviderSelection? {
-        PromptOptimizationProviderSelection(
-            rawValue: providerPopup.selectedItem?.representedObject as? String ?? ""
-        )
+        switch selectedModelChoice {
+        case .automaticFree:
+            return .automaticFree
+        case .remoteProfile:
+            return .openAICompatible
+        case nil:
+            return nil
+        }
     }
 
     private var selectedPreset: OpenAICompatiblePreset? {
@@ -828,7 +860,13 @@ final class PromptOptimizationPreferenceSection: NSStackView {
     }
 
     private func selectProvider(_ provider: PromptOptimizationProviderSelection) {
-        providerPopup.selectItem(at: PromptOptimizationProviderSelection.allCases.firstIndex(of: provider) ?? 0)
+        let representation = provider == .automaticFree
+            ? PromptOptimizationProviderSelection.automaticFree.rawValue
+            : profileDraft.selectedProfileID.uuidString
+        guard let index = modelChoicePopup.itemArray.firstIndex(where: {
+            $0.representedObject as? String == representation
+        }) else { return }
+        modelChoicePopup.selectItem(at: index)
     }
 
     private func selectPreset(_ preset: OpenAICompatiblePreset) {
@@ -852,7 +890,7 @@ final class PromptOptimizationPreferenceSection: NSStackView {
 
     func selectProviderForTesting(_ provider: PromptOptimizationProviderSelection) {
         selectProvider(provider)
-        providerChanged(providerPopup)
+        modelChoiceChanged(modelChoicePopup)
     }
 
     func selectPresetForTesting(_ preset: OpenAICompatiblePreset) {

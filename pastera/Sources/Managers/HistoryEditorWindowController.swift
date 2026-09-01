@@ -23,6 +23,10 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
     private let titleLabel = NSTextField(labelWithString: "")
     private let typeIconView = NSImageView()
     private let textView = NSTextView()
+    private var originalDisclosureButton = NSButton()
+    private var originalComparisonTextView = NSTextView()
+    private var originalComparisonScrollView = NSScrollView()
+    private var originalComparisonSeparator = NSBox()
     private let imageView = NSImageView()
     private let imageScrollView = NSScrollView()
     private let scriptPopup = NSPopUpButton()
@@ -37,6 +41,9 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
     private var historyID: PasteboardHistory.ID?
     private var mode: Mode = .text
     private var originalText = ""
+    private var comparisonBaselineText = ""
+    private var hasOriginalComparison = false
+    private var isOriginalComparisonExpanded = false
     private var operationID = UUID()
     private var isRunning = false
     private var transformationTask: Task<Void, Never>?
@@ -84,6 +91,7 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
         isRunning = false
         historyID = nil
         originalText = ""
+        resetOriginalComparison(baseline: "")
         textView.string = ""
         imageView.image = nil
         statusLabel.stringValue = ""
@@ -126,12 +134,14 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
         isRunning = false
         self.historyID = historyID
         statusLabel.stringValue = ""
+        resetOriginalComparison(baseline: "")
 
         let imageSource = PasteboardHistoryOCRIndexer.imageSource(from: content)
         if let imageSource, let image = NSImage(data: imageSource.data) {
             mode = .image
             configureHeader(for: history, isImage: true)
             originalText = repository.fetchOCRText(historyID: historyID)?.recognizedText ?? ""
+            resetOriginalComparison(baseline: originalText)
             textView.string = originalText
             imageView.image = image
             imageView.frame.size = image.size
@@ -143,6 +153,7 @@ final class HistoryEditorWindowController: NSWindowController, NSWindowDelegate,
             mode = .text
             configureHeader(for: history, isImage: false)
             originalText = content.stringValue
+            resetOriginalComparison(baseline: originalText)
             textView.string = originalText
             imageView.image = nil
             buildContent(showsImage: false)
@@ -222,7 +233,7 @@ private extension HistoryEditorWindowController {
     }
 
     private func makeTextEditor() -> NSView {
-        makeEditorSurface(containing: makeTextScrollView())
+        makeEditorSurface(containing: makeTextEditingContent())
     }
 
     private func makeImageEditor() -> NSView {
@@ -239,11 +250,10 @@ private extension HistoryEditorWindowController {
         imageView.imageAlignment = .alignCenter
         imageScrollView.documentView = imageView
 
-        let textScrollView = makeTextScrollView()
         let imagePane = makeImagePreviewPane()
         let textPane = makeEditorPane(
             title: historyEditorString("OCR Text", "OCR 文本"),
-            content: textScrollView
+            content: makeTextEditingContent()
         )
         splitView.addArrangedSubview(imagePane)
         splitView.addArrangedSubview(textPane)
@@ -373,6 +383,112 @@ private extension HistoryEditorWindowController {
         return scrollView
     }
 
+    private func makeTextEditingContent() -> NSView {
+        originalDisclosureButton = NSButton()
+        originalComparisonTextView = NSTextView()
+        originalComparisonScrollView = NSScrollView()
+        originalComparisonSeparator = NSBox()
+        configureOriginalComparisonControls()
+        let draftScrollView = makeTextScrollView()
+        let stack = NSStackView(views: [
+            originalDisclosureButton,
+            originalComparisonScrollView,
+            originalComparisonSeparator,
+            draftScrollView
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.distribution = .fill
+        [
+            originalDisclosureButton,
+            originalComparisonScrollView,
+            originalComparisonSeparator,
+            draftScrollView
+        ].forEach {
+            $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        originalDisclosureButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        originalComparisonScrollView.heightAnchor.constraint(equalToConstant: 112).isActive = true
+        originalComparisonSeparator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        draftScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        refreshOriginalComparison()
+        return stack
+    }
+
+    private func configureOriginalComparisonControls() {
+        originalDisclosureButton.title = ""
+        originalDisclosureButton.bezelStyle = .inline
+        originalDisclosureButton.isBordered = false
+        originalDisclosureButton.imagePosition = .imageLeading
+        originalDisclosureButton.alignment = .left
+        originalDisclosureButton.font = .systemFont(ofSize: 11, weight: .medium)
+        originalDisclosureButton.contentTintColor = .secondaryLabelColor
+        originalDisclosureButton.target = self
+        originalDisclosureButton.action = #selector(toggleOriginalComparison)
+        originalDisclosureButton.setAccessibilityLabel(historyEditorString(
+            "Original comparison",
+            "原文对照"
+        ))
+
+        originalComparisonTextView.isEditable = false
+        originalComparisonTextView.isSelectable = true
+        originalComparisonTextView.isRichText = false
+        originalComparisonTextView.drawsBackground = false
+        originalComparisonTextView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        originalComparisonTextView.textColor = .secondaryLabelColor
+        originalComparisonTextView.textContainerInset = NSSize(width: 12, height: 10)
+        originalComparisonTextView.isHorizontallyResizable = false
+        originalComparisonTextView.isVerticallyResizable = true
+        originalComparisonTextView.autoresizingMask = [.width]
+        originalComparisonTextView.textContainer?.widthTracksTextView = true
+        originalComparisonTextView.setAccessibilityLabel(historyEditorString(
+            "Original history text",
+            "历史原文"
+        ))
+        originalComparisonScrollView.hasVerticalScroller = true
+        originalComparisonScrollView.borderType = .noBorder
+        originalComparisonScrollView.drawsBackground = true
+        originalComparisonScrollView.backgroundColor = .controlBackgroundColor
+        originalComparisonScrollView.documentView = originalComparisonTextView
+
+        originalComparisonSeparator.boxType = .separator
+    }
+
+    @objc private func toggleOriginalComparison() {
+        guard hasOriginalComparison, textView.string != comparisonBaselineText else { return }
+        isOriginalComparisonExpanded.toggle()
+        refreshOriginalComparison()
+        window?.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    private func resetOriginalComparison(baseline: String) {
+        comparisonBaselineText = baseline
+        hasOriginalComparison = false
+        isOriginalComparisonExpanded = false
+        originalComparisonTextView.string = baseline
+        refreshOriginalComparison()
+    }
+
+    private func refreshOriginalComparison() {
+        let shouldShow = hasOriginalComparison && textView.string != comparisonBaselineText
+        if !shouldShow {
+            isOriginalComparisonExpanded = false
+        }
+        originalComparisonTextView.string = comparisonBaselineText
+        originalDisclosureButton.title = historyEditorString(
+            "Original · \(comparisonBaselineText.count) characters",
+            "原文 · \(comparisonBaselineText.count) 个字符"
+        )
+        originalDisclosureButton.image = NSImage(
+            systemSymbolName: isOriginalComparisonExpanded ? "chevron.down" : "chevron.right",
+            accessibilityDescription: nil
+        )
+        originalDisclosureButton.isHidden = !shouldShow
+        originalComparisonScrollView.isHidden = !shouldShow || !isOriginalComparisonExpanded
+        originalComparisonSeparator.isHidden = !shouldShow
+    }
+
     private func makeFooter() -> NSView {
         let footer = NSView()
         scriptPopup.setAccessibilityLabel(historyEditorString("Text transformation", "文本转换"))
@@ -495,6 +611,8 @@ private extension HistoryEditorWindowController {
             case let .success(text):
                 if textView.string == originalText {
                     originalText = text
+                    comparisonBaselineText = text
+                    originalComparisonTextView.string = text
                     textView.string = text
                 }
                 statusLabel.stringValue = text.isEmpty
@@ -603,6 +721,12 @@ private extension HistoryEditorWindowController {
         switch outcome {
         case let .optimized(output, source):
             finishPromptOptimization(requestID: requestID)
+            if output != input {
+                if !hasOriginalComparison {
+                    isOriginalComparisonExpanded = false
+                }
+                hasOriginalComparison = true
+            }
             replaceDraft(
                 with: output,
                 undoText: input,
@@ -887,6 +1011,7 @@ private extension HistoryEditorWindowController {
             "\(textView.string.count) characters",
             "\(textView.string.count) 个字符"
         )
+        refreshOriginalComparison()
     }
 
     private func configureHeader(for history: PasteboardHistory, isImage: Bool) {

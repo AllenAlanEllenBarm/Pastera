@@ -7215,6 +7215,15 @@
     "Improve history prompts locally or with your own compatible model." : { "localizations" : {
       "en" : { "stringUnit" : { "state" : "translated", "value" : "Improve history prompts locally or with your own compatible model." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在本机或通过自备兼容模型美化历史提示词。" } }
     } },
+    "Optimization model" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Optimization model" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "优化模型" } }
+    } },
+    "Automatic · Apple On-device" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic · Apple On-device" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动 · Apple 设备端" } }
+    } },
+    "Automatic · Local Formatting" : { "localizations" : {
+      "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic · Local Formatting" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动 · 本地整理" } }
+    } },
     "Processing" : { "localizations" : {
       "en" : { "stringUnit" : { "state" : "translated", "value" : "Processing" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "处理方式" } }
     } },

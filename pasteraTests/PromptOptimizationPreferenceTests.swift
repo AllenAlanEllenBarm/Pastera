@@ -39,12 +39,13 @@ struct PromptOptimizationPreferenceTests {
         #expect(!draft.isPersisted(secondID))
         draft.markSaved()
         #expect(draft.isPersisted(secondID))
-        draft.setProvider(.openAICompatible)
+        draft.selectModelChoice(.remoteProfile(secondID))
 
         let snapshot = draft.snapshot()
 
         #expect(snapshot.provider == .openAICompatible)
         #expect(snapshot.activeRemoteProfileID == secondID)
+        #expect(draft.selectedModelChoice == .remoteProfile(secondID))
         draft.removeOrResetSelectedProfile()
         #expect(draft.selectedProfileID == firstID)
         #expect(draft.settings.remoteProfiles.count == 1)
@@ -114,6 +115,99 @@ struct PromptOptimizationPreferenceTests {
         #expect(!fixture.section.showsRemoteFieldsForTesting)
         fixture.section.selectProviderForTesting(.openAICompatible)
         #expect(fixture.section.showsRemoteFieldsForTesting)
+    }
+
+    @Test
+    func modelChoiceReplacesProcessingProviderAndShowsMethodWithModel() {
+        let profileID = UUID(uuidString: "60000000-0000-0000-0000-000000000010")!
+        let profile = PromptOptimizationRemoteProfile.makeDefault(
+            id: profileID,
+            preset: .ollama
+        )
+        let fixture = makeFixture(settings: PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profileID,
+            confirmedOrigins: []
+        ))
+
+        let visibleText = allText(in: fixture.section)
+        #expect(!visibleText.contains("Processing"))
+        #expect(!visibleText.contains("处理方式"))
+
+        let popup = findPopUpButton(
+            in: fixture.section,
+            accessibilityLabels: ["Optimization model", "优化模型"]
+        )
+        #expect(popup != nil)
+        let titles = popup?.itemTitles ?? []
+        #expect(titles.contains { $0.contains("Automatic") || $0.contains("自动") })
+        #expect(titles.contains("Ollama · qwen2.5:7b-instruct"))
+    }
+
+    @Test
+    func unifiedModelChoicePersistsAutomaticAndRemoteSelections() {
+        let profileID = UUID(uuidString: "60000000-0000-0000-0000-000000000011")!
+        let profile = PromptOptimizationRemoteProfile.makeDefault(
+            id: profileID,
+            preset: .ollama
+        )
+        let fixture = makeFixture(settings: PromptOptimizationSettings(
+            provider: .openAICompatible,
+            remoteProfiles: [profile],
+            activeRemoteProfileID: profileID,
+            confirmedOrigins: []
+        ))
+        guard let popup = findPopUpButton(
+            in: fixture.section,
+            accessibilityLabels: ["Optimization model", "优化模型"]
+        ) else {
+            Issue.record("Missing unified optimization model selector")
+            return
+        }
+        guard let action = popup.action else {
+            Issue.record("Unified optimization model selector has no action")
+            return
+        }
+
+        guard let automaticIndex = popup.itemArray.firstIndex(where: {
+            $0.title.contains("Automatic") || $0.title.contains("自动")
+        }) else {
+            Issue.record("Missing automatic model choice")
+            return
+        }
+        popup.selectItem(at: automaticIndex)
+        #expect(NSApp.sendAction(action, to: popup.target, from: popup))
+        #expect(!fixture.section.showsRemoteFieldsForTesting)
+        #expect(!findButton(in: fixture.section, titles: ["Delete", "删除"])!.isEnabled)
+        #expect(fixture.section.saveSettingsForTesting())
+        #expect(fixture.settingsStore.settings.provider == .automaticFree)
+
+        guard let ollamaIndex = popup.itemArray.firstIndex(where: {
+            $0.title == "Ollama · qwen2.5:7b-instruct"
+        }) else {
+            Issue.record("Missing Ollama model choice")
+            return
+        }
+        popup.selectItem(at: ollamaIndex)
+        #expect(NSApp.sendAction(action, to: popup.target, from: popup))
+        #expect(fixture.section.showsRemoteFieldsForTesting)
+        #expect(fixture.section.saveSettingsForTesting())
+        #expect(fixture.settingsStore.settings.provider == .openAICompatible)
+        #expect(fixture.settingsStore.settings.activeRemoteProfileID == profileID)
+    }
+
+    @Test
+    func automaticChoiceCanBeSavedWithoutValidatingHiddenRemoteDrafts() {
+        let fixture = makeFixture()
+        _ = fixture.section.addProfileForTesting(preset: .custom)
+        fixture.section.setRemoteFieldsForTesting(baseURL: "not a URL", model: "")
+
+        fixture.section.selectProviderForTesting(.automaticFree)
+
+        #expect(fixture.section.saveSettingsForTesting())
+        #expect(fixture.settingsStore.settings.provider == .automaticFree)
+        #expect(!fixture.section.showsRemoteFieldsForTesting)
     }
 
     @Test
@@ -681,6 +775,22 @@ private func findButton(in view: NSView, titles: Set<String>) -> NSButton? {
     for subview in view.subviews {
         if let button = findButton(in: subview, titles: titles) {
             return button
+        }
+    }
+    return nil
+}
+
+private func findPopUpButton(
+    in view: NSView,
+    accessibilityLabels: Set<String>
+) -> NSPopUpButton? {
+    if let popup = view as? NSPopUpButton,
+       accessibilityLabels.contains(popup.accessibilityLabel() ?? "") {
+        return popup
+    }
+    for subview in view.subviews {
+        if let popup = findPopUpButton(in: subview, accessibilityLabels: accessibilityLabels) {
+            return popup
         }
     }
     return nil

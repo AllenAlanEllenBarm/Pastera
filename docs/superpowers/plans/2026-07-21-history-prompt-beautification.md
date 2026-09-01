@@ -2,9 +2,9 @@
 
 > **执行者必读：** 实施本计划时必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项执行。所有步骤使用复选框（`- [ ]`）跟踪进度。
 
-**目标：** 在每个可编辑历史条目的详情编辑器中提供“美化提示词”，把历史行原有铅笔图标替换成系统魔法棒图标，默认以不收费的本机方式运行，并允许用户配置 OpenAI 兼容的大模型或私有模型。
+**目标：** 在每个可编辑历史条目的详情编辑器中提供“美化提示词”，把历史行原有铅笔图标替换成系统魔法棒图标，默认以不收费的本机方式运行，允许用户直接选择自动来源或已配置模型，并在优化后通过折叠区对照最初原文。
 
-**架构：** 提示词优化领域模型、设置与 Keychain 存储、免费优化器、OpenAI 兼容优化器和统一编排服务保持独立。`HistoryEditorWindowController` 继续拥有草稿、撤销和保存生命周期，只把现有脚本下拉扩展成统一文本转换动作。`Environment` 负责注入单例服务；配置入口从 `CPYScriptsPreferenceViewController` 迁移到独立的 `CPYPromptOptimizationPreferenceViewController`，脚本页恢复为纯脚本管理页面。
+**架构：** 提示词优化领域模型、设置与 Keychain 存储、免费优化器、OpenAI 兼容优化器和统一编排服务保持独立。设置页把内部 `provider` 与远端 profile 映射为一个面向用户的“优化模型”选择器，保留原持久化结构且不迁移数据。`HistoryEditorWindowController` 继续拥有草稿、撤销和保存生命周期，并只在窗口会话内保存打开条目时的初始原文，用默认折叠的只读对照区展示，不写入额外持久层。
 
 **技术栈：** Swift、AppKit、macOS 26+ Foundation Models、URLSession、Security/Keychain、UserDefaults、Swift Testing、Xcode 26.5。
 
@@ -27,6 +27,8 @@
 - 使用 AppKit 原生控件、SF Symbols、`PasteraDesignTokens`、系统字体和系统浅色/深色外观，不添加 AI 紫、渐变、发光、玻璃卡片、向导或装饰动画。
 - 设置侧栏新增且只新增一个“提示词优化”页面，位于“历史记录”和“脚本”之间；不增加独立工作台、窗口或全局快捷键。
 - 迁移配置页面不得修改 UserDefaults 键、Keychain 服务名、已确认来源记录或提示词优化运行链路，不进行数据迁移。
+- 设置页不展示内部 `automaticFree` / `openAICompatible` 处理方式；用户只选择“自动”或具体的“配置名称 · 模型名”。
+- 原文对照固定使用打开当前历史详情时的初始文本，多次优化不得替换该快照；对照只存在于窗口会话内，默认折叠且只读。
 - 保留当前未跟踪的 `.codex/config.toml`、`.superpowers/` 以及所有无关修改。
 
 ## 调研结论与技术决策
@@ -144,6 +146,8 @@ V1 采用一次重写调用，不做多候选、评分、自动评测或循环�
 | AC-09 | 无回归并安装最新本地构建 | 工程与测试文件 | 聚焦测试、完整清理测试、Release 构建 | `/Applications/Pastera.app` 进程和功能回读 |
 | AC-10 | 在已打开的提示词优化设置页从免费模式切换到自备服务时，远端字段立即展开且页面滚动高度同步增长 | `PromptOptimizationPreferenceSection.swift`、`CPYPromptOptimizationPreferenceViewController.swift` | 页面真实布局高度回归测试 | 已安装应用切换处理方式并检查服务预设、基础地址、模型、API Key 和操作按钮 |
 | AC-11 | “提示词优化”作为独立侧栏页面位于“历史记录”和“脚本”之间，脚本页不再展示相关配置，设置搜索跳转到新页面 | 设置目录、偏好窗口控制器、两个页面控制器 | 目录、页面工厂、顺序、搜索路由和脚本页边界测试 | 真实设置侧栏、搜索跳转和两个页面截图 |
+| AC-12 | 设置页只有一个“优化模型”选择器；自动来源与每个远端 profile 同级展示，远端标题包含配置名称和模型名，选择结果继续写入原有 provider/profile 字段 | `PromptOptimizationPreferenceSection.swift`、`PromptOptimizationRemoteProfileDraft.swift` | 选择映射、标题、显隐、保存与既有 profile 回归测试 | 已安装应用切换自动与 Ollama，确认无“处理方式”行 |
+| AC-13 | 首次成功优化后显示默认折叠的原文栏；展开只读显示打开条目时的初始原文，多次优化不替换该快照，撤销回初始原文时隐藏 | `HistoryEditorWindowController.swift` | 初始隐藏、成功显示、折叠切换、多次优化、撤销回原文测试 | 已安装应用完成优化，拍摄折叠与展开状态截图 |
 
 ## 数据流
 
@@ -178,6 +182,28 @@ HistoryMenuRowView 魔法棒
 - `CPYPromptOptimizationPreferenceViewController` 注入现有设置存储、Keychain 存储和优化服务，承载 `PromptOptimizationPreferenceSection`，并在字段显隐变化后更新页面内容高度。
 - `CPYScriptsPreferenceViewController` 移除所有提示词优化依赖、属性、布局、锚点和测试接口，恢复为纯脚本页面。
 - 搜索项从 `scripts.promptOptimization` 迁移为 `promptOptimization.configuration`，相关关键词只路由到新页面。
+
+## 已确认的后续设计：统一模型选择与原文折叠对照
+
+**确认日期：** 2026-08-31
+
+**产品边界：** 用户不再选择内部“处理方式”，只选择实际使用的自动来源或具体模型配置。OpenAI-compatible 客户端、端点安全、来源确认、Keychain、UserDefaults 数据结构和远端 profile 管理保持不变。历史详情只为成功的提示词优化显示原文对照，不把脚本执行、独立对比窗口、版本历史或持久化快照纳入本次范围。
+
+**设置页：**
+
+- 删除“处理方式”行，把原“模型配置”选择器提升为唯一“优化模型”选择器。
+- 自动项根据当前能力显示“自动 · Apple 设备端”或“自动 · 本地整理”；远端项显示“配置名称 · 模型名”，例如 `Ollama · qwen2.5:7b-instruct`。
+- 选择自动项时写入 `provider = automaticFree` 并隐藏远端字段；选择远端项时写入 `provider = openAICompatible`、更新 `activeRemoteProfileID` 并展示该 profile 的配置字段。
+- “添加”在任意状态都可用，创建并选中新的自定义 profile；自动项不可删除，远端 profile 延续现有删除与 Keychain 清理规则。
+- 不删除领域层的 `PromptOptimizationProviderSelection`，因为运行编排和向后兼容仍使用它；只从用户界面隐藏该实现概念。
+
+**历史详情：**
+
+- 文本历史和图片 OCR 文本复用同一个原文折叠区；打开条目时不显示，首次得到不同的成功优化结果后显示。
+- 折叠栏位于同一编辑器外框内、主编辑区上方，标题为“原文 · N 个字符”，默认折叠；展开后显示固定高度、可滚动、不可编辑的等宽原文。
+- 原文固定为打开当前历史详情时的初始文本。再次优化、脚本转换或手动编辑都不替换该快照；切换条目、关闭窗口或重新打开时重置。
+- 当当前草稿等于初始原文时隐藏对照区；重做或再次产生不同结果时恢复显示。主编辑器、撤销栈、保存和脏草稿确认继续以现有 `textView` 与 `originalText` 为事实来源。
+- 折叠按钮提供“显示原文”/“隐藏原文”可访问性标签，展开的原文文本标记为只读，不把正文写入日志、测试快照或额外存储。
 
 **数据与错误边界：** UserDefaults 键、Keychain 服务名、已确认来源记录和 `AppEnvironment.current.promptOptimizationService` 不变，因此不需要数据迁移。保存、连接测试、取消、超时和错误提示继续由现有配置组件处理；页面关闭时仍取消连接测试任务。
 
@@ -1278,6 +1304,134 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 
 此处只提交真实新增的交付记录；如果步骤 1-3 没有全部通过，不创建该完成提交。
 
+## 任务 11：合并处理方式与模型配置为统一选择器
+
+**文件：**
+
+- 修改：`pastera/Sources/Preferences/Panels/PromptOptimizationRemoteProfileDraft.swift`
+- 修改：`pastera/Sources/Preferences/Panels/PromptOptimizationPreferenceSection.swift`
+- 修改：`pastera/Resources/Localizable.xcstrings`
+- 测试：`pasteraTests/PromptOptimizationPreferenceTests.swift`
+
+**接口：**
+
+- 新增 `PromptOptimizationModelChoice`，取值为 `.automaticFree` 或 `.remoteProfile(UUID)`。
+- `PromptOptimizationRemoteProfileDraft.selectedModelChoice` 从既有 `settings.provider` 与 `selectedProfileID` 派生；`selectModelChoice(_:)` 原子更新 provider 和远端 profile 选择。
+- `PromptOptimizationPreferenceSection` 只保留 `modelChoicePopup` 作为用户入口，远端 profile 的编辑、验证、密钥和删除契约不变。
+
+- [x] **步骤 1：先写统一选择行为的失败测试**
+
+在 `PromptOptimizationPreferenceTests` 覆盖：自动项和远端项同级、远端标题为字面值 `Ollama · qwen2.5:7b-instruct`、选择自动隐藏远端字段并保存 `automaticFree`、选择 Ollama 展开远端字段并保存 `openAICompatible` 与原 profile ID、自动项不可删除。
+
+- [x] **步骤 2：运行聚焦测试并确认按预期失败**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:pasteraTests/PromptOptimizationPreferenceTests test
+```
+
+预期：新增断言因仍存在独立 provider popup、模型选择器缺少自动项或标题不含模型名而失败；不是编译错误或夹具错误。
+
+- [x] **步骤 3：实现最小统一选择映射**
+
+删除可见 provider 行，把统一选择器移到远端字段外；用 `PromptOptimizationModelChoice` 更新既有 draft，不更改 UserDefaults 编码、Keychain 账号或优化服务。切换前继续暂存当前远端字段，切换后刷新选项、详情显隐、密钥状态和页面高度。
+
+- [x] **步骤 4：复跑设置聚焦测试**
+
+重复步骤 2，预期全部通过，并证明新增、删除、预设默认值、URL 校验、API Key 和连接测试既有用例没有回归。
+
+## 任务 12：在历史详情加入初始原文折叠对照
+
+**文件：**
+
+- 修改：`pastera/Sources/Managers/HistoryEditorWindowController.swift`
+- 修改：`pastera/Resources/Localizable.xcstrings`
+- 测试：`pasteraTests/HistoryEditorWindowControllerTests.swift`
+
+**接口：**
+
+- `HistoryEditorWindowController` 在窗口会话内保存独立的 `comparisonBaselineText` 初始原文快照，不建立新的持久化模型，也不影响既有 `originalText` 脏状态语义。
+- 新增窗口内对照可见性与折叠状态，成功优化后根据 `textView.string != comparisonBaselineText` 更新可见性。
+- 原文视图使用只读 `NSTextView`、`NSScrollView` 和一个 disclosure 按钮，文本与图片 OCR 编辑器共用同一构造路径。
+
+- [x] **步骤 1：先写原文对照行为的失败测试**
+
+新增用例覆盖：打开时隐藏；成功优化后显示且默认折叠；展开后只读文本严格等于字面值 `Draft`；连续两次优化后仍为 `Draft`；撤销回 `Draft` 时隐藏；加载另一条历史时清空旧快照。
+
+- [x] **步骤 2：运行历史编辑器聚焦测试并确认按预期失败**
+
+```bash
+xcodebuild CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  -scheme pastera -project pastera.xcodeproj \
+  -clonedSourcePackagesDirPath "$PWD/.spm-cache/SourcePackages" \
+  -packageCachePath "$PWD/.spm-cache/PackageCache" \
+  -skipPackagePluginValidation -skipMacroValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:pasteraTests/HistoryEditorWindowControllerTests test
+```
+
+预期：新增断言因原文对照尚不存在而失败；现有优化、撤销、保存、取消和脚本测试继续通过。
+
+- [x] **步骤 3：实现最小折叠对照视图与状态**
+
+在现有单一编辑器外框内加入紧凑 disclosure 行和固定高度只读原文滚动区；首次显示时强制折叠，按钮只切换原文区，不修改草稿或 undo manager。`load`、`windowWillClose` 和 OCR 初始化重置会话状态；`textDidChange`、成功优化和 undo/redo 共用可见性刷新。
+
+- [x] **步骤 4：复跑历史编辑器聚焦测试**
+
+重复步骤 2，预期全部通过，并确认对照 UI 不改变仓库写入次数、保存正文和转换输入。
+
+## 任务 13：完整回归、本地安装与真实视觉验收
+
+**文件：**
+
+- 修改：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`（只勾选真实完成步骤并记录偏差）
+
+**接口：**
+
+- 不再增加产品接口；验证 AC-09、AC-12 和 AC-13。
+- 不使用用户既有历史正文作为截图样本；只使用本轮合成文本，验收后删除合成记录。
+
+- [x] **步骤 1：运行提示词相关聚焦套件与完整串行回归**
+
+先运行任务 11、12 的两个聚焦套件，再执行项目默认 `clean test` 串行口径。预期最终输出 `** TEST SUCCEEDED **`；失败时先按 `superpowers:systematic-debugging` 定位，不弱化测试。
+
+- [x] **步骤 2：检查工程、资源和 diff**
+
+```bash
+jq empty pastera/Resources/Localizable.xcstrings
+plutil -lint pastera.xcodeproj/project.pbxproj
+git diff --check
+git status --short
+git diff --stat
+```
+
+预期：只出现任务 11-13 列出的文件和本计划更新；不修改凭据、OneDrive 配置或无关工作。
+
+- [x] **步骤 3：安装并验证真实应用**
+
+```bash
+./script/install_local.sh --verify
+pgrep -fl "/Applications/Pastera.app/Contents/MacOS/Pastera"
+```
+
+预期：构建、ad-hoc 签名和安装成功，运行进程来自精确安装路径。
+
+- [x] **步骤 4：截图验收设置页与历史详情**
+
+1. 设置页不存在“处理方式”行；“优化模型”同一选择器中可见自动项与 `Ollama · qwen2.5:7b-instruct`。
+2. 选择自动项时页面紧凑且远端字段隐藏；选择 Ollama 时原有配置字段完整、无裁切、操作区仍位于卡片内。
+3. 使用本轮合成历史运行一次真实优化，结果出现后“原文 · N 个字符”默认折叠；展开后显示初始合成文本且不可编辑，主编辑器保持可编辑。
+4. 再次优化后原文不变；撤销回初始原文后对照区隐藏。深色与浅色各检查一次，至少保存设置页、原文折叠和原文展开三张证据截图。
+
+- [x] **步骤 5：更新真实交付状态，不执行 Git 发布动作**
+
+把通过的测试、安装、截图、偏差和剩余风险追加到本计划交付记录，将计划状态更新为“统一模型选择与原文对照已实施并验证”。本次用户未授权 commit、push、release 或外部分发，因此不执行这些动作。
+
 ## 风险、回滚与观察
 
 ### 风险
@@ -1307,13 +1461,13 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 ## 交付元数据
 
 - 计划路径：`docs/superpowers/plans/2026-07-21-history-prompt-beautification.md`
-- 计划状态：`独立设置页已实施并验证`
+- 计划状态：`统一模型选择与原文对照已实施并验证`
 - 证据档位：`standard`
 - 需求 ID：`未请求`
-- 任务 ID：`未请求；Superpowers 任务 1-10 已交付`
+- 任务 ID：`未请求；Superpowers 任务 1-13 已交付`
 - 禅道同步状态：`未请求`
 - 禅道回读：`不适用`
-- 最后更新：`2026-07-22`
+- 最后更新：`2026-08-31`
 
 ## 交付记录
 
@@ -1341,3 +1495,9 @@ git commit -m "docs(prompt): 记录独立设置页交付"
 - 错别字修复剩余边界：本地规则已能修正本次用户明确确认的“分工翰”到“分功能”，但仍不具备任意中文上下文纠错能力；这是不打包第三方模型权重、不默认联网约束下的明确产品边界。其他未确认的上下文错别字仍需可用的 Apple 设备端模型或用户主动配置的兼容模型。
 - 后续动作：按需要在符合条件的 Apple Intelligence 设备、一个用户自配兼容端点及 VoiceOver 环境补充未覆盖矩阵；不阻塞当前默认免费模式、自动化回归和本地安装交付。
 - 禅道收尾：未请求。
+- 2026-08-31 任务 11 实施：设置页删除可见“处理方式”和独立“模型配置”两层选择，新增唯一“优化模型”选择器；自动项按运行时可用性显示“自动 · Apple 设备端”或“自动 · 本地整理”，远端项显示“配置名称 · 模型名”。选择仍映射到既有 `automaticFree` / `openAICompatible`、profile UUID、UserDefaults、Keychain 和来源确认契约；自动模式不校验隐藏的未完成远端草稿，远端配置的新增、删除、预设、密钥和连接测试保持原行为。
+- 2026-08-31 任务 12 实施：文本与图片 OCR 编辑器共用同一个会话级原文对照组件。首次成功且确实改变文本的提示词优化后显示“原文 · N 个字符”，默认折叠；展开区使用只读 `NSTextView`，多次优化始终保留打开历史详情时的初始快照，撤销回初始文本时自动隐藏。切换条目、关闭窗口和 OCR 首次识别均重置快照，不写数据库、不记录正文日志。
+- 2026-08-31 TDD 与回归：统一选择器、原文对照和自动模式保存分别在 `/tmp/pastera-model-choice-red.log`、`/tmp/pastera-original-comparison-red.log`、`/tmp/pastera-automatic-hidden-draft-red.log` 观察到预期失败；最终两个聚焦套件在 `/tmp/pastera-unified-ux-focused-final2.log` 以 43 个测试、2 个套件通过。项目标准串行 `clean test` 在 `/tmp/pastera-unified-ux-full-final2.log` 以 1255 个测试、101 个套件和 `** TEST SUCCEEDED **` 结束，结果包为 `/Users/feeyo/Library/Developer/Xcode/DerivedData/pastera-ajtgexftokzyiagrdjtmbtvtweyz/Logs/Test/Run-pastera-2026.08.31_17-59-54-+0800.xcresult`。Xcode 最后仍报告既有 `writerNotOpen` 摘要写入警告，因此以完整逐测试输出、计数和最终成功行作为事实来源。
+- 2026-08-31 安装与真实设置页：`./script/install_local.sh --verify` 输出 `** BUILD SUCCEEDED **`，ad-hoc 签名、Designated Requirement 和精确安装路径验证通过；PID `56925` 从 `/Applications/Pastera.app/Contents/MacOS/Pastera --open-preferences` 运行。安装版实际切换确认旧“处理方式”不存在，统一选择器可见“自动 · Apple 设备端”和 `Ollama · qwen2.5:7b-instruct`；自动页紧凑且删除禁用，Ollama 页完整显示配置名称、预设、基础地址、模型、API Key、HTTP 开关、保存和测试连接。本次只切换草稿并恢复 Ollama，未点击保存或测试连接。
+- 2026-08-31 真实 Ollama 与视觉证据：本机 Ollama `0.33.0` 在线并包含 `qwen2.5:7b-instruct`。使用生产 `PromptOptimizationService`、生产 `OpenAICompatiblePromptOptimizer`、隔离 UserDefaults、空密钥存根和内存历史仓库，对 42 字符合成文本发起真实本机请求；9.220 秒得到 74 字优化结果，原文对照仍严格等于初始合成文本，未读取、写入或删除用户历史。安装版设置截图为 `/Users/feeyo/.codex/visualizations/2026/08/31/01a056ec-00b0-7621-8787-94ccbb7d746b/pastera-optimization-model-auto.jpg` 与 `pastera-optimization-model-ollama.jpg`；真实 Ollama 结果的深色折叠和浅色展开截图为同目录 `pastera-history-original-live-ollama-collapsed-dark.png` 与 `pastera-history-original-live-ollama-expanded-light.png`，另保留两种外观的互补状态图。
+- 2026-08-31 静态检查与边界：`jq empty pastera/Resources/Localizable.xcstrings`、`plutil -lint pastera.xcodeproj/project.pbxproj` 和 `git diff --check` 通过。最终工作树只修改本计划、3 个产品源码、字符串目录和 2 个对应测试文件；未修改凭据、OneDrive 配置或 SQLite 模型。`.xcstrings` 是 JSON 字符串目录，故计划中的资源校验从不适用的 `plutil` 更正为 `jq empty`。用户要求直接在当前工作树实施，因此未创建隔离工作树；用户未授权 commit、push、release 或外部分发，本轮均未执行。
