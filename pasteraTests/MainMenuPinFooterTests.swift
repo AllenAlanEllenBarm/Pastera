@@ -997,6 +997,53 @@ struct OneDriveProcessStatusServiceTests {
         try await Task.sleep(for: .milliseconds(80))
 
         #expect(callbackCount == 2)
+
+        runningApplications = []
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(callbackCount == 3)
+    }
+
+    @Test
+    func monitoringDeduplicatesNotificationsAndStopsAfterCancellation() async throws {
+        let appURL = URL(fileURLWithPath: "/Applications/OneDrive.app")
+        let notificationCenter = NotificationCenter()
+        var runningApplications = [OneDriveRunningApplicationSnapshot]()
+        var callbackCount = 0
+        let runtimeApplication = OneDriveRunningApplicationSnapshot(
+            bundleIdentifier: "com.microsoft.OneDrive-mac",
+            executableURL: appURL.appendingPathComponent("Contents/MacOS/OneDrive"),
+            localizedName: "OneDrive"
+        )
+        let service = OneDriveProcessStatusService(
+            applicationURLProvider: { $0 == "com.microsoft.OneDrive-mac" ? appURL : nil },
+            fallbackApplicationURLs: [],
+            fileExists: { path in
+                URL(fileURLWithPath: path).standardizedFileURL.path == appURL.standardizedFileURL.path
+            },
+            runningApplicationsProvider: { runningApplications },
+            openApplication: { _ in true },
+            notificationCenter: notificationCenter,
+            applicationSnapshotFromNotification: { _ in runtimeApplication },
+            monitoringPollInterval: 0.01
+        )
+        let observation = service.startMonitoring {
+            callbackCount += 1
+        }
+
+        runningApplications = [runtimeApplication]
+        notificationCenter.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        #expect(callbackCount == 1)
+
+        notificationCenter.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(callbackCount == 1)
+
+        observation.cancel()
+        runningApplications = []
+        notificationCenter.post(name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(callbackCount == 1)
     }
 
     private func makeService(
