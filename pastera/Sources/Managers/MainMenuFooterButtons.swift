@@ -690,6 +690,7 @@ enum MainMenuOneDriveSyncBadge: Equatable {
     case none
     case progress
     case disconnected
+    case failed
     case conflicts(Int)
 }
 
@@ -738,9 +739,17 @@ struct MainMenuOneDriveStatusPresentation {
             return
         }
 
-        if !processStatus.isRunning || snapshot.phase.isDisconnected {
+        if !processStatus.isRunning {
             badge = .disconnected
             tintColor = .secondaryLabelColor
+            badgeColor = .systemRed
+            accessibilityLabel = Self.disconnectedLabel(pendingChangeCount: snapshot.pendingChangeCount)
+            return
+        }
+
+        if snapshot.phase.isDisconnected {
+            badge = .disconnected
+            tintColor = .systemBlue
             badgeColor = .systemRed
             accessibilityLabel = Self.disconnectedLabel(pendingChangeCount: snapshot.pendingChangeCount)
             return
@@ -761,9 +770,9 @@ struct MainMenuOneDriveStatusPresentation {
             badgeColor = .clear
             accessibilityLabel = String(localized: "OneDrive is waiting for the vault to unlock")
         case .failed:
-            badge = .disconnected
-            tintColor = .secondaryLabelColor
-            badgeColor = .systemRed
+            badge = .failed
+            tintColor = .systemBlue
+            badgeColor = .systemOrange
             accessibilityLabel = String(localized: "OneDrive sync failed")
         case .disabled:
             badge = .none
@@ -846,6 +855,8 @@ private final class MainMenuOneDriveSyncBadgeView: NSView {
             configureSymbol("arrow.triangle.2.circlepath")
         case .disconnected:
             configureSymbol("bolt.slash.fill")
+        case .failed:
+            configureSymbol("exclamationmark")
         case let .conflicts(count):
             countLabel.stringValue = count > 99 ? "99+" : String(count)
             countLabel.textColor = .black

@@ -1608,6 +1608,8 @@ private final class PasswordVaultMenuOneDriveProcessStatusService: OneDriveProce
 
     func currentStatus() -> OneDriveProcessStatus { status }
 
+    func isMainApplicationRunning() -> Bool { status.isRunning }
+
     func openOneDrive() -> Bool {
         openCallCount += 1
         return status.appURL != nil

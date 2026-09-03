@@ -632,7 +632,7 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
             controller.view.layoutSubtreeIfNeeded()
 
             visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
-            #expect(visibleTexts.contains("OneDrive 不可用"))
+            #expect(!visibleTexts.contains("OneDrive 可用"))
             #expect(!visibleTexts.contains("所选 OneDrive 文件夹不可用。"))
             #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
             #expect(!FileManager.default.fileExists(atPath: defaultRootURL.path))
@@ -685,7 +685,7 @@ struct SyncPreferenceOneDriveLocationTests { // swiftlint:disable:this type_body
                 controller.viewDidLoad()
                 controller.view.layoutSubtreeIfNeeded()
                 visibleTexts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
-                #expect(visibleTexts.contains("OneDrive 不可用"))
+                #expect(!visibleTexts.contains("OneDrive 可用"))
                 #expect(!visibleTexts.contains("所选 OneDrive 文件夹不可用。"))
                 #expect(defaults.string(forKey: Constants.UserDefaults.syncRootPath) == defaultRootURL.standardizedFileURL.path)
                 #expect(!FileManager.default.fileExists(atPath: defaultRootURL.path))

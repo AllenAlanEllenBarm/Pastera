@@ -15,6 +15,7 @@ import Cocoa
 final class PasteraOneDriveStatusBadge: NSView {
     enum State: Equatable {
         case available
+        case runningFolderUnavailable
         case unavailable
         case notDetected
         case selectionRequired
@@ -23,6 +24,8 @@ final class PasteraOneDriveStatusBadge: NSView {
             switch self {
             case .available:
                 return pasteraPreferenceString("OneDrive Available")
+            case .runningFolderUnavailable:
+                return pasteraPreferenceString("OneDrive Running, Folder Unavailable")
             case .unavailable:
                 return pasteraPreferenceString("OneDrive Unavailable")
             case .notDetected:
@@ -36,6 +39,8 @@ final class PasteraOneDriveStatusBadge: NSView {
             switch self {
             case .available:
                 return pasteraPreferenceString("OneDrive Available Description")
+            case .runningFolderUnavailable:
+                return pasteraPreferenceString("OneDrive Running, Folder Unavailable Description")
             case .unavailable:
                 return pasteraPreferenceString("OneDrive Unavailable Description")
             case .notDetected:
@@ -49,6 +54,8 @@ final class PasteraOneDriveStatusBadge: NSView {
             switch self {
             case .available:
                 return .systemGreen
+            case .runningFolderUnavailable:
+                return .systemOrange
             case .unavailable:
                 return .systemRed
             case .notDetected, .selectionRequired:

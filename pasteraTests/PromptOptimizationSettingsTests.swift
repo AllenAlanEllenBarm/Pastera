@@ -12,7 +12,7 @@ struct PromptOptimizationSettingsTests {
         #expect(OpenAICompatiblePreset.deepSeek.defaultBaseURL == "https://api.deepseek.com")
         #expect(OpenAICompatiblePreset.deepSeek.defaultModel == "deepseek-v4-flash")
         #expect(OpenAICompatiblePreset.deepSeek.disablesThinking)
-        #expect(OpenAICompatiblePreset.ollama.defaultModel == "qwen2.5:7b-instruct")
+        #expect(OpenAICompatiblePreset.ollama.defaultModel == "qwen3.5:4b")
         #expect(OpenAICompatiblePreset.custom.defaultBaseURL.isEmpty)
         #expect(!OpenAICompatiblePreset.custom.disablesThinking)
     }

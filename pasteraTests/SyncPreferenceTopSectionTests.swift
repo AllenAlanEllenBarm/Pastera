@@ -454,6 +454,33 @@ struct SyncPreferenceTopSectionTests {
 
 extension SyncPreferenceTopSectionTests {
     @Test
+    func runningOneDriveDistinguishesAnUnavailableFolderFromAStoppedClient() throws {
+        let defaults = AppEnvironment.current.defaults
+        let homeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let unavailableRootURL = cloudStorageURL(homeURL: homeURL)
+            .appendingPathComponent("OneDrive", isDirectory: true)
+            .appendingPathComponent("Pastera", isDirectory: true)
+            .appendingPathComponent("sync", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: homeURL) }
+
+        try withPreservedSyncDefaults {
+            defaults.set(unavailableRootURL.path, forKey: Constants.UserDefaults.syncRootPath)
+            let controller = CPYSyncPreferenceViewController(
+                defaultFolderResolutionProvider: { .notFound },
+                oneDriveProcessStatusService: SyncPreferenceOneDriveProcessStatusService()
+            )
+            controller.loadView()
+            controller.viewDidLoad()
+            controller.view.layoutSubtreeIfNeeded()
+
+            let texts = Set(preferenceTextFieldFrames(in: controller.view).map(\.text))
+            #expect(texts.contains("OneDrive 已启动 · 文件夹不可用"))
+            #expect(!texts.contains("OneDrive 不可用"))
+        }
+    }
+
+    @Test
     func passwordVaultSummaryIsIndependentFromHistoryAndSnippetSyncControls() throws {
         try withPreservedSyncDefaults {
             let controller = CPYSyncPreferenceViewController(
@@ -634,6 +661,8 @@ private final class SyncPreferenceOneDriveProcessStatusService: OneDriveProcessS
     func currentStatus() -> OneDriveProcessStatus {
         .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
     }
+
+    func isMainApplicationRunning() -> Bool { true }
 
     func openOneDrive() -> Bool { true }
 

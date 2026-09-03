@@ -3903,6 +3903,74 @@
         }
       }
     },
+    "OneDrive Running, Folder Unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive Running · Folder Unavailable"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive läuft · Ordner nicht verfügbar"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive in esecuzione · Cartella non disponibile"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDriveは実行中です · フォルダを利用できません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive 已启动 · 文件夹不可用"
+          }
+        }
+      }
+    },
+    "OneDrive Running, Folder Unavailable Description" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive is running, but the selected folder is not currently available."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive wird ausgeführt, aber der ausgewählte Ordner ist derzeit nicht verfügbar."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive è in esecuzione, ma la cartella selezionata non è al momento disponibile."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDriveは実行中ですが、選択したフォルダは現在利用できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OneDrive 已启动，但所选文件夹当前不可用。"
+          }
+        }
+      }
+    },
     "Select a OneDrive Folder" : {
       "localizations" : {
         "de" : {

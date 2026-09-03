@@ -1030,6 +1030,44 @@ struct SyncCoordinatorTests {
         #expect(oneDriveSync.synchronizeReasons.isEmpty)
     }
 
+    @Test
+    func coordinatorRetriesVaultImmediatelyWhenOneDriveLifecycleChangesWhileGenericQueueIsBusy() throws {
+        let rootURL = try makeRootURL()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let vaultSync = CoordinatorPasswordVaultSyncController(
+            snapshot: makeVaultSnapshot(mode: .oneDrive)
+        )
+        let processStatus = CoordinatorOneDriveProcessStatusService()
+        let coordinatorQueue = DispatchQueue(label: "Pastera.SyncCoordinatorTests.blocked")
+        let coordinator = SyncCoordinator(
+            settingsProvider: { makeSettings(rootURL: rootURL) },
+            historyRepository: historyRepository,
+            snippetRepository: snippetRepository,
+            passwordVaultSyncServiceProvider: { vaultSync },
+            oneDriveProcessStatusServiceProvider: { processStatus },
+            queue: coordinatorQueue
+        )
+        coordinator.start()
+        coordinator.syncNow(reason: .timer, wait: true)
+        vaultSync.removeSynchronizeReasons()
+
+        let enteredQueue = DispatchSemaphore(value: 0)
+        let releaseQueue = DispatchSemaphore(value: 0)
+        coordinatorQueue.async {
+            enteredQueue.signal()
+            _ = releaseQueue.wait(timeout: .now() + 5)
+        }
+        #expect(enteredQueue.wait(timeout: .now() + 1) == .success)
+
+        processStatus.sendLifecycleChange()
+
+        #expect(vaultSync.synchronizeReasons == [.startup])
+
+        releaseQueue.signal()
+        coordinator.syncNow(reason: .timer, wait: true)
+        coordinator.stop()
+    }
+
     private func makeRootURL() throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1195,6 +1233,8 @@ private final class CoordinatorOneDriveProcessStatusService: OneDriveProcessStat
     func currentStatus() -> OneDriveProcessStatus {
         .running(appURL: URL(fileURLWithPath: "/Applications/OneDrive.app"))
     }
+
+    func isMainApplicationRunning() -> Bool { true }
 
     func openOneDrive() -> Bool { true }
 

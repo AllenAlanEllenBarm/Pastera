@@ -665,12 +665,20 @@ final class SyncCoordinator {
     }
 
     private func performSync(reason: Reason) {
-        let settings = settingsProvider()
+        let vaultSyncEnabled = synchronizePasswordVaultIfEnabled(reason: reason)
+        performGenericSync(reason: reason, vaultSyncEnabled: vaultSyncEnabled)
+    }
+
+    @discardableResult
+    private func synchronizePasswordVaultIfEnabled(reason: Reason) -> Bool {
         let passwordVaultSyncService = passwordVaultSyncServiceProvider()
-        let vaultSyncEnabled = passwordVaultSyncService.snapshot.mode == .oneDrive
-        if vaultSyncEnabled {
-            passwordVaultSyncService.synchronize(reason: reason)
-        }
+        guard passwordVaultSyncService.snapshot.mode == .oneDrive else { return false }
+        passwordVaultSyncService.synchronize(reason: reason)
+        return true
+    }
+
+    private func performGenericSync(reason: Reason, vaultSyncEnabled: Bool) {
+        let settings = settingsProvider()
         guard settings.hasEnabledWork else {
             if !vaultSyncEnabled {
                 setSkipped(error: SyncCoordinatorError.noEnabledWork)
@@ -751,6 +759,7 @@ final class SyncCoordinator {
         observedOneDriveProcessStatusService = service
         oneDriveProcessStatusObservation = service.startMonitoring { [weak self, weak service] in
             guard let self, let service else { return }
+            _ = self.synchronizePasswordVaultIfEnabled(reason: .startup)
             self.queue.async { [weak self, weak service] in
                 guard let self,
                       let service,
@@ -758,7 +767,8 @@ final class SyncCoordinator {
                       self.observedOneDriveProcessStatusService === service else { return }
                 self.bindPasswordVaultSyncObservation()
                 self.applyConfiguration()
-                self.performSync(reason: .startup)
+                let vaultSyncEnabled = self.passwordVaultSyncServiceProvider().snapshot.mode == .oneDrive
+                self.performGenericSync(reason: .startup, vaultSyncEnabled: vaultSyncEnabled)
             }
         }
     }

@@ -28,7 +28,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Sendable {
         switch self {
         case .openAI: "gpt-5.6-luna"
         case .deepSeek: "deepseek-v4-flash"
-        case .ollama: "qwen2.5:7b-instruct"
+        case .ollama: "qwen3.5:4b"
         case .gemini, .lmStudio, .custom: ""
         }
     }
@@ -45,6 +45,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Sendable {
     }
 
     var disablesThinking: Bool { self == .deepSeek }
+    var disablesReasoning: Bool { self == .ollama }
 
     static let presetBaseURLs: [OpenAICompatiblePreset: String] = Dictionary(
         uniqueKeysWithValues: allCases.map { ($0, $0.defaultBaseURL) }

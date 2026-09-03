@@ -210,6 +210,31 @@ struct OpenAICompatiblePromptOptimizerTests {
     }
 
     @Test
+    func ollamaPresetDisablesReasoningForPromptRewrites() async throws {
+        let client = makeClient(
+            status: 200,
+            body: #"{"choices":[{"message":{"content":"Improved"}}]}"#
+        )
+        var configuration = PromptOptimizationRemoteConfiguration.fixture
+        configuration.preset = .ollama
+        configuration.baseURL = "http://127.0.0.1:11434/v1"
+        configuration.model = "qwen3.5:4b"
+
+        _ = try await client.optimize(
+            text: "Draft",
+            configuration: configuration,
+            apiKey: ""
+        ).get()
+
+        let body = try #require(PromptOptimizationURLProtocolStub.lastRequestBody)
+        let payload = try #require(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        #expect(payload["reasoning_effort"] as? String == "none")
+        #expect(payload["thinking"] == nil)
+    }
+
+    @Test
     func customGatewayKeepsPathAndModelWithoutDeepSeekFields() async throws {
         let client = makeClient(
             status: 200,
@@ -1016,3 +1041,5 @@ private final class StubRemotePromptOptimizer: OpenAICompatiblePromptOptimizing 
         result
     }
 }
+
+// swiftlint:enable file_length

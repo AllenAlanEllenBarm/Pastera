@@ -208,6 +208,7 @@ private struct ChatCompletionRequest: Encodable {
     let temperature = 0
     let maximumOutputTokens: Int?
     let thinking: ThinkingConfiguration?
+    let reasoningEffort: String?
 
     init(
         model: String,
@@ -219,6 +220,7 @@ private struct ChatCompletionRequest: Encodable {
         self.messages = messages
         self.maximumOutputTokens = maximumOutputTokens
         self.thinking = preset.disablesThinking ? ThinkingConfiguration() : nil
+        self.reasoningEffort = preset.disablesReasoning ? "none" : nil
     }
 
     enum CodingKeys: String, CodingKey {
@@ -228,6 +230,7 @@ private struct ChatCompletionRequest: Encodable {
         case temperature
         case maximumOutputTokens = "max_tokens"
         case thinking
+        case reasoningEffort = "reasoning_effort"
     }
 
     struct ThinkingConfiguration: Encodable {

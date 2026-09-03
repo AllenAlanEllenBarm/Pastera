@@ -177,6 +177,8 @@ final class FakeOneDriveProcessStatusService: OneDriveProcessStatusServicing {
         return status
     }
 
+    func isMainApplicationRunning() -> Bool { status.isRunning }
+
     func openOneDrive() -> Bool { true }
 
     func startMonitoring(_ onChange: @escaping () -> Void) -> OneDriveProcessStatusObservation {

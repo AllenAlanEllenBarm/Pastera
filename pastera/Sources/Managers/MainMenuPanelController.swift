@@ -3255,7 +3255,11 @@ extension MainMenuPanelController {
     private func openOneDriveFromToolbar() {
         switch oneDriveStatusService.currentStatus() {
         case .running:
-            onOpenOneDriveStatus()
+            if oneDriveStatusService.isMainApplicationRunning() {
+                onOpenOneDriveStatus()
+            } else {
+                _ = oneDriveStatusService.openOneDrive()
+            }
         case .notRunning:
             _ = oneDriveStatusService.openOneDrive()
         case .notInstalled:

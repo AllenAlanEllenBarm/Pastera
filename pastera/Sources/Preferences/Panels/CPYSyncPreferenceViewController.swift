@@ -778,7 +778,13 @@ private extension CPYSyncPreferenceViewController {
             && isDirectory.boolValue
             && isOneDriveBacked(rootURL)
             && FileManager.default.isWritableFile(atPath: rootURL.path)
-        oneDriveStatusBadge.state = isAvailable ? .available : .unavailable
+        if isAvailable {
+            oneDriveStatusBadge.state = .available
+        } else if oneDriveProcessStatusService.currentStatus().isRunning {
+            oneDriveStatusBadge.state = .runningFolderUnavailable
+        } else {
+            oneDriveStatusBadge.state = .unavailable
+        }
         let displayName = displayName(for: rootURL)
         folderRow?.toolTip = displayName
         changeFolderButton.toolTip = displayName

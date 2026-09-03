@@ -105,7 +105,7 @@ struct PromptOptimizationPreferenceTests {
         draft.applyPresetDefaults()
 
         #expect(draft.selectedProfile?.baseURL == "http://127.0.0.1:11434/v1")
-        #expect(draft.selectedProfile?.model == "qwen2.5:7b-instruct")
+        #expect(draft.selectedProfile?.model == "qwen3.5:4b")
     }
 
     @Test
@@ -142,7 +142,7 @@ struct PromptOptimizationPreferenceTests {
         #expect(popup != nil)
         let titles = popup?.itemTitles ?? []
         #expect(titles.contains { $0.contains("Automatic") || $0.contains("自动") })
-        #expect(titles.contains("Ollama · qwen2.5:7b-instruct"))
+        #expect(titles.contains("Ollama · qwen3.5:4b"))
     }
 
     @Test
@@ -184,7 +184,7 @@ struct PromptOptimizationPreferenceTests {
         #expect(fixture.settingsStore.settings.provider == .automaticFree)
 
         guard let ollamaIndex = popup.itemArray.firstIndex(where: {
-            $0.title == "Ollama · qwen2.5:7b-instruct"
+            $0.title == "Ollama · qwen3.5:4b"
         }) else {
             Issue.record("Missing Ollama model choice")
             return
@@ -241,7 +241,7 @@ struct PromptOptimizationPreferenceTests {
         fixture.section.applyPresetDefaultsForTesting()
 
         #expect(fixture.section.baseURLForTesting == "http://127.0.0.1:11434/v1")
-        #expect(fixture.section.modelForTesting == "qwen2.5:7b-instruct")
+        #expect(fixture.section.modelForTesting == "qwen3.5:4b")
     }
 
     @Test
