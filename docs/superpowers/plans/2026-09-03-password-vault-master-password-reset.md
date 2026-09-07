@@ -1196,7 +1196,8 @@ Record actual implementation, deviations, exact passing commands/counts, install
 - ZenTao Story ID: absent
 - ZenTao Task ID: absent
 - ZenTao Sync: not requested
-- Git authorization: no commit or push authorization
+- Git authorization: feature commit and branch push authorized on 2026-09-07;
+  merge, tag, release, and external distribution remain unauthorized
 
 ## Delivery Record
 
@@ -1240,6 +1241,9 @@ Record actual implementation, deviations, exact passing commands/counts, install
   900-point dark, and main-menu recovery layouts. The app target built successfully;
   `/Applications/Pastera.app` was ad-hoc signed, verified, installed, and launched as
   version 3.0.2 (302), bundle `com.pastera-app.Pastera.debug`, from its installed path.
+  Before commit on 2026-09-07, the same implementation tree passed another fresh serial
+  `clean test`: 1388/1388 tests in 102 suites with `** TEST SUCCEEDED **` and exit code
+  0; only the same post-test `writerNotOpen` summary warning remained.
 - Remaining Risks: Task 8 Step 5 remains open. Automated temporary KDBX roots and fake
   cloud replicas cover reset, rollback, restart, archive-before-replace, offline, race,
   recovery, and Agent boundaries, but this run intentionally did not submit a real Mac
@@ -1252,5 +1256,7 @@ Record actual implementation, deviations, exact passing commands/counts, install
 - Follow-ups: Perform Step 5 with a disposable vault and disposable OneDrive root,
   including Mac-login authentication on the target Mac mini, offline reconnect, Agent
   reauthorization, keyboard/VoiceOver checks, and non-Chinese localization spot checks.
-  No commit, push, tag, release, or external distribution was performed.
+  The implementation was committed as `6398d713a3a9263d8caf474126476c91c798e05e`
+  and pushed to `origin/codex/password-vault-master-password-reset` on 2026-09-07.
+  No merge, pull request, tag, release, or external distribution was performed.
 - ZenTao Closeout: Not requested.
