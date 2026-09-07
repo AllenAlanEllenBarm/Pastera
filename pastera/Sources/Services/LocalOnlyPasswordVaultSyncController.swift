@@ -27,6 +27,11 @@ final class LocalOnlyPasswordVaultSyncController: PasswordVaultSyncControlling {
     func removeObserver(_ identifier: UUID) {}
     func record(_ commit: PasswordVaultCommit) {}
     func synchronize(reason: SyncCoordinator.Reason) {}
+    func prepareForcedReset(previousLocalDigest: String) throws {}
+    func cancelPreparedForcedReset(previousLocalDigest: String) {}
+    func retryForcedReset(completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void) {
+        completion(.failure(.remoteUnavailable))
+    }
     func enableOneDrive(
         rootURL: URL,
         remoteMasterPassword: String?, // swiftlint:disable:this inclusive_language

@@ -1,22 +1,28 @@
 import Foundation
 import KDBXKit
+import LocalAuthentication
 import Testing
 @testable import Pastera
 
-@Suite("Password vault master password change")
+extension PasswordVaultAuthorizationContext {
+    static var testing: Self { .init(localAuthenticationContext: nil) }
+}
+
+@Suite("Password vault master password reset")
 struct PasswordVaultMasterPasswordTests {
-    @Test("wrong current password leaves every managed artifact unchanged")
-    func wrongCurrentPasswordDoesNotMutateArtifacts() throws {
+    @Test("no authorized unlock material leaves every managed artifact unchanged")
+    func resetWithoutUnlockMaterialDoesNotMutateArtifacts() throws {
         let fixture = try RekeyFixture()
         defer { fixture.remove() }
         try fixture.addManagedCopies()
         let original = try fixture.artifactBytes()
+        fixture.store.lock()
 
-        #expect(throws: PasswordVaultError.wrongMasterPassword) {
-            try fixture.store.changeMasterPassword(
-                currentPassword: "incorrect fixture password",
+        #expect(throws: PasswordVaultError.resetRequiresForcedReset) {
+            try fixture.store.resetMasterPassword(
                 newPassword: fixture.newPassword,
-                keepQuickUnlockEnabled: true
+                keepSystemUnlockEnabled: true,
+                authorization: .testing
             )
         }
 
@@ -30,10 +36,10 @@ struct PasswordVaultMasterPasswordTests {
         defer { fixture.remove() }
 
         #expect(throws: PasswordVaultError.invalidPassword) {
-            try fixture.store.changeMasterPassword(
-                currentPassword: fixture.oldPassword,
+            try fixture.store.resetMasterPassword(
                 newPassword: "",
-                keepQuickUnlockEnabled: false
+                keepSystemUnlockEnabled: false,
+                authorization: .testing
             )
         }
 
@@ -41,8 +47,105 @@ struct PasswordVaultMasterPasswordTests {
         #expect(fixture.canOpen(fixture.vaultURL, password: fixture.oldPassword))
     }
 
+    @Test("readable session resets the master password without the old password")
+    func readableSessionResetPreservesData() throws {
+        let fixture = try RekeyFixture()
+        defer { fixture.remove() }
+        try fixture.addLocalEntry(title: "Preserved Entry")
+
+        _ = try fixture.store.resetMasterPassword(
+            newPassword: fixture.newPassword,
+            keepSystemUnlockEnabled: true,
+            authorization: .testing
+        )
+
+        #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
+        #expect(fixture.canOpen(fixture.vaultURL, password: fixture.newPassword))
+        #expect(!fixture.canOpen(fixture.vaultURL, password: fixture.oldPassword))
+    }
+
+    @Test("locked vault uses the authorized quick-unlock key once")
+    func quickKeyResetPreservesData() throws {
+        let fixture = try RekeyFixture()
+        defer { fixture.remove() }
+        try fixture.addLocalEntry(title: "Preserved Entry")
+        try fixture.store.enableQuickUnlock()
+        fixture.store.lock()
+        let authorizationContext = LAContext()
+
+        _ = try fixture.store.resetMasterPassword(
+            newPassword: fixture.newPassword,
+            keepSystemUnlockEnabled: true,
+            authorization: .init(localAuthenticationContext: authorizationContext)
+        )
+
+        #expect(fixture.quickKey.authorizationContextLoadCount == 1)
+        #expect(try #require(fixture.quickKey.receivedAuthenticationContext) === authorizationContext)
+        #expect(fixture.canOpen(fixture.vaultURL, password: fixture.newPassword))
+    }
+
+    @Test("quick-unlock cancellation leaves every managed artifact unchanged")
+    func quickKeyCancellationDoesNotMutateArtifacts() throws {
+        let fixture = try RekeyFixture()
+        defer { fixture.remove() }
+        try fixture.addManagedCopies()
+        try fixture.store.enableQuickUnlock()
+        fixture.store.lock()
+        let original = try fixture.artifactBytes()
+        fixture.quickKey.nextAuthorizationContextLoadError = .userCancelled
+
+        #expect(throws: PasswordVaultError.userCancelled) {
+            try fixture.store.resetMasterPassword(
+                newPassword: fixture.newPassword,
+                keepSystemUnlockEnabled: true,
+                authorization: .init(localAuthenticationContext: LAContext())
+            )
+        }
+
+        #expect(try fixture.artifactBytes() == original)
+    }
+
+    @Test("quick-unlock authentication failure leaves every managed artifact unchanged")
+    func quickKeyAuthenticationFailureDoesNotMutateArtifacts() throws {
+        let fixture = try RekeyFixture()
+        defer { fixture.remove() }
+        try fixture.addManagedCopies()
+        try fixture.store.enableQuickUnlock()
+        fixture.store.lock()
+        let original = try fixture.artifactBytes()
+        fixture.quickKey.nextAuthorizationContextLoadError = .authenticationFailed
+
+        #expect(throws: PasswordVaultError.authenticationFailed) {
+            try fixture.store.resetMasterPassword(
+                newPassword: fixture.newPassword,
+                keepSystemUnlockEnabled: true,
+                authorization: .init(localAuthenticationContext: LAContext())
+            )
+        }
+
+        #expect(try fixture.artifactBytes() == original)
+    }
+
+    @Test("locked vault uses the automation-unlock key after quick unlock is unavailable")
+    func automationKeyResetPreservesData() throws {
+        let fixture = try RekeyFixture()
+        defer { fixture.remove() }
+        try fixture.addLocalEntry(title: "Preserved Entry")
+        try fixture.store.enableAutomationUnlock()
+        fixture.store.lock()
+
+        _ = try fixture.store.resetMasterPassword(
+            newPassword: fixture.newPassword,
+            keepSystemUnlockEnabled: true,
+            authorization: .testing
+        )
+
+        #expect(fixture.automationKey.loadCallCount == 1)
+        #expect(fixture.canOpen(fixture.vaultURL, password: fixture.newPassword))
+    }
+
     @Test("success rekeys all artifacts and keeps merged vault data")
-    func successfulChangeRekeysAllArtifactsAndMergesLatestData() throws {
+    func successfulResetRekeysAllArtifactsAndMergesLatestData() throws {
         let fixture = try RekeyFixture()
         defer { fixture.remove() }
         try fixture.addLocalEntry(title: "Memory Entry")
@@ -50,10 +153,10 @@ struct PasswordVaultMasterPasswordTests {
         try fixture.addConflictEntry(title: "Conflict Entry")
         try fixture.addResolvedArchive()
 
-        let result = try fixture.store.changeMasterPassword(
-            currentPassword: fixture.oldPassword,
+        let result = try fixture.store.resetMasterPassword(
             newPassword: fixture.newPassword,
-            keepQuickUnlockEnabled: true
+            keepSystemUnlockEnabled: true,
+            authorization: .testing
         )
 
         #expect(result.warnings.isEmpty)
@@ -84,10 +187,10 @@ struct PasswordVaultMasterPasswordTests {
         let original = try fixture.artifactBytes()
 
         #expect(throws: PasswordVaultError.saveFailed) {
-            try fixture.store.changeMasterPassword(
-                currentPassword: fixture.oldPassword,
+            try fixture.store.resetMasterPassword(
                 newPassword: fixture.newPassword,
-                keepQuickUnlockEnabled: true
+                keepSystemUnlockEnabled: true,
+                authorization: .testing
             )
         }
 
@@ -115,10 +218,10 @@ struct PasswordVaultMasterPasswordTests {
         try fixture.addManagedCopies()
 
         #expect(throws: PasswordVaultError.externalConflict) {
-            try fixture.store.changeMasterPassword(
-                currentPassword: fixture.oldPassword,
+            try fixture.store.resetMasterPassword(
                 newPassword: fixture.newPassword,
-                keepQuickUnlockEnabled: false
+                keepSystemUnlockEnabled: false,
+                authorization: .testing
             )
         }
 
@@ -137,10 +240,10 @@ struct PasswordVaultMasterPasswordTests {
         try fixture.store.enableAutomationUnlock()
 
         let outcome = Result {
-            try fixture.store.changeMasterPassword(
-                currentPassword: fixture.oldPassword,
+            try fixture.store.resetMasterPassword(
                 newPassword: fixture.newPassword,
-                keepQuickUnlockEnabled: true
+                keepSystemUnlockEnabled: true,
+                authorization: .testing
             )
         }
 
@@ -184,10 +287,10 @@ struct PasswordVaultMasterPasswordTests {
         try fixture.store.enableAutomationUnlock()
 
         let outcome = Result {
-            try fixture.store.changeMasterPassword(
-                currentPassword: fixture.oldPassword,
+            try fixture.store.resetMasterPassword(
                 newPassword: fixture.newPassword,
-                keepQuickUnlockEnabled: true
+                keepSystemUnlockEnabled: true,
+                authorization: .testing
             )
         }
         fileManager.restoreWriteAccess()
@@ -212,17 +315,18 @@ struct PasswordVaultMasterPasswordTests {
         #expect(try fixture.store.listEntries().map(\.title) == ["Preserved Entry"])
     }
 
-    @Test("a locked store stays locked after a successful password change")
+    @Test("a locked store stays locked after a successful password reset")
     func lockedStoreRemainsLocked() throws {
         let fixture = try RekeyFixture()
         defer { fixture.remove() }
         try fixture.addLocalEntry(title: "Preserved Entry")
+        try fixture.store.enableQuickUnlock()
         fixture.store.lock()
 
-        _ = try fixture.store.changeMasterPassword(
-            currentPassword: fixture.oldPassword,
+        _ = try fixture.store.resetMasterPassword(
             newPassword: fixture.newPassword,
-            keepQuickUnlockEnabled: false
+            keepSystemUnlockEnabled: false,
+            authorization: .testing
         )
 
         #expect(fixture.store.state == .locked)
@@ -241,10 +345,10 @@ struct PasswordVaultMasterPasswordTests {
         try cloudStore.createDatabase(masterPassword: fixture.oldPassword, rememberQuickUnlock: false)
         let cloudBefore = try Data(contentsOf: cloudStorage.paths.vaultURL)
 
-        _ = try fixture.store.changeMasterPassword(
-            currentPassword: fixture.oldPassword,
+        _ = try fixture.store.resetMasterPassword(
             newPassword: fixture.newPassword,
-            keepQuickUnlockEnabled: false
+            keepSystemUnlockEnabled: false,
+            authorization: .testing
         )
 
         #expect(try Data(contentsOf: cloudStorage.paths.vaultURL) == cloudBefore)
@@ -282,6 +386,8 @@ private final class RekeyFixture {
     let localStorage: FilePasswordVaultLocalStorage
     let vaultURL: URL
     let transaction: VaultArtifactRekeyTransaction
+    let quickKey: RekeyUnlockKeyStore
+    let automationKey: RekeyAutomationKeyStore
     let store: KDBXPasswordVaultStore
 
     init(transaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction()) throws {
@@ -290,10 +396,12 @@ private final class RekeyFixture {
         localStorage = makeRekeyLocalStorage(at: root)
         vaultURL = localStorage.paths.vaultURL
         self.transaction = transaction
+        quickKey = RekeyUnlockKeyStore()
+        automationKey = RekeyAutomationKeyStore()
         store = KDBXPasswordVaultStore(
             localStorage: localStorage,
-            unlockKeyStore: RekeyUnlockKeyStore(),
-            automationUnlockKeyStore: RekeyAutomationKeyStore(),
+            unlockKeyStore: quickKey,
+            automationUnlockKeyStore: automationKey,
             rekeyTransaction: transaction
         )
         try store.createDatabase(masterPassword: oldPassword, rememberQuickUnlock: false)
@@ -401,17 +509,33 @@ private func makeRekeyLocalStorage(at root: URL) -> FilePasswordVaultLocalStorag
 
 private final class RekeyUnlockKeyStore: VaultUnlockKeyStoring {
     var data: Data?
+    var nextAuthorizationContextLoadError: PasswordVaultError?
+    private(set) var authorizationContextLoadCount = 0
+    private(set) var receivedAuthenticationContext: LAContext?
     var containsKey: Bool { data != nil }
     func save(_ data: Data) throws { self.data = data }
     func load(reason: String) throws -> Data { try #require(data) }
+    func load(reason: String, authenticationContext: LAContext?) throws -> Data {
+        authorizationContextLoadCount += 1
+        receivedAuthenticationContext = authenticationContext
+        if let error = nextAuthorizationContextLoadError {
+            nextAuthorizationContextLoadError = nil
+            throw error
+        }
+        return try #require(data)
+    }
     func delete() throws { data = nil }
 }
 
 private final class RekeyAutomationKeyStore: VaultAutomationUnlockKeyStoring {
     var data: Data?
+    private(set) var loadCallCount = 0
     var containsKey: Bool { data != nil }
     func save(_ data: Data) throws { self.data = data }
-    func load() throws -> Data { try #require(data) }
+    func load() throws -> Data {
+        loadCallCount += 1
+        return try #require(data)
+    }
     func delete() throws { data = nil }
 }
 

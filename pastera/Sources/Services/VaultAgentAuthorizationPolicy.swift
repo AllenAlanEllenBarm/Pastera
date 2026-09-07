@@ -76,6 +76,13 @@ final class VaultAgentAuthorizationPolicy {
         grants = try executor.sync { try store.load() }
     }
 
+    func reloadFromStore() throws {
+        try executor.sync {
+            let loaded = try store.load()
+            grants = loaded
+        }
+    }
+
     @discardableResult
     func authorize(identity: VaultAgentPeerIdentity, authenticatedAt: Date) throws -> VaultAgentGrant {
         try executor.sync {

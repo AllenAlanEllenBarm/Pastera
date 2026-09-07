@@ -153,17 +153,86 @@ struct PreferenceSearchTests {
     }
 
     @Test
-    func passwordVaultQueriesOwnTheThreeSecurityAnchors() throws {
+    func passwordVaultQueriesOwnTheFourResetSecurityAnchors() throws {
         let page = try #require(catalog.pages.first { $0.paneID == .passwordVault })
 
         #expect(page.searchItems.map(\.anchorID) == [
             "vault.autoLock",
-            "vault.quickUnlock",
-            "vault.masterPassword"
+            "vault.systemUnlock",
+            "vault.masterPassword",
+            "vault.forceReset"
         ])
-        for query in ["密码箱", "自动锁定", "快速解锁", "重置密码", "vault"] {
+        #expect(page.searchItems.map(\.title) == [
+            pasteraPreferenceString("Automatic Lock"),
+            pasteraPreferenceString("System Unlock"),
+            pasteraPreferenceString("Reset Master Password"),
+            pasteraPreferenceString("Force Reset Password Vault")
+        ])
+        for query in [
+            "密码箱", "自动锁定", "Mac password", "login password", "forgot password",
+            "force reset", "Mac 登录密码", "忘记密码", "强制重置", "vault"
+        ] {
             let results = PasteraPreferenceSearch(catalog: catalog).search(query)
             #expect(results.contains { $0.paneID == .passwordVault })
+        }
+    }
+
+    @Test
+    func task7PasswordVaultProductionKeysHaveFiveReviewedLocalizations() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let data = try Data(contentsOf: repositoryURL
+            .appendingPathComponent("pastera/Resources/Localizable.xcstrings"))
+        let document = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try #require(document["strings"] as? [String: Any])
+        let languages = ["en", "de", "it", "ja", "zh-Hans"]
+        let productionKeys = [
+            "Reset Master Password",
+            "Pastera will use this Mac's authentication, then preserve your folders and entries while resetting the master password.",
+            "No usable unlock key is available, so Pastera cannot preserve the existing password vault. Review forced reset to create a new empty vault.",
+            "Review Force Reset...", "Authenticate & Reset", "Resetting…",
+            "Authentication was canceled. No password-vault data was changed.",
+            "This Mac could not authenticate the reset. No password-vault data was changed.",
+            "The master password could not be reset. Please try again.",
+            "Force Reset Password Vault",
+            "No usable unlock key is available. Because the existing password vault is encrypted, Pastera cannot decrypt or recover it. Continuing will preserve one latest encrypted archive and create a new empty password vault. Only the original master password can open the archive.",
+            "The next forced reset will replace the currently saved encrypted archive.",
+            "I understand that my old entries will not appear in the new password vault.",
+            "Review the encrypted-data limitation, then choose a password for the new empty vault. This attempt uses this Mac's authentication.",
+            "Confirm that the old entries will not appear in the new password vault.",
+            "Authentication was canceled. The existing password vault was not changed.",
+            "This Mac could not authenticate the forced reset. The existing password vault was not changed.",
+            "Pastera could not prepare the OneDrive replacement. The existing password vault was not changed.",
+            "Pastera must finish recovering an earlier reset before another forced reset.",
+            "The password vault could not be force reset. The existing password vault was not changed.",
+            "System Unlock",
+            "Use Touch ID, Apple Watch, or the Mac login password to unlock on this Mac.",
+            "A forced reset creates a new empty password vault. Only the original master password can open the retained encrypted archive.",
+            "Password Vault sync is paused until Pastera archives and replaces the previous OneDrive vault.",
+            "OneDrive changed elsewhere. Retry will archive the latest remote encrypted vault before replacing the active vault.",
+            "Retry", "Retrying…",
+            "The new empty password vault is ready. One latest encrypted archive was retained. Agent access must be authorized again.",
+            "The new local password vault is empty and ready. One latest encrypted archive was retained. Password-vault sync is paused until Pastera can archive and replace the previous OneDrive vault. Agent access must be authorized again.",
+            "Pastera could not retry the OneDrive replacement. Password Vault sync remains paused.",
+            "The local encrypted archive could not be created, so no reset occurred.",
+            "System unlock was turned off. Unlock the vault and enable it again.",
+            "Master password reset. Folders and entries were preserved."
+        ]
+
+        for key in productionKeys {
+            let entry = try #require(strings[key] as? [String: Any], "Missing key: \(key)")
+            let localizations = try #require(entry["localizations"] as? [String: Any])
+            for language in languages {
+                let localization = try #require(localizations[language] as? [String: Any], "\(key): \(language)")
+                let stringUnit = try #require(localization["stringUnit"] as? [String: Any])
+                #expect(stringUnit["state"] as? String != "needs_review")
+                let value = try #require(stringUnit["value"] as? String)
+                #expect(!value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if language != "en" {
+                    #expect(value != key, "Untranslated source copy for \(language): \(key)")
+                }
+            }
         }
     }
 

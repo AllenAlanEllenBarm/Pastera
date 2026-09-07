@@ -622,6 +622,13 @@ extension MenuManager {
                 retryLocalPreparation: {
                     AppEnvironment.current.retryPasswordVaultLocalPreparation()
                 },
+                retryForcedResetRecovery: { [weak self] completion in
+                    guard let self else {
+                        completion(.failure(.recoveryRequired))
+                        return
+                    }
+                    self.passwordVaultUIController.retryForcedResetRecovery(completion: completion)
+                },
                 fetchFolders: { [weak self] in
                     try self?.passwordVaultUIController.folders() ?? []
                 },

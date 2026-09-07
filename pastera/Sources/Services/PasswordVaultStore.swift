@@ -277,6 +277,8 @@ enum PasswordVaultError: Error, Equatable {
     case databaseNotConfigured
     case vaultLocked
     case wrongMasterPassword
+    case resetRequiresForcedReset
+    case recoveryRequired
     case unsupportedFormat
     case cloudUnavailable
     case externalConflict
@@ -284,22 +286,54 @@ enum PasswordVaultError: Error, Equatable {
     case invalidAutoLockInterval
 }
 
-enum PasswordVaultMasterPasswordChangeWarning: String, Hashable {
-    case quickUnlockDisabled
+struct PasswordVaultAuthorizationContext {
+    let localAuthenticationContext: LAContext?
+}
+
+enum PasswordVaultMasterPasswordResetCapability: Equatable {
+    case preservesData
+    case requiresForcedReset
+    case unavailable
+}
+
+enum PasswordVaultMasterPasswordResetWarning: String, Hashable {
+    case systemUnlockDisabled
     case automationUnlockDisabled
     case credentialCleanupFailed
     case conflictArchivePending
     case rekeyArtifactCleanupPending
 }
 
-struct PasswordVaultMasterPasswordChangeResult: Equatable {
-    let warnings: [PasswordVaultMasterPasswordChangeWarning]
+struct PasswordVaultMasterPasswordResetResult: Equatable {
+    let warnings: [PasswordVaultMasterPasswordResetWarning]
+}
+
+enum PasswordVaultForcedResetWarning: String, Hashable {
+    case systemUnlockDisabled
+    case credentialCleanupFailed
+    case resetArtifactCleanupPending
+}
+
+struct PasswordVaultForcedResetResult: Equatable {
+    let encryptedSnapshot: PasswordVaultEncryptedSnapshot
+    let localArchiveDigest: String
+    let warnings: [PasswordVaultForcedResetWarning]
+}
+
+enum PasswordVaultForcedResetError: Error, Equatable {
+    case recoveryRequired
+}
+
+enum PasswordVaultForcedResetRecoveryResult: Equatable {
+    case rolledBack(oldDigest: String)
+    case committed(newDigest: String)
 }
 
 protocol PasswordVaultStore {
     var state: PasswordVaultState { get }
     var canQuickUnlock: Bool { get }
     var canAutomationUnlock: Bool { get }
+    var masterPasswordResetCapability: PasswordVaultMasterPasswordResetCapability { get }
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws
@@ -307,11 +341,16 @@ protocol PasswordVaultStore {
     func enableQuickUnlock() throws
     func disableQuickUnlock() throws
     func refreshAutoLockSchedule()
-    func changeMasterPassword(
-        currentPassword: String,
+    func resetMasterPassword(
         newPassword: String,
-        keepQuickUnlockEnabled: Bool
-    ) throws -> PasswordVaultMasterPasswordChangeResult
+        keepSystemUnlockEnabled: Bool,
+        authorization: PasswordVaultAuthorizationContext
+    ) throws -> PasswordVaultMasterPasswordResetResult
+    func forceReset(
+        newPassword: String,
+        rememberSystemUnlock: Bool
+    ) throws -> PasswordVaultForcedResetResult
+    func retryForcedResetRecovery() throws -> PasswordVaultForcedResetRecoveryResult
     func enableAutomationUnlock() throws
     func unlockForAutomation() throws
     func disableAutomationUnlock() throws
@@ -337,18 +376,28 @@ extension PasswordVaultStore {
     var state: PasswordVaultState { .unlocked }
     var canQuickUnlock: Bool { false }
     var canAutomationUnlock: Bool { false }
+    var masterPasswordResetCapability: PasswordVaultMasterPasswordResetCapability { .unavailable }
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws { throw PasswordVaultError.unsupportedFormat }
     func unlockWithQuickKey(reason: String) throws { throw PasswordVaultError.keychainUnavailable }
     func enableQuickUnlock() throws { throw PasswordVaultError.keychainUnavailable }
     func disableQuickUnlock() throws {}
     func refreshAutoLockSchedule() {}
-    func changeMasterPassword(
-        currentPassword: String,
+    func resetMasterPassword(
         newPassword: String,
-        keepQuickUnlockEnabled: Bool
-    ) throws -> PasswordVaultMasterPasswordChangeResult {
+        keepSystemUnlockEnabled: Bool,
+        authorization: PasswordVaultAuthorizationContext
+    ) throws -> PasswordVaultMasterPasswordResetResult {
         throw PasswordVaultError.unsupportedFormat
+    }
+    func forceReset(
+        newPassword: String,
+        rememberSystemUnlock: Bool
+    ) throws -> PasswordVaultForcedResetResult {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func retryForcedResetRecovery() throws -> PasswordVaultForcedResetRecoveryResult {
+        throw PasswordVaultForcedResetError.recoveryRequired
     }
     func enableAutomationUnlock() throws { throw PasswordVaultError.keychainUnavailable }
     func unlockForAutomation() throws { throw PasswordVaultError.keychainUnavailable }
@@ -371,7 +420,14 @@ protocol VaultUnlockKeyStoring {
     var containsKey: Bool { get }
     func save(_ data: Data) throws
     func load(reason: String) throws -> Data
+    func load(reason: String, authenticationContext: LAContext?) throws -> Data
     func delete() throws
+}
+
+extension VaultUnlockKeyStoring {
+    func load(reason: String, authenticationContext: LAContext?) throws -> Data {
+        try load(reason: reason)
+    }
 }
 
 final class VaultUnlockKeyStore: VaultUnlockKeyStoring {
@@ -418,18 +474,30 @@ final class VaultUnlockKeyStore: VaultUnlockKeyStoring {
         }
     }
 
-    func load(reason: String) throws -> Data {
-        let context = LAContext()
-        context.localizedReason = reason
-        let query: [String: Any] = [
+    private static var baseLoadQuery: [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: false,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationContext as String: context
+            kSecMatchLimit as String: kSecMatchLimitOne
         ]
+    }
+
+    func load(reason: String) throws -> Data {
+        try load(reason: reason, authenticationContext: nil)
+    }
+
+    func load(reason: String, authenticationContext: LAContext?) throws -> Data {
+        let context = authenticationContext ?? LAContext()
+        context.localizedReason = reason
+        var query = Self.baseLoadQuery
+        query[kSecUseAuthenticationContext as String] = context
+        return try copyUnlockKey(using: query)
+    }
+
+    private func copyUnlockKey(using query: [String: Any]) throws -> Data {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data, data.count == 32 else {

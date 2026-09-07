@@ -32,6 +32,20 @@ struct PasswordVaultLocalPaths: Equatable {
     }
 }
 
+extension PasswordVaultLocalPaths {
+    var forcedResetRecoveryDirectoryURL: URL {
+        directoryURL.appendingPathComponent("ForcedResetRecovery", isDirectory: true)
+    }
+
+    var latestForcedResetArchiveURL: URL {
+        forcedResetRecoveryDirectoryURL.appendingPathComponent("PasteraVault-latest.kdbx")
+    }
+
+    var forcedResetRecoveryMarkerURL: URL {
+        forcedResetRecoveryDirectoryURL.appendingPathComponent("PasteraVault-reset-recovery.marker")
+    }
+}
+
 protocol PasswordVaultLocalStoring {
     var paths: PasswordVaultLocalPaths { get }
 

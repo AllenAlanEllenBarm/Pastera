@@ -336,6 +336,388 @@ extension VaultAgentAuthorizationPolicyTests {
 }
 
 extension VaultAgentAuthorizationPolicyTests {
+    @Test("installed policy revocation updates live and durable grants without building a fallback")
+    func installedPolicyRevocationUsesLivePolicy() throws {
+        let now = Date(timeIntervalSince1970: 102_000)
+        let store = InMemoryVaultAgentGrantStore()
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let identity = VaultAgentPeerIdentity.testValue(client: .codex)
+        _ = try policy.authorize(identity: identity, authenticatedAt: now)
+        var fallbackBuildCount = 0
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                return store
+            },
+            now: { now.addingTimeInterval(1) }
+        )
+        try resetCoordinator.install(policy)
+
+        try resetCoordinator.revokeAll()
+
+        #expect(policy.decision(for: identity, at: now.addingTimeInterval(1)) == .revoked)
+        #expect(store.grants[.codex]?.revokedAt == now.addingTimeInterval(1))
+        #expect(fallbackBuildCount == 0)
+    }
+
+    @Test("uninstalled policy revocation rebuilds from durable grants on the shared executor")
+    func uninstalledPolicyRevocationUsesDurableFallback() throws {
+        let now = Date(timeIntervalSince1970: 103_000)
+        let store = InMemoryVaultAgentGrantStore()
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let identity = VaultAgentPeerIdentity.testValue(client: .claude)
+        _ = try policy.authorize(identity: identity, authenticatedAt: now)
+        var fallbackBuildCount = 0
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                return store
+            },
+            now: { now.addingTimeInterval(2) }
+        )
+        try resetCoordinator.install(policy)
+        resetCoordinator.uninstall(policy)
+
+        try executor.sync { try resetCoordinator.revokeAll() }
+
+        let laterPolicy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        #expect(laterPolicy.decision(for: identity, at: now.addingTimeInterval(2)) == .revoked)
+        #expect(store.grants[.claude]?.revokedAt == now.addingTimeInterval(2))
+        #expect(fallbackBuildCount == 1)
+    }
+
+    @Test("fallback persistence failure is propagated")
+    func fallbackRevocationFailureIsPropagated() throws {
+        let now = Date(timeIntervalSince1970: 104_000)
+        let store = InMemoryVaultAgentGrantStore()
+        store.grants[.cli] = VaultAgentGrant.testValue(client: .cli)
+        store.saveError = VaultAgentErrorCode.automationUnlockUnavailable
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: .testValue(),
+            storeFactory: { store },
+            now: { now }
+        )
+
+        #expect(throws: VaultAgentErrorCode.automationUnlockUnavailable) {
+            try resetCoordinator.revokeAll()
+        }
+        #expect(store.grants[.cli]?.revokedAt == nil)
+    }
+
+    @Test("application runtime registers reset policy before socket traffic and unregisters on stop")
+    func applicationRuntimeOwnsResetPolicyLifecycle() async throws {
+        let now = Date(timeIntervalSince1970: 105_000)
+        let store = InMemoryVaultAgentGrantStore()
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        var fallbackBuildCount = 0
+        let events = AgentResetEventRecorder()
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                return store
+            },
+            now: { now }
+        )
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: { events.append("seed") },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: {
+                events.append("socketStart")
+                try resetCoordinator.revokeAll()
+            },
+            socketStop: { events.append("socketStop") },
+            trackerStart: { events.append("trackerStart") },
+            trackerStop: { events.append("trackerStop") },
+            removeTickets: { events.append("removeTickets") },
+            authorizationResetCoordinator: resetCoordinator,
+            authorizationPolicy: policy,
+            worker: DispatchQueue(label: "VaultAgentAuthorizationResetCoordinatorTests.runtime")
+        )
+
+        runtime.start()
+        try await waitUntil { events.values.contains("socketStart") }
+        #expect(Array(events.values.prefix(3)) == ["seed", "trackerStart", "socketStart"])
+        #expect(fallbackBuildCount == 0)
+
+        runtime.stop()
+        try resetCoordinator.revokeAll()
+
+        #expect(fallbackBuildCount == 1)
+    }
+
+    @Test("runtime reloads a stale policy after fallback revocation before socket traffic")
+    func runtimeReloadsRevocationBeforeSocketStart() async throws {
+        let now = Date(timeIntervalSince1970: 105_500)
+        let identity = VaultAgentPeerIdentity.testValue(client: .codex)
+        let store = InMemoryVaultAgentGrantStore()
+        store.grants[.codex] = VaultAgentGrant.testValue(client: .codex)
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        var fallbackBuildCount = 0
+        let events = AgentResetEventRecorder()
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                return store
+            },
+            now: { now }
+        )
+
+        try resetCoordinator.revokeAll()
+        #expect(policy.decision(for: identity, at: now) != .revoked)
+
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: { events.append("seed") },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: {
+                switch policy.decision(for: identity, at: now) {
+                case .revoked: events.append("socketSawRevoked")
+                default: events.append("socketSawStaleGrant")
+                }
+                try resetCoordinator.revokeAll()
+            },
+            socketStop: { events.append("socketStop") },
+            trackerStart: { events.append("trackerStart") },
+            trackerStop: { events.append("trackerStop") },
+            removeTickets: { events.append("removeTickets") },
+            authorizationResetCoordinator: resetCoordinator,
+            authorizationPolicy: policy,
+            worker: DispatchQueue(label: "VaultAgentAuthorizationResetCoordinatorTests.stale-runtime")
+        )
+
+        runtime.start()
+        try await waitUntil {
+            events.values.contains("socketSawRevoked") || events.values.contains("socketSawStaleGrant")
+        }
+        defer { runtime.stop() }
+
+        #expect(Array(events.values.prefix(3)) == ["seed", "trackerStart", "socketSawRevoked"])
+        #expect(fallbackBuildCount == 1)
+        #expect(store.grants[.codex]?.revokedAt == now)
+    }
+
+    @Test("runtime installs a reloaded policy before seed can persist stale grants")
+    func runtimeInstallsReloadedPolicyBeforeStaleSeed() async throws {
+        let now = Date(timeIntervalSince1970: 105_750)
+        let codexIdentity = VaultAgentPeerIdentity.testValue(client: .codex)
+        let claudeIdentity = VaultAgentPeerIdentity.testValue(client: .claude)
+        let store = InMemoryVaultAgentGrantStore()
+        store.grants = [
+            .codex: VaultAgentGrant.testValue(client: .codex),
+            .claude: VaultAgentGrant.testValue(client: .claude)
+        ]
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        var fallbackBuildCount = 0
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                return store
+            },
+            now: { now }
+        )
+
+        try resetCoordinator.revokeAll()
+        #expect(policy.decision(for: codexIdentity, at: now) != .revoked)
+        #expect(policy.decision(for: claudeIdentity, at: now) != .revoked)
+
+        let events = AgentResetEventRecorder()
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: {
+                try policy.revoke(.codex, at: now.addingTimeInterval(1))
+                events.append("seed")
+            },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: {
+                events.append(policy.decision(for: codexIdentity, at: now) == .revoked
+                    ? "socketSawCodexRevoked"
+                    : "socketSawCodexAllowed")
+                events.append(policy.decision(for: claudeIdentity, at: now) == .revoked
+                    ? "socketSawClaudeRevoked"
+                    : "socketSawClaudeAllowed")
+                events.append(store.grants[.claude]?.revokedAt == now
+                    ? "durableClaudeRevoked"
+                    : "durableClaudeResurrected")
+            },
+            socketStop: { events.append("socketStop") },
+            trackerStart: { events.append("trackerStart") },
+            trackerStop: { events.append("trackerStop") },
+            removeTickets: { events.append("removeTickets") },
+            authorizationResetCoordinator: resetCoordinator,
+            authorizationPolicy: policy,
+            worker: DispatchQueue(label: "VaultAgentAuthorizationResetCoordinatorTests.seed-race")
+        )
+
+        runtime.start()
+        try await waitUntil {
+            events.values.contains("durableClaudeRevoked")
+                || events.values.contains("durableClaudeResurrected")
+        }
+        defer { runtime.stop() }
+
+        #expect(Array(events.values.prefix(5)) == [
+            "seed",
+            "trackerStart",
+            "socketSawCodexRevoked",
+            "socketSawClaudeRevoked",
+            "durableClaudeRevoked"
+        ])
+        #expect(fallbackBuildCount == 1)
+    }
+
+    @Test("stopping during seed defers policy uninstall until preparation exits")
+    func stopDuringSeedDefersPolicyUninstall() async throws {
+        let now = Date(timeIntervalSince1970: 105_875)
+        let store = InMemoryVaultAgentGrantStore()
+        store.grants[.codex] = VaultAgentGrant.testValue(client: .codex)
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        let events = AgentResetEventRecorder()
+        var fallbackBuildCount = 0
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                events.append("fallbackBuilt")
+                return store
+            },
+            now: { now }
+        )
+        let seedStarted = DispatchSemaphore(value: 0)
+        let releaseSeed = DispatchSemaphore(value: 0)
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: {
+                seedStarted.signal()
+                releaseSeed.wait()
+                events.append("seedFinished")
+            },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: { events.append("socketStart") },
+            socketStop: { events.append("socketStop") },
+            trackerStart: { events.append("trackerStart") },
+            trackerStop: { events.append("trackerStop") },
+            removeTickets: { events.append("removeTickets") },
+            authorizationResetCoordinator: resetCoordinator,
+            authorizationPolicy: policy,
+            worker: DispatchQueue(label: "VaultAgentAuthorizationResetCoordinatorTests.stop-during-seed")
+        )
+
+        runtime.start()
+        #expect(seedStarted.wait(timeout: .now() + 1) == .success)
+        runtime.stop()
+        try resetCoordinator.revokeAll()
+        #expect(!events.values.contains("fallbackBuilt"))
+
+        releaseSeed.signal()
+        try await waitUntil {
+            if events.values.contains("fallbackBuilt") { return true }
+            try? resetCoordinator.revokeAll()
+            return events.values.contains("fallbackBuilt")
+        }
+
+        #expect(fallbackBuildCount == 1)
+        #expect(!events.values.contains("trackerStart"))
+        #expect(!events.values.contains("socketStart"))
+    }
+
+    @Test("runtime reload failure prevents tracker and socket startup")
+    func runtimeReloadFailureFailsClosed() async throws {
+        let store = InMemoryVaultAgentGrantStore()
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        store.loadError = VaultAgentErrorCode.automationUnlockUnavailable
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: { store }
+        )
+        let events = AgentResetEventRecorder()
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: { events.append("seed") },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: { events.append("socketStart") },
+            socketStop: { events.append("socketStop") },
+            trackerStart: { events.append("trackerStart") },
+            trackerStop: { events.append("trackerStop") },
+            removeTickets: { events.append("removeTickets") },
+            authorizationResetCoordinator: resetCoordinator,
+            authorizationPolicy: policy,
+            worker: DispatchQueue(label: "VaultAgentAuthorizationResetCoordinatorTests.reload-failure")
+        )
+
+        runtime.start()
+        try await waitUntil {
+            events.values.contains("socketStart") || events.values.contains("removeTickets")
+        }
+
+        #expect(!events.values.contains("trackerStart"))
+        #expect(!events.values.contains("socketStart"))
+        #expect(events.values.contains("removeTickets"))
+    }
+
+    @Test("socket startup failure unregisters the policy for durable fallback")
+    func socketStartupFailureUninstallsPolicy() async throws {
+        let store = InMemoryVaultAgentGrantStore()
+        let executor = VaultAgentSerialExecutor.testValue()
+        let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
+        var fallbackBuildCount = 0
+        let events = AgentResetEventRecorder()
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: executor,
+            storeFactory: {
+                fallbackBuildCount += 1
+                events.append("fallbackBuilt")
+                return store
+            }
+        )
+        let runtime = VaultAgentApplicationRuntime(
+            startupSeed: { events.append("seed") },
+            preferenceRuntime: UnavailableVaultAgentPreferenceRuntime(),
+            socketStart: {
+                events.append("socketStart")
+                throw VaultAgentErrorCode.invalidRequest
+            },
+            socketStop: { events.append("socketStop") },
+            trackerStart: { events.append("trackerStart") },
+            trackerStop: { events.append("trackerStop") },
+            removeTickets: { events.append("removeTickets") },
+            authorizationResetCoordinator: resetCoordinator,
+            authorizationPolicy: policy,
+            worker: DispatchQueue(label: "VaultAgentAuthorizationResetCoordinatorTests.socket-failure")
+        )
+
+        runtime.start()
+        try await waitUntil { events.values.contains("socketStart") }
+        try await waitUntil {
+            try? resetCoordinator.revokeAll()
+            return events.values.contains("fallbackBuilt")
+        }
+
+        #expect(fallbackBuildCount == 1)
+    }
+
+    @Test("fallback policy load failure is propagated before any save")
+    func fallbackLoadFailureIsPropagated() {
+        let store = InMemoryVaultAgentGrantStore()
+        store.loadError = VaultAgentErrorCode.automationUnlockUnavailable
+        let resetCoordinator = VaultAgentAuthorizationResetCoordinator(
+            executor: .testValue(),
+            storeFactory: { store }
+        )
+
+        #expect(throws: VaultAgentErrorCode.automationUnlockUnavailable) {
+            try resetCoordinator.revokeAll()
+        }
+        #expect(store.saveCallCount == 0)
+    }
+
     @Test("matching requests deduplicate while changed identities fail immediately")
     func requestDeduplicationAndIdentityIsolation() async throws {
         let harness = try CoordinatorHarness()
@@ -478,7 +860,7 @@ extension VaultAgentAuthorizationPolicyTests {
         let policy = try VaultAgentAuthorizationPolicy(store: store, executor: executor)
         let identity = VaultAgentPeerIdentity.testValue(client: .cli)
 
-        try executor.sync {
+        _ = try executor.sync {
             try policy.authorize(identity: identity, authenticatedAt: Date(timeIntervalSince1970: 101_000))
         }
 
@@ -489,10 +871,22 @@ extension VaultAgentAuthorizationPolicyTests {
     }
 }
 
+private final class AgentResetEventRecorder {
+    private let lock = NSLock()
+    private var storage = [String]()
+
+    var values: [String] { lock.withLock { storage } }
+
+    func append(_ value: String) {
+        lock.withLock { storage.append(value) }
+    }
+}
+
 private final class InMemoryVaultAgentGrantStore: VaultAgentGrantStoring {
     var grants: [VaultAgentClientKind: VaultAgentGrant] = [:]
     var loadError: Error?
     var saveError: Error?
+    private(set) var saveCallCount = 0
 
     func load() throws -> [VaultAgentClientKind: VaultAgentGrant] {
         if let loadError { throw loadError }
@@ -500,6 +894,7 @@ private final class InMemoryVaultAgentGrantStore: VaultAgentGrantStoring {
     }
 
     func save(_ grants: [VaultAgentClientKind: VaultAgentGrant]) throws {
+        saveCallCount += 1
         if let saveError { throw saveError }
         self.grants = grants
     }

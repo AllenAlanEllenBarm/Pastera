@@ -5,6 +5,7 @@ enum PasswordVaultCommitOrigin: Equatable {
     case userMutation
     case syncMerge
     case migration
+    case forcedReset
 }
 
 struct PasswordVaultCommit: Equatable {
@@ -19,6 +20,7 @@ struct PasswordVaultEncryptedSnapshot: Equatable {
 
 protocol PasswordVaultSyncAccess: AnyObject {
     var state: PasswordVaultState { get }
+    var requiresForcedResetRecovery: Bool { get }
 
     func encryptedSnapshot() throws -> PasswordVaultEncryptedSnapshot
     // swiftlint:disable inclusive_language
@@ -28,6 +30,13 @@ protocol PasswordVaultSyncAccess: AnyObject {
     ) throws -> PasswordVaultMergeApplication
     // swiftlint:enable inclusive_language
     func setCommitObserver(_ observer: @escaping (PasswordVaultCommit) -> Void)
+}
+
+extension PasswordVaultSyncAccess {
+    var requiresForcedResetRecovery: Bool {
+        if case .recoveryRequired = state { return true }
+        return false
+    }
 }
 
 struct PasswordVaultMergeApplication: Equatable {
@@ -52,6 +61,15 @@ enum PasswordVaultSyncFailure: String, Codable, Equatable, Error {
     case remoteVerificationFailed
 }
 
+struct PasswordVaultPendingForcedReset: Codable, Equatable {
+    let previousLocalDigest: String
+    var replacementLocalDigest: String?
+    var didInspectRemote: Bool
+    var observedRemoteDigest: String?
+    var archivedRemoteDigest: String?
+    var remoteArchiveRequired: Bool?
+}
+
 enum PasswordVaultSyncPhase: Equatable {
     case disabled
     case synced
@@ -60,6 +78,7 @@ enum PasswordVaultSyncPhase: Equatable {
     case waitingForUnlock
     case conflicts(Int)
     case failed(PasswordVaultSyncFailure)
+    case pendingForcedReset(PasswordVaultSyncFailure?)
 }
 
 enum PasswordVaultSyncStep: String, Codable, Equatable {
@@ -114,7 +133,8 @@ struct PasswordVaultSyncMetadata: Codable, Equatable {
         pendingChangeCount: 0,
         conflictCopyCount: 0,
         lastFailure: nil,
-        migrationVersion: 0
+        migrationVersion: 0,
+        pendingForcedReset: nil
     )
 
     var schemaVersion: Int
@@ -129,6 +149,7 @@ struct PasswordVaultSyncMetadata: Codable, Equatable {
     var conflictCopyCount: Int
     var lastFailure: PasswordVaultSyncFailure?
     var migrationVersion: Int
+    var pendingForcedReset: PasswordVaultPendingForcedReset?
 }
 
 protocol PasswordVaultSyncMetadataStoring {

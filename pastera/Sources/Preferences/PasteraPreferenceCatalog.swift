@@ -311,26 +311,45 @@ struct PasteraPreferenceCatalog: Equatable {
                         keywords: ["vault", "password vault", "auto lock", "自动锁定", "密码箱"]
                     ),
                     PasteraPreferenceSearchItem(
-                        id: "vault.quickUnlock",
+                        id: "vault.systemUnlock",
                         paneID: .passwordVault,
                         sectionID: "vault.locking",
-                        anchorID: "vault.quickUnlock",
-                        title: pasteraPreferenceString("Quick Unlock"),
+                        anchorID: "vault.systemUnlock",
+                        title: pasteraPreferenceString("System Unlock"),
                         subtitle: pasteraPreferenceString(
-                            "Use this Mac's authentication to unlock the password vault."
+                            "Use Touch ID, Apple Watch, or the Mac login password to unlock on this Mac."
                         ),
-                        keywords: ["vault", "quick unlock", "touch id", "快速解锁", "密码箱"]
+                        keywords: [
+                            "vault", "system unlock", "Mac password", "login password",
+                            "Mac 登录密码", "系统解锁", "密码箱"
+                        ]
                     ),
                     PasteraPreferenceSearchItem(
                         id: "vault.masterPassword",
                         paneID: .passwordVault,
                         sectionID: "vault.masterPassword",
                         anchorID: "vault.masterPassword",
-                        title: pasteraPreferenceString("Change Master Password"),
+                        title: pasteraPreferenceString("Reset Master Password"),
                         subtitle: pasteraPreferenceString(
-                            "Change the master password after verifying the current password."
+                            "Reset the master password after this Mac authenticates you."
                         ),
-                        keywords: ["vault", "master password", "reset password", "重置密码", "主密码", "密码箱"]
+                        keywords: [
+                            "vault", "master password", "reset password", "forgot password",
+                            "忘记密码", "重置密码", "主密码", "密码箱"
+                        ]
+                    ),
+                    PasteraPreferenceSearchItem(
+                        id: "vault.forceReset",
+                        paneID: .passwordVault,
+                        sectionID: "vault.recovery",
+                        anchorID: "vault.forceReset",
+                        title: pasteraPreferenceString("Force Reset Password Vault"),
+                        subtitle: pasteraPreferenceString(
+                            "Create a new empty vault while retaining one latest encrypted archive."
+                        ),
+                        keywords: [
+                            "vault", "force reset", "forgot password", "强制重置", "忘记密码", "密码箱"
+                        ]
                     )
                 ]
             ),

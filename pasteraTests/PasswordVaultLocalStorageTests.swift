@@ -234,7 +234,8 @@ struct PasswordVaultLocalStorageTests {
             pendingChangeCount: 1,
             conflictCopyCount: 0,
             lastFailure: .remoteUnavailable,
-            migrationVersion: 1
+            migrationVersion: 1,
+            pendingForcedReset: nil
         )
 
         let encoded = try JSONEncoder().encode(metadata)

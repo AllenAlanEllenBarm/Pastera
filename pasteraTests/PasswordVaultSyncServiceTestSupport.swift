@@ -41,9 +41,10 @@ final class SyncServiceFixture {
 func makeSyncServiceFixture(
     metadata initialMetadata: PasswordVaultSyncMetadata = .defaultLocalOnly,
     localData: Data = Data("local".utf8),
+    access providedAccess: FakePasswordVaultSyncAccess? = nil,
     callbackDispatcher: ((@escaping () -> Void) -> Void)? = { $0() }
 ) throws -> SyncServiceFixture {
-    let access = FakePasswordVaultSyncAccess(data: localData)
+    let access = providedAccess ?? FakePasswordVaultSyncAccess(data: localData)
     let metadata = FakePasswordVaultSyncMetadataStore(value: initialMetadata)
     let cloud = FakePasswordVaultCloudReplica()
     let process = FakeOneDriveProcessStatusService()
@@ -72,9 +73,45 @@ func makeSyncServiceFixture(
     )
 }
 
+func makePreparedResetFixture(
+    previousLocalData: Data,
+    localData: Data,
+    replacementLocalDigest: String? = nil
+) throws -> SyncServiceFixture {
+    var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+    metadata.mode = .oneDrive
+    metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+        previousLocalDigest: PasswordVaultDigest.hex(previousLocalData),
+        replacementLocalDigest: replacementLocalDigest,
+        didInspectRemote: false,
+        observedRemoteDigest: nil,
+        archivedRemoteDigest: nil,
+        remoteArchiveRequired: nil
+    )
+    return try makeSyncServiceFixture(metadata: metadata, localData: localData)
+}
+
+func makePendingForcedResetFixture(
+    previousLocalData: Data = Data("previous-local".utf8),
+    localData: Data = Data("replacement-local".utf8),
+    remoteData: Data? = Data("previous-remote".utf8)
+) throws -> SyncServiceFixture {
+    let fixture = try makePreparedResetFixture(
+        previousLocalData: previousLocalData,
+        localData: localData,
+        replacementLocalDigest: PasswordVaultDigest.hex(localData)
+    )
+    fixture.cloud.snapshot = remoteData.map {
+        PasswordVaultCloudSnapshot(data: $0, digest: PasswordVaultDigest.hex($0))
+    }
+    return fixture
+}
+
 final class FakePasswordVaultSyncAccess: PasswordVaultSyncAccess {
     var state: PasswordVaultState = .locked
     var data: Data
+    var snapshotError: Error?
+    var snapshotReadCount = 0
     var mergeApplication: PasswordVaultMergeApplication?
     var mergeError: Error?
     var mergeCount = 0
@@ -86,7 +123,9 @@ final class FakePasswordVaultSyncAccess: PasswordVaultSyncAccess {
     }
 
     func encryptedSnapshot() throws -> PasswordVaultEncryptedSnapshot {
-        PasswordVaultEncryptedSnapshot(data: data, digest: PasswordVaultDigest.hex(data))
+        snapshotReadCount += 1
+        if let snapshotError { throw snapshotError }
+        return PasswordVaultEncryptedSnapshot(data: data, digest: PasswordVaultDigest.hex(data))
     }
 
     // swiftlint:disable inclusive_language
@@ -118,6 +157,7 @@ final class FakePasswordVaultSyncAccess: PasswordVaultSyncAccess {
 final class FakePasswordVaultSyncMetadataStore: PasswordVaultSyncMetadataStoring {
     var value: PasswordVaultSyncMetadata
     var saveError: Error?
+    var saveFailurePredicate: ((PasswordVaultSyncMetadata) -> Bool)?
     var savedValues = [PasswordVaultSyncMetadata]()
 
     init(value: PasswordVaultSyncMetadata) {
@@ -128,12 +168,24 @@ final class FakePasswordVaultSyncMetadataStore: PasswordVaultSyncMetadataStoring
 
     func save(_ metadata: PasswordVaultSyncMetadata) throws {
         if let saveError { throw saveError }
+        if saveFailurePredicate?(metadata) == true {
+            throw SyncServiceFixtureError.metadataWrite
+        }
         value = metadata
         savedValues.append(metadata)
     }
 }
 
 final class FakePasswordVaultCloudReplica: PasswordVaultCloudReplica {
+    enum OperationKind: Equatable {
+        case archiveWrite
+        case activeWrite
+    }
+
+    struct Operation: Equatable {
+        let kind: OperationKind
+    }
+
     struct Write: Equatable {
         let data: Data
         let rootURL: URL
@@ -141,10 +193,19 @@ final class FakePasswordVaultCloudReplica: PasswordVaultCloudReplica {
     }
 
     var snapshot: PasswordVaultCloudSnapshot?
+    var archiveSnapshot: PasswordVaultCloudSnapshot?
     var readError: PasswordVaultSyncFailure?
+    var archiveReadError: PasswordVaultSyncFailure?
     var writeError: PasswordVaultSyncFailure?
+    var archiveWriteError: PasswordVaultSyncFailure?
+    var postActiveWriteError: PasswordVaultSyncFailure?
+    var activeSnapshotBeforeNextWrite: PasswordVaultCloudSnapshot?
+    var archiveReadSnapshotOverride: PasswordVaultCloudSnapshot?
     var readCount = 0
+    var archiveReadCount = 0
     var writes = [Write]()
+    var archiveWrites = [Write]()
+    var operations = [Operation]()
 
     func read(rootURL: URL) throws -> PasswordVaultCloudSnapshot? {
         readCount += 1
@@ -157,11 +218,52 @@ final class FakePasswordVaultCloudReplica: PasswordVaultCloudReplica {
         rootURL: URL,
         expecting expectation: PasswordVaultRemoteExpectation
     ) throws -> String {
+        operations.append(Operation(kind: .activeWrite))
         writes.append(Write(data: data, rootURL: rootURL, expectation: expectation))
         if let writeError { throw writeError }
+        if let activeSnapshotBeforeNextWrite {
+            snapshot = activeSnapshotBeforeNextWrite
+            self.activeSnapshotBeforeNextWrite = nil
+        }
+        try verify(expectation, against: snapshot)
         let digest = PasswordVaultDigest.hex(data)
         snapshot = PasswordVaultCloudSnapshot(data: data, digest: digest)
+        if let postActiveWriteError { throw postActiveWriteError }
         return digest
+    }
+
+    func readLatestForcedResetArchive(rootURL: URL) throws -> PasswordVaultCloudSnapshot? {
+        archiveReadCount += 1
+        if let archiveReadError { throw archiveReadError }
+        return archiveReadSnapshotOverride ?? archiveSnapshot
+    }
+
+    func writeLatestForcedResetArchiveAtomically(
+        _ data: Data,
+        rootURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws -> String {
+        operations.append(Operation(kind: .archiveWrite))
+        archiveWrites.append(Write(data: data, rootURL: rootURL, expectation: expectation))
+        if let archiveWriteError { throw archiveWriteError }
+        try verify(expectation, against: archiveSnapshot)
+        let digest = PasswordVaultDigest.hex(data)
+        archiveSnapshot = PasswordVaultCloudSnapshot(data: data, digest: digest)
+        return digest
+    }
+
+    private func verify(
+        _ expectation: PasswordVaultRemoteExpectation,
+        against current: PasswordVaultCloudSnapshot?
+    ) throws {
+        switch (expectation, current) {
+        case (.absent, nil):
+            return
+        case let (.digest(expected), current?) where current.digest == expected:
+            return
+        default:
+            throw PasswordVaultSyncFailure.remoteVerificationFailed
+        }
     }
 
 }

@@ -32,7 +32,22 @@ final class PasswordVaultInlineActionView: NSView {
         let title: String
         let identifier: String
         let style: PasswordVaultInlineActionStyle
+        let isEnabled: Bool
         let handler: () -> Void
+
+        init(
+            title: String,
+            identifier: String,
+            style: PasswordVaultInlineActionStyle,
+            isEnabled: Bool = true,
+            handler: @escaping () -> Void
+        ) {
+            self.title = title
+            self.identifier = identifier
+            self.style = style
+            self.isEnabled = isEnabled
+            self.handler = handler
+        }
     }
 
     private let symbolView = NSImageView()
@@ -47,11 +62,19 @@ final class PasswordVaultInlineActionView: NSView {
         symbolColor: NSColor,
         title: String,
         messages: [String],
-        actions: [Action]
+        actions: [Action],
+        showsTitle: Bool = true
     ) {
         messageLabels = messages.map { NSTextField(wrappingLabelWithString: $0) }
-        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: 234))
-        setup(symbolName: symbolName, symbolColor: symbolColor, title: title, actions: actions)
+        let height: CGFloat = showsTitle ? 234 : 160
+        super.init(frame: NSRect(x: 0, y: 0, width: MainMenuPanelLayout.width, height: height))
+        setup(
+            symbolName: symbolName,
+            symbolColor: symbolColor,
+            title: title,
+            actions: actions,
+            showsTitle: showsTitle
+        )
     }
 
     required init?(coder: NSCoder) { nil }
@@ -60,6 +83,22 @@ final class PasswordVaultInlineActionView: NSView {
         super.layout()
         let inset: CGFloat = 14
         let width = max(0, bounds.width - inset * 2)
+        if titleLabel.isHidden {
+            var top = bounds.height - 12
+            for label in messageLabels {
+                top -= 34
+                label.frame = NSRect(x: inset, y: top, width: width, height: 32)
+            }
+            if !errorLabel.isHidden {
+                top -= 34
+                errorLabel.frame = NSRect(x: inset, y: top, width: width, height: 28)
+            }
+            for button in actionButtons {
+                top -= 36
+                button.frame = NSRect(x: inset, y: top, width: width, height: 28)
+            }
+            return
+        }
         symbolView.frame = NSRect(x: inset, y: bounds.height - 40, width: 24, height: 24)
         titleLabel.frame = NSRect(x: 46, y: bounds.height - 44, width: max(0, bounds.width - 60), height: 30)
 
@@ -88,7 +127,8 @@ final class PasswordVaultInlineActionView: NSView {
         symbolName: String,
         symbolColor: NSColor,
         title: String,
-        actions: [Action]
+        actions: [Action],
+        showsTitle: Bool
     ) {
         wantsLayer = true
         symbolView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
@@ -99,6 +139,8 @@ final class PasswordVaultInlineActionView: NSView {
         titleLabel.textColor = .labelColor
         titleLabel.maximumNumberOfLines = 2
         titleLabel.lineBreakMode = .byWordWrapping
+        symbolView.isHidden = !showsTitle
+        titleLabel.isHidden = !showsTitle
         messageLabels.forEach {
             $0.font = .systemFont(ofSize: 10.5)
             $0.textColor = .secondaryLabelColor
@@ -118,6 +160,7 @@ final class PasswordVaultInlineActionView: NSView {
             let button = NSButton(title: action.title, target: self, action: #selector(actionClicked(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(action.identifier)
             button.tag = index
+            button.isEnabled = action.isEnabled
             button.controlSize = .large
             button.setAccessibilityLabel(action.title)
             switch action.style {
@@ -155,7 +198,7 @@ final class PasswordVaultInlineActionView: NSView {
 
 #if DEBUG
     var textValuesForTesting: [String] {
-        [titleLabel.stringValue]
+        [titleLabel].filter { !$0.isHidden }.map(\.stringValue)
             + messageLabels.map(\.stringValue)
             + [errorLabel.stringValue].filter { !$0.isEmpty }
     }

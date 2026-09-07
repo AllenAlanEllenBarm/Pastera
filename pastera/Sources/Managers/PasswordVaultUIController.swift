@@ -7,11 +7,17 @@ import PasteraAgentProtocol
 // swiftlint:disable file_length
 
 protocol PasswordVaultAuthorizing {
-    func authorize(reason: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void)
+    func authorize(
+        reason: String,
+        completion: @escaping (Result<PasswordVaultAuthorizationContext, PasswordVaultError>) -> Void
+    )
 }
 
 final class SystemPasswordVaultAuthorizer: PasswordVaultAuthorizing {
-    func authorize(reason: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
+    func authorize(
+        reason: String,
+        completion: @escaping (Result<PasswordVaultAuthorizationContext, PasswordVaultError>) -> Void
+    ) {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
@@ -21,7 +27,7 @@ final class SystemPasswordVaultAuthorizer: PasswordVaultAuthorizing {
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, error in
             DispatchQueue.main.async {
                 if success {
-                    completion(.success(()))
+                    completion(.success(.init(localAuthenticationContext: context)))
                 } else if (error as? LAError)?.code == .userCancel || (error as? LAError)?.code == .appCancel {
                     completion(.failure(.userCancelled))
                 } else {
@@ -68,11 +74,17 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
     private let storeQueue: DispatchQueue
     private let defaults: UserDefaults
     private let snapshotLock = NSLock()
+    private let syncSnapshotLock = NSLock()
+    private let agentAuthorizationResetterLock = NSLock()
     private let stateChangeObserverLock = NSLock()
     private let interactiveSensitiveUseLock = NSLock()
     private var snapshot: PasswordVaultViewState
+    private var syncSnapshot: PasswordVaultSyncSnapshot
+    private var syncObserverIdentifier: UUID?
+    private var agentAuthorizationResetter: VaultAgentAuthorizationResetting?
     private var interactiveSensitiveUseObservers = [UUID: () -> Void]()
     private var stateChangeObservers = [UUID: () -> Void]()
+    private var lastHandledForcedResetRecovery: PasswordVaultForcedResetRecoveryResult?
     let vaultAgentExecutor: VaultAgentSerialExecutor
     var onChange: (() -> Void)?
     var onInteractiveSensitiveUse: (() -> Void)?
@@ -84,6 +96,7 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         authorizer: PasswordVaultAuthorizing = SystemPasswordVaultAuthorizer(),
         pasteService: PasteService = PasteService(),
         defaults: UserDefaults = .standard,
+        agentAuthorizationResetter: VaultAgentAuthorizationResetting? = nil,
         storeQueue: DispatchQueue = DispatchQueue(
             label: "com.pastera.password-vault.store",
             qos: .userInitiated
@@ -95,9 +108,11 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         self.authorizer = authorizer
         self.pasteService = pasteService
         self.defaults = defaults
+        self.agentAuthorizationResetter = agentAuthorizationResetter
         self.storeQueue = storeQueue
         vaultAgentExecutor = VaultAgentSerialExecutor(queue: storeQueue)
         snapshot = PasswordVaultViewState(state: .locked)
+        syncSnapshot = syncController.snapshot
         store.bindSessionExecutor(vaultAgentExecutor) { [weak self] in
             self?.storeStateDidChange()
         }
@@ -105,11 +120,24 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
             syncController?.record(commit)
         }
         vaultAgentExecutor.sync { refreshSnapshotFromStore() }
+        syncObserverIdentifier = syncController.addObserver { [weak self] snapshot in
+            self?.syncSnapshotDidChange(snapshot)
+        }
+    }
+
+    deinit {
+        if let syncObserverIdentifier {
+            syncController.removeObserver(syncObserverIdentifier)
+        }
     }
 
     var state: PasswordVaultState {
         let snapshot = currentSnapshot
-        return snapshot.isBusy ? .unlocking : snapshot.state
+        if snapshot.isBusy {
+            if case .recoveryRequired = snapshot.state { return snapshot.state }
+            return .unlocking
+        }
+        return snapshot.state
     }
     var agentVaultReady: Bool {
         let value = state
@@ -132,14 +160,29 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         vaultAgentExecutor.async { [weak self] in
             guard let self else { return }
             let snapshot = self.currentSnapshot
+            let syncSnapshot = self.currentSyncSnapshot
             let state = PasswordVaultSecuritySettingsState(
                 vaultState: snapshot.state,
                 isBusy: snapshot.isBusy,
                 autoLockInterval: VaultSessionController.resolvedTimeout(defaults: self.defaults),
                 quickUnlockEnabled: self.quickUnlockIntent,
-                quickUnlockAvailable: self.store.canQuickUnlock
+                quickUnlockAvailable: self.store.canQuickUnlock,
+                masterPasswordResetCapability: self.store.masterPasswordResetCapability,
+                forcedResetPending: syncSnapshot.phase.isForcedResetPending,
+                forcedResetPendingFailure: syncSnapshot.phase.forcedResetFailure
             )
             DispatchQueue.main.async { completion(state) }
+        }
+    }
+
+    func retryForcedReset(
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        syncController.retryForcedReset { [weak self] result in
+            DispatchQueue.main.async {
+                self?.notifyStateChange()
+                completion(result)
+            }
         }
     }
 
@@ -170,22 +213,98 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         }
     }
 
+    func bindAgentAuthorizationResetter(_ resetter: VaultAgentAuthorizationResetting) {
+        agentAuthorizationResetterLock.withLock {
+            guard agentAuthorizationResetter == nil else { return }
+            agentAuthorizationResetter = resetter
+        }
+    }
+
     // swiftlint:disable:next inclusive_language
-    func changeMasterPassword(
-        currentPassword: String,
+    func resetMasterPassword(
         newPassword: String,
-        completion: @escaping (Result<PasswordVaultMasterPasswordChangeResult, PasswordVaultError>) -> Void
+        completion: @escaping (Result<PasswordVaultMasterPasswordResetResult, PasswordVaultError>) -> Void
     ) {
-        perform(completion: completion) {
-            let result = try self.store.changeMasterPassword(
-                currentPassword: currentPassword,
-                newPassword: newPassword,
-                keepQuickUnlockEnabled: self.quickUnlockIntent
-            )
-            if result.warnings.contains(.quickUnlockDisabled) {
-                self.defaults.set(false, forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
+        authorizer.authorize(
+            reason: String(localized: "Authenticate to reset the password database.")
+        ) { [weak self] authorizationResult in
+            guard let self else { return }
+            switch authorizationResult {
+            case let .failure(error):
+                completion(.failure(error))
+            case let .success(authorization):
+                self.publishBusyState()
+                self.vaultAgentExecutor.async { [weak self] in
+                    guard let self else { return }
+                    let result: Result<PasswordVaultMasterPasswordResetResult, PasswordVaultError>
+                    do {
+                        let value = try self.store.resetMasterPassword(
+                            newPassword: newPassword,
+                            keepSystemUnlockEnabled: self.quickUnlockIntent,
+                            authorization: authorization
+                        )
+                        if value.warnings.contains(.systemUnlockDisabled) {
+                            self.defaults.set(false, forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
+                        }
+                        result = .success(value)
+                    } catch let error as PasswordVaultError {
+                        result = .failure(error)
+                    } catch PasswordVaultForcedResetError.recoveryRequired {
+                        result = .failure(.recoveryRequired)
+                    } catch {
+                        result = .failure(.keychainUnavailable)
+                    }
+                    self.finish(result, completion: completion)
+                }
             }
-            return result
+        }
+    }
+
+    func forceResetPasswordVault(
+        newPassword: String,
+        completion: @escaping (Result<PasswordVaultForcedResetOutcome, PasswordVaultError>) -> Void
+    ) {
+        authorizer.authorize(
+            reason: String(localized: "Authenticate to force reset the password database.")
+        ) { [weak self] authorizationResult in
+            guard let self else { return }
+            switch authorizationResult {
+            case let .failure(error):
+                completion(.failure(error))
+            case .success:
+                self.publishBusyState()
+                self.vaultAgentExecutor.async { [weak self] in
+                    self?.performForcedReset(newPassword: newPassword, completion: completion)
+                }
+            }
+        }
+    }
+
+    func retryForcedResetRecovery(
+        completion: @escaping (
+            Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>
+        ) -> Void
+    ) {
+        publishBusyState(preservingRecoveryState: true)
+        vaultAgentExecutor.async { [weak self] in
+            guard let self else { return }
+            let result: Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>
+            do {
+                let recovery = try self.store.retryForcedResetRecovery()
+                if self.lastHandledForcedResetRecovery != recovery {
+                    switch recovery {
+                    case let .rolledBack(oldDigest):
+                        self.syncController.cancelPreparedForcedReset(previousLocalDigest: oldDigest)
+                    case .committed:
+                        self.syncController.synchronize(reason: .localChange)
+                    }
+                    self.lastHandledForcedResetRecovery = recovery
+                }
+                result = .success(recovery)
+            } catch {
+                result = .failure(Self.mapForcedResetError(error))
+            }
+            self.finish(result, completion: completion)
         }
     }
 
@@ -275,6 +394,8 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
                 result = .success(())
             } catch let error as PasswordVaultError {
                 result = .failure(error)
+            } catch PasswordVaultForcedResetError.recoveryRequired {
+                result = .failure(.recoveryRequired)
             } catch {
                 result = .failure(.corruptedData)
             }
@@ -523,6 +644,8 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
                 result = .success(try operation())
             } catch let error as PasswordVaultError {
                 result = .failure(error)
+            } catch PasswordVaultForcedResetError.recoveryRequired {
+                result = .failure(.recoveryRequired)
             } catch {
                 result = .failure(.keychainUnavailable)
             }
@@ -546,10 +669,86 @@ final class PasswordVaultUIController: PasswordVaultAgentAccess {
         return snapshot
     }
 
-    private func publishBusyState() {
+    private var currentSyncSnapshot: PasswordVaultSyncSnapshot {
+        syncSnapshotLock.withLock { syncSnapshot }
+    }
+
+    private func performForcedReset(
+        newPassword: String,
+        completion: @escaping (Result<PasswordVaultForcedResetOutcome, PasswordVaultError>) -> Void
+    ) {
+        var preparedDigest: String?
+        let result: Result<PasswordVaultForcedResetOutcome, PasswordVaultError>
+        do {
+            guard let access = store as? PasswordVaultSyncAccess else {
+                throw PasswordVaultError.corruptedData
+            }
+            guard !access.requiresForcedResetRecovery else {
+                throw PasswordVaultForcedResetError.recoveryRequired
+            }
+            lastHandledForcedResetRecovery = nil
+            guard let agentAuthorizationResetter = agentAuthorizationResetterLock.withLock({
+                agentAuthorizationResetter
+            }) else {
+                throw PasswordVaultError.keychainUnavailable
+            }
+            try agentAuthorizationResetter.revokeAll()
+            let previousDigest = try access.encryptedSnapshot().digest
+            try syncController.prepareForcedReset(previousLocalDigest: previousDigest)
+            preparedDigest = previousDigest
+            let storeResult = try store.forceReset(
+                newPassword: newPassword,
+                rememberSystemUnlock: quickUnlockIntent
+            )
+            if storeResult.warnings.contains(.systemUnlockDisabled) {
+                defaults.set(false, forKey: Constants.UserDefaults.passwordVaultQuickUnlockEnabled)
+            }
+            syncController.synchronize(reason: .localChange)
+            let syncSnapshot = syncController.snapshot
+            result = .success(PasswordVaultForcedResetOutcome(
+                localArchiveDigest: storeResult.localArchiveDigest,
+                oneDriveReplacementPending: syncSnapshot.mode == .oneDrive
+                    && syncSnapshot.phase.isForcedResetPending,
+                warnings: storeResult.warnings
+            ))
+        } catch {
+            if let preparedDigest,
+               error as? PasswordVaultForcedResetError != .recoveryRequired {
+                syncController.cancelPreparedForcedReset(previousLocalDigest: preparedDigest)
+            }
+            result = .failure(Self.mapForcedResetError(error))
+        }
+        finish(result, completion: completion)
+    }
+
+    private static func mapForcedResetError(_ error: Error) -> PasswordVaultError {
+        if let error = error as? PasswordVaultError { return error }
+        if error as? PasswordVaultForcedResetError == .recoveryRequired { return .recoveryRequired }
+        if error is PasswordVaultSyncFailure { return .cloudUnavailable }
+        if error is VaultAgentErrorCode { return .keychainUnavailable }
+        return .saveFailed
+    }
+
+    private func syncSnapshotDidChange(_ value: PasswordVaultSyncSnapshot) {
+        let didChange = syncSnapshotLock.withLock {
+            guard syncSnapshot != value else { return false }
+            syncSnapshot = value
+            return true
+        }
+        guard didChange else { return }
+        DispatchQueue.main.async { [weak self] in self?.notifyStateChange() }
+    }
+
+    private func publishBusyState(preservingRecoveryState: Bool = false) {
         let current = currentSnapshot
+        let busyState: PasswordVaultState
+        if preservingRecoveryState, case .recoveryRequired = current.state {
+            busyState = current.state
+        } else {
+            busyState = .unlocking
+        }
         setSnapshot(PasswordVaultViewState(
-            state: .unlocking,
+            state: busyState,
             folders: current.folders,
             entries: current.entries,
             isBusy: true,
@@ -639,5 +838,17 @@ private extension PasswordVaultState {
     var isReadableWarning: Bool {
         if case .readOnlyWarning = self { return true }
         return false
+    }
+}
+
+private extension PasswordVaultSyncPhase {
+    var isForcedResetPending: Bool {
+        if case .pendingForcedReset = self { return true }
+        return false
+    }
+
+    var forcedResetFailure: PasswordVaultSyncFailure? {
+        if case let .pendingForcedReset(failure) = self { return failure }
+        return nil
     }
 }

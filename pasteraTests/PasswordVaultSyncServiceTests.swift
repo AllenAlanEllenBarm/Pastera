@@ -6,7 +6,7 @@ import Testing
 // swiftlint:disable file_length
 
 @Suite("Password vault sync service", .serialized)
-struct PasswordVaultSyncServiceTests {
+struct PasswordVaultSyncServiceTests { // swiftlint:disable:this type_body_length
     @Test("sync decision covers all local and remote change combinations")
     func syncDecisionMatrix() {
         #expect(passwordVaultSyncDecision(localChanged: false, remoteChanged: false) == .noChange)
@@ -27,6 +27,209 @@ struct PasswordVaultSyncServiceTests {
         #expect(fixture.processStatus.readCount == 0)
         #expect(fixture.root.urlReadCount == 0)
         #expect(fixture.cloud.readCount == 0)
+    }
+
+    @Test("local-only forced reset preparation is a no-op")
+    func localOnlyForcedResetPreparationIsNoOp() throws {
+        let fixture = try makeSyncServiceFixture()
+
+        try fixture.service.prepareForcedReset(previousLocalDigest: "local-only")
+
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.metadata.savedValues.isEmpty)
+        #expect(fixture.service.snapshot.phase == .disabled)
+    }
+
+    @Test("forced reset preparation persists synchronously and reenters the shared queue")
+    func forcedResetPreparationPersistsReentrantlyBeforeLocalMutation() throws {
+        let oldLocalData = Data("old-local".utf8)
+        let newLocalData = Data("new-local".utf8)
+        let previousDigest = PasswordVaultDigest.hex(oldLocalData)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: oldLocalData)
+
+        try fixture.queue.sync {
+            try fixture.service.prepareForcedReset(previousLocalDigest: previousDigest)
+            #expect(fixture.metadata.value.pendingForcedReset?.previousLocalDigest == previousDigest)
+            #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest == nil)
+            fixture.access.data = newLocalData
+        }
+
+        #expect(fixture.metadata.savedValues.count == 1)
+        #expect(fixture.metadata.savedValues[0].pendingForcedReset?.previousLocalDigest == previousDigest)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(nil))
+    }
+
+    @Test("cancellation only clears the matching uncommitted preparation")
+    func cancellationRequiresMatchingUncommittedPreparation() throws {
+        let oldLocalData = Data("old-local".utf8)
+        let previousDigest = PasswordVaultDigest.hex(oldLocalData)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: oldLocalData)
+
+        try fixture.service.prepareForcedReset(previousLocalDigest: previousDigest)
+        fixture.service.cancelPreparedForcedReset(previousLocalDigest: "different")
+        #expect(fixture.metadata.value.pendingForcedReset != nil)
+
+        fixture.service.cancelPreparedForcedReset(previousLocalDigest: previousDigest)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.service.snapshot.phase == .syncing(.checking))
+
+        try fixture.service.prepareForcedReset(previousLocalDigest: previousDigest)
+        fixture.service.record(PasswordVaultCommit(origin: .forcedReset, encryptedDigest: "replacement"))
+        fixture.drain()
+        fixture.service.cancelPreparedForcedReset(previousLocalDigest: previousDigest)
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest == "replacement")
+    }
+
+    @Test("startup cancels a prepared reset when the local digest never changed")
+    func unchangedPreparedResetIsCancelled() throws {
+        let oldLocalData = Data("old-local".utf8)
+        let fixture = try makePreparedResetFixture(
+            previousLocalData: oldLocalData,
+            localData: oldLocalData
+        )
+
+        fixture.service.reconcilePendingForcedResetForTesting()
+
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.snapshotReadCount == 1)
+        #expect(fixture.service.snapshot.phase == .syncing(.checking))
+    }
+
+    @Test("startup adopts the changed local digest after a crash")
+    func committedLocalResetIsRecoveredAfterRestart() throws {
+        let oldLocalData = Data("old-local".utf8)
+        let newLocalData = Data("new-local".utf8)
+        let fixture = try makePreparedResetFixture(
+            previousLocalData: oldLocalData,
+            localData: newLocalData
+        )
+
+        fixture.service.reconcilePendingForcedResetForTesting()
+
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest
+            == PasswordVaultDigest.hex(newLocalData))
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(nil))
+    }
+
+    @Test("startup retains a committed forced reset regardless of the current digest")
+    func committedPreparedResetRemainsPending() throws {
+        let oldLocalData = Data("old-local".utf8)
+        let replacementDigest = PasswordVaultDigest.hex(Data("replacement".utf8))
+        let fixture = try makePreparedResetFixture(
+            previousLocalData: oldLocalData,
+            localData: oldLocalData,
+            replacementLocalDigest: replacementDigest
+        )
+
+        fixture.service.reconcilePendingForcedResetForTesting()
+
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest == replacementDigest)
+        #expect(fixture.access.snapshotReadCount == 2)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(nil))
+    }
+
+    @Test("startup retains forced reset state when the local snapshot is unavailable")
+    func unavailableLocalSnapshotKeepsPreparedResetPending() throws {
+        let oldLocalData = Data("old-local".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: PasswordVaultDigest.hex(oldLocalData),
+            replacementLocalDigest: nil,
+            didInspectRemote: false,
+            observedRemoteDigest: nil,
+            archivedRemoteDigest: nil,
+            remoteArchiveRequired: nil
+        )
+        let access = FakePasswordVaultSyncAccess(data: oldLocalData)
+        access.snapshotError = PasswordVaultSyncFailure.remoteUnavailable
+        let fixture = try makeSyncServiceFixture(metadata: metadata, access: access)
+
+        #expect(fixture.metadata.value.pendingForcedReset == metadata.pendingForcedReset)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteUnavailable))
+        #expect(fixture.cloud.readCount == 0)
+    }
+
+    @Test("forced reset commits advance revision without entering ordinary merge pending")
+    func forcedResetCommitUsesDedicatedPendingRecord() throws {
+        let oldLocalData = Data("old-local".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.localRevision = 4
+        metadata.pendingChangeCount = 2
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: PasswordVaultDigest.hex(oldLocalData),
+            replacementLocalDigest: "prepared-replacement",
+            didInspectRemote: false,
+            observedRemoteDigest: nil,
+            archivedRemoteDigest: nil,
+            remoteArchiveRequired: nil
+        )
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: oldLocalData)
+
+        fixture.service.record(PasswordVaultCommit(origin: .forcedReset, encryptedDigest: "committed-replacement"))
+        fixture.drain()
+
+        #expect(fixture.metadata.value.localRevision == 5)
+        #expect(fixture.metadata.value.pendingChangeCount == 2)
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest == "committed-replacement")
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(nil))
+    }
+
+    @Test("forced reset commit persists before a reentrant cancellation can run")
+    func forcedResetCommitPrecedesReentrantCancellation() throws {
+        let oldLocalData = Data("old-local".utf8)
+        let previousDigest = PasswordVaultDigest.hex(oldLocalData)
+        let replacementDigest = "committed-replacement"
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: oldLocalData)
+        try fixture.service.prepareForcedReset(previousLocalDigest: previousDigest)
+
+        fixture.queue.sync {
+            fixture.service.record(
+                PasswordVaultCommit(origin: .forcedReset, encryptedDigest: replacementDigest)
+            )
+            fixture.service.cancelPreparedForcedReset(previousLocalDigest: previousDigest)
+
+            #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest == replacementDigest)
+            #expect(fixture.metadata.savedValues.map(\.pendingForcedReset?.replacementLocalDigest) == [nil, replacementDigest])
+        }
+        fixture.drain()
+
+        #expect(fixture.metadata.savedValues.count == 2)
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest == replacementDigest)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(nil))
+    }
+
+    @Test("ordinary mutations keep their pending count while forced reset stays pending")
+    func ordinaryMutationKeepsPendingCountAndForcedResetPhase() throws {
+        let localData = Data("replacement".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.localRevision = 4
+        metadata.pendingChangeCount = 2
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: "previous",
+            replacementLocalDigest: PasswordVaultDigest.hex(localData),
+            didInspectRemote: false,
+            observedRemoteDigest: nil,
+            archivedRemoteDigest: nil,
+            remoteArchiveRequired: nil
+        )
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: localData)
+
+        fixture.service.record(PasswordVaultCommit(origin: .userMutation, encryptedDigest: "newer-local"))
+        fixture.drain()
+
+        #expect(fixture.metadata.value.localRevision == 5)
+        #expect(fixture.metadata.value.pendingChangeCount == 3)
+        #expect(fixture.metadata.value.pendingForcedReset == metadata.pendingForcedReset)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(nil))
     }
 
     @Test("offline OneDrive disconnects before resolving or reading its folder")
@@ -519,6 +722,471 @@ extension PasswordVaultSyncServiceTests {
             }
         }
         #expect(deliveredOnMain)
+    }
+}
+
+extension PasswordVaultSyncServiceTests {
+    @Test("pending forced reset archives remote before replacing active")
+    func forcedResetArchivesBeforeActiveReplacement() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let newLocalData = Data("new-local".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: newLocalData,
+            remoteData: oldRemoteData
+        )
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.operations.map(\.kind) == [.archiveWrite, .activeWrite])
+        #expect(fixture.cloud.archiveSnapshot?.data == oldRemoteData)
+        #expect(fixture.cloud.snapshot?.data == newLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(newLocalData))
+        #expect(fixture.metadata.value.lastObservedRemoteDigest == PasswordVaultDigest.hex(newLocalData))
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("offline forced reset stays pending and never merges")
+    func offlineForcedResetPausesSync() throws {
+        let fixture = try makePendingForcedResetFixture()
+        fixture.processStatus.status = .notRunning(appURL: fixture.oneDriveAppURL)
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.metadata.value.pendingForcedReset != nil)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.oneDriveNotRunning))
+        #expect(fixture.cloud.operations.isEmpty)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("forced reset with an absent remote uploads active without creating an archive")
+    func forcedResetWithAbsentRemoteSkipsArchive() throws {
+        let newLocalData = Data("new-local".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: newLocalData,
+            remoteData: nil
+        )
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.operations.map(\.kind) == [.activeWrite])
+        #expect(fixture.cloud.writes.first?.expectation == .absent)
+        #expect(fixture.cloud.archiveSnapshot == nil)
+        #expect(fixture.cloud.snapshot?.data == newLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("retry after verified archive replaces only active")
+    func verifiedArchiveIsNotRepeatedAfterActiveFailure() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let newLocalData = Data("new-local".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: newLocalData,
+            remoteData: oldRemoteData
+        )
+        fixture.cloud.writeError = .remoteWriteFailed
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.metadata.value.pendingForcedReset?.archivedRemoteDigest
+            == PasswordVaultDigest.hex(oldRemoteData))
+        #expect(fixture.metadata.value.pendingForcedReset?.remoteArchiveRequired == true)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteWriteFailed))
+        #expect(fixture.access.mergeCount == 0)
+
+        fixture.cloud.writeError = nil
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.cloud.operations.map(\.kind) == [.archiveWrite, .activeWrite, .activeWrite])
+        #expect(fixture.cloud.archiveWrites.count == 1)
+        #expect(fixture.cloud.archiveSnapshot?.data == oldRemoteData)
+        #expect(fixture.cloud.snapshot?.data == newLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("restart after active replacement finalizes only with recorded archive progress")
+    func replacedActiveFinalizesAfterCrash() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let newLocalData = Data("new-local".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: newLocalData,
+            remoteData: oldRemoteData
+        )
+        fixture.cloud.postActiveWriteError = .remoteUnavailable
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == newLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset?.archivedRemoteDigest
+            == PasswordVaultDigest.hex(oldRemoteData))
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteUnavailable))
+
+        fixture.cloud.postActiveWriteError = nil
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.cloud.operations.map(\.kind) == [.archiveWrite, .activeWrite])
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.service.snapshot.phase == .synced)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("explicit retry after finalize save failure preserves the original archive")
+    func explicitRetryAfterFinalizeSaveFailureOnlyFinalizes() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let replacementData = Data("replacement".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: replacementData,
+            remoteData: oldRemoteData
+        )
+        fixture.metadata.saveFailurePredicate = { $0.pendingForcedReset == nil }
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == replacementData)
+        #expect(fixture.cloud.archiveSnapshot?.data == oldRemoteData)
+        #expect(fixture.metadata.value.pendingForcedReset != nil)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteWriteFailed))
+
+        fixture.metadata.saveFailurePredicate = nil
+        var retryResult: Result<Void, PasswordVaultSyncFailure>?
+        fixture.service.retryForcedReset { retryResult = $0 }
+        fixture.drain()
+
+        #expect(try retryResult?.get() != nil)
+        #expect(fixture.cloud.operations.map(\.kind) == [.archiveWrite, .activeWrite])
+        #expect(fixture.cloud.archiveWrites.count == 1)
+        #expect(fixture.cloud.archiveSnapshot?.data == oldRemoteData)
+        #expect(fixture.cloud.snapshot?.data == replacementData)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.service.snapshot.phase == .synced)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("first observation equal to replacement cannot manufacture archive proof")
+    func firstObservationEqualToReplacementFailsClosedWithoutOverwritingArchive() throws {
+        let archivedOldRemoteData = Data("archived-old-remote".utf8)
+        let replacementData = Data("replacement".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: replacementData,
+            remoteData: replacementData
+        )
+        fixture.cloud.archiveSnapshot = PasswordVaultCloudSnapshot(
+            data: archivedOldRemoteData,
+            digest: PasswordVaultDigest.hex(archivedOldRemoteData)
+        )
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.metadata.value.pendingForcedReset != nil)
+        #expect(fixture.metadata.value.pendingForcedReset?.remoteArchiveRequired == true)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteVerificationFailed))
+
+        var retryResult: Result<Void, PasswordVaultSyncFailure>?
+        fixture.service.retryForcedReset { retryResult = $0 }
+        fixture.drain()
+
+        #expect(throws: PasswordVaultSyncFailure.remoteVerificationFailed) {
+            try retryResult?.get()
+        }
+        #expect(fixture.cloud.operations.isEmpty)
+        #expect(fixture.cloud.archiveWrites.isEmpty)
+        #expect(fixture.cloud.archiveSnapshot?.data == archivedOldRemoteData)
+        #expect(fixture.cloud.snapshot?.data == replacementData)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("local edit after active replacement advances CAS without replacing the original archive")
+    func localEditAfterFinalizeSaveFailureAdvancesActiveExpectation() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let firstReplacement = Data("replacement-r1".utf8)
+        let latestLocalData = Data("replacement-r2".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: firstReplacement,
+            remoteData: oldRemoteData
+        )
+        fixture.metadata.saveFailurePredicate = { $0.pendingForcedReset == nil }
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == firstReplacement)
+        #expect(fixture.cloud.archiveSnapshot?.data == oldRemoteData)
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest
+            == PasswordVaultDigest.hex(firstReplacement))
+
+        fixture.metadata.saveFailurePredicate = nil
+        fixture.access.data = latestLocalData
+        fixture.service.record(
+            PasswordVaultCommit(
+                origin: .userMutation,
+                encryptedDigest: PasswordVaultDigest.hex(latestLocalData)
+            )
+        )
+        fixture.drain()
+        fixture.cloud.postActiveWriteError = .remoteUnavailable
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == latestLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset?.observedRemoteDigest
+            == PasswordVaultDigest.hex(firstReplacement))
+        #expect(fixture.metadata.value.pendingForcedReset?.replacementLocalDigest
+            == PasswordVaultDigest.hex(latestLocalData))
+        #expect(fixture.metadata.value.pendingForcedReset?.archivedRemoteDigest
+            == PasswordVaultDigest.hex(oldRemoteData))
+
+        fixture.cloud.postActiveWriteError = nil
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.cloud.operations.map(\.kind) == [.archiveWrite, .activeWrite, .activeWrite])
+        #expect(fixture.cloud.writes.last?.expectation
+            == .digest(PasswordVaultDigest.hex(firstReplacement)))
+        #expect(fixture.cloud.archiveWrites.count == 1)
+        #expect(fixture.cloud.archiveSnapshot?.data == oldRemoteData)
+        #expect(fixture.cloud.snapshot?.data == latestLocalData)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(latestLocalData))
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("absent remote proof survives R1 to R2 progress without touching an existing archive")
+    func absentRemoteProofSurvivesReplacementAdvanceAndReadbackFailure() throws {
+        let existingArchiveData = Data("precious-existing-archive".utf8)
+        let firstReplacement = Data("replacement-r1".utf8)
+        let latestLocalData = Data("replacement-r2".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: firstReplacement,
+            remoteData: nil
+        )
+        fixture.cloud.archiveSnapshot = PasswordVaultCloudSnapshot(
+            data: existingArchiveData,
+            digest: PasswordVaultDigest.hex(existingArchiveData)
+        )
+        fixture.metadata.saveFailurePredicate = { $0.pendingForcedReset == nil }
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == firstReplacement)
+        #expect(fixture.cloud.archiveSnapshot?.data == existingArchiveData)
+        #expect(fixture.cloud.archiveWrites.isEmpty)
+        #expect(fixture.metadata.value.pendingForcedReset?.remoteArchiveRequired == false)
+
+        fixture.metadata.saveFailurePredicate = nil
+        fixture.access.data = latestLocalData
+        fixture.service.record(
+            PasswordVaultCommit(
+                origin: .userMutation,
+                encryptedDigest: PasswordVaultDigest.hex(latestLocalData)
+            )
+        )
+        fixture.drain()
+        fixture.cloud.postActiveWriteError = .remoteUnavailable
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == latestLocalData)
+        #expect(fixture.cloud.archiveSnapshot?.data == existingArchiveData)
+        #expect(fixture.cloud.archiveWrites.isEmpty)
+        #expect(fixture.metadata.value.pendingForcedReset?.remoteArchiveRequired == false)
+        #expect(fixture.access.mergeCount == 0)
+
+        fixture.cloud.postActiveWriteError = nil
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.cloud.operations.map(\.kind) == [.activeWrite, .activeWrite])
+        #expect(fixture.cloud.archiveSnapshot?.data == existingArchiveData)
+        #expect(fixture.cloud.archiveWrites.isEmpty)
+        #expect(fixture.cloud.snapshot?.data == latestLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(latestLocalData))
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("legacy inspected reset without archive requirement fails closed")
+    func unknownLegacyArchiveRequirementCannotWriteRemote() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let replacementData = Data("replacement".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: "previous-local",
+            replacementLocalDigest: PasswordVaultDigest.hex(replacementData),
+            didInspectRemote: true,
+            observedRemoteDigest: PasswordVaultDigest.hex(oldRemoteData),
+            archivedRemoteDigest: PasswordVaultDigest.hex(oldRemoteData),
+            remoteArchiveRequired: nil
+        )
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: replacementData)
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: oldRemoteData,
+            digest: PasswordVaultDigest.hex(oldRemoteData)
+        )
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.metadata.value.pendingForcedReset?.remoteArchiveRequired == nil)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteVerificationFailed))
+
+        var retryResult: Result<Void, PasswordVaultSyncFailure>?
+        fixture.service.retryForcedReset { retryResult = $0 }
+        fixture.drain()
+
+        #expect(throws: PasswordVaultSyncFailure.remoteVerificationFailed) {
+            try retryResult?.get()
+        }
+        #expect(fixture.cloud.operations.isEmpty)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("an unrecorded archive never authorizes finalizing an already replaced active")
+    func missingArchiveProgressKeepsReplacementPending() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let newLocalData = Data("new-local".utf8)
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: "previous-local",
+            replacementLocalDigest: PasswordVaultDigest.hex(newLocalData),
+            didInspectRemote: true,
+            observedRemoteDigest: PasswordVaultDigest.hex(oldRemoteData),
+            archivedRemoteDigest: nil,
+            remoteArchiveRequired: true
+        )
+        let fixture = try makeSyncServiceFixture(metadata: metadata, localData: newLocalData)
+        fixture.cloud.snapshot = PasswordVaultCloudSnapshot(
+            data: newLocalData,
+            digest: PasswordVaultDigest.hex(newLocalData)
+        )
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+
+        #expect(fixture.metadata.value.pendingForcedReset != nil)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteVerificationFailed))
+        #expect(fixture.cloud.operations.isEmpty)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("remote CAS race preserves the changed active and requires explicit retry")
+    func remoteCASRacePreservesChangedActiveUntilExplicitRetry() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let racedRemoteData = Data("raced-remote".utf8)
+        let newLocalData = Data("new-local".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: newLocalData,
+            remoteData: oldRemoteData
+        )
+        fixture.cloud.activeSnapshotBeforeNextWrite = PasswordVaultCloudSnapshot(
+            data: racedRemoteData,
+            digest: PasswordVaultDigest.hex(racedRemoteData)
+        )
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.snapshot?.data == racedRemoteData)
+        #expect(fixture.metadata.value.pendingForcedReset != nil)
+        #expect(fixture.service.snapshot.phase == .pendingForcedReset(.remoteVerificationFailed))
+        #expect(fixture.access.mergeCount == 0)
+
+        fixture.service.synchronize(reason: .manual)
+        fixture.drain()
+        #expect(fixture.cloud.archiveWrites.count == 1)
+        #expect(fixture.cloud.snapshot?.data == racedRemoteData)
+
+        var retryResult: Result<Void, PasswordVaultSyncFailure>?
+        fixture.service.retryForcedReset { retryResult = $0 }
+        fixture.drain()
+
+        #expect(try retryResult?.get() != nil)
+        #expect(fixture.metadata.savedValues.contains {
+            $0.pendingForcedReset?.observedRemoteDigest == PasswordVaultDigest.hex(racedRemoteData)
+                && $0.pendingForcedReset?.remoteArchiveRequired == true
+        })
+        #expect(fixture.cloud.archiveWrites.count == 2)
+        #expect(fixture.cloud.archiveSnapshot?.data == racedRemoteData)
+        #expect(fixture.cloud.snapshot?.data == newLocalData)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("local edits while forced reset is pending upload the latest local snapshot")
+    func pendingForcedResetUploadsLatestLocalSnapshot() throws {
+        let oldRemoteData = Data("old-remote".utf8)
+        let initialReplacement = Data("initial-replacement".utf8)
+        let latestLocalData = Data("latest-local-edit".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: initialReplacement,
+            remoteData: oldRemoteData
+        )
+        fixture.cloud.writeError = .remoteWriteFailed
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        fixture.access.data = latestLocalData
+        fixture.service.record(
+            PasswordVaultCommit(
+                origin: .userMutation,
+                encryptedDigest: PasswordVaultDigest.hex(latestLocalData)
+            )
+        )
+        fixture.cloud.writeError = nil
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.archiveWrites.count == 1)
+        #expect(fixture.cloud.snapshot?.data == latestLocalData)
+        #expect(fixture.metadata.value.lastSyncedLocalDigest == PasswordVaultDigest.hex(latestLocalData))
+        #expect(fixture.metadata.value.pendingChangeCount == 0)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.mergeCount == 0)
+    }
+
+    @Test("repeated forced reset keeps one latest remote archive")
+    func repeatedForcedResetKeepsSingleRemoteArchive() throws {
+        let firstRemoteData = Data("first-remote".utf8)
+        let firstReplacement = Data("first-replacement".utf8)
+        let secondReplacement = Data("second-replacement".utf8)
+        let fixture = try makePendingForcedResetFixture(
+            localData: firstReplacement,
+            remoteData: firstRemoteData
+        )
+
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+        try fixture.service.prepareForcedReset(
+            previousLocalDigest: PasswordVaultDigest.hex(firstReplacement)
+        )
+        fixture.access.data = secondReplacement
+        fixture.service.record(
+            PasswordVaultCommit(
+                origin: .forcedReset,
+                encryptedDigest: PasswordVaultDigest.hex(secondReplacement)
+            )
+        )
+        fixture.service.synchronize(reason: .localChange)
+        fixture.drain()
+
+        #expect(fixture.cloud.archiveWrites.count == 2)
+        #expect(fixture.cloud.archiveSnapshot?.data == firstReplacement)
+        #expect(fixture.cloud.snapshot?.data == secondReplacement)
+        #expect(fixture.metadata.value.pendingForcedReset == nil)
+        #expect(fixture.access.mergeCount == 0)
     }
 }
 

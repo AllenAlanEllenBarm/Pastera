@@ -13,7 +13,13 @@ enum PasswordVaultRemoteExpectation: Equatable {
 
 protocol PasswordVaultCloudReplica {
     func read(rootURL: URL) throws -> PasswordVaultCloudSnapshot?
+    func readLatestForcedResetArchive(rootURL: URL) throws -> PasswordVaultCloudSnapshot?
     func writeAtomically(
+        _ data: Data,
+        rootURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws -> String
+    func writeLatestForcedResetArchiveAtomically(
         _ data: Data,
         rootURL: URL,
         expecting expectation: PasswordVaultRemoteExpectation
@@ -89,7 +95,15 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
 
     func read(rootURL: URL) throws -> PasswordVaultCloudSnapshot? {
         try validateRoot(rootURL, requiresWriteAccess: false)
-        let targetURL = VaultFileCoordinator.vaultURL(for: rootURL)
+        return try readTarget(at: VaultFileCoordinator.vaultURL(for: rootURL))
+    }
+
+    func readLatestForcedResetArchive(rootURL: URL) throws -> PasswordVaultCloudSnapshot? {
+        try validateRoot(rootURL, requiresWriteAccess: false)
+        return try readTarget(at: VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL))
+    }
+
+    private func readTarget(at targetURL: URL) throws -> PasswordVaultCloudSnapshot? {
         do {
             return try coordinateRead(at: targetURL) { coordinatedURL in
                 switch try itemStatus(at: coordinatedURL) {
@@ -119,20 +133,46 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
         rootURL: URL,
         expecting expectation: PasswordVaultRemoteExpectation
     ) throws -> String {
+        try writeAtomically(
+            data,
+            rootURL: rootURL,
+            targetURL: VaultFileCoordinator.vaultURL(for: rootURL),
+            expecting: expectation
+        )
+    }
+
+    func writeLatestForcedResetArchiveAtomically(
+        _ data: Data,
+        rootURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws -> String {
+        try writeAtomically(
+            data,
+            rootURL: rootURL,
+            targetURL: VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL),
+            expecting: expectation
+        )
+    }
+
+    private func writeAtomically(
+        _ data: Data,
+        rootURL: URL,
+        targetURL: URL,
+        expecting expectation: PasswordVaultRemoteExpectation
+    ) throws -> String {
         guard Self.hasKDBXSignature(data) else {
             throw PasswordVaultSyncFailure.remoteCorrupted
         }
         try validateRoot(rootURL, requiresWriteAccess: true)
 
-        let targetURL = VaultFileCoordinator.vaultURL(for: rootURL)
         let directoryURL = targetURL.deletingLastPathComponent()
         let temporaryURL = directoryURL.appendingPathComponent(
-            ".PasteraVault-\(UUID().uuidString).tmp",
+            ".\(targetURL.lastPathComponent).pastera-stage",
             isDirectory: false
         )
         let expectedDigest = PasswordVaultDigest.hex(data)
 
-        defer { try? operations.removeItem(temporaryURL) }
+        try removeOwnedStageIfPresent(at: temporaryURL)
 
         do {
             try operations.createDirectory(directoryURL)
@@ -149,20 +189,41 @@ final class OneDrivePasswordVaultCloudReplica: PasswordVaultCloudReplica {
                     expecting: expectation
                 )
             }
-        } catch let failure as PasswordVaultSyncFailure {
-            throw failure
         } catch {
-            throw PasswordVaultSyncFailure.remoteWriteFailed
+            let operationFailure = (error as? PasswordVaultSyncFailure) ?? .remoteWriteFailed
+            try removeOwnedStageIfPresent(at: temporaryURL)
+            throw operationFailure
         }
+        try removeOwnedStageIfPresent(at: temporaryURL)
 
         do {
-            guard let snapshot = try read(rootURL: rootURL), snapshot.digest == expectedDigest else {
+            guard let snapshot = try readTarget(at: targetURL), snapshot.digest == expectedDigest else {
                 throw PasswordVaultSyncFailure.remoteVerificationFailed
             }
         } catch {
             throw PasswordVaultSyncFailure.remoteVerificationFailed
         }
         return expectedDigest
+    }
+
+    private func removeOwnedStageIfPresent(at temporaryURL: URL) throws {
+        do {
+            switch try itemStatus(at: temporaryURL) {
+            case .missing:
+                return
+            case .regular:
+                try operations.removeItem(temporaryURL)
+                guard case .missing = try itemStatus(at: temporaryURL) else {
+                    throw PasswordVaultSyncFailure.remoteWriteFailed
+                }
+            case .other:
+                throw PasswordVaultSyncFailure.remoteWriteFailed
+            }
+        } catch let failure as PasswordVaultSyncFailure {
+            throw failure
+        } catch {
+            throw PasswordVaultSyncFailure.remoteWriteFailed
+        }
     }
 
     private func validateRoot(_ rootURL: URL, requiresWriteAccess: Bool) throws {

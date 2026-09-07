@@ -2,7 +2,7 @@
 
 import AppKit
 
-private final class PasswordVaultMasterPasswordSheetWindow: NSWindow {
+final class PasswordVaultResetSheetWindow: NSWindow {
     var onEscape: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
@@ -14,7 +14,11 @@ private final class PasswordVaultMasterPasswordSheetWindow: NSWindow {
     }
 }
 
-private final class PasswordVaultPasswordInputView: NSView, NSTextFieldDelegate {
+final class PasswordVaultKeyViewButton: NSButton {
+    override var canBecomeKeyView: Bool { true }
+}
+
+final class PasswordVaultPasswordInputView: NSView, NSTextFieldDelegate {
     let secureField = NSSecureTextField()
     let visibleField = NSTextField()
     let visibilityButton = NSButton()
@@ -44,9 +48,7 @@ private final class PasswordVaultPasswordInputView: NSView, NSTextFieldDelegate 
         }
     }
 
-    var activeField: NSTextField {
-        isPasswordVisible ? visibleField : secureField
-    }
+    var activeField: NSTextField { isPasswordVisible ? visibleField : secureField }
 
     func setEnabled(_ enabled: Bool) {
         secureField.isEnabled = enabled
@@ -82,7 +84,7 @@ private final class PasswordVaultPasswordInputView: NSView, NSTextFieldDelegate 
             systemSymbolName: isPasswordVisible ? "eye.slash" : "eye",
             accessibilityDescription: nil
         )
-        visibilityButton.setAccessibilityLabel(pasteraPreferenceString(
+        visibilityButton.setAccessibilityLabel(String(localized:
             isPasswordVisible ? "Hide Password" : "Show Password"
         ))
 
@@ -118,7 +120,7 @@ private final class PasswordVaultPasswordInputView: NSView, NSTextFieldDelegate 
         visibilityButton.isBordered = false
         visibilityButton.bezelStyle = .inline
         visibilityButton.image = NSImage(systemSymbolName: "eye", accessibilityDescription: nil)
-        visibilityButton.setAccessibilityLabel(pasteraPreferenceString("Show Password"))
+        visibilityButton.setAccessibilityLabel(String(localized: "Show Password"))
 
         errorLabel.font = .systemFont(ofSize: 11.5)
         errorLabel.textColor = .systemRed
@@ -167,52 +169,67 @@ private final class PasswordVaultPasswordInputView: NSView, NSTextFieldDelegate 
 }
 
 final class PasswordVaultMasterPasswordSheetController: NSWindowController, NSWindowDelegate {
-    typealias ChangePassword = (
+    typealias ResetPassword = (
         String,
-        String,
-        @escaping (Result<PasswordVaultMasterPasswordChangeResult, PasswordVaultError>) -> Void
+        @escaping (Result<PasswordVaultMasterPasswordResetResult, PasswordVaultError>) -> Void
     ) -> Void
 
-    private let changePasswordOperation: ChangePassword
-    private let onSuccess: (PasswordVaultMasterPasswordChangeResult) -> Void
-    private let currentInput = PasswordVaultPasswordInputView(
-        labelText: pasteraPreferenceString("Current Master Password"),
-        accessibilityIdentifier: "masterPassword.current"
-    )
+    private enum Text {
+        static let title = String(localized: "Reset Master Password")
+        static let subtitle = String(localized:
+            "Pastera will use this Mac's authentication, then preserve your folders and entries while resetting the master password."
+        )
+        static let recoveryWarning = String(localized:
+            "The new master password encrypts your password vault. If forgotten, it cannot be recovered by any other means."
+        )
+        static let forcedResetExplanation = String(localized:
+            "No usable unlock key is available, so Pastera cannot preserve the existing password vault. Review forced reset to create a new empty vault."
+        )
+    }
+
+    private let resetPasswordOperation: ResetPassword
+    private let onSuccess: (PasswordVaultMasterPasswordResetResult) -> Void
+    private let onReviewForceReset: () -> Void
     private let newInput = PasswordVaultPasswordInputView(
-        labelText: pasteraPreferenceString("New Master Password"),
+        labelText: String(localized: "New Master Password"),
         accessibilityIdentifier: "masterPassword.new"
     )
     private let confirmationInput = PasswordVaultPasswordInputView(
-        labelText: pasteraPreferenceString("Confirm New Master Password"),
+        labelText: String(localized: "Confirm New Master Password"),
         accessibilityIdentifier: "masterPassword.confirmation"
     )
-    private let recoveryWarningLabel = NSTextField(wrappingLabelWithString: pasteraPreferenceString(
-        "The new master password encrypts your password vault. If forgotten, it cannot be recovered by any other means."
-    ))
+    private let recoveryWarningLabel = NSTextField(wrappingLabelWithString: Text.recoveryWarning)
     private let generalErrorLabel = NSTextField(wrappingLabelWithString: "")
-    private let cancelButton = NSButton(
-        title: pasteraPreferenceString("Cancel"),
+    private let forceResetExplanationLabel = NSTextField(wrappingLabelWithString: Text.forcedResetExplanation)
+    private let reviewForceResetButton = NSButton(
+        title: String(localized: "Review Force Reset..."),
         target: nil,
         action: nil
     )
-    private let submitButton = NSButton(
-        title: pasteraPreferenceString("Change Master Password"),
+    private let cancelButton = PasswordVaultKeyViewButton(
+        title: String(localized: "Cancel"), target: nil, action: nil
+    )
+    private let submitButton = PasswordVaultKeyViewButton(
+        title: String(localized: "Authenticate & Reset"),
         target: nil,
         action: nil
     )
+    private let forceResetRecoveryPanel = NSStackView()
     private weak var parentWindow: NSWindow?
+    private weak var priorFirstResponder: NSResponder?
     private(set) var isBusy = false
     private(set) var didCancel = false
 
     init(
-        changePassword: @escaping ChangePassword,
-        onSuccess: @escaping (PasswordVaultMasterPasswordChangeResult) -> Void = { _ in }
+        resetPassword: @escaping ResetPassword,
+        onSuccess: @escaping (PasswordVaultMasterPasswordResetResult) -> Void = { _ in },
+        onReviewForceReset: @escaping () -> Void = {}
     ) {
-        changePasswordOperation = changePassword
+        resetPasswordOperation = resetPassword
         self.onSuccess = onSuccess
-        let window = PasswordVaultMasterPasswordSheetWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 438),
+        self.onReviewForceReset = onReviewForceReset
+        let window = PasswordVaultResetSheetWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 390),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -226,57 +243,46 @@ final class PasswordVaultMasterPasswordSheetController: NSWindowController, NSWi
 
     convenience init(
         controller: PasswordVaultUIController,
-        onSuccess: @escaping (PasswordVaultMasterPasswordChangeResult) -> Void
+        onSuccess: @escaping (PasswordVaultMasterPasswordResetResult) -> Void,
+        onReviewForceReset: @escaping () -> Void = {}
     ) {
         self.init(
-            changePassword: { currentPassword, newPassword, completion in
-                controller.changeMasterPassword(
-                    currentPassword: currentPassword,
-                    newPassword: newPassword,
-                    completion: completion
-                )
+            resetPassword: { newPassword, completion in
+                controller.resetMasterPassword(newPassword: newPassword, completion: completion)
             },
-            onSuccess: onSuccess
+            onSuccess: onSuccess,
+            onReviewForceReset: onReviewForceReset
         )
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
+    required init?(coder: NSCoder) { nil }
 
-    deinit {
-        clearSecrets()
-    }
+    deinit { clearSecrets() }
 
     func beginSheet(for parentWindow: NSWindow) {
         self.parentWindow = parentWindow
+        priorFirstResponder = parentWindow.firstResponder
         didCancel = false
-        parentWindow.beginSheet(window!) { [weak self] _ in
-            self?.clearSecrets()
-        }
-        focusCurrentPassword()
+        parentWindow.beginSheet(window!)
+        focusNewPassword()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard !isBusy else { return false }
         cancel()
-        return parentWindow == nil
+        return false
     }
 
-    func windowWillClose(_ notification: Notification) {
-        clearSecrets()
-    }
+    func windowWillClose(_ notification: Notification) { clearSecrets() }
 }
 
 private extension PasswordVaultMasterPasswordSheetController {
-    var inputs: [PasswordVaultPasswordInputView] {
-        [currentInput, newInput, confirmationInput]
-    }
+    var inputs: [PasswordVaultPasswordInputView] { [newInput, confirmationInput] }
 
-    func configureWindow(_ window: PasswordVaultMasterPasswordSheetWindow) {
-        window.title = pasteraPreferenceString("Change Master Password")
-        window.contentMinSize = NSSize(width: 360, height: 438)
+    func configureWindow(_ window: PasswordVaultResetSheetWindow) {
+        window.title = Text.title
+        window.contentMinSize = NSSize(width: 360, height: 390)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.onEscape = { [weak self] in self?.cancel() }
@@ -286,14 +292,12 @@ private extension PasswordVaultMasterPasswordSheetController {
         let contentView = PasteraPreferenceFlippedView()
         window.contentView = contentView
 
-        let titleLabel = NSTextField(labelWithString: pasteraPreferenceString("Change Master Password"))
+        let titleLabel = NSTextField(labelWithString: Text.title)
         titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        let subtitleLabel = NSTextField(wrappingLabelWithString: pasteraPreferenceString(
-            "Verify your current master password, then choose a new one. Your folders and entries will be preserved."
-        ))
+        let subtitleLabel = NSTextField(wrappingLabelWithString: Text.subtitle)
         subtitleLabel.font = .systemFont(ofSize: 12.5)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.maximumNumberOfLines = 2
+        subtitleLabel.maximumNumberOfLines = 3
 
         let warningIcon = NSImageView(image: NSImage(
             systemSymbolName: "exclamationmark.triangle.fill",
@@ -310,6 +314,8 @@ private extension PasswordVaultMasterPasswordSheetController {
         warningRow.spacing = 7
         warningRow.setAccessibilityLabel(recoveryWarningLabel.stringValue)
         warningRow.setAccessibilityIdentifier("masterPassword.recoveryWarning")
+
+        configureForceResetRecoveryPanel()
 
         generalErrorLabel.font = .systemFont(ofSize: 11.5)
         generalErrorLabel.textColor = .systemRed
@@ -328,9 +334,9 @@ private extension PasswordVaultMasterPasswordSheetController {
             titleLabel,
             subtitleLabel,
             warningRow,
-            currentInput,
             newInput,
             confirmationInput,
+            forceResetRecoveryPanel,
             generalErrorLabel,
             footer
         ])
@@ -350,12 +356,32 @@ private extension PasswordVaultMasterPasswordSheetController {
             subtitleLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             warningRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             recoveryWarningLabel.widthAnchor.constraint(lessThanOrEqualTo: warningRow.widthAnchor, constant: -24),
-            currentInput.widthAnchor.constraint(equalTo: stack.widthAnchor),
             newInput.widthAnchor.constraint(equalTo: stack.widthAnchor),
             confirmationInput.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            forceResetRecoveryPanel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             generalErrorLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             footer.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+    }
+
+    func configureForceResetRecoveryPanel() {
+        forceResetExplanationLabel.font = .systemFont(ofSize: 11.5)
+        forceResetExplanationLabel.textColor = .secondaryLabelColor
+        forceResetExplanationLabel.maximumNumberOfLines = 3
+        reviewForceResetButton.bezelStyle = .rounded
+        reviewForceResetButton.contentTintColor = .systemRed
+        reviewForceResetButton.setAccessibilityIdentifier("masterPassword.reviewForceReset")
+        forceResetRecoveryPanel.setViews([forceResetExplanationLabel, reviewForceResetButton], in: .top)
+        forceResetRecoveryPanel.orientation = .horizontal
+        forceResetRecoveryPanel.alignment = .top
+        forceResetRecoveryPanel.spacing = 10
+        forceResetRecoveryPanel.edgeInsets = NSEdgeInsets(top: 9, left: 10, bottom: 9, right: 10)
+        forceResetRecoveryPanel.wantsLayer = true
+        forceResetRecoveryPanel.layer?.cornerRadius = 8
+        forceResetRecoveryPanel.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.10).cgColor
+        forceResetRecoveryPanel.setAccessibilityIdentifier("masterPassword.forceResetRecovery")
+        forceResetRecoveryPanel.isHidden = true
+        reviewForceResetButton.setContentHuggingPriority(.required, for: .horizontal)
     }
 
     func bindActions() {
@@ -363,18 +389,21 @@ private extension PasswordVaultMasterPasswordSheetController {
             input.onChange = { [weak self] in self?.inputDidChange() }
             input.visibilityButton.target = self
         }
-        currentInput.visibilityButton.action = #selector(toggleCurrentVisibility(_:))
         newInput.visibilityButton.action = #selector(toggleNewVisibility(_:))
         confirmationInput.visibilityButton.action = #selector(toggleConfirmationVisibility(_:))
         inputs.flatMap { [$0.secureField, $0.visibleField] }.forEach { field in
             field.target = self
             field.action = #selector(submit(_:))
         }
+        reviewForceResetButton.target = self
+        reviewForceResetButton.action = #selector(reviewForceReset(_:))
         cancelButton.target = self
         cancelButton.action = #selector(cancelClicked(_:))
+        cancelButton.refusesFirstResponder = false
         cancelButton.setAccessibilityIdentifier("masterPassword.cancel")
         submitButton.target = self
         submitButton.action = #selector(submit(_:))
+        submitButton.refusesFirstResponder = false
         submitButton.keyEquivalent = "\r"
         submitButton.bezelStyle = .rounded
         submitButton.setAccessibilityIdentifier("masterPassword.submit")
@@ -382,55 +411,49 @@ private extension PasswordVaultMasterPasswordSheetController {
     }
 
     func installKeyViewLoop() {
-        currentInput.secureField.nextKeyView = newInput.secureField
-        currentInput.visibleField.nextKeyView = newInput.secureField
-        newInput.secureField.nextKeyView = confirmationInput.secureField
-        newInput.visibleField.nextKeyView = confirmationInput.secureField
+        let confirmationField = confirmationInput.activeField
+        newInput.secureField.nextKeyView = confirmationField
+        newInput.visibleField.nextKeyView = confirmationField
         confirmationInput.secureField.nextKeyView = cancelButton
         confirmationInput.visibleField.nextKeyView = cancelButton
         cancelButton.nextKeyView = submitButton
-        submitButton.nextKeyView = currentInput.secureField
+        submitButton.nextKeyView = newInput.activeField
     }
 
     func inputDidChange() {
         inputs.forEach { $0.setError(nil) }
         setGeneralError(nil)
+        forceResetRecoveryPanel.isHidden = true
         updateValidationState()
     }
 
     func updateValidationState() {
-        let allPresent = inputs.allSatisfy { !$0.value.isEmpty }
-        submitButton.isEnabled = !isBusy && allPresent && newInput.value == confirmationInput.value
+        submitButton.isEnabled = !isBusy && !newInput.value.isEmpty
+            && newInput.value == confirmationInput.value
     }
 
     func setBusy(_ busy: Bool) {
         isBusy = busy
         inputs.forEach { $0.setEnabled(!busy) }
+        reviewForceResetButton.isEnabled = !busy
         cancelButton.isEnabled = !busy
-        submitButton.isEnabled = !busy && inputs.allSatisfy { !$0.value.isEmpty }
-            && newInput.value == confirmationInput.value
-        submitButton.title = busy
-            ? pasteraPreferenceString("Changing…")
-            : pasteraPreferenceString("Change Master Password")
+        updateValidationState()
+        submitButton.title = busy ? String(localized: "Resetting…") : String(localized: "Authenticate & Reset")
         window?.standardWindowButton(.closeButton)?.isEnabled = !busy
-        window?.setAccessibilityValue(busy ? pasteraPreferenceString("Processing") : nil)
+        window?.setAccessibilityValue(busy ? String(localized: "Processing") : nil)
     }
 
     func validateForSubmission() -> Bool {
         inputs.forEach { $0.setError(nil) }
         setGeneralError(nil)
-        if currentInput.value.isEmpty {
-            currentInput.setError(pasteraPreferenceString("Enter the current master password."))
-            focusCurrentPassword()
-            return false
-        }
+        forceResetRecoveryPanel.isHidden = true
         if newInput.value.isEmpty {
-            newInput.setError(pasteraPreferenceString("Enter a new master password."))
-            window?.makeFirstResponder(newInput.activeField)
+            newInput.setError(String(localized: "Enter a new master password."))
+            focusNewPassword()
             return false
         }
         if confirmationInput.value.isEmpty || confirmationInput.value != newInput.value {
-            confirmationInput.setError(pasteraPreferenceString("The new master passwords do not match."))
+            confirmationInput.setError(String(localized: "The new master passwords do not match."))
             window?.makeFirstResponder(confirmationInput.activeField)
             return false
         }
@@ -439,42 +462,52 @@ private extension PasswordVaultMasterPasswordSheetController {
 
     @objc func submit(_ sender: Any?) {
         guard !isBusy, validateForSubmission() else { return }
-        let currentPassword = currentInput.value
         let newPassword = newInput.value
         setBusy(true)
-        changePasswordOperation(currentPassword, newPassword) { [weak self] result in
-            self?.finish(result)
-        }
+        resetPasswordOperation(newPassword) { [weak self] result in self?.finish(result) }
     }
 
-    func finish(_ result: Result<PasswordVaultMasterPasswordChangeResult, PasswordVaultError>) {
+    func finish(_ result: Result<PasswordVaultMasterPasswordResetResult, PasswordVaultError>) {
+        setBusy(false)
         switch result {
-        case let .success(changeResult):
-            clearSecrets()
-            setBusy(false)
-            closeSheet()
-            onSuccess(changeResult)
+        case let .success(resetResult):
+            closeSheetAndClearSecrets()
+            onSuccess(resetResult)
         case let .failure(error):
-            setBusy(false)
             handle(error)
         }
     }
 
     func handle(_ error: PasswordVaultError) {
         switch error {
-        case .wrongMasterPassword:
-            currentInput.value = ""
-            currentInput.setError(pasteraPreferenceString("The current master password is incorrect."))
-            focusCurrentPassword()
+        case .resetRequiresForcedReset:
+            setGeneralError(nil)
+            forceResetRecoveryPanel.isHidden = false
         case .invalidPassword:
-            newInput.setError(pasteraPreferenceString("Enter a new master password."))
-            window?.makeFirstResponder(newInput.activeField)
+            newInput.setError(String(localized: "Enter a new master password."))
+            focusNewPassword()
+        case .userCancelled:
+            setGeneralError(String(localized:
+                "Authentication was canceled. No password-vault data was changed."
+            ))
+        case .authenticationFailed:
+            setGeneralError(String(localized:
+                "This Mac could not authenticate the reset. No password-vault data was changed."
+            ))
         case .externalConflict, .cloudUnavailable:
-            setGeneralError(pasteraPreferenceString("Resolve the sync conflict, then try again without closing this sheet."))
+            setGeneralError(String(localized:
+                "Resolve the sync conflict, then try again without closing this sheet."
+            ))
         case .saveFailed:
-            setGeneralError(pasteraPreferenceString("Check access to the password vault file, then try again."))
+            setGeneralError(String(localized:
+                "Check access to the password vault file, then try again."
+            ))
+        case .recoveryRequired:
+            setGeneralError(String(localized:
+                "Close this window, open Password Vault settings, choose Retry Local Recovery, then try again."
+            ))
         default:
-            setGeneralError(pasteraPreferenceString("The master password could not be changed. Please try again."))
+            setGeneralError(String(localized: "The master password could not be reset. Please try again."))
         }
         updateValidationState()
     }
@@ -485,37 +518,46 @@ private extension PasswordVaultMasterPasswordSheetController {
         generalErrorLabel.setAccessibilityLabel(message)
     }
 
-    func focusCurrentPassword() {
-        window?.makeFirstResponder(currentInput.activeField)
+    func focusNewPassword() { window?.makeFirstResponder(newInput.activeField) }
+
+    @objc func reviewForceReset(_ sender: Any?) {
+        guard !isBusy, !forceResetRecoveryPanel.isHidden else { return }
+        closeSheetAndClearSecrets()
+        onReviewForceReset()
     }
 
-    @objc func cancelClicked(_ sender: Any?) {
-        cancel()
-    }
+    @objc func cancelClicked(_ sender: Any?) { cancel() }
 
     func cancel() {
         guard !isBusy else { return }
         didCancel = true
-        clearSecrets()
-        closeSheet()
+        closeSheetAndClearSecrets()
     }
 
-    func closeSheet() {
+    func closeSheetAndClearSecrets() {
         guard let window else { return }
         if let parentWindow, window.sheetParent === parentWindow {
             parentWindow.endSheet(window)
+            if let priorFirstResponder { parentWindow.makeFirstResponder(priorFirstResponder) }
         } else {
             window.orderOut(nil)
         }
+        self.parentWindow = nil
+        priorFirstResponder = nil
+        clearSecrets()
     }
 
-    func clearSecrets() {
-        inputs.forEach { $0.clear() }
+    func clearSecrets() { inputs.forEach { $0.clear() } }
+
+    @objc func toggleNewVisibility(_ sender: Any?) {
+        newInput.toggleVisibility()
+        installKeyViewLoop()
     }
 
-    @objc func toggleCurrentVisibility(_ sender: Any?) { currentInput.toggleVisibility() }
-    @objc func toggleNewVisibility(_ sender: Any?) { newInput.toggleVisibility() }
-    @objc func toggleConfirmationVisibility(_ sender: Any?) { confirmationInput.toggleVisibility() }
+    @objc func toggleConfirmationVisibility(_ sender: Any?) {
+        confirmationInput.toggleVisibility()
+        installKeyViewLoop()
+    }
 }
 
 #if DEBUG
@@ -523,17 +565,24 @@ extension PasswordVaultMasterPasswordSheetController {
     var secureFieldCountForTesting: Int { inputs.filter { !$0.isPasswordVisible }.count }
     var visiblePasswordFieldCountForTesting: Int { inputs.filter(\.isPasswordVisible).count }
     var fieldLabelsForTesting: [String] { inputs.map { $0.label.stringValue } }
+    var inputAccessibilityIdentifiersForTesting: [String] { inputs.map(\.accessibilityIdentifier) }
     var recoveryWarningForTesting: String { recoveryWarningLabel.stringValue }
     var primaryButtonEnabledForTesting: Bool { submitButton.isEnabled }
     var confirmationErrorForTesting: String { confirmationInput.errorLabel.stringValue }
-    var currentPasswordErrorForTesting: String { currentInput.errorLabel.stringValue }
+    var generalErrorForTesting: String { generalErrorLabel.stringValue }
+    var forceResetExplanationVisibleForTesting: Bool { !forceResetRecoveryPanel.isHidden }
+    var reviewForceResetTitleForTesting: String { reviewForceResetButton.title }
     var isBusyForTesting: Bool { isBusy }
     var didCancelForTesting: Bool { didCancel }
-    var valuesForTesting: (current: String, new: String, confirmation: String) {
-        (currentInput.value, newInput.value, confirmationInput.value)
+    var valuesForTesting: (new: String, confirmation: String) {
+        (newInput.value, confirmationInput.value)
     }
     var keyViewOrderForTesting: [String] {
-        inputs.map(\.accessibilityIdentifier) + ["masterPassword.cancel", "masterPassword.submit"]
+        var currentView: NSView? = newInput.activeField
+        return (0..<4).map { _ in
+            defer { currentView = currentView?.nextValidKeyView }
+            return currentView?.accessibilityIdentifier() ?? "<missing>"
+        }
     }
     var allInteractiveControlsDisabledForTesting: Bool {
         inputs.allSatisfy {
@@ -543,7 +592,12 @@ extension PasswordVaultMasterPasswordSheetController {
     var controlsFitBoundsForTesting: Bool {
         guard let contentView = window?.contentView else { return false }
         contentView.layoutSubtreeIfNeeded()
-        let controls: [NSView] = inputs + [recoveryWarningLabel, cancelButton, submitButton]
+        let controls: [NSView] = inputs + [
+            recoveryWarningLabel,
+            forceResetRecoveryPanel,
+            cancelButton,
+            submitButton
+        ]
         return controls.allSatisfy {
             let frame = contentView.convert($0.bounds, from: $0)
             return frame.minX >= -0.5 && frame.maxX <= contentView.bounds.maxX + 0.5
@@ -561,16 +615,13 @@ extension PasswordVaultMasterPasswordSheetController {
         return nil
     }
 
-    func setValuesForTesting(current: String, new: String, confirmation: String) {
-        currentInput.value = current
+    func setValuesForTesting(new: String, confirmation: String) {
         newInput.value = new
         confirmationInput.value = confirmation
         inputDidChange()
     }
 
-    func passwordIsVisibleForTesting(index: Int) -> Bool {
-        inputs[index].isPasswordVisible
-    }
+    func passwordIsVisibleForTesting(index: Int) -> Bool { inputs[index].isPasswordVisible }
 
     func focusFieldForTesting(index: Int) {
         window?.makeFirstResponder(nil)
@@ -578,10 +629,14 @@ extension PasswordVaultMasterPasswordSheetController {
     }
 
     func toggleVisibilityForTesting(index: Int) {
-        inputs[index].toggleVisibility()
+        if index == 0 {
+            toggleNewVisibility(nil)
+        } else {
+            toggleConfirmationVisibility(nil)
+        }
     }
-
     func submitForTesting() { submit(nil) }
     func cancelForTesting() { cancel() }
+    func reviewForceResetForTesting() { reviewForceReset(nil) }
 }
 #endif

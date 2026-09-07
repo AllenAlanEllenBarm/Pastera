@@ -10,6 +10,214 @@ import AppKit
 import Testing
 @testable import Pastera
 
+private let passwordVaultTask7Chinese: [String: String] = [
+    "The master password encrypts your password vault. If forgotten, it cannot be recovered by any other means.":
+        "主密码用于加密密码箱。如果忘记主密码且没有可用的解锁密钥，Pastera 无法解密或找回原密码箱。",
+    "A forced reset creates a new empty password vault. Only the original master password can open the retained encrypted archive.":
+        "强制重置会创建一个空密码箱。保留的加密归档仍然只能使用原主密码打开，旧条目不会出现在新密码箱中。",
+    "Password Vault sync is paused until Pastera archives and replaces the previous OneDrive vault.":
+        "密码箱同步已暂停，直到 Pastera 完成归档并替换之前的 OneDrive 密码箱。",
+    "OneDrive changed elsewhere. Retry will archive the latest remote encrypted vault before replacing the active vault.":
+        "OneDrive 上的密码箱已在其他位置发生变化。重试后，Pastera 会先归档最新的远程加密密码箱，再替换当前密码箱。"
+]
+
+@MainActor
+private func renderPasswordVaultPage(
+    _ page: CPYPasswordVaultPreferenceViewController,
+    state: PasswordVaultSecuritySettingsState,
+    width: CGFloat,
+    appearance: NSAppearance.Name,
+    to url: URL
+) throws {
+    page.loadView()
+    page.view.appearance = NSAppearance(named: appearance)
+    page.applySecurityStateForTesting(state)
+    page.view.frame = NSRect(x: 0, y: 0, width: width, height: 1_400)
+    page.view.layoutSubtreeIfNeeded()
+    let height = ceil(max(page.view.fittingSize.height, 1))
+    page.view.frame = NSRect(x: 0, y: 0, width: width, height: height)
+
+    let background = PasswordVaultScreenshotBackgroundView(frame: page.view.bounds)
+    background.appearance = NSAppearance(named: appearance)
+    page.view.autoresizingMask = [.width, .height]
+    background.addSubview(page.view)
+    background.layoutSubtreeIfNeeded()
+
+    let representation = try #require(background.bitmapImageRepForCachingDisplay(in: background.bounds))
+    background.cacheDisplay(in: background.bounds, to: representation)
+    let data = try #require(representation.representation(using: .png, properties: [:]))
+    try data.write(to: url, options: .atomic)
+}
+
+private final class PasswordVaultScreenshotBackgroundView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        dirtyRect.fill()
+        super.draw(dirtyRect)
+    }
+}
+
+private final class PasswordVaultPreferenceActionStore: PasswordVaultStore {
+    private let recoveryLock = NSLock()
+    private var recoveryCalls = 0
+    var state: PasswordVaultState
+    var canQuickUnlock = false
+    var canAutomationUnlock = false
+    var masterPasswordResetCapability: PasswordVaultMasterPasswordResetCapability
+    var quickUnlockError: PasswordVaultError?
+    var recoveryHandler: (() throws -> PasswordVaultForcedResetRecoveryResult)?
+
+    var recoveryCallCount: Int { recoveryLock.withLock { recoveryCalls } }
+
+    init(
+        state: PasswordVaultState = .locked,
+        capability: PasswordVaultMasterPasswordResetCapability = .preservesData
+    ) {
+        self.state = state
+        masterPasswordResetCapability = capability
+    }
+
+    func enableQuickUnlock() throws {
+        if let quickUnlockError { throw quickUnlockError }
+        canQuickUnlock = true
+    }
+
+    func disableQuickUnlock() throws { canQuickUnlock = false }
+    func listFolders() throws -> [PasswordVaultFolder] { [] }
+    func listEntries() throws -> [PasswordVaultEntry] { [] }
+    func createFolder(name: String) throws -> PasswordVaultFolder { throw PasswordVaultError.unsupportedFormat }
+    func renameFolder(id: UUID, name: String) throws -> PasswordVaultFolder {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func deleteFolder(id: UUID) throws { throw PasswordVaultError.unsupportedFormat }
+    func reorderFolders(_ folderIDs: [UUID]) throws { throw PasswordVaultError.unsupportedFormat }
+    func moveEntry(id: UUID, to folderID: UUID) throws { throw PasswordVaultError.unsupportedFormat }
+    func moveEntry(id: UUID, to folderID: UUID, orderedEntryIDsByFolder: [UUID: [UUID]]) throws {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func create(_ draft: PasswordVaultDraft) throws -> PasswordVaultEntry {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func update(id: UUID, draft: PasswordVaultDraft) throws -> PasswordVaultEntry {
+        throw PasswordVaultError.unsupportedFormat
+    }
+    func revealPassword(id: UUID, reason: String) throws -> String { throw PasswordVaultError.unsupportedFormat }
+    func delete(id: UUID, reason: String) throws { throw PasswordVaultError.unsupportedFormat }
+
+    func retryForcedResetRecovery() throws -> PasswordVaultForcedResetRecoveryResult {
+        recoveryLock.withLock { recoveryCalls += 1 }
+        guard let recoveryHandler else { throw PasswordVaultForcedResetError.recoveryRequired }
+        return try recoveryHandler()
+    }
+}
+
+private final class PasswordVaultPreferenceRetrySyncController: PasswordVaultSyncControlling {
+    private let lock = NSLock()
+    private var observers = [UUID: (PasswordVaultSyncSnapshot) -> Void]()
+    private var storedSnapshot: PasswordVaultSyncSnapshot
+    private var retryCompletions = [(Result<Void, PasswordVaultSyncFailure>) -> Void]()
+    private(set) var retryCallCount = 0
+
+    init(pendingFailure: PasswordVaultSyncFailure? = nil) {
+        storedSnapshot = PasswordVaultSyncSnapshot(
+            mode: .oneDrive,
+            phase: .pendingForcedReset(pendingFailure),
+            localVaultAvailable: true,
+            remoteVaultAvailable: true,
+            pendingChangeCount: 0,
+            conflictCopyCount: 0,
+            lastSyncAt: nil
+        )
+    }
+
+    var snapshot: PasswordVaultSyncSnapshot { lock.withLock { storedSnapshot } }
+
+    func addObserver(_ observer: @escaping (PasswordVaultSyncSnapshot) -> Void) -> UUID {
+        let identifier = UUID()
+        let initial = lock.withLock {
+            observers[identifier] = observer
+            return storedSnapshot
+        }
+        observer(initial)
+        return identifier
+    }
+
+    func removeObserver(_ identifier: UUID) { _ = lock.withLock { observers.removeValue(forKey: identifier) } }
+    func record(_ commit: PasswordVaultCommit) {}
+    func synchronize(reason: SyncCoordinator.Reason) {}
+    func retryForcedReset(completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void) {
+        retryCallCount += 1
+        retryCompletions.append(completion)
+    }
+    func enableOneDrive(
+        rootURL: URL,
+        remoteMasterPassword: String?, // swiftlint:disable:this inclusive_language
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) { completion(.success(())) }
+
+    func completeOldestRetry(with result: Result<Void, PasswordVaultSyncFailure>) {
+        retryCompletions.removeFirst()(result)
+    }
+}
+
+private struct PasswordVaultResetActionCase {
+    let vaultState: PasswordVaultState
+    let capability: PasswordVaultMasterPasswordResetCapability
+    let isBusy: Bool
+    let isPending: Bool
+    let isEnabled: Bool
+}
+
+private func passwordVaultDescendants(in view: NSView) -> [NSView] {
+    view.subviews + view.subviews.flatMap(passwordVaultDescendants(in:))
+}
+
+private func passwordVaultView(identifier: String, in root: NSView) -> NSView? {
+    passwordVaultDescendants(in: root).first { $0.accessibilityIdentifier() == identifier }
+}
+
+private func passwordVaultAncestor<T: NSView>(of view: NSView, type: T.Type) -> T? {
+    var current = view.superview
+    while let candidate = current {
+        if let typed = candidate as? T { return typed }
+        current = candidate.superview
+    }
+    return nil
+}
+
+private func passwordVaultFeedbackFollowsAction(
+    actionContainer: NSView,
+    feedback: NSView,
+    in page: NSView
+) -> Bool {
+    guard
+        let footer = actionContainer.superview as? NSStackView,
+        feedback.superview === footer,
+        let actionIndex = footer.arrangedSubviews.firstIndex(where: { $0 === actionContainer }),
+        let feedbackIndex = footer.arrangedSubviews.firstIndex(where: { $0 === feedback }),
+        passwordVaultAncestor(of: actionContainer, type: PasteraPreferenceGroupView.self)
+            === passwordVaultAncestor(of: feedback, type: PasteraPreferenceGroupView.self)
+    else { return false }
+    let actionFrame = actionContainer.convert(actionContainer.bounds, to: page)
+    let feedbackFrame = feedback.convert(feedback.bounds, to: page)
+    return feedbackIndex == actionIndex + 1 && feedbackFrame.minY >= actionFrame.maxY - 0.5
+}
+
+private func passwordVaultColorIsRed(_ color: NSColor?) -> Bool {
+    guard let rgb = color?.usingColorSpace(.deviceRGB) else { return false }
+    return rgb.redComponent > rgb.greenComponent * 1.5
+        && rgb.redComponent > rgb.blueComponent * 1.25
+}
+
+@MainActor
+private func passwordVaultWaitUntil(_ predicate: () -> Bool) async -> Bool {
+    for _ in 0..<100 {
+        if predicate() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return false
+}
+
 @MainActor
 @Suite(.serialized)
 struct PreferenceSidebarTests {
@@ -67,32 +275,641 @@ struct PreferenceSidebarTests {
 
 @MainActor
 @Suite(.serialized)
+// swiftlint:disable:next type_body_length
 struct PreferencePaneAlignmentTests {
     @Test
-    func passwordVaultPaneStacksNarrowAndUsesWeightedColumnsWhenWide() throws {
+    func passwordVaultRepeatedLoadKeepsOneItemAndExactlyThreeRealGroups() {
+        let page = CPYPasswordVaultPreferenceViewController()
+
+        page.loadView()
+        page.loadView()
+        page.view.frame = NSRect(x: 0, y: 0, width: 600, height: 1_200)
+        page.view.layoutSubtreeIfNeeded()
+
+        let groups = passwordVaultDescendants(in: page.view).compactMap { $0 as? PasteraPreferenceGroupView }
+        #expect(page.adaptiveRowCountForTesting == 1)
+        #expect(page.adaptiveItemWidthsForTesting.count == 1)
+        #expect(groups.count == 3)
+        #expect(Set(groups.map(ObjectIdentifier.init)).count == 3)
+    }
+
+    @Test
+    func passwordVaultResetActionsRespectVaultStateCapabilityPendingAndBusy() throws {
+        let page = CPYPasswordVaultPreferenceViewController()
+        page.loadView()
+        let reset = try #require(passwordVaultView(
+            identifier: "vault.masterPassword.button", in: page.view
+        ) as? NSButton)
+        let force = try #require(passwordVaultView(identifier: "vault.forceReset.button", in: page.view) as? NSButton)
+        let cases = [
+            PasswordVaultResetActionCase(
+                vaultState: .locked, capability: .preservesData, isBusy: false, isPending: false, isEnabled: true
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .unlocked, capability: .requiresForcedReset,
+                isBusy: false, isPending: false, isEnabled: true
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .locked, capability: .unavailable, isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .notConfigured, capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .preparingLocalCopy, capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .localCopyUnavailable(.localWriteFailed), capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .unlocking, capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .readOnlyWarning("read only"), capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .recoveryRequired("recovery"), capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .failed("failed"), capability: .preservesData,
+                isBusy: false, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .locked, capability: .preservesData, isBusy: true, isPending: false, isEnabled: false
+            ),
+            PasswordVaultResetActionCase(
+                vaultState: .unlocked, capability: .requiresForcedReset,
+                isBusy: false, isPending: true, isEnabled: false
+            )
+        ]
+
+        for testCase in cases {
+            page.applySecurityStateForTesting(.init(
+                vaultState: testCase.vaultState,
+                isBusy: testCase.isBusy,
+                autoLockInterval: 300,
+                quickUnlockEnabled: false,
+                quickUnlockAvailable: false,
+                masterPasswordResetCapability: testCase.capability,
+                forcedResetPending: testCase.isPending,
+                forcedResetPendingFailure: testCase.isPending ? .remoteUnavailable : nil
+            ))
+            #expect(reset.isEnabled == testCase.isEnabled)
+            #expect(force.isEnabled == testCase.isEnabled)
+        }
+    }
+
+    @Test
+    func forceResetUsesVisibleSecondaryDestructiveStylingOnlyWhileEnabled() throws {
+        let page = CPYPasswordVaultPreferenceViewController()
+        page.loadView()
+        page.applySecurityStateForTesting(.init(
+            vaultState: .unlocked,
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: true,
+            quickUnlockAvailable: true,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: false,
+            forcedResetPendingFailure: nil
+        ))
+        let button = try #require(passwordVaultView(
+            identifier: "vault.forceReset.button", in: page.view
+        ) as? NSButton)
+        let titleColor = button.attributedTitle.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSColor
+        let borderColor = button.layer?.borderColor.flatMap(NSColor.init(cgColor:))
+
+        #expect(button.isEnabled)
+        #expect(button.image != nil)
+        #expect(passwordVaultColorIsRed(titleColor))
+        #expect(passwordVaultColorIsRed(button.contentTintColor))
+        #expect(passwordVaultColorIsRed(borderColor))
+        #expect((button.layer?.borderWidth ?? 0) > 0)
+
+        button.isEnabled = false
+        let disabledTitleColor = button.attributedTitle.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSColor
+        #expect(!passwordVaultColorIsRed(disabledTitleColor))
+        #expect(!passwordVaultColorIsRed(button.contentTintColor))
+    }
+
+    @Test
+    func actionFeedbackAppearsDirectlyBelowItsProducingActionAndOwnedGroup() async throws {
+        let store = PasswordVaultPreferenceActionStore()
+        store.quickUnlockError = .saveFailed
+        let syncController = PasswordVaultPreferenceRetrySyncController()
+        let defaultsName = "PreferencePaneAlignmentTests.feedback.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let controller = PasswordVaultUIController(
+            store: store,
+            syncController: syncController,
+            defaults: defaults,
+            storeQueue: DispatchQueue(label: defaultsName)
+        )
+        let page = CPYPasswordVaultPreferenceViewController(
+            controller: controller,
+            localizedString: { $0 },
+            resetPassword: { _, completion in completion(.success(.init(warnings: []))) },
+            forceResetPassword: { _, completion in
+                completion(.success(.init(
+                    localArchiveDigest: "archive",
+                    oneDriveReplacementPending: false,
+                    warnings: []
+                )))
+            }
+        )
+        page.loadView()
+        let parent = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 900),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        parent.isReleasedWhenClosed = false
+        parent.contentView = page.view
+        parent.orderFront(nil)
+        defer {
+            if let sheet = parent.attachedSheet {
+                parent.endSheet(sheet)
+                sheet.orderOut(nil)
+            }
+            parent.orderOut(nil)
+        }
+        let usableState = PasswordVaultSecuritySettingsState(
+            vaultState: .locked,
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: false,
+            quickUnlockAvailable: false,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: false,
+            forcedResetPendingFailure: nil
+        )
+        page.applySecurityStateForTesting(usableState)
+
+        let systemUnlock = try #require(passwordVaultView(
+            identifier: "vault.systemUnlock.control", in: page.view
+        ) as? NSSwitch)
+        systemUnlock.performClick(nil)
+        let statusFeedback = try #require(passwordVaultView(identifier: "vault.status.feedback", in: page.view))
+        #expect(await passwordVaultWaitUntil { !statusFeedback.isHidden })
+        page.view.layoutSubtreeIfNeeded()
+        let systemUnlockRow = try #require(passwordVaultAncestor(
+            of: systemUnlock, type: PasteraPreferenceSettingRowView.self
+        ))
+        #expect(passwordVaultFeedbackFollowsAction(
+            actionContainer: systemUnlockRow,
+            feedback: statusFeedback,
+            in: page.view
+        ))
+        let statusText = passwordVaultDescendants(in: statusFeedback)
+            .compactMap { $0 as? NSTextField }.map(\.stringValue).joined()
+        #expect(statusText == "The security setting could not be updated. Please try again.")
+
+        page.applySecurityStateForTesting(usableState)
+        let resetButton = try #require(passwordVaultView(
+            identifier: "vault.masterPassword.button", in: page.view
+        ) as? NSButton)
+        resetButton.performClick(nil)
+        let resetSheet = try #require(page.resetSheetForTesting)
+        resetSheet.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        resetSheet.submitForTesting()
+        let masterFeedback = try #require(passwordVaultView(
+            identifier: "vault.masterPassword.feedback", in: page.view
+        ))
+        page.view.layoutSubtreeIfNeeded()
+        #expect(!masterFeedback.isHidden)
+        #expect(passwordVaultFeedbackFollowsAction(
+            actionContainer: try #require(resetButton.superview),
+            feedback: masterFeedback,
+            in: page.view
+        ))
+
+        page.applySecurityStateForTesting(usableState)
+        let forceButton = try #require(passwordVaultView(
+            identifier: "vault.forceReset.button", in: page.view
+        ) as? NSButton)
+        forceButton.performClick(nil)
+        let forceSheet = try #require(page.forceSheetForTesting)
+        forceSheet.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        forceSheet.setAcknowledgementForTesting(true)
+        forceSheet.submitForTesting()
+        let forceFeedback = try #require(passwordVaultView(identifier: "vault.forceReset.feedback", in: page.view))
+        page.view.layoutSubtreeIfNeeded()
+        #expect(!forceFeedback.isHidden)
+        #expect(passwordVaultFeedbackFollowsAction(
+            actionContainer: try #require(forceButton.superview),
+            feedback: forceFeedback,
+            in: page.view
+        ))
+    }
+
+    @Test
+    func retryFeedbackStaysBelowRetryAndInFlightRetryCannotReenterAcrossStateApply() async throws {
+        let store = PasswordVaultPreferenceActionStore(state: .unlocked)
+        let syncController = PasswordVaultPreferenceRetrySyncController(pendingFailure: .remoteVerificationFailed)
+        let defaultsName = "PreferencePaneAlignmentTests.retry.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let controller = PasswordVaultUIController(
+            store: store,
+            syncController: syncController,
+            defaults: defaults,
+            storeQueue: DispatchQueue(label: defaultsName)
+        )
+        let page = CPYPasswordVaultPreferenceViewController(controller: controller, localizedString: { $0 })
+        page.loadView()
+        let pendingState = PasswordVaultSecuritySettingsState(
+            vaultState: .unlocked,
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: false,
+            quickUnlockAvailable: false,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: true,
+            forcedResetPendingFailure: .remoteVerificationFailed
+        )
+        page.applySecurityStateForTesting(pendingState)
+        let retryButton = try #require(passwordVaultView(
+            identifier: "vault.forceReset.retry", in: page.view
+        ) as? NSButton)
+
+        retryButton.performClick(nil)
+        #expect(syncController.retryCallCount == 1)
+        #expect(!retryButton.isEnabled)
+
+        page.applySecurityStateForTesting(pendingState)
+        retryButton.performClick(nil)
+        #expect(syncController.retryCallCount == 1)
+        #expect(!retryButton.isEnabled)
+
+        syncController.completeOldestRetry(with: .failure(.remoteWriteFailed))
+        #expect(await passwordVaultWaitUntil { retryButton.isEnabled })
+        let retryFeedback = try #require(passwordVaultView(
+            identifier: "vault.forceReset.retryFeedback", in: page.view
+        ))
+        let forceFeedback = try #require(passwordVaultView(
+            identifier: "vault.forceReset.feedback", in: page.view
+        ))
+        page.view.layoutSubtreeIfNeeded()
+        #expect(!retryFeedback.isHidden)
+        #expect(forceFeedback.isHidden)
+        #expect(passwordVaultFeedbackFollowsAction(
+            actionContainer: try #require(retryButton.superview),
+            feedback: retryFeedback,
+            in: page.view
+        ))
+
+        retryButton.performClick(nil)
+        #expect(syncController.retryCallCount == 2)
+    }
+
+    @Test
+    func localRecoveryHidesRawReasonAndOneDriveRetryWhileItsRetryFailsClosed() async throws {
+        let store = PasswordVaultPreferenceActionStore(
+            state: .recoveryRequired("forced-reset-cleanup")
+        )
+        let retryGate = DispatchSemaphore(value: 0)
+        defer { retryGate.signal() }
+        store.recoveryHandler = {
+            retryGate.wait()
+            throw PasswordVaultForcedResetError.recoveryRequired
+        }
+        let syncController = PasswordVaultPreferenceRetrySyncController(
+            pendingFailure: .remoteVerificationFailed
+        )
+        let defaultsName = "PreferencePaneAlignmentTests.local-recovery.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let controller = PasswordVaultUIController(
+            store: store,
+            syncController: syncController,
+            defaults: defaults,
+            storeQueue: DispatchQueue(label: defaultsName)
+        )
+        let page = CPYPasswordVaultPreferenceViewController(
+            controller: controller,
+            localizedString: { $0 }
+        )
+        page.loadView()
+        page.applySecurityStateForTesting(.init(
+            vaultState: .recoveryRequired("forced-reset-cleanup"),
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: true,
+            quickUnlockAvailable: true,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: true,
+            forcedResetPendingFailure: .remoteVerificationFailed
+        ))
+
+        let visibleCopy = passwordVaultDescendants(in: page.view)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+            .joined(separator: " ")
+        #expect(!visibleCopy.contains("forced-reset-cleanup"))
+        #expect(!page.passwordVaultPendingRowVisibleForTesting)
+        #expect(!page.passwordVaultRetryVisibleForTesting)
+        #expect(!page.passwordVaultResetActionsEnabledForTesting)
+
+        let retryButton = try #require(passwordVaultView(
+            identifier: "vault.localRecovery.retry",
+            in: page.view
+        ) as? NSButton)
+        page.view.layoutSubtreeIfNeeded()
+        let retryFrame = retryButton.convert(retryButton.bounds, to: page.view)
+        let retrySuperview = try #require(retryButton.superview)
+        let retryRow = retrySuperview.convert(retrySuperview.bounds, to: page.view)
+        #expect(abs(retryFrame.midY - retryRow.midY) < 0.5)
+        #expect(retryButton.isEnabled)
+        retryButton.performClick(nil)
+        #expect(await passwordVaultWaitUntil { store.recoveryCallCount == 1 })
+        #expect(controller.state == .recoveryRequired("forced-reset-cleanup"))
+        #expect(controller.viewState.isBusy)
+        #expect(retryButton.title == "Retrying…")
+        #expect(!retryButton.isEnabled)
+
+        retryButton.performClick(nil)
+        #expect(store.recoveryCallCount == 1)
+        retryGate.signal()
+
+        let feedback = try #require(passwordVaultView(
+            identifier: "vault.localRecovery.feedback",
+            in: page.view
+        ))
+        #expect(await passwordVaultWaitUntil { !feedback.isHidden })
+        let feedbackText = passwordVaultDescendants(in: feedback)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+            .joined(separator: " ")
+        #expect(feedbackText ==
+            "Local recovery is not complete. OneDrive sync remains paused. You can safely try again."
+        )
+        #expect(store.state == .recoveryRequired("forced-reset-cleanup"))
+    }
+
+    @Test
+    func localRecoveryRetryBusySnapshotPreservesRecoveryState() async throws {
+        let store = PasswordVaultPreferenceActionStore(
+            state: .recoveryRequired("forced-reset-cleanup")
+        )
+        let retryGate = DispatchSemaphore(value: 0)
+        defer { retryGate.signal() }
+        store.recoveryHandler = {
+            retryGate.wait()
+            throw PasswordVaultForcedResetError.recoveryRequired
+        }
+        let queue = DispatchQueue(label: "PreferencePaneAlignmentTests.recovery-busy")
+        let controller = PasswordVaultUIController(store: store, storeQueue: queue)
+        var didComplete = false
+
+        controller.retryForcedResetRecovery { _ in didComplete = true }
+
+        #expect(controller.viewState.isBusy)
+        #expect(controller.viewState.state == .recoveryRequired("forced-reset-cleanup"))
+        #expect(controller.state == .recoveryRequired("forced-reset-cleanup"))
+        retryGate.signal()
+        #expect(await passwordVaultWaitUntil { didComplete })
+        #expect(controller.state == .recoveryRequired("forced-reset-cleanup"))
+    }
+
+    @Test
+    func localRecoverySuccessReportsWhetherThePreviousOrNewVaultWasKept() async throws {
+        let scenarios: [(PasswordVaultForcedResetRecoveryResult, String)] = [
+            (
+                .rolledBack(oldDigest: "old-digest"),
+                "Local recovery restored the previous password vault. Password Vault is ready to continue."
+            ),
+            (
+                .committed(newDigest: "new-digest"),
+                "Local recovery kept the new password vault. Password Vault is ready to continue."
+            )
+        ]
+
+        for (result, expectedFeedback) in scenarios {
+            let store = PasswordVaultPreferenceActionStore(
+                state: .recoveryRequired("forced-reset-cleanup")
+            )
+            store.recoveryHandler = {
+                store.state = .locked
+                return result
+            }
+            let controller = PasswordVaultUIController(
+                store: store,
+                storeQueue: DispatchQueue(label: "PreferencePaneAlignmentTests.recovery-success")
+            )
+            let page = CPYPasswordVaultPreferenceViewController(
+                controller: controller,
+                localizedString: { $0 }
+            )
+            page.loadView()
+            page.applySecurityStateForTesting(.init(
+                vaultState: .recoveryRequired("forced-reset-cleanup"),
+                isBusy: false,
+                autoLockInterval: 300,
+                quickUnlockEnabled: true,
+                quickUnlockAvailable: true,
+                masterPasswordResetCapability: .preservesData,
+                forcedResetPending: false,
+                forcedResetPendingFailure: nil
+            ))
+            let retryButton = try #require(passwordVaultView(
+                identifier: "vault.localRecovery.retry",
+                in: page.view
+            ) as? NSButton)
+            let feedback = try #require(passwordVaultView(
+                identifier: "vault.localRecovery.feedback",
+                in: page.view
+            ))
+
+            retryButton.performClick(nil)
+
+            #expect(await passwordVaultWaitUntil { !feedback.isHidden })
+            let feedbackText = passwordVaultDescendants(in: feedback)
+                .compactMap { ($0 as? NSTextField)?.stringValue }
+                .joined(separator: " ")
+            #expect(feedbackText == expectedFeedback)
+            #expect(controller.state == .locked)
+        }
+    }
+
+    @Test
+    func passwordVaultGroupsRemainOneAlignedColumnAtEverySupportedWidth() throws {
         let page = CPYPasswordVaultPreferenceViewController()
         page.loadView()
 
-        page.view.frame = NSRect(x: 0, y: 0, width: 600, height: 900)
-        page.view.layoutSubtreeIfNeeded()
-        #expect(page.adaptiveColumnCountForTesting == 1)
-        #expect(page.adaptiveRowCountForTesting == 2)
+        for width: CGFloat in [480, 600, 900] {
+            page.view.frame = NSRect(x: 0, y: 0, width: width, height: 1_200)
+            page.view.needsLayout = true
+            page.view.layoutSubtreeIfNeeded()
 
-        page.view.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
-        page.view.needsLayout = true
-        page.view.layoutSubtreeIfNeeded()
-        #expect(page.adaptiveColumnCountForTesting == 2)
-        #expect(page.adaptiveRowCountForTesting == 1)
-        let widths = page.adaptiveItemWidthsForTesting
-        #expect(widths.count == 2)
-        let firstWidth = try #require(widths.first)
-        let lastWidth = try #require(widths.last)
-        let ratio = firstWidth / lastWidth
-        #expect(abs(ratio - 1.18 / 0.82) < 0.03)
+            #expect(page.adaptiveRowCountForTesting == 1)
+            #expect(page.adaptiveItemWidthsForTesting.count == 1)
 
-        for anchorID in ["vault.autoLock", "vault.quickUnlock", "vault.masterPassword"] {
-            #expect(page.revealSetting(anchorID: anchorID, animated: false))
+            let frames = page.passwordVaultGroupFramesForTesting
+            #expect(frames.count == 3)
+            let first = try #require(frames.first)
+            #expect(frames.allSatisfy { abs($0.minX - first.minX) < 0.5 })
+            #expect(frames.allSatisfy { abs($0.width - first.width) < 0.5 })
+            #expect(frames[0].maxY + 11.5 <= frames[1].minY)
+            #expect(frames[1].maxY + 11.5 <= frames[2].minY)
+            #expect(abs(frames[1].minY - frames[0].maxY - 12) < 0.5)
+            #expect(abs(frames[2].minY - frames[1].maxY - 12) < 0.5)
+            #expect(frames.allSatisfy { page.view.bounds.contains($0) })
+
+            #expect(page.passwordVaultActionInsetsForTesting.allSatisfy {
+                abs($0.left - 14) < 0.5 && abs($0.right - 14) < 0.5
+            })
+            let actions = page.passwordVaultActionButtonFramesForTesting
+            #expect(actions.count == 2)
+            #expect(abs(actions[0].maxX - actions[1].maxX) < 0.5)
+            #expect(abs(actions[0].midY - page.passwordVaultActionRowFramesForTesting[0].midY) < 0.5)
+            #expect(abs(actions[1].midY - page.passwordVaultActionRowFramesForTesting[1].midY) < 0.5)
         }
+
+        for anchorID in ["vault.autoLock", "vault.systemUnlock", "vault.masterPassword", "vault.forceReset"] {
+            #expect(page.revealSetting(anchorID: anchorID, animated: false))
+            let frame = try #require(page.passwordVaultAnchorFrameForTesting(anchorID))
+            #expect(page.view.bounds.contains(frame))
+        }
+        #expect(page.passwordVaultFeedbackIdentifiersForTesting == [
+            "vault.status.feedback",
+            "vault.masterPassword.feedback",
+            "vault.forceReset.feedback",
+            "vault.forceReset.retryFeedback"
+        ])
+    }
+
+    @Test
+    func passwordVaultLongChinesePendingCopyWrapsWithoutOverlapOrEmptyHoles() throws {
+        let page = CPYPasswordVaultPreferenceViewController(
+            localizedString: { passwordVaultTask7Chinese[$0] ?? $0 }
+        )
+        page.loadView()
+        page.applySecurityStateForTesting(.init(
+            vaultState: .unlocked,
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: true,
+            quickUnlockAvailable: true,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: true,
+            forcedResetPendingFailure: .remoteVerificationFailed
+        ))
+        page.view.frame = NSRect(x: 0, y: 0, width: 480, height: 1_400)
+        page.view.layoutSubtreeIfNeeded()
+
+        #expect(page.passwordVaultVisibleContentFramesForTesting.allSatisfy { page.view.bounds.contains($0) })
+        let visibleFrames = page.passwordVaultVisibleContentFramesForTesting.sorted { $0.minY < $1.minY }
+        for pair in zip(visibleFrames, visibleFrames.dropFirst()) {
+            #expect(pair.0.maxY <= pair.1.minY + 0.5 || !pair.0.intersects(pair.1))
+        }
+        #expect(page.passwordVaultPendingRowVisibleForTesting)
+        #expect(page.passwordVaultRetryVisibleForTesting)
+        #expect(!page.passwordVaultResetActionsEnabledForTesting)
+        #expect(page.passwordVaultPendingDetailForTesting == passwordVaultTask7Chinese[
+            "OneDrive changed elsewhere. Retry will archive the latest remote encrypted vault before replacing the active vault."
+        ])
+        #expect(page.passwordVaultMasterFeedbackVisibleForTesting == false)
+        #expect(page.passwordVaultForceFeedbackVisibleForTesting == false)
+        #expect(page.passwordVaultHiddenOptionalRowsAreCollapsedForTesting)
+    }
+
+    @Test
+    func renderPasswordVaultTask7VisualEvidence() throws {
+        let outputDirectory = URL(fileURLWithPath: "/tmp/pastera-password-vault-task7", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        let ordinaryState = PasswordVaultSecuritySettingsState(
+            vaultState: .unlocked,
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: true,
+            quickUnlockAvailable: true,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: false,
+            forcedResetPendingFailure: nil
+        )
+        let light = CPYPasswordVaultPreferenceViewController()
+        try renderPasswordVaultPage(
+            light,
+            state: ordinaryState,
+            width: 480,
+            appearance: .aqua,
+            to: outputDirectory.appendingPathComponent("password-vault-480-light.png")
+        )
+
+        let dark = CPYPasswordVaultPreferenceViewController()
+        try renderPasswordVaultPage(
+            dark,
+            state: ordinaryState,
+            width: 900,
+            appearance: .darkAqua,
+            to: outputDirectory.appendingPathComponent("password-vault-900-dark.png")
+        )
+
+        let pendingChinese = CPYPasswordVaultPreferenceViewController(
+            localizedString: { passwordVaultTask7Chinese[$0] ?? pasteraPreferenceString($0) }
+        )
+        try renderPasswordVaultPage(
+            pendingChinese,
+            state: .init(
+                vaultState: .unlocked,
+                isBusy: false,
+                autoLockInterval: 300,
+                quickUnlockEnabled: true,
+                quickUnlockAvailable: true,
+                masterPasswordResetCapability: .preservesData,
+                forcedResetPending: true,
+                forcedResetPendingFailure: .remoteVerificationFailed
+            ),
+            width: 480,
+            appearance: .aqua,
+            to: outputDirectory.appendingPathComponent("password-vault-480-light-zh-pending.png")
+        )
+    }
+
+    @Test
+    func renderPasswordVaultTask8RecoveryVisualEvidence() throws {
+        let outputDirectory = URL(fileURLWithPath: "/tmp/pastera-password-vault-task8", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        let recoveryState = PasswordVaultSecuritySettingsState(
+            vaultState: .recoveryRequired("forced-reset-cleanup"),
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: true,
+            quickUnlockAvailable: true,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: true,
+            forcedResetPendingFailure: .remoteVerificationFailed
+        )
+
+        try renderPasswordVaultPage(
+            CPYPasswordVaultPreferenceViewController(),
+            state: recoveryState,
+            width: 480,
+            appearance: .aqua,
+            to: outputDirectory.appendingPathComponent("password-vault-recovery-480-light.png")
+        )
+        try renderPasswordVaultPage(
+            CPYPasswordVaultPreferenceViewController(),
+            state: recoveryState,
+            width: 900,
+            appearance: .darkAqua,
+            to: outputDirectory.appendingPathComponent("password-vault-recovery-900-dark.png")
+        )
     }
 
     @Test

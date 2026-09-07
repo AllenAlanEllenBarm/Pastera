@@ -19,6 +19,7 @@
 		A62000000000000000000005 /* libPasteraAgentProtocol.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A61000000000000000000019 /* libPasteraAgentProtocol.a */; };
 		A62000000000000000000008 /* VaultAgentGrantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000000000000000000009 /* VaultAgentGrantStore.swift */; };
 		A6200000000000000000000A /* VaultAgentAuthorizationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */; };
+		A6F000000000000000000001 /* VaultAgentAuthorizationResetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F000000000000000000002 /* VaultAgentAuthorizationResetCoordinator.swift */; };
 		A63000000000000000000001 /* VaultAutomationUnlockKeyStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63000000000000000000002 /* VaultAutomationUnlockKeyStoreTests.swift */; };
 		A63000000000000000000003 /* VaultAutomationUnlockKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63000000000000000000004 /* VaultAutomationUnlockKeyStore.swift */; };
 		A64000000000000000000001 /* VaultAgentTicketStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64000000000000000000002 /* VaultAgentTicketStoreTests.swift */; };
@@ -114,6 +115,7 @@
 		C5F3A0002FF3000000B7C0DE /* PasswordVaultTransactionAndMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F3A0012FF3000000B7C0DE /* PasswordVaultTransactionAndMergeTests.swift */; };
 		C5F602002FF6100000B7C0DE /* PasswordVaultLocalStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F602012FF6100000B7C0DE /* PasswordVaultLocalStorageTests.swift */; };
 		C5F700002FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700012FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift */; };
+		C5F701002FF7100000B7C0DE /* PasswordVaultForcedResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F701012FF7100000B7C0DE /* PasswordVaultForcedResetTests.swift */; };
 		C5F700042FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700052FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift */; };
 		C5F300022FF3000000B7C0DE /* PasswordVaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300032FF3000000B7C0DE /* PasswordVaultStore.swift */; };
 		C5F601002FF6000000B7C0DE /* KDBXPasswordVaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F601012FF6000000B7C0DE /* KDBXPasswordVaultStore.swift */; };
@@ -133,6 +135,7 @@
 		C5F60F002FF6E00000B7C0DE /* LocalOnlyPasswordVaultSyncController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F60F012FF6E00000B7C0DE /* LocalOnlyPasswordVaultSyncController.swift */; };
 		C5F60A002FF6900000B7C0DE /* PasswordVaultCloudReplica.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F60A012FF6900000B7C0DE /* PasswordVaultCloudReplica.swift */; };
 		C5F700022FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700032FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift */; };
+		C5F701022FF7100000B7C0DE /* VaultForcedResetTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F701032FF7100000B7C0DE /* VaultForcedResetTransaction.swift */; };
 		C5F700062FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700072FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift */; };
 		C5F300042FF3000000B7C0DE /* SecureClipboardServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300052FF3000000B7C0DE /* SecureClipboardServiceTests.swift */; };
 		C5F300062FF3000000B7C0DE /* SecureClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F300072FF3000000B7C0DE /* SecureClipboardService.swift */; };
@@ -238,6 +241,8 @@
 		C5F1B7331FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F1B7321FF74A2D00D2DA83 /* NSPasteboard+Deprecated.swift */; };
 		C5F700082FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700092FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift */; };
 		C5F700102FF7000000B7C0DE /* PasswordVaultMasterPasswordSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700112FF7000000B7C0DE /* PasswordVaultMasterPasswordSheetController.swift */; };
+		C5F700122FF7000000B7C0DE /* PasswordVaultForceResetSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700132FF7000000B7C0DE /* PasswordVaultForceResetSheetController.swift */; };
+		C5F700142FF7000000B7C0DE /* PasswordVaultResetSheetInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F700152FF7000000B7C0DE /* PasswordVaultResetSheetInteractionTests.swift */; };
 		FA08EDF81D1FED7D000D1D13 /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */; };
 		FA0D5CE81DDCC61600AC9052 /* ClipService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0D5CE71DDCC61600AC9052 /* ClipService.swift */; };
 		FA1189331E4CD58C00244F12 /* ExcludeAppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1189321E4CD58C00244F12 /* ExcludeAppService.swift */; };
@@ -411,6 +416,7 @@
 		C5F3A0012FF3000000B7C0DE /* PasswordVaultTransactionAndMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultTransactionAndMergeTests.swift; sourceTree = "<group>"; };
 		C5F602012FF6100000B7C0DE /* PasswordVaultLocalStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultLocalStorageTests.swift; sourceTree = "<group>"; };
 		C5F700012FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultMasterPasswordTests.swift; sourceTree = "<group>"; };
+		C5F701012FF7100000B7C0DE /* PasswordVaultForcedResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultForcedResetTests.swift; sourceTree = "<group>"; };
 		C5F700052FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultSecuritySettingsTests.swift; sourceTree = "<group>"; };
 		C5F300032FF3000000B7C0DE /* PasswordVaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultStore.swift; sourceTree = "<group>"; };
 		C5F601012FF6000000B7C0DE /* KDBXPasswordVaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDBXPasswordVaultStore.swift; sourceTree = "<group>"; };
@@ -430,6 +436,7 @@
 		C5F60F012FF6E00000B7C0DE /* LocalOnlyPasswordVaultSyncController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalOnlyPasswordVaultSyncController.swift; sourceTree = "<group>"; };
 		C5F60A012FF6900000B7C0DE /* PasswordVaultCloudReplica.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultCloudReplica.swift; sourceTree = "<group>"; };
 		C5F700032FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultArtifactRekeyTransaction.swift; sourceTree = "<group>"; };
+		C5F701032FF7100000B7C0DE /* VaultForcedResetTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultForcedResetTransaction.swift; sourceTree = "<group>"; };
 		C5F700072FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultSecuritySettings.swift; sourceTree = "<group>"; };
 		C5F300052FF3000000B7C0DE /* SecureClipboardServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardServiceTests.swift; sourceTree = "<group>"; };
 		C5F300072FF3000000B7C0DE /* SecureClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardService.swift; sourceTree = "<group>"; };
@@ -483,6 +490,8 @@
 		FA08EDF71D1FED7D000D1D13 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
 		C5F700092FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPYPasswordVaultPreferenceViewController.swift; sourceTree = "<group>"; };
 		C5F700112FF7000000B7C0DE /* PasswordVaultMasterPasswordSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultMasterPasswordSheetController.swift; sourceTree = "<group>"; };
+		C5F700132FF7000000B7C0DE /* PasswordVaultForceResetSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultForceResetSheetController.swift; sourceTree = "<group>"; };
+		C5F700152FF7000000B7C0DE /* PasswordVaultResetSheetInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordVaultResetSheetInteractionTests.swift; sourceTree = "<group>"; };
 		FA0D5CE71DDCC61600AC9052 /* ClipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ClipService.swift; sourceTree = "<group>"; };
 		FA1189321E4CD58C00244F12 /* ExcludeAppService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ExcludeAppService.swift; sourceTree = "<group>"; };
 		FA1DB48F1DDCA5D9007F95C8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -566,6 +575,7 @@
 		A6800000000000000000000E /* PasteraSecretConsumerFixture */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = PasteraSecretConsumerFixture; sourceTree = BUILT_PRODUCTS_DIR; };
 		A62000000000000000000009 /* VaultAgentGrantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGrantStore.swift; sourceTree = "<group>"; };
 		A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationCoordinator.swift; sourceTree = "<group>"; };
+		A6F000000000000000000002 /* VaultAgentAuthorizationResetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentAuthorizationResetCoordinator.swift; sourceTree = "<group>"; };
 		FAC43DDD1B35D8B100C06102 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FAC43E221B35DFC800C06102 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		FAC43E241B35DFD000C06102 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
@@ -755,6 +765,7 @@
 				A62000000000000000000004 /* VaultAgentAuthorizationPolicy.swift */,
 				A62000000000000000000009 /* VaultAgentGrantStore.swift */,
 				A6200000000000000000000B /* VaultAgentAuthorizationCoordinator.swift */,
+				A6F000000000000000000002 /* VaultAgentAuthorizationResetCoordinator.swift */,
 				FA0D5CE71DDCC61600AC9052 /* ClipService.swift */,
 				FAE911B81DE045E2008A4BEC /* HotKeyService.swift */,
 				FAC0DCF01DE576F300309C49 /* PasteService.swift */,
@@ -777,6 +788,7 @@
 				C5F60E012FF6D00000B7C0DE /* PasswordVaultSyncService.swift */,
 				C5F60F012FF6E00000B7C0DE /* LocalOnlyPasswordVaultSyncController.swift */,
 				C5F700032FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift */,
+				C5F701032FF7100000B7C0DE /* VaultForcedResetTransaction.swift */,
 				C5F700072FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift */,
 				C5F300072FF3000000B7C0DE /* SecureClipboardService.swift */,
 				C5F4000A2FF4000000B7C0DE /* ScriptExecutionService.swift */,
@@ -970,6 +982,7 @@
 				A6A000000000000000000004 /* CPYAgentIntegrationPreferenceViewController.swift */,
 				C5F700092FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift */,
 				C5F700112FF7000000B7C0DE /* PasswordVaultMasterPasswordSheetController.swift */,
+				C5F700132FF7000000B7C0DE /* PasswordVaultForceResetSheetController.swift */,
 				C5A900032FD0A10000B7C0DE /* CPYGeneralPreferenceViewController.swift */,
 				C5E207012FF2000000B7C0DE /* CPYHistoryPreferenceViewController.swift */,
 				FA1DB4F31DDCB4C0007F95C8 /* CPYExcludeAppPreferenceViewController.swift */,
@@ -1090,6 +1103,7 @@
 				C5A916012FD1B0000B7C0DE /* MenuManagerStatusItemTests.swift */,
 				C5A91A012FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift */,
 					C5A91B012FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift */,
+					C5F700152FF7000000B7C0DE /* PasswordVaultResetSheetInteractionTests.swift */,
 					C5A91D012FD200000B7C0DE /* PreferencePaneAlignmentTests.swift */,
 					C5E200012FF1000000B7C0DE /* PreferenceSearchTests.swift */,
 					C5E203012FF1000000B7C0DE /* PreferenceWindowShellTests.swift */,
@@ -1117,6 +1131,7 @@
 				C5F60D012FF6C00000B7C0DE /* PasswordVaultSyncServiceTestSupport.swift */,
 				C5F610012FF6F00000B7C0DE /* PasswordVaultSyncMigrationCommitTests.swift */,
 				C5F700012FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift */,
+				C5F701012FF7100000B7C0DE /* PasswordVaultForcedResetTests.swift */,
 				C5F700052FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift */,
 				C5F300052FF3000000B7C0DE /* SecureClipboardServiceTests.swift */,
 				C5F300092FF3000000B7C0DE /* PasswordVaultMenuTests.swift */,
@@ -1613,6 +1628,7 @@
 				A62000000000000000000003 /* VaultAgentAuthorizationPolicy.swift in Sources */,
 				A62000000000000000000008 /* VaultAgentGrantStore.swift in Sources */,
 				A6200000000000000000000A /* VaultAgentAuthorizationCoordinator.swift in Sources */,
+				A6F000000000000000000001 /* VaultAgentAuthorizationResetCoordinator.swift in Sources */,
 				FAC0DCEF1DE3255E00309C49 /* NSImage+NSColor.swift in Sources */,
 				FA1DB4A61DDCB443007F95C8 /* MenuType.swift in Sources */,
 				C54C29D52FC3E20000EF30FB /* SQLiteDataDatabase.swift in Sources */,
@@ -1644,6 +1660,7 @@
 					C5F60E002FF6D00000B7C0DE /* PasswordVaultSyncService.swift in Sources */,
 					C5F60F002FF6E00000B7C0DE /* LocalOnlyPasswordVaultSyncController.swift in Sources */,
 					C5F700022FF7000000B7C0DE /* VaultArtifactRekeyTransaction.swift in Sources */,
+					C5F701022FF7100000B7C0DE /* VaultForcedResetTransaction.swift in Sources */,
 					C5F700062FF7000000B7C0DE /* PasswordVaultSecuritySettings.swift in Sources */,
 				C5F300062FF3000000B7C0DE /* SecureClipboardService.swift in Sources */,
 				C5F400092FF4000000B7C0DE /* ScriptExecutionService.swift in Sources */,
@@ -1690,6 +1707,7 @@
 					C5F3000A2FF3000000B7C0DE /* PasswordVaultUIController.swift in Sources */,
 					C5F700082FF7000000B7C0DE /* CPYPasswordVaultPreferenceViewController.swift in Sources */,
 					C5F700102FF7000000B7C0DE /* PasswordVaultMasterPasswordSheetController.swift in Sources */,
+					C5F700122FF7000000B7C0DE /* PasswordVaultForceResetSheetController.swift in Sources */,
 					C5F3000C2FF3000000B7C0DE /* PasswordVaultEditorView.swift in Sources */,
 					C5A90C002FD1408000B7C0DE /* MenuManagerPanelDismissal.swift in Sources */,
 				C5A90A002FD1300000B7C0DE /* SnippetBrowserPanelController.swift in Sources */,
@@ -1755,6 +1773,7 @@
 				C5A919002FD1C0000B7C0DE /* SnippetBrowserHotPathPerformanceTests.swift in Sources */,
 				C5A91A002FD1D0000B7C0DE /* MainMenuChildNavigationTests.swift in Sources */,
 					C5A91B002FD1E0000B7C0DE /* KeyboardAccessibilityTests.swift in Sources */,
+					C5F700142FF7000000B7C0DE /* PasswordVaultResetSheetInteractionTests.swift in Sources */,
 					C5A91D002FD200000B7C0DE /* PreferencePaneAlignmentTests.swift in Sources */,
 					C5E200002FF1000000B7C0DE /* PreferenceSearchTests.swift in Sources */,
 						C5E203002FF1000000B7C0DE /* PreferenceWindowShellTests.swift in Sources */,
@@ -1782,6 +1801,7 @@
 					C5F60D002FF6C00000B7C0DE /* PasswordVaultSyncServiceTestSupport.swift in Sources */,
 					C5F610002FF6F00000B7C0DE /* PasswordVaultSyncMigrationCommitTests.swift in Sources */,
 					C5F700002FF7000000B7C0DE /* PasswordVaultMasterPasswordTests.swift in Sources */,
+					C5F701002FF7100000B7C0DE /* PasswordVaultForcedResetTests.swift in Sources */,
 					C5F700042FF7000000B7C0DE /* PasswordVaultSecuritySettingsTests.swift in Sources */,
 					C5F300042FF3000000B7C0DE /* SecureClipboardServiceTests.swift in Sources */,
 					C5F300082FF3000000B7C0DE /* PasswordVaultMenuTests.swift in Sources */,

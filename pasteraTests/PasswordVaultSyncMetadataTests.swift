@@ -82,6 +82,7 @@ struct PasswordVaultSyncMetadataTests {
         let decoded = try JSONDecoder().decode(PasswordVaultSyncMetadata.self, from: legacyData)
 
         #expect(decoded.pendingMergedRemoteDigest == nil)
+        #expect(decoded.pendingForcedReset == nil)
     }
 
     @Test("pending merge marker round trips as an anonymous digest")
@@ -94,6 +95,69 @@ struct PasswordVaultSyncMetadataTests {
 
         #expect(decoded == metadata)
         #expect(decoded.pendingMergedRemoteDigest == String(repeating: "d", count: 64))
+    }
+
+    @Test("pending forced reset round trips with digests and progress only")
+    func pendingForcedResetRoundTripsWithoutPlaintext() throws {
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: String(repeating: "a", count: 64),
+            replacementLocalDigest: String(repeating: "b", count: 64),
+            didInspectRemote: true,
+            observedRemoteDigest: String(repeating: "c", count: 64),
+            archivedRemoteDigest: String(repeating: "d", count: 64),
+            remoteArchiveRequired: true
+        )
+
+        let encoded = try JSONEncoder().encode(metadata)
+        let decoded = try JSONDecoder().decode(PasswordVaultSyncMetadata.self, from: encoded)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let pending = try #require(object["pendingForcedReset"] as? [String: Any])
+
+        #expect(decoded == metadata)
+        #expect(Set(pending.keys) == [
+            "previousLocalDigest",
+            "replacementLocalDigest",
+            "didInspectRemote",
+            "observedRemoteDigest",
+            "archivedRemoteDigest",
+            "remoteArchiveRequired"
+        ])
+        #expect(pending["remoteArchiveRequired"] as? Bool == true)
+        let text = try #require(String(data: encoded, encoding: .utf8))
+        #expect(!text.contains("vault-password-DO-NOT-PERSIST"))
+        #expect(!text.contains("raw-key-DO-NOT-PERSIST"))
+        #expect(!text.contains("KDBX-plaintext-DO-NOT-PERSIST"))
+        #expect(!text.contains("authentication-value-DO-NOT-PERSIST"))
+    }
+
+    @Test("schema one pending reset without archive requirement decodes as unknown")
+    func legacyPendingForcedResetWithoutArchiveRequirementRemainsReadable() throws {
+        var metadata = PasswordVaultSyncMetadata.defaultLocalOnly
+        metadata.mode = .oneDrive
+        metadata.pendingForcedReset = PasswordVaultPendingForcedReset(
+            previousLocalDigest: String(repeating: "a", count: 64),
+            replacementLocalDigest: String(repeating: "b", count: 64),
+            didInspectRemote: true,
+            observedRemoteDigest: String(repeating: "c", count: 64),
+            archivedRemoteDigest: String(repeating: "c", count: 64),
+            remoteArchiveRequired: true
+        )
+        let encoded = try JSONEncoder().encode(metadata)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var pending = try #require(object["pendingForcedReset"] as? [String: Any])
+        pending.removeValue(forKey: "remoteArchiveRequired")
+        object["pendingForcedReset"] = pending
+        let legacySchemaOneData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(
+            PasswordVaultSyncMetadata.self,
+            from: legacySchemaOneData
+        )
+
+        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.pendingForcedReset?.remoteArchiveRequired == nil)
     }
 
     @Test("failed atomic save preserves the previous sync baseline")

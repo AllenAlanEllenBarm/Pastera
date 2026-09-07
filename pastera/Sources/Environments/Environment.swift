@@ -46,10 +46,13 @@ struct Environment {
          retryPasswordVaultLocalPreparation: (() -> Void)? = nil,
          prepareProductionPasswordVault: Bool = false,
          secureClipboard: SecureClipboardWriting = SecureClipboardService(),
+         passwordVaultAuthorizer: PasswordVaultAuthorizing = SystemPasswordVaultAuthorizer(),
          passwordVaultUIController: PasswordVaultUIController? = nil,
          vaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing? = nil,
-         vaultAgentApplicationRuntimeFactory: ((PasswordVaultUIController) ->
+         vaultAgentApplicationRuntimeFactory: ((PasswordVaultUIController, VaultAgentAuthorizationResetCoordinator) ->
              VaultAgentApplicationRuntimeServicing)? = nil,
+         vaultAgentResetCoordinatorFactory: ((VaultAgentSerialExecutor) ->
+             VaultAgentAuthorizationResetCoordinator)? = nil,
          clipboardScriptCoordinator: ClipboardScriptCoordinating = ClipboardScriptCoordinator(
              repository: ScriptRepository(),
              executor: ScriptExecutionService()
@@ -115,6 +118,7 @@ struct Environment {
             store: resolvedPasswordVaultStore,
             syncController: resolvedPasswordVaultSyncService,
             clipboard: secureClipboard,
+            authorizer: passwordVaultAuthorizer,
             pasteService: resolvedPasteService,
             defaults: defaults,
             storeQueue: vaultQueue
@@ -138,9 +142,13 @@ struct Environment {
         if resolvedPasswordVaultMigrator != nil {
             retryLocalPreparation()
         }
-        self.vaultAgentApplicationRuntime = vaultAgentApplicationRuntime ??
-            vaultAgentApplicationRuntimeFactory?(resolvedPasswordVaultUIController) ??
-            UnavailableVaultAgentApplicationRuntime()
+        self.vaultAgentApplicationRuntime = Self.resolveVaultAgentApplicationRuntime(
+            explicitRuntime: vaultAgentApplicationRuntime,
+            runtimeFactory: vaultAgentApplicationRuntimeFactory,
+            resetCoordinatorFactory: vaultAgentResetCoordinatorFactory,
+            controller: resolvedPasswordVaultUIController,
+            shouldBindCoordinator: passwordVaultUIController == nil
+        )
         self.clipboardScriptCoordinator = clipboardScriptCoordinator
         self.promptOptimizationService = promptOptimizationService ?? PromptOptimizationService(
             settingsStore: PromptOptimizationSettingsStore(defaults: defaults),
@@ -148,6 +156,39 @@ struct Environment {
         )
         self.menuManager = menuManager
         self.defaults = defaults
+    }
+
+    private static func makeVaultAgentAuthorizationResetCoordinator(
+        controller: PasswordVaultUIController,
+        shouldBind: Bool,
+        factory: (VaultAgentSerialExecutor) -> VaultAgentAuthorizationResetCoordinator
+    ) -> VaultAgentAuthorizationResetCoordinator {
+        let coordinator = factory(controller.vaultAgentExecutor)
+        if shouldBind {
+            controller.bindAgentAuthorizationResetter(coordinator)
+        }
+        return coordinator
+    }
+
+    private static func resolveVaultAgentApplicationRuntime(
+        explicitRuntime: VaultAgentApplicationRuntimeServicing?,
+        runtimeFactory: ((PasswordVaultUIController, VaultAgentAuthorizationResetCoordinator) ->
+            VaultAgentApplicationRuntimeServicing)?,
+        resetCoordinatorFactory: ((VaultAgentSerialExecutor) -> VaultAgentAuthorizationResetCoordinator)?,
+        controller: PasswordVaultUIController,
+        shouldBindCoordinator: Bool
+    ) -> VaultAgentApplicationRuntimeServicing {
+        if let explicitRuntime { return explicitRuntime }
+        guard let runtimeFactory else { return UnavailableVaultAgentApplicationRuntime() }
+        let coordinatorFactory = resetCoordinatorFactory ?? {
+            VaultAgentAuthorizationResetCoordinator(executor: $0)
+        }
+        let coordinator = makeVaultAgentAuthorizationResetCoordinator(
+            controller: controller,
+            shouldBind: shouldBindCoordinator,
+            factory: coordinatorFactory
+        )
+        return runtimeFactory(controller, coordinator)
     }
 
     static func validatePasswordVaultSyncRoot(_ url: URL) -> PasswordVaultSyncFailure? {

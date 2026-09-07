@@ -117,9 +117,10 @@ struct AppEnvironment {
                            excludeAppService: excludeAppService,
                            accessibilityService: AccessibilityService(),
                            prepareProductionPasswordVault: true,
-                           vaultAgentApplicationRuntimeFactory: { controller in
+                           vaultAgentApplicationRuntimeFactory: { controller, resetCoordinator in
                                VaultAgentApplicationRuntime.production(
                                    vault: controller,
+                                   authorizationResetCoordinator: resetCoordinator,
                                    defaults: defaults
                                )
                            },

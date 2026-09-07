@@ -170,6 +170,9 @@ struct MainMenuPasswordVaultDataSource {
     let unlock: (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let unlockWithQuickKey: (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
     let retryLocalPreparation: () -> Void
+    let retryForcedResetRecovery: (
+        @escaping (Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>) -> Void
+    ) -> Void
     let fetchFolders: () throws -> [PasswordVaultFolder]
     let fetchEntries: () throws -> [PasswordVaultEntry]
     let copyPassword: (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void
@@ -194,6 +197,9 @@ struct MainMenuPasswordVaultDataSource {
         unlock: @escaping (String, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { _, completion in completion(.failure(.vaultLocked)) },
         unlockWithQuickKey: @escaping (@escaping (Result<Void, PasswordVaultError>) -> Void) -> Void = { completion in completion(.failure(.keychainUnavailable)) },
         retryLocalPreparation: @escaping () -> Void = {},
+        retryForcedResetRecovery: @escaping (
+            @escaping (Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>) -> Void
+        ) -> Void = { completion in completion(.failure(.recoveryRequired)) },
         fetchFolders: @escaping () throws -> [PasswordVaultFolder],
         fetchEntries: @escaping () throws -> [PasswordVaultEntry],
         copyPassword: @escaping (PasswordVaultEntry.ID, @escaping (Result<Void, PasswordVaultError>) -> Void) -> Void,
@@ -218,6 +224,7 @@ struct MainMenuPasswordVaultDataSource {
         self.unlock = unlock
         self.unlockWithQuickKey = unlockWithQuickKey
         self.retryLocalPreparation = retryLocalPreparation
+        self.retryForcedResetRecovery = retryForcedResetRecovery
         self.fetchFolders = fetchFolders
         self.fetchEntries = fetchEntries
         self.copyPassword = copyPassword
@@ -430,6 +437,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var passwordVaultCreateStorageMode: PasswordVaultCreateStorageMode = .localOnly
     private var passwordVaultLocalRecoveryShowsWarning = false
     private var passwordVaultAllowsLocalReplacement = false
+    private var passwordVaultForcedResetRecoveryInFlight = false
+    private var passwordVaultForcedResetRecoveryError: String?
     private var passwordVaultSuppressesRemotePrompt = false
     private var passwordVaultAccessModeInFlight: PasswordVaultAccessView.Mode?
     private var passwordVaultAutomaticQuickUnlockAttempted = false
@@ -1784,7 +1793,14 @@ extension MainMenuPanelController {
         guard let passwordVaultDataSource else {
             return passwordVaultFailureContent(message: String(localized: "Password Vault Unavailable"))
         }
-        switch passwordVaultDataSource.state() {
+        let vaultState = passwordVaultDataSource.state()
+        if case .recoveryRequired = vaultState {
+            // Preserve retry state and inline feedback until local recovery finishes.
+        } else {
+            passwordVaultForcedResetRecoveryInFlight = false
+            passwordVaultForcedResetRecoveryError = nil
+        }
+        switch vaultState {
         case .notConfigured:
             return passwordVaultAccessContent(
                 mode: .create,
@@ -1810,9 +1826,8 @@ extension MainMenuPanelController {
             passwordVaultAccessView = nil
             passwordVaultAccessError = nil
             break
-        case let .recoveryRequired(message):
-            return passwordVaultFailureContent(message: message.isEmpty
-                ? String(localized: "Password Vault Unavailable") : message)
+        case .recoveryRequired:
+            return makePasswordVaultForcedResetRecoveryContent()
         case let .failed(message):
             return passwordVaultFailureContent(
                 message: passwordVaultAccessError ?? passwordVaultFailureMessage(message)
@@ -2227,6 +2242,67 @@ extension MainMenuPanelController {
             showsBackButton: false, canGoToPreviousPage: false, canGoToNextPage: false,
             typeFilter: nil, rows: [emptyRow(title: message)]
         )
+    }
+
+    private func makePasswordVaultForcedResetRecoveryContent() -> EmbeddedContent {
+        let view = PasswordVaultInlineActionView(
+            symbolName: "arrow.triangle.2.circlepath",
+            symbolColor: .systemOrange,
+            title: String(localized: "Local Recovery Required"),
+            messages: [
+                String(localized: "Pastera must restore a safe local password vault before it can be used."),
+                String(localized: "OneDrive sync is paused during local recovery, and the cloud vault will not be replaced.")
+            ],
+            actions: [
+                .init(
+                    title: passwordVaultForcedResetRecoveryInFlight
+                        ? String(localized: "Retrying…")
+                        : String(localized: "Retry Local Recovery"),
+                    identifier: "passwordVaultLocalRecoveryRetry",
+                    style: .primary,
+                    isEnabled: !passwordVaultForcedResetRecoveryInFlight,
+                    handler: { [weak self] in self?.retryPasswordVaultForcedResetRecovery() }
+                )
+            ],
+            showsTitle: false
+        )
+        view.setError(passwordVaultForcedResetRecoveryError)
+        passwordVaultInlineActionView = view
+        return passwordVaultActionContent(
+            headerTitle: String(localized: "Local Recovery"),
+            rowTitle: String(localized: "Local Recovery Required"),
+            view: view,
+            showsBackButton: false
+        )
+    }
+
+    private func retryPasswordVaultForcedResetRecovery() {
+        guard !passwordVaultForcedResetRecoveryInFlight,
+              let passwordVaultDataSource else { return }
+        passwordVaultForcedResetRecoveryInFlight = true
+        passwordVaultForcedResetRecoveryError = nil
+        reloadContentKeepingTopLeft()
+        passwordVaultDataSource.retryForcedResetRecovery { [weak self] result in
+            self?.finishPasswordVaultForcedResetRecovery(result)
+        }
+    }
+
+    private func finishPasswordVaultForcedResetRecovery(
+        _ result: Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.finishPasswordVaultForcedResetRecovery(result)
+            }
+            return
+        }
+        passwordVaultForcedResetRecoveryInFlight = false
+        if case .failure = result {
+            passwordVaultForcedResetRecoveryError = String(localized:
+                "Local recovery is not complete. OneDrive sync remains paused. You can safely try again."
+            )
+        }
+        reloadContentKeepingTopLeft()
     }
 
     private func submitPasswordVaultAccess(password: String, mode: PasswordVaultAccessView.Mode) {
@@ -2700,9 +2776,11 @@ extension MainMenuPanelController {
         case .databaseNotConfigured: return String(localized: "Create the password database first.")
         case .vaultLocked: return String(localized: "Unlock the password database first.")
         case .wrongMasterPassword: return String(localized: "The database password is incorrect.")
+        case .resetRequiresForcedReset: return String(localized: "A data-preserving password reset is not available.")
         case .unsupportedFormat: return String(localized: "This password database format is not supported.")
         case .cloudUnavailable: return String(localized: "OneDrive sync needs attention")
-        case .externalConflict: return String(localized: "Password database changes need conflict recovery.")
+        case .externalConflict, .recoveryRequired:
+            return String(localized: "Password database changes need conflict recovery.")
         case .saveFailed: return String(localized: "The password database could not be saved.")
         case .invalidAutoLockInterval: return String(localized: "Choose a supported automatic lock time.")
         case .userCancelled: return ""

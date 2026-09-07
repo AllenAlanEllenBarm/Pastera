@@ -769,7 +769,7 @@ struct MainMenuOneDriveStatusPresentation {
             tintColor = .systemBlue
             badgeColor = .clear
             accessibilityLabel = String(localized: "OneDrive is waiting for the vault to unlock")
-        case .failed:
+        case .failed, .pendingForcedReset:
             badge = .failed
             tintColor = .systemBlue
             badgeColor = .systemOrange

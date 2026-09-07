@@ -325,10 +325,13 @@ final class VaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing 
     private let trackerStart: () -> Void
     private let trackerStop: () -> Void
     private let removeTickets: () -> Void
+    private let authorizationResetCoordinator: VaultAgentAuthorizationResetCoordinator?
+    private let authorizationPolicy: VaultAgentAuthorizationPolicy?
     private let worker: DispatchQueue
     private let lock = NSLock()
     private var requested = false
     private var generation: UInt64 = 0
+    private var preparingGeneration: UInt64?
 
     init(
         startupSeed: @escaping () throws -> Void,
@@ -338,6 +341,8 @@ final class VaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing 
         trackerStart: @escaping () -> Void,
         trackerStop: @escaping () -> Void,
         removeTickets: @escaping () -> Void,
+        authorizationResetCoordinator: VaultAgentAuthorizationResetCoordinator? = nil,
+        authorizationPolicy: VaultAgentAuthorizationPolicy? = nil,
         worker: DispatchQueue = DispatchQueue(
             label: "com.pastera-app.Pastera.vault-agent.application-runtime",
             qos: .utility
@@ -350,6 +355,8 @@ final class VaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing 
         self.trackerStart = trackerStart
         self.trackerStop = trackerStop
         self.removeTickets = removeTickets
+        self.authorizationResetCoordinator = authorizationResetCoordinator
+        self.authorizationPolicy = authorizationPolicy
         self.worker = worker
     }
 
@@ -377,23 +384,42 @@ final class VaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing 
         trackerStop()
         socketStop()
         removeTickets()
+        if preparingGeneration == nil, let authorizationPolicy {
+            authorizationResetCoordinator?.uninstall(authorizationPolicy)
+        }
         lock.unlock()
     }
 
     private func prepareStart(generation startGeneration: UInt64) {
-        do {
-            try startupSeed()
-        } catch {
-            NSLog("Pastera vault agent bootstrap failed while seeding durable installation state.")
-            failStart(generation: startGeneration)
-            return
-        }
-
         lock.lock()
         guard requested, generation == startGeneration else {
             lock.unlock()
             return
         }
+        preparingGeneration = startGeneration
+        lock.unlock()
+
+        do {
+            if let authorizationPolicy {
+                try authorizationResetCoordinator?.install(authorizationPolicy)
+            }
+            try startupSeed()
+        } catch {
+            NSLog("Pastera vault agent bootstrap failed while preparing durable installation state.")
+            failPreparation(generation: startGeneration)
+            return
+        }
+
+        lock.lock()
+        guard requested, generation == startGeneration else {
+            if preparingGeneration == startGeneration {
+                preparingGeneration = nil
+            }
+            lock.unlock()
+            uninstallAuthorizationPolicy()
+            return
+        }
+        preparingGeneration = nil
         do {
             trackerStart()
             try socketStart()
@@ -404,23 +430,38 @@ final class VaultAgentApplicationRuntime: VaultAgentApplicationRuntimeServicing 
             trackerStop()
             socketStop()
             removeTickets()
+            uninstallAuthorizationPolicy()
             requested = false
             generation &+= 1
             lock.unlock()
         }
     }
 
-    private func failStart(generation startGeneration: UInt64) {
+    private func failPreparation(generation startGeneration: UInt64) {
         lock.lock()
-        guard requested, generation == startGeneration else {
+        guard preparingGeneration == startGeneration else {
             lock.unlock()
             return
         }
-        requested = false
-        generation &+= 1
-        VaultAgentPreferenceRuntimeProvider.uninstall(preferenceRuntime)
-        removeTickets()
+        preparingGeneration = nil
+        let ownsRequest = requested && generation == startGeneration
+        if ownsRequest {
+            requested = false
+            generation &+= 1
+        }
         lock.unlock()
+
+        uninstallAuthorizationPolicy()
+        if ownsRequest {
+            VaultAgentPreferenceRuntimeProvider.uninstall(preferenceRuntime)
+            removeTickets()
+        }
+    }
+
+    private func uninstallAuthorizationPolicy() {
+        if let authorizationPolicy {
+            authorizationResetCoordinator?.uninstall(authorizationPolicy)
+        }
     }
 }
 
@@ -2211,6 +2252,7 @@ final class VaultAgentDurableStateSeeder {
 extension VaultAgentApplicationRuntime {
     static func production(
         vault: PasswordVaultUIController,
+        authorizationResetCoordinator: VaultAgentAuthorizationResetCoordinator,
         defaults: UserDefaults = .standard,
         applicationURL: URL = Bundle.main.bundleURL,
         userRootURL: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -2219,6 +2261,7 @@ extension VaultAgentApplicationRuntime {
         DeferredVaultAgentApplicationRuntime {
             try makeProduction(
                 vault: vault,
+                authorizationResetCoordinator: authorizationResetCoordinator,
                 defaults: defaults,
                 applicationURL: applicationURL,
                 userRootURL: userRootURL,
@@ -2227,8 +2270,11 @@ extension VaultAgentApplicationRuntime {
         }
     }
 
+    // The production runtime inputs are kept explicit so tests can substitute each host boundary.
+    // swiftlint:disable:next function_parameter_count
     private static func makeProduction(
         vault: PasswordVaultUIController,
+        authorizationResetCoordinator: VaultAgentAuthorizationResetCoordinator,
         defaults: UserDefaults,
         applicationURL: URL,
         userRootURL: URL,
@@ -2329,7 +2375,9 @@ extension VaultAgentApplicationRuntime {
             socketStop: { socketServer.stop() },
             trackerStart: { tracker.start() },
             trackerStop: { tracker.stop() },
-            removeTickets: { ticketStore.removeAll() }
+            removeTickets: { ticketStore.removeAll() },
+            authorizationResetCoordinator: authorizationResetCoordinator,
+            authorizationPolicy: policy
         )
     }
 

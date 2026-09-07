@@ -11,26 +11,89 @@ import KeyHolder
 import Testing
 @testable import Pastera
 
+// Swift Testing keeps the keyboard and accessibility contract in one serialized source.
+// swiftlint:disable file_length
+
 extension KeyboardAccessibilityTests {
     @Test
-    func masterPasswordSheetUsesThreeSecureFieldsPermanentRecoveryWarningAndCompactLayout() throws {
-        let controller = PasswordVaultMasterPasswordSheetController { _, _, completion in
-            completion(.success(PasswordVaultMasterPasswordChangeResult(warnings: [])))
+    func passwordVaultPreferenceTransitionsToIndependentForceSheetOnlyAfterResetSheetDetaches() throws {
+        var forcedOperationCount = 0
+        let page = CPYPasswordVaultPreferenceViewController(
+            resetPassword: { _, completion in completion(.failure(.resetRequiresForcedReset)) },
+            forceResetPassword: { _, _ in forcedOperationCount += 1 }
+        )
+        page.loadView()
+        page.applySecurityStateForTesting(.init(
+            vaultState: .unlocked,
+            isBusy: false,
+            autoLockInterval: 300,
+            quickUnlockEnabled: true,
+            quickUnlockAvailable: true,
+            masterPasswordResetCapability: .preservesData,
+            forcedResetPending: false,
+            forcedResetPendingFailure: nil
+        ))
+        let parent = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 900),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        parent.isReleasedWhenClosed = false
+        parent.contentView = page.view
+        parent.orderFront(nil)
+        defer {
+            if let attached = parent.attachedSheet { parent.endSheet(attached) }
+            parent.orderOut(nil)
+        }
+
+        page.openResetSheetForTesting()
+        let resetSheet = try #require(page.resetSheetForTesting)
+        let resetWindow = try #require(resetSheet.window)
+        #expect(parent.attachedSheet === resetWindow)
+        resetSheet.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        resetSheet.submitForTesting()
+        #expect(resetSheet.forceResetExplanationVisibleForTesting)
+        #expect(forcedOperationCount == 0)
+
+        resetSheet.reviewForceResetForTesting()
+
+        let forceSheet = try #require(page.forceSheetForTesting)
+        let forceWindow = try #require(forceSheet.window)
+        #expect(resetWindow.sheetParent == nil)
+        #expect(parent.attachedSheet === forceWindow)
+        #expect(forcedOperationCount == 0)
+        forceSheet.cancelForTesting()
+
+        page.openForceResetSheetForTesting()
+        let directForceWindow = try #require(page.forceSheetForTesting?.window)
+        #expect(parent.attachedSheet === directForceWindow)
+        #expect(directForceWindow !== resetWindow)
+    }
+
+    @Test
+    func masterPasswordResetSheetUsesTwoSecureFieldsPermanentRecoveryWarningAndCompactLayout() throws {
+        let controller = PasswordVaultMasterPasswordSheetController { _, completion in
+            completion(.success(PasswordVaultMasterPasswordResetResult(warnings: [])))
         }
         let window = try #require(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
 
-        #expect(controller.secureFieldCountForTesting == 3)
+        #expect(controller.secureFieldCountForTesting == 2)
         #expect(controller.visiblePasswordFieldCountForTesting == 0)
         #expect(controller.fieldLabelsForTesting == [
-            pasteraPreferenceString("Current Master Password"),
             pasteraPreferenceString("New Master Password"),
             pasteraPreferenceString("Confirm New Master Password")
+        ])
+        #expect(controller.inputAccessibilityIdentifiersForTesting == [
+            "masterPassword.new",
+            "masterPassword.confirmation"
         ])
         #expect(controller.recoveryWarningForTesting == pasteraPreferenceString(
             "The new master password encrypts your password vault. If forgotten, it cannot be recovered by any other means."
         ))
         #expect(controller.keyViewOrderForTesting == [
-            "masterPassword.current",
             "masterPassword.new",
             "masterPassword.confirmation",
             "masterPassword.cancel",
@@ -43,61 +106,81 @@ extension KeyboardAccessibilityTests {
     }
 
     @Test
-    func masterPasswordSheetValidatesConfirmationAndVisibilityTogglePreservesValueAndFocus() throws {
+    func masterPasswordResetSheetSubmitsOnlyNewPasswordAndVisibilityTogglePreservesValueAndFocus() throws {
         var submissionCount = 0
-        let controller = PasswordVaultMasterPasswordSheetController { _, _, _ in
+        var submittedPassword: String?
+        let controller = PasswordVaultMasterPasswordSheetController { newPassword, _ in
             submissionCount += 1
+            submittedPassword = newPassword
         }
         let window = try #require(controller.window)
-        controller.setValuesForTesting(current: "current", new: "new-password", confirmation: "different")
+        controller.setValuesForTesting(new: "new-password", confirmation: "different")
 
         controller.submitForTesting()
         #expect(submissionCount == 0)
         #expect(!controller.confirmationErrorForTesting.isEmpty)
         #expect(!controller.primaryButtonEnabledForTesting)
 
-        controller.setValuesForTesting(current: "current", new: "new-password", confirmation: "new-password")
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
         #expect(controller.primaryButtonEnabledForTesting)
-        controller.focusFieldForTesting(index: 1)
+        controller.focusFieldForTesting(index: 0)
         let focusedIdentifier = controller.focusedFieldIdentifierForTesting
-        controller.toggleVisibilityForTesting(index: 1)
+        controller.toggleVisibilityForTesting(index: 0)
 
         #expect(controller.valuesForTesting.new == "new-password")
-        #expect(controller.passwordIsVisibleForTesting(index: 1))
+        #expect(controller.passwordIsVisibleForTesting(index: 0))
         #expect(controller.focusedFieldIdentifierForTesting == focusedIdentifier)
         #expect(window.firstResponder != nil)
+
+        controller.submitForTesting()
+        #expect(submissionCount == 1)
+        #expect(submittedPassword == "new-password")
     }
 
     @Test
-    func wrongCurrentMasterPasswordClearsOnlyCurrentFieldAndRestoresFocus() {
-        let controller = PasswordVaultMasterPasswordSheetController { _, _, completion in
-            completion(.failure(.wrongMasterPassword))
-        }
-        controller.setValuesForTesting(current: "wrong", new: "new-password", confirmation: "new-password")
+    func resetRequiresForcedResetShowsReviewWithoutStartingDestructiveReset() throws {
+        var reviewCount = 0
+        let controller = PasswordVaultMasterPasswordSheetController(
+            resetPassword: { _, completion in completion(.failure(.resetRequiresForcedReset)) },
+            onReviewForceReset: { reviewCount += 1 }
+        )
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
 
         controller.submitForTesting()
 
-        #expect(controller.valuesForTesting.current.isEmpty)
+        #expect(window.isVisible)
         #expect(controller.valuesForTesting.new == "new-password")
         #expect(controller.valuesForTesting.confirmation == "new-password")
-        #expect(!controller.currentPasswordErrorForTesting.isEmpty)
-        #expect(controller.focusedFieldIdentifierForTesting == "masterPassword.current")
+        #expect(controller.forceResetExplanationVisibleForTesting)
+        #expect(controller.reviewForceResetTitleForTesting == pasteraPreferenceString("Review Force Reset..."))
+        #expect(reviewCount == 0)
         #expect(!controller.isBusyForTesting)
+
+        controller.reviewForceResetForTesting()
+
+        #expect(!window.isVisible)
+        #expect(controller.valuesForTesting.new.isEmpty)
+        #expect(controller.valuesForTesting.confirmation.isEmpty)
+        #expect(reviewCount == 1)
     }
 
     @Test
-    func masterPasswordSheetBusyStatePreventsDuplicateSubmitAndEscapeUntilSuccess() {
+    func masterPasswordResetSheetBusyStatePreventsDuplicateSubmitAndEscapeUntilSuccess() throws {
         var submissionCount = 0
-        var pendingCompletion: ((Result<PasswordVaultMasterPasswordChangeResult, PasswordVaultError>) -> Void)?
-        var successResult: PasswordVaultMasterPasswordChangeResult?
+        var pendingCompletion: ((Result<PasswordVaultMasterPasswordResetResult, PasswordVaultError>) -> Void)?
+        var successResult: PasswordVaultMasterPasswordResetResult?
         let controller = PasswordVaultMasterPasswordSheetController(
-            changePassword: { _, _, completion in
+            resetPassword: { _, completion in
                 submissionCount += 1
                 pendingCompletion = completion
             },
             onSuccess: { successResult = $0 }
         )
-        controller.setValuesForTesting(current: "current", new: "new-password", confirmation: "new-password")
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
 
         controller.submitForTesting()
         controller.submitForTesting()
@@ -107,15 +190,236 @@ extension KeyboardAccessibilityTests {
         #expect(controller.isBusyForTesting)
         #expect(controller.allInteractiveControlsDisabledForTesting)
         #expect(!controller.didCancelForTesting)
+        #expect(window.isVisible)
 
-        pendingCompletion?(.success(PasswordVaultMasterPasswordChangeResult(warnings: [.quickUnlockDisabled])))
+        pendingCompletion?(.success(PasswordVaultMasterPasswordResetResult(warnings: [.systemUnlockDisabled])))
 
-        #expect(successResult?.warnings == [.quickUnlockDisabled])
-        #expect(controller.valuesForTesting.current.isEmpty)
+        #expect(successResult?.warnings == [.systemUnlockDisabled])
+        #expect(!window.isVisible)
         #expect(controller.valuesForTesting.new.isEmpty)
         #expect(controller.valuesForTesting.confirmation.isEmpty)
     }
 
+    @Test(arguments: [PasswordVaultError.userCancelled, .authenticationFailed])
+    func masterPasswordResetAuthenticationFailureKeepsSheetOpenAndSecretsUntilClose(
+        error: PasswordVaultError
+    ) throws {
+        let controller = PasswordVaultMasterPasswordSheetController { _, completion in
+            completion(.failure(error))
+        }
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
+
+        controller.submitForTesting()
+
+        #expect(window.isVisible)
+        #expect(controller.valuesForTesting.new == "new-password")
+        #expect(controller.valuesForTesting.confirmation == "new-password")
+        #expect(!controller.generalErrorForTesting.isEmpty)
+
+        controller.cancelForTesting()
+
+        #expect(!window.isVisible)
+        #expect(controller.valuesForTesting.new.isEmpty)
+        #expect(controller.valuesForTesting.confirmation.isEmpty)
+    }
+
+    @Test
+    func forceResetSheetShowsExactLimitationsArchiveReplacementWarningAndAccessibility() throws {
+        let controller = PasswordVaultForceResetSheetController { _, _ in }
+        let window = try #require(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        #expect(controller.secureFieldCountForTesting == 2)
+        #expect(controller.visiblePasswordFieldCountForTesting == 0)
+        #expect(controller.fieldLabelsForTesting == [
+            pasteraPreferenceString("New Master Password"),
+            pasteraPreferenceString("Confirm New Master Password")
+        ])
+        let englishLimitation = localizedPasswordVaultString(
+            controller.limitationLocalizationKeyForTesting,
+            localeIdentifier: "en"
+        )
+        let simplifiedChineseLimitation = localizedPasswordVaultString(
+            controller.limitationLocalizationKeyForTesting,
+            localeIdentifier: "zh-Hans"
+        )
+        #expect([
+            englishLimitation,
+            simplifiedChineseLimitation
+        ].contains(controller.limitationTextForTesting))
+        #expect(englishLimitation == "No usable unlock key is available. Because the existing password vault is encrypted, Pastera cannot decrypt or recover it. Continuing will preserve one latest encrypted archive and create a new empty password vault. Only the original master password can open the archive.")
+        #expect(simplifiedChineseLimitation == "当前没有可用的解锁密钥。受加密方式限制，Pastera 无法解密或找回原密码箱。继续后将保留一份最新的加密归档，并创建一个空密码箱。只有原主密码才能打开该归档。")
+        let englishArchiveWarning = localizedPasswordVaultString(
+            controller.archiveReplacementLocalizationKeyForTesting,
+            localeIdentifier: "en"
+        )
+        let simplifiedChineseArchiveWarning = localizedPasswordVaultString(
+            controller.archiveReplacementLocalizationKeyForTesting,
+            localeIdentifier: "zh-Hans"
+        )
+        #expect([
+            englishArchiveWarning,
+            simplifiedChineseArchiveWarning
+        ].contains(controller.archiveReplacementWarningForTesting))
+        #expect(englishArchiveWarning == "The next forced reset will replace the currently saved encrypted archive.")
+        #expect(simplifiedChineseArchiveWarning == "下一次强制重置会替换当前保存的加密归档。")
+        #expect(controller.warningAccessibilityIdentifierForTesting == "forceReset.warning")
+        #expect(controller.inputAccessibilityIdentifiersForTesting == [
+            "forceReset.new",
+            "forceReset.confirmation"
+        ])
+        #expect(controller.keyViewOrderForTesting == [
+            "forceReset.new",
+            "forceReset.confirmation",
+            "forceReset.acknowledgement",
+            "forceReset.cancel",
+            "forceReset.submit"
+        ])
+        #expect(controller.submitAccessibilityLabelForTesting == pasteraPreferenceString("Force Reset Password Vault"))
+        #expect(controller.submitAccessibilityRoleForTesting == .button)
+
+        window.setContentSize(NSSize(width: 360, height: window.contentLayoutRect.height))
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(controller.controlsFitBoundsForTesting)
+    }
+
+    @Test
+    func forceResetSheetRequiresMatchingPasswordsAndAcknowledgementBeforeDefaultSubmit() {
+        var submissionCount = 0
+        let controller = PasswordVaultForceResetSheetController { _, _ in submissionCount += 1 }
+
+        #expect(!controller.primaryButtonEnabledForTesting)
+        #expect(!controller.primaryButtonIsDefaultForTesting)
+        controller.setValuesForTesting(new: "new-password", confirmation: "different")
+        controller.setAcknowledgementForTesting(true)
+        #expect(!controller.primaryButtonEnabledForTesting)
+        #expect(!controller.primaryButtonIsDefaultForTesting)
+
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        controller.setAcknowledgementForTesting(false)
+        #expect(!controller.primaryButtonEnabledForTesting)
+        #expect(!controller.primaryButtonIsDefaultForTesting)
+
+        controller.setAcknowledgementForTesting(true)
+        #expect(controller.primaryButtonEnabledForTesting)
+        #expect(controller.primaryButtonIsDefaultForTesting)
+
+        controller.submitForTesting()
+        #expect(submissionCount == 1)
+    }
+
+    @Test
+    func forceResetSheetBusyStateBlocksDuplicateReturnAndEscape() throws {
+        var submissionCount = 0
+        var pendingCompletion: ((Result<PasswordVaultForcedResetOutcome, PasswordVaultError>) -> Void)?
+        let controller = PasswordVaultForceResetSheetController { _, completion in
+            submissionCount += 1
+            pendingCompletion = completion
+        }
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        controller.setAcknowledgementForTesting(true)
+
+        controller.submitForTesting()
+        controller.submitForTesting()
+        controller.cancelForTesting()
+
+        #expect(submissionCount == 1)
+        #expect(controller.isBusyForTesting)
+        #expect(controller.allInteractiveControlsDisabledForTesting)
+        #expect(!controller.didCancelForTesting)
+        #expect(window.isVisible)
+
+        pendingCompletion?(.failure(.userCancelled))
+
+        #expect(!controller.isBusyForTesting)
+        #expect(window.isVisible)
+        #expect(controller.valuesForTesting.new == "new-password")
+        #expect(controller.valuesForTesting.confirmation == "new-password")
+
+        controller.cancelForTesting()
+        #expect(!window.isVisible)
+        #expect(controller.valuesForTesting.new.isEmpty)
+        #expect(controller.valuesForTesting.confirmation.isEmpty)
+    }
+
+    @Test(arguments: [PasswordVaultError.userCancelled, .authenticationFailed])
+    func forceResetAuthenticationFailureKeepsSheetOpenAndSecretsUntilClose(
+        error: PasswordVaultError
+    ) throws {
+        let controller = PasswordVaultForceResetSheetController { _, completion in
+            completion(.failure(error))
+        }
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        controller.setAcknowledgementForTesting(true)
+
+        controller.submitForTesting()
+
+        #expect(window.isVisible)
+        #expect(controller.valuesForTesting.new == "new-password")
+        #expect(controller.valuesForTesting.confirmation == "new-password")
+
+        controller.cancelForTesting()
+
+        #expect(!window.isVisible)
+        #expect(controller.valuesForTesting.new.isEmpty)
+        #expect(controller.valuesForTesting.confirmation.isEmpty)
+    }
+
+    @Test(arguments: [
+        PasswordVaultForcedResetOutcome(
+            localArchiveDigest: "archive-local",
+            oneDriveReplacementPending: false,
+            warnings: []
+        ),
+        PasswordVaultForcedResetOutcome(
+            localArchiveDigest: "archive-pending",
+            oneDriveReplacementPending: true,
+            warnings: [.systemUnlockDisabled]
+        )
+    ])
+    func forceResetSuccessClosesClearsSecretsAndReportsOneDriveState(
+        outcome: PasswordVaultForcedResetOutcome
+    ) throws {
+        var reportedOutcome: PasswordVaultForcedResetOutcome?
+        let controller = PasswordVaultForceResetSheetController(
+            forceReset: { _, completion in completion(.success(outcome)) },
+            onSuccess: { reportedOutcome = $0 }
+        )
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        controller.setValuesForTesting(new: "new-password", confirmation: "new-password")
+        controller.setAcknowledgementForTesting(true)
+
+        controller.submitForTesting()
+
+        #expect(!window.isVisible)
+        #expect(controller.valuesForTesting.new.isEmpty)
+        #expect(controller.valuesForTesting.confirmation.isEmpty)
+        #expect(reportedOutcome == outcome)
+        #expect(reportedOutcome?.oneDriveReplacementPending == outcome.oneDriveReplacementPending)
+    }
+}
+
+private func localizedPasswordVaultString(_ key: String, localeIdentifier: String) -> String {
+    let appBundle = Bundle(for: PasswordVaultUIController.self)
+    guard
+        let localizationPath = appBundle.path(forResource: localeIdentifier, ofType: "lproj"),
+        let data = try? Data(contentsOf: URL(fileURLWithPath: localizationPath)
+            .appendingPathComponent("Localizable.strings")),
+        let strings = try? PropertyListSerialization.propertyList(from: data, format: nil)
+            as? [String: String]
+    else {
+        return key
+    }
+
+    return strings[key] ?? key
 }
 
 @MainActor

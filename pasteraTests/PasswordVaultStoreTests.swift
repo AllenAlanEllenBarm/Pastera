@@ -73,10 +73,10 @@ struct PasswordVaultStoreTests {
         try store.unlockWithQuickKey(reason: "test")
         store.lock()
         try store.unlockForAutomation()
-        _ = try store.changeMasterPassword(
-            currentPassword: "local master",
+        _ = try store.resetMasterPassword(
             newPassword: "new local master",
-            keepQuickUnlockEnabled: true
+            keepSystemUnlockEnabled: true,
+            authorization: .testing
         )
         store.lock()
         try store.unlock(masterPassword: "new local master", rememberQuickUnlock: false)

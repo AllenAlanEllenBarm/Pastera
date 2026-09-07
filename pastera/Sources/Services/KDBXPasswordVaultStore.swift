@@ -2,12 +2,21 @@ import CryptoKit
 import Foundation
 import KDBXKit
 
+// swiftlint:disable file_length
+
 final class VaultFileCoordinator {
     static func vaultURL(for syncRootURL: URL) -> URL {
         syncRootURL
             .appendingPathComponent("PasteraSync", isDirectory: true)
             .appendingPathComponent("vault", isDirectory: true)
             .appendingPathComponent("PasteraVault.kdbx", isDirectory: false)
+    }
+
+    static func latestForcedResetArchiveURL(for syncRootURL: URL) -> URL {
+        vaultURL(for: syncRootURL)
+            .deletingLastPathComponent()
+            .appendingPathComponent("recovery", isDirectory: true)
+            .appendingPathComponent("PasteraVault-latest.kdbx", isDirectory: false)
     }
 
     private let fileManager: FileManager
@@ -63,12 +72,20 @@ final class VaultFileCoordinator {
     }
 }
 
+private struct CommittedForcedResetPersistence {
+    let data: Data
+    let archiveDigest: String
+    let cleanupOutcome: VaultForcedResetCleanupOutcome
+}
+
+// swiftlint:disable:next type_body_length
 final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess {
     private let localStorage: PasswordVaultLocalStoring
     private let coordinator = VaultFileCoordinator()
     private let unlockKeyStore: VaultUnlockKeyStoring
     private let automationUnlockKeyStore: VaultAutomationUnlockKeyStoring
     private let rekeyTransaction: VaultArtifactRekeyTransaction
+    private let forcedResetTransaction: VaultForcedResetTransaction
     private let merger = KDBXVaultMerger()
     private let now: () -> Date
     private let autoLockTimeoutProvider: () -> TimeInterval
@@ -78,11 +95,29 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
     private let sessionExecutorLock = NSLock()
     private var sessionExecutor: VaultAgentSerialExecutor?
     private var sessionStateChange: (() -> Void)?
+    private var forcedResetRequiresRecovery = false
+    private var lastForcedResetRecoveryResult: PasswordVaultForcedResetRecoveryResult?
     private let sessionNotificationCenter: NotificationCenter?
     private var commitObserver: (PasswordVaultCommit) -> Void = { _ in }
     private(set) var state: PasswordVaultState
+    var requiresForcedResetRecovery: Bool {
+        forcedResetRequiresRecovery
+            || forcedResetTransaction.hasRecoveryMarker(
+                at: localStorage.paths.forcedResetRecoveryMarkerURL
+            )
+    }
     var canQuickUnlock: Bool { unlockKeyStore.containsKey }
     var canAutomationUnlock: Bool { automationUnlockKeyStore.containsKey }
+    var masterPasswordResetCapability: PasswordVaultMasterPasswordResetCapability {
+        switch state {
+        case .locked, .unlocking, .unlocked, .readOnlyWarning:
+            return unlockData != nil || canQuickUnlock || canAutomationUnlock
+                ? .preservesData
+                : .requiresForcedReset
+        case .notConfigured, .preparingLocalCopy, .localCopyUnavailable, .recoveryRequired, .failed:
+            return .unavailable
+        }
+    }
     private lazy var sessionController = VaultSessionController(
         timeoutProvider: autoLockTimeoutProvider,
         notificationCenter: sessionNotificationCenter,
@@ -94,6 +129,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         unlockKeyStore: VaultUnlockKeyStoring = VaultUnlockKeyStore(),
         automationUnlockKeyStore: VaultAutomationUnlockKeyStoring = VaultAutomationUnlockKeyStore(),
         rekeyTransaction: VaultArtifactRekeyTransaction = VaultArtifactRekeyTransaction(),
+        forcedResetTransaction: VaultForcedResetTransaction = VaultForcedResetTransaction(),
         sessionNotificationCenter: NotificationCenter? = nil,
         autoLockTimeoutProvider: @escaping () -> TimeInterval = {
             VaultSessionController.resolvedTimeout(defaults: .standard)
@@ -104,17 +140,44 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         self.unlockKeyStore = unlockKeyStore
         self.automationUnlockKeyStore = automationUnlockKeyStore
         self.rekeyTransaction = rekeyTransaction
+        self.forcedResetTransaction = forcedResetTransaction
         self.sessionNotificationCenter = sessionNotificationCenter
         self.autoLockTimeoutProvider = autoLockTimeoutProvider
         self.now = now
-        do {
-            state = try localStorage.containsVault() ? .locked : .notConfigured
-        } catch {
-            state = .localCopyUnavailable(.localWriteFailed)
+        state = .recoveryRequired("forced-reset-cleanup")
+        if forcedResetTransaction.hasRecoveryMarker(at: localStorage.paths.forcedResetRecoveryMarkerURL) {
+            do {
+                let recovery = try localStorage.withExclusiveTransaction {
+                    try forcedResetTransaction.recover(
+                        activeURL: localStorage.paths.vaultURL,
+                        archiveURL: localStorage.paths.latestForcedResetArchiveURL,
+                        recoveryMarkerURL: localStorage.paths.forcedResetRecoveryMarkerURL,
+                        managedArtifactURLs: {
+                            try rekeyTransaction.managedArtifactURLs(in: localStorage.paths)
+                        },
+                        beforeCommittedCompletion: {
+                            try deleteStaleForcedResetQuickUnlockKey()
+                        }
+                    )
+                }
+                lastForcedResetRecoveryResult = recovery
+                forcedResetRequiresRecovery = false
+                state = (try? localStorage.containsVault()) == true ? .locked : .notConfigured
+            } catch {
+                forcedResetRequiresRecovery = true
+                state = .recoveryRequired("forced-reset-cleanup")
+            }
+        } else {
+            do {
+                state = try localStorage.containsVault() ? .locked : .notConfigured
+            } catch {
+                state = .localCopyUnavailable(.localWriteFailed)
+            }
         }
     }
 
     func createDatabase(masterPassword: String, rememberQuickUnlock: Bool) throws {
+        try requireForcedResetSafety()
         guard !masterPassword.isEmpty else { throw PasswordVaultError.invalidPassword }
         let unlock = UnlockData(masterPassword: masterPassword)
         var newContent = KDBXContent.makeEmpty(databaseName: "Pastera", generator: "Pastera")
@@ -145,6 +208,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
     }
 
     func unlock(masterPassword: String, rememberQuickUnlock: Bool) throws {
+        try requireForcedResetSafety()
         state = .unlocking
         let unlock = UnlockData(masterPassword: masterPassword)
         do {
@@ -168,6 +232,7 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
     }
 
     func unlockWithQuickKey(reason: String) throws {
+        try requireForcedResetSafety()
         state = .unlocking
         do {
             let unlock = UnlockData(rawKeyData: try unlockKeyStore.load(reason: reason))
@@ -203,6 +268,12 @@ final class KDBXPasswordVaultStore: PasswordVaultStore, PasswordVaultSyncAccess 
         content = nil
         unlockData = nil
         lastRevision = nil
+        if requiresForcedResetRecovery {
+            forcedResetRequiresRecovery = true
+            state = .recoveryRequired("forced-reset-cleanup")
+            onStateChange?()
+            return
+        }
         do {
             state = try localStorage.containsVault() ? .locked : .notConfigured
         } catch {
@@ -512,6 +583,65 @@ extension KDBXPasswordVaultStore {
         return PasswordVaultEncryptedSnapshot(data: data, digest: PasswordVaultDigest.hex(data))
     }
 
+    func retryForcedResetRecovery() throws -> PasswordVaultForcedResetRecoveryResult {
+        let binding = sessionBinding()
+        guard let executor = binding.executor else {
+            return try retryForcedResetRecovery(onStateChange: nil)
+        }
+        return try executor.sync {
+            try retryForcedResetRecovery(onStateChange: binding.onStateChange)
+        }
+    }
+
+    private func retryForcedResetRecovery(
+        onStateChange: (() -> Void)?
+    ) throws -> PasswordVaultForcedResetRecoveryResult {
+        guard requiresForcedResetRecovery else {
+            guard let lastForcedResetRecoveryResult else {
+                throw PasswordVaultForcedResetError.recoveryRequired
+            }
+            return lastForcedResetRecoveryResult
+        }
+        do {
+            let result = try withLocalTransaction {
+                try forcedResetTransaction.recover(
+                    activeURL: localStorage.paths.vaultURL,
+                    archiveURL: localStorage.paths.latestForcedResetArchiveURL,
+                    recoveryMarkerURL: localStorage.paths.forcedResetRecoveryMarkerURL,
+                    managedArtifactURLs: {
+                        try rekeyTransaction.managedArtifactURLs(in: localStorage.paths)
+                    },
+                    beforeCommittedCompletion: {
+                        try deleteStaleForcedResetQuickUnlockKey()
+                    }
+                )
+            }
+            lastForcedResetRecoveryResult = result
+            forcedResetRequiresRecovery = false
+            sessionController.cancel()
+            content = nil
+            unlockData = nil
+            lastRevision = nil
+            state = try localStorage.containsVault() ? .locked : .notConfigured
+            if case let .committed(newDigest) = result,
+               let data = try? localStorage.read(),
+               PasswordVaultDigest.hex(data) == newDigest {
+                publishCommit(data: data, origin: .forcedReset)
+            }
+            onStateChange?()
+            return result
+        } catch {
+            forcedResetRequiresRecovery = true
+            sessionController.cancel()
+            content = nil
+            unlockData = nil
+            lastRevision = nil
+            state = .recoveryRequired("forced-reset-cleanup")
+            onStateChange?()
+            throw PasswordVaultForcedResetError.recoveryRequired
+        }
+    }
+
     func mergeRemoteSnapshot(
         _ remoteData: Data,
         remoteMasterPassword: String?
@@ -644,24 +774,350 @@ extension KDBXPasswordVaultStore {
         try unlockKeyStore.save(data)
     }
 
-    func changeMasterPassword(
-        currentPassword: String,
+    func forceReset(
         newPassword: String,
-        keepQuickUnlockEnabled: Bool
-    ) throws -> PasswordVaultMasterPasswordChangeResult {
-        guard !currentPassword.isEmpty, !newPassword.isEmpty else {
-            throw PasswordVaultError.invalidPassword
+        rememberSystemUnlock: Bool
+    ) throws -> PasswordVaultForcedResetResult {
+        let binding = sessionBinding()
+        guard let executor = binding.executor else {
+            return try forceReset(
+                newPassword: newPassword,
+                rememberSystemUnlock: rememberSystemUnlock,
+                onStateChange: nil
+            )
         }
+        return try executor.sync {
+            try forceReset(
+                newPassword: newPassword,
+                rememberSystemUnlock: rememberSystemUnlock,
+                onStateChange: binding.onStateChange
+            )
+        }
+    }
+
+    private func forceReset(
+        newPassword: String,
+        rememberSystemUnlock: Bool,
+        onStateChange: (() -> Void)?
+    ) throws -> PasswordVaultForcedResetResult {
+        try requireForcedResetSafety()
+        guard !newPassword.isEmpty else { throw PasswordVaultError.invalidPassword }
+        lastForcedResetRecoveryResult = nil
+        let originalState = state
+        let originalContent = content
+        let originalUnlockData = unlockData
+        let originalRevision = lastRevision
+        let newUnlock = UnlockData(masterPassword: newPassword)
+        var newContent = KDBXContent.makeEmpty(databaseName: "Pastera", generator: "Pastera")
+        newContent.database.meta.historyMaxItems = .value(10)
+        var committedPersistence: CommittedForcedResetPersistence?
+
+        let persistence: CommittedForcedResetPersistence
+        do {
+            persistence = try withLocalTransaction {
+                try requireForcedResetSafety()
+                // Revocation is deliberately before the first possible vault-byte mutation.
+                do {
+                    try automationUnlockKeyStore.delete()
+                } catch let error as PasswordVaultError {
+                    throw error
+                } catch {
+                    throw PasswordVaultError.keychainUnavailable
+                }
+                let managedArtifacts = try rekeyTransaction.managedArtifactURLs(in: localStorage.paths)
+                let newData = try encoded(newContent, unlockData: newUnlock)
+                let reset = try forcedResetTransaction.replace(
+                    activeURL: localStorage.paths.vaultURL,
+                    archiveURL: localStorage.paths.latestForcedResetArchiveURL,
+                    recoveryMarkerURL: localStorage.paths.forcedResetRecoveryMarkerURL,
+                    newVaultData: newData
+                ) { _, data in
+                    _ = try KDBXReader.parse(data, unlockData: newUnlock)
+                }
+                let staleArtifacts = managedArtifacts.filter {
+                    $0.standardizedFileURL != localStorage.paths.vaultURL.standardizedFileURL
+                }
+                let staleCleanup = forcedResetTransaction.removeOrSanitize(
+                    staleArtifacts,
+                    replacementData: newData
+                ) { _, data in
+                    _ = try KDBXReader.parse(data, unlockData: newUnlock)
+                }
+                var cleanupOutcome = reset.cleanupOutcome
+                cleanupOutcome.combine(with: staleCleanup)
+                let committed = CommittedForcedResetPersistence(
+                    data: newData,
+                    archiveDigest: reset.localArchiveDigest,
+                    cleanupOutcome: cleanupOutcome
+                )
+                committedPersistence = committed
+                try deleteStaleForcedResetQuickUnlockKey()
+                forcedResetTransaction.clearRecoveryMarkerIfSafe(
+                    at: localStorage.paths.forcedResetRecoveryMarkerURL,
+                    cleanupOutcome: cleanupOutcome
+                )
+                return committed
+            }
+        } catch {
+            if let committedPersistence {
+                let recoveryReason = committedPersistence.cleanupOutcome == .requiresRecovery
+                    || forcedResetTransaction.hasRecoveryMarker(
+                        at: localStorage.paths.forcedResetRecoveryMarkerURL
+                    )
+                    ? "forced-reset-cleanup"
+                    : nil
+                return try adoptCommittedForcedReset(
+                    committedPersistence,
+                    content: newContent,
+                    unlock: newUnlock,
+                    rememberSystemUnlock: rememberSystemUnlock,
+                    recoveryReason: recoveryReason,
+                    onStateChange: onStateChange
+                )
+            }
+            if error as? PasswordVaultForcedResetError == .recoveryRequired
+                || forcedResetTransaction.hasRecoveryMarker(
+                    at: localStorage.paths.forcedResetRecoveryMarkerURL
+                ) {
+                forcedResetRequiresRecovery = true
+                sessionController.cancel()
+                content = nil
+                unlockData = nil
+                lastRevision = nil
+                state = .recoveryRequired("forced-reset-cleanup")
+                throw PasswordVaultForcedResetError.recoveryRequired
+            }
+            restoreRekeyState(
+                originalState,
+                content: originalContent,
+                unlockData: originalUnlockData,
+                revision: originalRevision
+            )
+            if let vaultError = error as? PasswordVaultError {
+                throw vaultError
+            }
+            throw PasswordVaultError.saveFailed
+        }
+
+        let recoveryReason = persistence.cleanupOutcome == .requiresRecovery
+            || forcedResetTransaction.hasRecoveryMarker(
+                at: localStorage.paths.forcedResetRecoveryMarkerURL
+            )
+            ? "forced-reset-cleanup"
+            : nil
+        return try adoptCommittedForcedReset(
+            persistence,
+            content: newContent,
+            unlock: newUnlock,
+            rememberSystemUnlock: rememberSystemUnlock,
+            recoveryReason: recoveryReason,
+            onStateChange: onStateChange
+        )
+    }
+
+    private func requireForcedResetSafety() throws {
+        guard !forcedResetRequiresRecovery,
+              !forcedResetTransaction.hasRecoveryMarker(
+                at: localStorage.paths.forcedResetRecoveryMarkerURL
+              ) else {
+            forcedResetRequiresRecovery = true
+            state = .recoveryRequired("forced-reset-cleanup")
+            throw PasswordVaultForcedResetError.recoveryRequired
+        }
+    }
+
+    private func adoptCommittedForcedReset(
+        _ persistence: CommittedForcedResetPersistence,
+        content newContent: KDBXContent,
+        unlock newUnlock: UnlockData,
+        rememberSystemUnlock: Bool,
+        recoveryReason: String?,
+        onStateChange: (() -> Void)?
+    ) throws -> PasswordVaultForcedResetResult {
+        content = newContent
+        unlockData = newUnlock
+        lastRevision = coordinator.revision(of: persistence.data)
+        var warnings = recoveryReason == nil
+            ? refreshForcedResetSystemUnlock(
+                with: newUnlock,
+                rememberSystemUnlock: rememberSystemUnlock
+            )
+            : []
+        if persistence.cleanupOutcome == .pendingDeletion {
+            warnings.append(.resetArtifactCleanupPending)
+        }
+        let uniqueWarnings = Array(Set(warnings)).sorted { $0.rawValue < $1.rawValue }
+        let snapshot = PasswordVaultEncryptedSnapshot(
+            data: persistence.data,
+            digest: PasswordVaultDigest.hex(persistence.data)
+        )
+
+        if let recoveryReason {
+            forcedResetRequiresRecovery = true
+            state = .recoveryRequired(recoveryReason)
+            sessionController.cancel()
+        } else {
+            state = .unlocked
+            sessionController.touch()
+        }
+        publishCommit(data: persistence.data, origin: .forcedReset)
+        onStateChange?()
+        guard recoveryReason == nil else {
+            throw PasswordVaultForcedResetError.recoveryRequired
+        }
+        return PasswordVaultForcedResetResult(
+            encryptedSnapshot: snapshot,
+            localArchiveDigest: persistence.archiveDigest,
+            warnings: uniqueWarnings
+        )
+    }
+
+    private func refreshForcedResetSystemUnlock(
+        with unlock: UnlockData,
+        rememberSystemUnlock: Bool
+    ) -> [PasswordVaultForcedResetWarning] {
+        var warnings = [PasswordVaultForcedResetWarning]()
+        if rememberSystemUnlock {
+            do {
+                try remember(unlock)
+            } catch {
+                warnings.append(.systemUnlockDisabled)
+                do {
+                    try unlockKeyStore.delete()
+                } catch {
+                    warnings.append(.credentialCleanupFailed)
+                }
+            }
+        }
+        return warnings
+    }
+
+    private func deleteStaleForcedResetQuickUnlockKey() throws {
+        do {
+            try unlockKeyStore.delete()
+        } catch let error as PasswordVaultError {
+            throw error
+        } catch {
+            throw PasswordVaultError.keychainUnavailable
+        }
+    }
+
+    func resetMasterPassword(
+        newPassword: String,
+        keepSystemUnlockEnabled: Bool,
+        authorization: PasswordVaultAuthorizationContext
+    ) throws -> PasswordVaultMasterPasswordResetResult {
+        try requireForcedResetSafety()
+        guard !newPassword.isEmpty else { throw PasswordVaultError.invalidPassword }
+        let binding = sessionBinding()
+        guard let executor = binding.executor else {
+            return try resetMasterPassword(
+                newPassword: newPassword,
+                keepSystemUnlockEnabled: keepSystemUnlockEnabled,
+                authorization: authorization,
+                onStateChange: nil
+            )
+        }
+        return try executor.sync {
+            try resetMasterPassword(
+                newPassword: newPassword,
+                keepSystemUnlockEnabled: keepSystemUnlockEnabled,
+                authorization: authorization,
+                onStateChange: binding.onStateChange
+            )
+        }
+    }
+
+    private func resetMasterPassword(
+        newPassword: String,
+        keepSystemUnlockEnabled: Bool,
+        authorization: PasswordVaultAuthorizationContext,
+        onStateChange: (() -> Void)?
+    ) throws -> PasswordVaultMasterPasswordResetResult {
+        let oldUnlock = try authorizedResetUnlockData(authorization: authorization)
+        let result = try rekeyManagedArtifacts(
+            from: oldUnlock,
+            to: newPassword,
+            keepSystemUnlockEnabled: keepSystemUnlockEnabled
+        )
+        onStateChange?()
+        return result
+    }
+
+    private func authorizedResetUnlockData(
+        authorization: PasswordVaultAuthorizationContext
+    ) throws -> UnlockData {
+        if let unlockData { return unlockData }
+        if let quickUnlock = try authorizedQuickUnlockData(authorization: authorization) {
+            return quickUnlock
+        }
+        if let automationUnlock = try automationUnlockData() {
+            return automationUnlock
+        }
+        throw PasswordVaultError.resetRequiresForcedReset
+    }
+
+    private func authorizedQuickUnlockData(
+        authorization: PasswordVaultAuthorizationContext
+    ) throws -> UnlockData? {
+        guard unlockKeyStore.containsKey else { return nil }
+        do {
+            let key = try unlockKeyStore.load(
+                reason: String(localized: "Authenticate to reset the master password."),
+                authenticationContext: authorization.localAuthenticationContext
+            )
+            guard key.count == 32 else { return nil }
+            let unlock = UnlockData(rawKeyData: key)
+            return try canReadActiveVault(with: unlock) ? unlock : nil
+        } catch let error as PasswordVaultError where error == .userCancelled || error == .authenticationFailed {
+            throw error
+        } catch let error as PasswordVaultError where error == .databaseNotConfigured || error == .corruptedData {
+            throw error
+        } catch {
+            return nil
+        }
+    }
+
+    private func automationUnlockData() throws -> UnlockData? {
+        guard automationUnlockKeyStore.containsKey else { return nil }
+        do {
+            let key = try automationUnlockKeyStore.load()
+            guard key.count == 32 else { return nil }
+            let unlock = UnlockData(rawKeyData: key)
+            return try canReadActiveVault(with: unlock) ? unlock : nil
+        } catch let error as PasswordVaultError where error == .databaseNotConfigured || error == .corruptedData {
+            throw error
+        } catch {
+            return nil
+        }
+    }
+
+    private func canReadActiveVault(with unlock: UnlockData) throws -> Bool {
+        do {
+            _ = try KDBXReader.parse(try readLocalData(), unlockData: unlock)
+            return true
+        } catch KDBXReader.Error.wrongCredentials {
+            return false
+        } catch let error as PasswordVaultError {
+            throw error
+        } catch {
+            throw PasswordVaultError.corruptedData
+        }
+    }
+
+    private func rekeyManagedArtifacts(
+        from oldUnlock: UnlockData,
+        to newPassword: String,
+        keepSystemUnlockEnabled: Bool
+    ) throws -> PasswordVaultMasterPasswordResetResult {
         let originalState = state
         let originalContent = content
         let originalUnlockData = unlockData
         let originalRevision = lastRevision
         let mainURL = localStorage.paths.vaultURL
-        let oldUnlock = UnlockData(masterPassword: currentPassword)
-
         do {
             let change = try withLocalTransaction { () -> (
-                result: PasswordVaultMasterPasswordChangeResult,
+                result: PasswordVaultMasterPasswordResetResult,
                 data: Data
             ) in
                 let diskData = try readLocalDataWithinTransaction()
@@ -669,7 +1125,7 @@ extension KDBXPasswordVaultStore {
                 do {
                     diskContent = try KDBXReader.parse(diskData, unlockData: oldUnlock)
                 } catch KDBXReader.Error.wrongCredentials {
-                    throw PasswordVaultError.wrongMasterPassword
+                    throw PasswordVaultError.externalConflict
                 } catch {
                     throw PasswordVaultError.corruptedData
                 }
@@ -707,7 +1163,7 @@ extension KDBXPasswordVaultStore {
 
                 var warnings = refreshCredentials(
                     with: newUnlock,
-                    keepQuickUnlockEnabled: keepQuickUnlockEnabled
+                    keepSystemUnlockEnabled: keepSystemUnlockEnabled
                 )
                 if rekeyResult.hasPendingCleanup {
                     warnings.append(.rekeyArtifactCleanupPending)
@@ -739,7 +1195,7 @@ extension KDBXPasswordVaultStore {
                 }
                 let uniqueWarnings = Array(Set(warnings)).sorted { $0.rawValue < $1.rawValue }
                 return (
-                    PasswordVaultMasterPasswordChangeResult(warnings: uniqueWarnings),
+                    PasswordVaultMasterPasswordResetResult(warnings: uniqueWarnings),
                     replacements[0].data
                 )
             }
@@ -776,17 +1232,17 @@ extension KDBXPasswordVaultStore {
 
     private func refreshCredentials(
         with unlock: UnlockData,
-        keepQuickUnlockEnabled: Bool
-    ) -> [PasswordVaultMasterPasswordChangeWarning] {
+        keepSystemUnlockEnabled: Bool
+    ) -> [PasswordVaultMasterPasswordResetWarning] {
         let rawKey = unlock.keyDataBytes.withUnsafeBytes { Data($0) }
         let hadAutomationUnlock = automationUnlockKeyStore.containsKey
-        var warnings = [PasswordVaultMasterPasswordChangeWarning]()
+        var warnings = [PasswordVaultMasterPasswordResetWarning]()
 
-        if keepQuickUnlockEnabled {
+        if keepSystemUnlockEnabled {
             do {
                 try unlockKeyStore.save(rawKey)
             } catch {
-                warnings.append(.quickUnlockDisabled)
+                warnings.append(.systemUnlockDisabled)
                 do {
                     try unlockKeyStore.delete()
                 } catch {
@@ -827,6 +1283,12 @@ private extension PasswordVaultState {
 extension KDBXPasswordVaultStore {
     func prepareLocalCopy(using migrator: PasswordVaultMigrating) {
         let onStateChange = sessionBinding().onStateChange
+        guard !requiresForcedResetRecovery else {
+            forcedResetRequiresRecovery = true
+            state = .recoveryRequired("forced-reset-cleanup")
+            onStateChange?()
+            return
+        }
         state = .preparingLocalCopy
         onStateChange?()
         do {
@@ -861,6 +1323,7 @@ extension KDBXPasswordVaultStore {
     }
 
     func unlockForAutomation() throws {
+        try requireForcedResetSafety()
         sessionController.cancel()
         content = nil
         unlockData = nil

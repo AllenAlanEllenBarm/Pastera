@@ -8,4 +8,14 @@ struct PasswordVaultSecuritySettingsState: Equatable {
     let autoLockInterval: TimeInterval
     let quickUnlockEnabled: Bool
     let quickUnlockAvailable: Bool
+    // swiftlint:disable:next inclusive_language
+    let masterPasswordResetCapability: PasswordVaultMasterPasswordResetCapability
+    let forcedResetPending: Bool
+    let forcedResetPendingFailure: PasswordVaultSyncFailure?
+}
+
+struct PasswordVaultForcedResetOutcome: Equatable {
+    let localArchiveDigest: String
+    let oneDriveReplacementPending: Bool
+    let warnings: [PasswordVaultForcedResetWarning]
 }

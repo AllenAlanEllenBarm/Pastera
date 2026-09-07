@@ -129,6 +129,70 @@ struct PasswordVaultMenuTests {
         #expect(retryCount == 1)
     }
 
+    @Test("forced-reset recovery stays inline, hides internal reasons, and retries once")
+    func forcedResetRecoveryIsAnInlineAction() throws {
+        let state = PasswordVaultState.recoveryRequired("forced-reset-cleanup")
+        var retryCount = 0
+        var pendingCompletion: ((
+            Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>
+        ) -> Void)?
+        let controller = makeVaultController(
+            state: { state },
+            folders: { [] },
+            retryForcedResetRecovery: { completion in
+                retryCount += 1
+                pendingCompletion = completion
+            }
+        )
+        controller.openPasswordVaultFromMainMenu()
+        controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
+
+        #expect(!controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "Local Recovery Required")
+        ))
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "OneDrive sync is paused during local recovery, and the cloud vault will not be replaced.")
+        ))
+        #expect(!controller.vaultInlinePageTextsForTesting.joined().contains("forced-reset-cleanup"))
+        #expect(controller.mainMenuButtonIdentifiersForTesting.contains(
+            "passwordVaultLocalRecoveryRetry"
+        ))
+
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultLocalRecoveryRetry")
+        controller.performMainMenuButtonClickForTesting(identifier: "passwordVaultLocalRecoveryRetry")
+        #expect(retryCount == 1)
+
+        pendingCompletion?(.failure(.recoveryRequired))
+        #expect(controller.vaultInlinePageTextsForTesting.contains(
+            String(localized:
+                "Local recovery is not complete. OneDrive sync remains paused. You can safely try again."
+            )
+        ))
+        #expect(!controller.vaultInlinePageTextsForTesting.contains(
+            String(localized: "Local Recovery Required")
+        ))
+        #expect(!controller.vaultInlinePageTextsForTesting.joined().contains("forced-reset-cleanup"))
+        #expect(state == .recoveryRequired("forced-reset-cleanup"))
+        let contentFrame = try #require(controller.mainMenuEmbeddedSectionFramesForTesting?["content"])
+        let actionFrame = try #require(controller.mainMenuButtonFrameForTesting(
+            identifier: "passwordVaultLocalRecoveryRetry"
+        ))
+        let actionTopGap = contentFrame.maxY - actionFrame.maxY
+        #expect(actionTopGap <= 140)
+        #expect(controller.vaultInlineActionsFitViewportForTesting)
+
+        let outputDirectory = URL(
+            fileURLWithPath: "/tmp/pastera-password-vault-task8",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        try controller.mainMenuSnapshotPNGForTesting().write(
+            to: outputDirectory.appendingPathComponent("main-menu-local-recovery.png"),
+            options: .atomic
+        )
+    }
+
     @Test("a locked vault unlocks inside the main content area")
     func lockedVaultUsesEmbeddedUnlockForm() {
         let folder = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)
@@ -1527,6 +1591,9 @@ struct PasswordVaultMenuTests {
             completion(.failure(.keychainUnavailable))
         },
         retryLocalPreparation: @escaping () -> Void = {},
+        retryForcedResetRecovery: @escaping (
+            @escaping (Result<PasswordVaultForcedResetRecoveryResult, PasswordVaultError>) -> Void
+        ) -> Void = { completion in completion(.failure(.recoveryRequired)) },
         syncDataSource: MainMenuPasswordVaultSyncDataSource? = nil,
         oneDriveStatusService: OneDriveProcessStatusServicing = PasswordVaultMenuOneDriveProcessStatusService(
             status: .notInstalled
@@ -1547,6 +1614,7 @@ struct PasswordVaultMenuTests {
                 createDatabase: createDatabase,
                 unlock: unlock, unlockWithQuickKey: unlockWithQuickKey,
                 retryLocalPreparation: retryLocalPreparation,
+                retryForcedResetRecovery: retryForcedResetRecovery,
                 fetchFolders: folders, fetchEntries: { [] },
                 copyPassword: { _, completion in completion(.success(())) },
                 loadDraft: { _, completion in completion(.failure(.entryNotFound)) },
@@ -1644,8 +1712,11 @@ private func waitUntil(
 }
 
 private final class AllowPasswordVaultAuthorizer: PasswordVaultAuthorizing {
-    func authorize(reason: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
-        completion(.success(()))
+    func authorize(
+        reason: String,
+        completion: @escaping (Result<PasswordVaultAuthorizationContext, PasswordVaultError>) -> Void
+    ) {
+        completion(.success(.testing))
     }
 }
 

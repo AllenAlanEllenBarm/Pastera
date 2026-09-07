@@ -1,6 +1,10 @@
 import Foundation
 import Testing
 @testable import Pastera
+
+// Cloud replica coverage stays co-located so active and archive I/O share one fixture.
+// swiftlint:disable file_length
+
 @Suite("Password vault OneDrive cloud replica", .serialized)
 struct PasswordVaultCloudReplicaTests {
     private let signature = Data([0x03, 0xD9, 0xA2, 0x9A, 0x67, 0xFB, 0x4B, 0xB5])
@@ -353,6 +357,281 @@ extension PasswordVaultCloudReplicaTests {
     }
 }
 
+extension PasswordVaultCloudReplicaTests {
+    @Test("first forced-reset archive write creates and verifies the latest slot")
+    func firstForcedResetArchiveWriteCreatesLatestSlot() throws {
+        try withCloudRoot { rootURL in
+            let data = kdbxData("first-remote-generation")
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+
+            let digest = try OneDrivePasswordVaultCloudReplica()
+                .writeLatestForcedResetArchiveAtomically(data, rootURL: rootURL, expecting: .absent)
+            let loadedSnapshot = try OneDrivePasswordVaultCloudReplica()
+                .readLatestForcedResetArchive(rootURL: rootURL)
+            let snapshot = try #require(loadedSnapshot)
+            let remainingTemporaryFiles = try temporaryFiles(alongside: targetURL)
+
+            #expect(targetURL.path.hasSuffix("/recovery/PasteraVault-latest.kdbx"))
+            #expect(snapshot.data == data)
+            #expect(snapshot.digest == digest)
+            #expect(digest == PasswordVaultDigest.hex(data))
+            #expect(remainingTemporaryFiles.isEmpty)
+        }
+    }
+
+    @Test("a later forced-reset archive atomically replaces the single latest slot")
+    func laterForcedResetReplacesSingleLatestArchive() throws {
+        try withCloudRoot { rootURL in
+            let first = kdbxData("first-remote-generation")
+            let second = kdbxData("second-remote-generation")
+            let replica = OneDrivePasswordVaultCloudReplica()
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+
+            let firstDigest = try replica.writeLatestForcedResetArchiveAtomically(
+                first,
+                rootURL: rootURL,
+                expecting: .absent
+            )
+            _ = try replica.writeLatestForcedResetArchiveAtomically(
+                second,
+                rootURL: rootURL,
+                expecting: .digest(firstDigest)
+            )
+
+            let recoveryContents = try FileManager.default.contentsOfDirectory(
+                at: targetURL.deletingLastPathComponent(),
+                includingPropertiesForKeys: nil
+            )
+            #expect(try Data(contentsOf: targetURL) == second)
+            #expect(recoveryContents.map(\.lastPathComponent) == ["PasteraVault-latest.kdbx"])
+        }
+    }
+
+    @Test("forced-reset archive rejects non-KDBX bytes before creating recovery storage")
+    func forcedResetArchiveRejectsInvalidSignature() throws {
+        try withCloudRoot { rootURL in
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+
+            #expect(throws: PasswordVaultSyncFailure.remoteCorrupted) {
+                try OneDrivePasswordVaultCloudReplica().writeLatestForcedResetArchiveAtomically(
+                    Data("not-a-kdbx".utf8),
+                    rootURL: rootURL,
+                    expecting: .absent
+                )
+            }
+
+            #expect(!FileManager.default.fileExists(atPath: targetURL.deletingLastPathComponent().path))
+        }
+    }
+
+    @Test("forced-reset archive readback digest mismatch fails verification")
+    func forcedResetArchiveReadbackMismatchFailsVerification() throws {
+        try withCloudRoot { rootURL in
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+            let expected = kdbxData("expected-archive")
+            var mismatched = expected
+            mismatched[mismatched.index(before: mismatched.endIndex)] ^= 0x01
+            var operations = PasswordVaultCloudFileOperations.live
+            let liveRead = operations.readData
+            operations.readData = { url in
+                if url.standardizedFileURL == targetURL.standardizedFileURL {
+                    return mismatched
+                }
+                return try liveRead(url)
+            }
+
+            #expect(throws: PasswordVaultSyncFailure.remoteVerificationFailed) {
+                try OneDrivePasswordVaultCloudReplica(operations: operations)
+                    .writeLatestForcedResetArchiveAtomically(
+                        expected,
+                        rootURL: rootURL,
+                        expecting: .absent
+                    )
+            }
+            let remainingTemporaryFiles = try temporaryFiles(alongside: targetURL)
+            #expect(remainingTemporaryFiles.isEmpty)
+        }
+    }
+
+    @Test("stale forced-reset archive expectation preserves the newer archive")
+    func staleForcedResetArchiveExpectationPreservesNewerArchive() throws {
+        try withCloudRoot { rootURL in
+            let observed = kdbxData("observed-archive")
+            let newer = kdbxData("newer-archive")
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+            try FileManager.default.createDirectory(
+                at: targetURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try newer.write(to: targetURL)
+
+            #expect(throws: PasswordVaultSyncFailure.remoteVerificationFailed) {
+                try OneDrivePasswordVaultCloudReplica().writeLatestForcedResetArchiveAtomically(
+                    self.kdbxData("must-not-replace-newer-archive"),
+                    rootURL: rootURL,
+                    expecting: .digest(PasswordVaultDigest.hex(observed))
+                )
+            }
+
+            #expect(try Data(contentsOf: targetURL) == newer)
+            let remainingTemporaryFiles = try temporaryFiles(alongside: targetURL)
+            #expect(remainingTemporaryFiles.isEmpty)
+        }
+    }
+
+    @Test("failed forced-reset archive staging removes its owned temporary file")
+    func forcedResetArchiveStageFailureCleansTemporaryFile() throws {
+        try withCloudRoot { rootURL in
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+            var operations = PasswordVaultCloudFileOperations.live
+            operations.writeData = { _, _ in throw CloudReplicaFixtureError.writeFailed }
+
+            #expect(throws: PasswordVaultSyncFailure.remoteWriteFailed) {
+                try OneDrivePasswordVaultCloudReplica(operations: operations)
+                    .writeLatestForcedResetArchiveAtomically(
+                        self.kdbxData("archive-stage-failure"),
+                        rootURL: rootURL,
+                        expecting: .absent
+                    )
+            }
+
+            let remainingTemporaryFiles = try temporaryFiles(alongside: targetURL)
+            #expect(remainingTemporaryFiles.isEmpty)
+        }
+    }
+
+    @Test("partial archive staging cleanup failure is bounded and recovers without deleting the archive")
+    func partialArchiveStageCleanupFailureDoesNotAccumulateTemporaryFiles() throws {
+        try withCloudRoot { rootURL in
+            let original = kdbxData("original-archive")
+            let replacement = kdbxData("replacement-archive")
+            let targetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+            try FileManager.default.createDirectory(
+                at: targetURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try original.write(to: targetURL)
+
+            var shouldFailStageWrite = true
+            var shouldFailStageRemoval = true
+            var removedURLs = [URL]()
+            var operations = PasswordVaultCloudFileOperations.live
+            let liveWrite = operations.writeData
+            let liveRemove = operations.removeItem
+            operations.writeData = { data, url in
+                guard url.lastPathComponent.hasPrefix(".PasteraVault-latest") else {
+                    try liveWrite(data, url)
+                    return
+                }
+                if shouldFailStageWrite {
+                    try liveWrite(Data(data.prefix(data.count / 2)), url)
+                    throw CloudReplicaFixtureError.writeFailed
+                }
+                try liveWrite(data, url)
+            }
+            operations.removeItem = { url in
+                removedURLs.append(url)
+                if url.lastPathComponent.hasPrefix(".PasteraVault-latest"),
+                   shouldFailStageRemoval {
+                    throw CloudReplicaFixtureError.removeFailed
+                }
+                try liveRemove(url)
+            }
+            let replica = OneDrivePasswordVaultCloudReplica(operations: operations)
+
+            #expect(throws: PasswordVaultSyncFailure.remoteWriteFailed) {
+                try replica.writeLatestForcedResetArchiveAtomically(
+                    replacement,
+                    rootURL: rootURL,
+                    expecting: .digest(PasswordVaultDigest.hex(original))
+                )
+            }
+            #expect(try Data(contentsOf: targetURL) == original)
+            #expect(try temporaryFiles(alongside: targetURL).count == 1)
+
+            shouldFailStageWrite = false
+            shouldFailStageRemoval = false
+            _ = try replica.writeLatestForcedResetArchiveAtomically(
+                replacement,
+                rootURL: rootURL,
+                expecting: .digest(PasswordVaultDigest.hex(original))
+            )
+
+            let recoveryContents = try FileManager.default.contentsOfDirectory(
+                at: targetURL.deletingLastPathComponent(),
+                includingPropertiesForKeys: nil
+            )
+            #expect(recoveryContents.map(\.lastPathComponent) == ["PasteraVault-latest.kdbx"])
+            #expect(try Data(contentsOf: targetURL) == replacement)
+            #expect(!removedURLs.contains { $0.standardizedFileURL == targetURL.standardizedFileURL })
+        }
+    }
+
+    @Test("active and archive own distinct deterministic stages and active cleanup is observable")
+    func activeAndArchiveUseDistinctDeterministicStages() throws {
+        try withCloudRoot { rootURL in
+            let activeOriginal = kdbxData("active-original")
+            let activeReplacement = kdbxData("active-replacement")
+            let archive = kdbxData("archive")
+            let activeTargetURL = try writeCloudVault(activeOriginal, rootURL: rootURL)
+            let archiveTargetURL = VaultFileCoordinator.latestForcedResetArchiveURL(for: rootURL)
+            var shouldFailStageWrite = true
+            var shouldFailStageRemoval = true
+            var stageWriteURLs = [URL]()
+            var operations = PasswordVaultCloudFileOperations.live
+            let liveWrite = operations.writeData
+            let liveRemove = operations.removeItem
+            operations.writeData = { data, url in
+                stageWriteURLs.append(url)
+                if shouldFailStageWrite {
+                    try liveWrite(Data(data.prefix(data.count / 2)), url)
+                    throw CloudReplicaFixtureError.writeFailed
+                }
+                try liveWrite(data, url)
+            }
+            operations.removeItem = { url in
+                if shouldFailStageRemoval {
+                    throw CloudReplicaFixtureError.removeFailed
+                }
+                try liveRemove(url)
+            }
+            let replica = OneDrivePasswordVaultCloudReplica(operations: operations)
+
+            #expect(throws: PasswordVaultSyncFailure.remoteWriteFailed) {
+                try replica.writeAtomically(
+                    activeReplacement,
+                    rootURL: rootURL,
+                    expecting: .digest(PasswordVaultDigest.hex(activeOriginal))
+                )
+            }
+            #expect(try temporaryFiles(alongside: activeTargetURL).count == 1)
+
+            shouldFailStageWrite = false
+            shouldFailStageRemoval = false
+            _ = try replica.writeAtomically(
+                activeReplacement,
+                rootURL: rootURL,
+                expecting: .digest(PasswordVaultDigest.hex(activeOriginal))
+            )
+            _ = try replica.writeLatestForcedResetArchiveAtomically(
+                archive,
+                rootURL: rootURL,
+                expecting: .absent
+            )
+
+            let firstActiveStage = try #require(stageWriteURLs.first)
+            let retriedActiveStage = try #require(stageWriteURLs.dropFirst().first)
+            let archiveStage = try #require(stageWriteURLs.last)
+            #expect(firstActiveStage.lastPathComponent == ".PasteraVault.kdbx.pastera-stage")
+            #expect(retriedActiveStage == firstActiveStage)
+            #expect(archiveStage.lastPathComponent == ".PasteraVault-latest.kdbx.pastera-stage")
+            #expect(archiveStage != firstActiveStage)
+            #expect(try temporaryFiles(alongside: activeTargetURL).isEmpty)
+            #expect(try temporaryFiles(alongside: archiveTargetURL).isEmpty)
+        }
+    }
+}
+
 private extension PasswordVaultCloudReplicaTests {
 
     func kdbxData(_ payload: String) -> Data {
@@ -381,7 +660,10 @@ private extension PasswordVaultCloudReplicaTests {
         try FileManager.default.contentsOfDirectory(
             at: targetURL.deletingLastPathComponent(),
             includingPropertiesForKeys: nil
-        ).filter { $0.lastPathComponent.hasPrefix(".PasteraVault-") && $0.pathExtension == "tmp" }
+        ).filter {
+            $0.lastPathComponent.hasPrefix(".PasteraVault")
+                && ($0.pathExtension == "tmp" || $0.lastPathComponent.hasSuffix(".pastera-stage"))
+        }
     }
 
     func withCloudRoot(_ operation: (URL) throws -> Void) throws {
@@ -396,4 +678,7 @@ private extension PasswordVaultCloudReplicaTests {
 private enum CloudReplicaFixtureError: Error {
     case writeFailed
     case replaceFailed
+    case removeFailed
 }
+
+// swiftlint:enable file_length

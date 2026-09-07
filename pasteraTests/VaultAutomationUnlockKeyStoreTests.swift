@@ -570,22 +570,28 @@ private final class AgentAutomationUnlockKeyStore: VaultAutomationUnlockKeyStori
 }
 
 private final class AgentCountingAuthorizer: PasswordVaultAuthorizing {
-    private let result: Result<Void, PasswordVaultError>
+    private let result: Result<PasswordVaultAuthorizationContext, PasswordVaultError>
     private(set) var callCount = 0
 
-    init(result: Result<Void, PasswordVaultError>) {
+    init(result: Result<PasswordVaultAuthorizationContext, PasswordVaultError>) {
         self.result = result
     }
 
-    func authorize(reason: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
+    func authorize(
+        reason: String,
+        completion: @escaping (Result<PasswordVaultAuthorizationContext, PasswordVaultError>) -> Void
+    ) {
         callCount += 1
         completion(result)
     }
 }
 
 private final class AgentAllowAuthorizer: PasswordVaultAuthorizing {
-    func authorize(reason: String, completion: @escaping (Result<Void, PasswordVaultError>) -> Void) {
-        completion(.success(()))
+    func authorize(
+        reason: String,
+        completion: @escaping (Result<PasswordVaultAuthorizationContext, PasswordVaultError>) -> Void
+    ) {
+        completion(.success(.testing))
     }
 }
 

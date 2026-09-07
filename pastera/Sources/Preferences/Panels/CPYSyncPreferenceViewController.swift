@@ -733,7 +733,7 @@ private extension CPYSyncPreferenceViewController {
                 symbolName: "exclamationmark.triangle.fill",
                 tintColor: .systemOrange
             )
-        case .failed, .disabled:
+        case .failed, .disabled, .pendingForcedReset:
             return PasteraVaultSyncPresentation(
                 text: pasteraPreferenceString("OneDrive sync needs attention"),
                 detail: pendingDetail,

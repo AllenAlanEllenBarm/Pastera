@@ -10,6 +10,9 @@ protocol PasswordVaultSyncControlling: AnyObject {
     func removeObserver(_ identifier: UUID)
     func record(_ commit: PasswordVaultCommit)
     func synchronize(reason: SyncCoordinator.Reason)
+    func prepareForcedReset(previousLocalDigest: String) throws
+    func cancelPreparedForcedReset(previousLocalDigest: String)
+    func retryForcedReset(completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void)
     // swiftlint:disable inclusive_language
     func enableOneDrive(
         rootURL: URL,
@@ -24,6 +27,12 @@ protocol PasswordVaultSyncControlling: AnyObject {
 }
 
 extension PasswordVaultSyncControlling {
+    func prepareForcedReset(previousLocalDigest: String) throws {}
+    func cancelPreparedForcedReset(previousLocalDigest: String) {}
+    func retryForcedReset(completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void) {
+        completion(.failure(.remoteUnavailable))
+    }
+
     // swiftlint:disable inclusive_language
     func retry(
         remoteMasterPassword: String,
@@ -44,7 +53,7 @@ final class PasswordVaultSyncService: PasswordVaultSyncControlling {
     private let rootURLProvider: () -> URL?
     private let rootURLSetter: (URL) -> Void
     private let rootValidator: (URL) -> PasswordVaultSyncFailure?
-    private let queue: DispatchQueue
+    private let executor: VaultAgentSerialExecutor
     private let callbackDispatcher: CallbackDispatcher
     private let now: () -> Date
 
@@ -65,7 +74,8 @@ final class PasswordVaultSyncService: PasswordVaultSyncControlling {
         callbackDispatcher: CallbackDispatcher? = nil,
         now: @escaping () -> Date = Date.init
     ) throws {
-        let metadata = try metadataStore.load()
+        let executor = VaultAgentSerialExecutor(queue: queue)
+        let metadata = try executor.sync { try metadataStore.load() }
         self.access = access
         self.metadataStore = metadataStore
         self.cloudReplica = cloudReplica
@@ -73,7 +83,7 @@ final class PasswordVaultSyncService: PasswordVaultSyncControlling {
         self.rootURLProvider = rootURLProvider
         self.rootURLSetter = rootURLSetter
         self.rootValidator = rootValidator
-        self.queue = queue
+        self.executor = executor
         self.callbackDispatcher = callbackDispatcher ?? { callback in
             DispatchQueue.main.async(execute: callback)
         }
@@ -81,10 +91,11 @@ final class PasswordVaultSyncService: PasswordVaultSyncControlling {
         self.metadata = metadata
         self.currentSnapshot = Self.makeSnapshot(
             metadata: metadata,
-            phase: metadata.mode == .localOnly ? .disabled : .syncing(.checking),
+            phase: Self.initialPhase(for: metadata),
             localVaultAvailable: Self.isLocalVaultAvailable(access.state),
             remoteVaultAvailable: nil
         )
+        reconcilePendingForcedResetForTesting()
     }
 
     var snapshot: PasswordVaultSyncSnapshot {
@@ -108,15 +119,59 @@ extension PasswordVaultSyncService {
     }
 
     func record(_ commit: PasswordVaultCommit) {
-        queue.async { [weak self] in
+        if commit.origin == .forcedReset {
+            executor.sync { recordOnQueue(commit) }
+            return
+        }
+        executor.async { [weak self] in
             self?.recordOnQueue(commit)
         }
     }
 
     func synchronize(reason: SyncCoordinator.Reason) {
-        queue.async { [weak self] in
+        executor.async { [weak self] in
             self?.synchronizeOnQueue(remotePassword: nil, completion: nil)
         }
+    }
+
+    func prepareForcedReset(previousLocalDigest: String) throws {
+        try executor.sync {
+            guard !access.requiresForcedResetRecovery else {
+                throw PasswordVaultForcedResetError.recoveryRequired
+            }
+            guard metadata.mode == .oneDrive else { return }
+            var candidate = metadata
+            candidate.pendingForcedReset = PasswordVaultPendingForcedReset(
+                previousLocalDigest: previousLocalDigest,
+                replacementLocalDigest: nil,
+                didInspectRemote: false,
+                observedRemoteDigest: nil,
+                archivedRemoteDigest: nil,
+                remoteArchiveRequired: nil
+            )
+            try save(candidate)
+            publish(phase: .pendingForcedReset(nil), remoteVaultAvailable: nil)
+        }
+    }
+
+    func cancelPreparedForcedReset(previousLocalDigest: String) {
+        executor.sync {
+            guard let pending = metadata.pendingForcedReset,
+                  pending.previousLocalDigest == previousLocalDigest,
+                  pending.replacementLocalDigest == nil else { return }
+            var candidate = metadata
+            candidate.pendingForcedReset = nil
+            do {
+                try save(candidate)
+                publish(phase: Self.initialPhase(for: candidate), remoteVaultAvailable: nil)
+            } catch {
+                publish(phase: .pendingForcedReset(.remoteUnavailable), remoteVaultAvailable: nil)
+            }
+        }
+    }
+
+    func reconcilePendingForcedResetForTesting() {
+        executor.sync { reconcilePendingForcedResetOnQueue() }
     }
 
     // swiftlint:disable inclusive_language
@@ -125,8 +180,13 @@ extension PasswordVaultSyncService {
         remoteMasterPassword: String?,
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     ) {
-        queue.async { [weak self] in
+        executor.async { [weak self] in
             guard let self else { return }
+            guard !self.access.requiresForcedResetRecovery else {
+                self.publish(phase: .failed(.remoteUnavailable), remoteVaultAvailable: nil)
+                self.complete(.failure(.remoteUnavailable), completion: completion)
+                return
+            }
             if let failure = self.rootValidator(rootURL) {
                 self.complete(.failure(failure), completion: completion)
                 return
@@ -152,10 +212,28 @@ extension PasswordVaultSyncService {
         remoteMasterPassword: String,
         completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
     ) {
-        queue.async { [weak self] in
+        executor.async { [weak self] in
             self?.synchronizeOnQueue(
                 remotePassword: remoteMasterPassword,
                 completion: completion
+            )
+        }
+    }
+
+    func retryForcedReset(
+        completion: @escaping (Result<Void, PasswordVaultSyncFailure>) -> Void
+    ) {
+        executor.async { [weak self] in
+            guard let self else { return }
+            guard self.metadata.mode == .oneDrive,
+                  self.metadata.pendingForcedReset != nil else {
+                self.complete(.failure(.remoteUnavailable), completion: completion)
+                return
+            }
+            self.synchronizeOnQueue(
+                remotePassword: nil,
+                completion: completion,
+                allowForcedResetRaceReobservation: true
             )
         }
     }
@@ -173,6 +251,14 @@ private extension PasswordVaultSyncService {
             candidate = metadata
         }
         switch commit.origin {
+        case .forcedReset:
+            if candidate.pendingForcedReset?.replacementLocalDigest != commit.encryptedDigest {
+                candidate.localRevision &+= 1
+            }
+            if var pending = candidate.pendingForcedReset {
+                pending.replacementLocalDigest = commit.encryptedDigest
+                candidate.pendingForcedReset = pending
+            }
         case .userMutation:
             candidate.localRevision &+= 1
             if candidate.mode == .oneDrive {
@@ -191,13 +277,76 @@ private extension PasswordVaultSyncService {
         }
     }
 
+    private func reconcilePendingForcedResetOnQueue() {
+        guard let pending = metadata.pendingForcedReset else { return }
+        guard !access.requiresForcedResetRecovery else {
+            publish(phase: .pendingForcedReset(.remoteUnavailable), remoteVaultAvailable: nil)
+            return
+        }
+        let local: PasswordVaultEncryptedSnapshot
+        do {
+            local = try access.encryptedSnapshot()
+        } catch {
+            publish(phase: .pendingForcedReset(.remoteUnavailable), remoteVaultAvailable: nil)
+            return
+        }
+
+        guard pending.replacementLocalDigest == nil else {
+            publish(phase: .pendingForcedReset(nil), remoteVaultAvailable: nil)
+            return
+        }
+
+        var candidate = metadata
+        if local.digest == pending.previousLocalDigest {
+            candidate.pendingForcedReset = nil
+        } else {
+            var committed = pending
+            committed.replacementLocalDigest = local.digest
+            candidate.pendingForcedReset = committed
+        }
+        do {
+            try save(candidate)
+            publish(
+                phase: candidate.pendingForcedReset == nil
+                    ? Self.initialPhase(for: candidate)
+                    : .pendingForcedReset(nil),
+                remoteVaultAvailable: nil
+            )
+        } catch {
+            publish(phase: .pendingForcedReset(.remoteUnavailable), remoteVaultAvailable: nil)
+        }
+    }
+
     private func synchronizeOnQueue(
         remotePassword: String?,
-        completion: ((Result<Void, PasswordVaultSyncFailure>) -> Void)?
+        completion: ((Result<Void, PasswordVaultSyncFailure>) -> Void)?,
+        allowForcedResetRaceReobservation: Bool = false
     ) {
+        guard !access.requiresForcedResetRecovery else {
+            let phase: PasswordVaultSyncPhase = metadata.pendingForcedReset == nil
+                ? .failed(.remoteUnavailable)
+                : .pendingForcedReset(.remoteUnavailable)
+            publish(phase: phase, remoteVaultAvailable: nil)
+            completeIfPresent(.failure(.remoteUnavailable), completion: completion)
+            return
+        }
         guard metadata.mode == .oneDrive else {
             publish(phase: .disabled, remoteVaultAvailable: nil)
             completeIfPresent(.success(()), completion: completion)
+            return
+        }
+        if let pendingForcedReset = metadata.pendingForcedReset {
+            do {
+                try resumeForcedReset(
+                    pendingForcedReset,
+                    allowRaceReobservation: allowForcedResetRaceReobservation
+                )
+                completeIfPresent(.success(()), completion: completion)
+            } catch {
+                let failure = Self.syncFailure(from: error)
+                failForcedReset(failure, remoteVaultAvailable: nil)
+                completeIfPresent(.failure(failure), completion: completion)
+            }
             return
         }
         publish(phase: .syncing(.checking), remoteVaultAvailable: nil)
@@ -245,6 +394,155 @@ private extension PasswordVaultSyncService {
             completeIfPresent(.failure(failure), completion: completion)
         }
     }
+
+    private func resumeForcedReset(
+        _ pendingForcedReset: PasswordVaultPendingForcedReset,
+        allowRaceReobservation: Bool
+    ) throws {
+        let rootURL = try resolvedRootURL()
+        let local = try access.encryptedSnapshot()
+        var pending = pendingForcedReset
+
+        // Before the first remote observation there cannot have been an active CAS.
+        // Afterwards the persisted replacement is evidence for a possibly completed CAS,
+        // so keep it until the remote snapshot has been classified.
+        if !pending.didInspectRemote, pending.replacementLocalDigest != local.digest {
+            pending.replacementLocalDigest = local.digest
+            try savePendingForcedReset(pending)
+        }
+
+        let wasPreviouslyInspected = pending.didInspectRemote
+        let previousReplacementDigest = pending.replacementLocalDigest
+        let remote = try cloudReplica.read(rootURL: rootURL)
+        if !pending.didInspectRemote {
+            pending.didInspectRemote = true
+            pending.observedRemoteDigest = remote?.digest
+            pending.archivedRemoteDigest = nil
+            pending.remoteArchiveRequired = remote != nil
+            try savePendingForcedReset(pending)
+
+            // Seeing the replacement on the very first inspection cannot prove that an
+            // older active vault was archived by this reset. Never archive the replacement
+            // itself to manufacture that missing proof.
+            if remote?.digest == local.digest {
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            }
+        }
+
+        guard pending.remoteArchiveRequired != nil else {
+            throw PasswordVaultSyncFailure.remoteVerificationFailed
+        }
+
+        if wasPreviouslyInspected,
+           let previousReplacementDigest,
+           remote?.digest == previousReplacementDigest {
+            guard hasDurableForcedResetArchiveProof(pending) else {
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            }
+
+            if previousReplacementDigest == local.digest {
+                try finalizeForcedReset(local: local, verifiedRemoteDigest: local.digest)
+                return
+            }
+
+            // The prior replacement reached active, then the local vault changed again.
+            // Advance the durable CAS expectation while retaining proof for the original
+            // archived generation.
+            pending.observedRemoteDigest = previousReplacementDigest
+            pending.replacementLocalDigest = local.digest
+            try savePendingForcedReset(pending)
+        }
+
+        if remote?.digest != pending.observedRemoteDigest {
+            let isConfirmedRace = remote?.digest != previousReplacementDigest
+                && remote?.digest != local.digest
+            guard allowRaceReobservation, isConfirmedRace else {
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            }
+            pending.didInspectRemote = true
+            pending.observedRemoteDigest = remote?.digest
+            pending.archivedRemoteDigest = nil
+            pending.replacementLocalDigest = local.digest
+            pending.remoteArchiveRequired = remote != nil
+            try savePendingForcedReset(pending)
+        } else if pending.replacementLocalDigest != local.digest {
+            pending.replacementLocalDigest = local.digest
+            try savePendingForcedReset(pending)
+        }
+
+        if pending.remoteArchiveRequired == true,
+           let remote,
+           pending.archivedRemoteDigest == nil {
+            let currentArchive = try cloudReplica.readLatestForcedResetArchive(rootURL: rootURL)
+            let archiveExpectation: PasswordVaultRemoteExpectation = currentArchive.map {
+                .digest($0.digest)
+            } ?? .absent
+            let archivedDigest = try cloudReplica.writeLatestForcedResetArchiveAtomically(
+                remote.data,
+                rootURL: rootURL,
+                expecting: archiveExpectation
+            )
+            guard archivedDigest == remote.digest,
+                  let archiveReadback = try cloudReplica.readLatestForcedResetArchive(rootURL: rootURL),
+                  archiveReadback.digest == remote.digest,
+                  archiveReadback.data == remote.data else {
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            }
+            pending.archivedRemoteDigest = remote.digest
+            try savePendingForcedReset(pending)
+        } else if pending.remoteArchiveRequired == true {
+            guard hasDurableForcedResetArchiveProof(pending) else {
+                throw PasswordVaultSyncFailure.remoteVerificationFailed
+            }
+        }
+
+        let expectation: PasswordVaultRemoteExpectation = pending.observedRemoteDigest.map {
+            .digest($0)
+        } ?? .absent
+        let writtenDigest = try cloudReplica.writeAtomically(
+            local.data,
+            rootURL: rootURL,
+            expecting: expectation
+        )
+        guard writtenDigest == local.digest,
+              let activeReadback = try cloudReplica.read(rootURL: rootURL),
+              activeReadback.digest == local.digest,
+              activeReadback.data == local.data else {
+            throw PasswordVaultSyncFailure.remoteVerificationFailed
+        }
+        try finalizeForcedReset(local: local, verifiedRemoteDigest: activeReadback.digest)
+    }
+
+    private func hasDurableForcedResetArchiveProof(
+        _ pending: PasswordVaultPendingForcedReset
+    ) -> Bool {
+        guard let remoteArchiveRequired = pending.remoteArchiveRequired else { return false }
+        return !remoteArchiveRequired || pending.archivedRemoteDigest != nil
+    }
+
+    private func savePendingForcedReset(_ pending: PasswordVaultPendingForcedReset) throws {
+        var candidate = metadata
+        candidate.pendingForcedReset = pending
+        try save(candidate)
+    }
+
+    private func finalizeForcedReset(
+        local: PasswordVaultEncryptedSnapshot,
+        verifiedRemoteDigest: String
+    ) throws {
+        var candidate = metadata
+        candidate.lastSyncedLocalRevision = candidate.localRevision
+        candidate.lastSyncedLocalDigest = local.digest
+        candidate.lastObservedRemoteDigest = verifiedRemoteDigest
+        candidate.pendingMergedRemoteDigest = nil
+        candidate.lastSyncAt = now()
+        candidate.pendingChangeCount = 0
+        candidate.lastFailure = nil
+        candidate.pendingForcedReset = nil
+        try save(candidate)
+        publish(phase: .synced, remoteVaultAvailable: true)
+    }
+
     private func resolvedRootURL() throws -> URL {
         switch processStatus.currentStatus() {
         case .notInstalled:
@@ -396,10 +694,35 @@ private extension PasswordVaultSyncService {
         publish(phase: phase, remoteVaultAvailable: remoteVaultAvailable)
     }
 
+    private func failForcedReset(
+        _ failure: PasswordVaultSyncFailure,
+        remoteVaultAvailable: Bool?
+    ) {
+        var candidate = metadata
+        candidate.lastFailure = failure
+        if (try? metadataStore.save(candidate)) != nil {
+            metadata = candidate
+        }
+        publish(
+            phase: .pendingForcedReset(failure),
+            remoteVaultAvailable: remoteVaultAvailable
+        )
+    }
+
     private func publishCurrentState() {
         let previous = snapshot
+        let phase: PasswordVaultSyncPhase
+        if metadata.pendingForcedReset != nil {
+            if case let .pendingForcedReset(failure) = previous.phase {
+                phase = .pendingForcedReset(failure)
+            } else {
+                phase = .pendingForcedReset(nil)
+            }
+        } else {
+            phase = metadata.mode == .localOnly ? .disabled : previous.phase
+        }
         publish(
-            phase: metadata.mode == .localOnly ? .disabled : previous.phase,
+            phase: phase,
             remoteVaultAvailable: previous.remoteVaultAvailable
         )
     }
@@ -455,6 +778,11 @@ private extension PasswordVaultSyncService {
             conflictCopyCount: metadata.conflictCopyCount,
             lastSyncAt: metadata.lastSyncAt
         )
+    }
+
+    static func initialPhase(for metadata: PasswordVaultSyncMetadata) -> PasswordVaultSyncPhase {
+        if metadata.pendingForcedReset != nil { return .pendingForcedReset(nil) }
+        return metadata.mode == .localOnly ? .disabled : .syncing(.checking)
     }
 
     static func isLocalVaultAvailable(_ state: PasswordVaultState) -> Bool {
