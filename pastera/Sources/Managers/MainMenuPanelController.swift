@@ -439,6 +439,8 @@ final class MainMenuPanelController: NSObject, NSWindowDelegate, NSSearchFieldDe
     private var visibleHistoryIDs = [PasteboardHistory.ID]()
     private var visibleSnippetFolderIDs = [SnippetFolder.ID]()
     private var visibleSnippetIDs = [Snippet.ID]()
+    private var visiblePasswordVaultFolderIDs = [PasswordVaultFolder.ID]()
+    private var visiblePasswordVaultEntryIDs = [PasswordVaultEntry.ID]()
     private var visibleMainMenuRowTitles = [String]()
     private var currentSnippetFolderTitle: String?
     private var isSearchVisible = false
@@ -1843,15 +1845,20 @@ extension MainMenuPanelController {
         }
         let query = passwordVaultSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let matchingEntries = entries.filter { query.isEmpty || $0.matches(query) }
+        let allowsNumberShortcuts = passwordVaultEditorState == nil && passwordVaultFolderEditorState == nil
         let rows = folders.flatMap { folder -> [EmbeddedRow] in
             let folderEntries = matchingEntries.filter { $0.folderID == folder.id }
             guard query.isEmpty || !folderEntries.isEmpty || folder.name.localizedCaseInsensitiveContains(query) else { return [] }
             let isExpanded = query.isEmpty ? folder.id == expandedPasswordVaultFolderID : true
+            let folderNumber = allowsNumberShortcuts && query.isEmpty && expandedPasswordVaultFolderID == nil
+                ? numericShortcutText(forRowIndex: visiblePasswordVaultFolderIDs.count) : nil
+            visiblePasswordVaultFolderIDs.append(folder.id)
             let folderRow = EmbeddedRow(
                 title: folder.name,
                 view: MainMenuPanelRowView(
                     title: folder.name,
                     image: folderRowImage(),
+                    itemNumberText: folderNumber,
                     rowKind: .snippetFolder,
                     showsChevron: true,
                     isExpanded: isExpanded,
@@ -1885,18 +1892,23 @@ extension MainMenuPanelController {
             }
             guard isExpanded else { return folderRows }
             let entryRows = folderEntries.flatMap { entry -> [EmbeddedRow] in
+                let numberShortcut = allowsNumberShortcuts
+                    ? numericShortcutText(forRowIndex: visiblePasswordVaultEntryIDs.count) : nil
+                let usernameShortcut = numberShortcut.map { "⌃\($0)" }
+                visiblePasswordVaultEntryIDs.append(entry.id)
                 let row = EmbeddedRow(
                     title: entry.title,
                     view: MainMenuPanelRowView(
                         title: entry.title,
                         image: MainMenuModeIcons.passwordVault(),
+                        itemNumberText: numberShortcut,
                         rowKind: .action,
                         indentationLevel: 1,
                         contextActions: [
-                            .init(title: String(localized: "Paste Username"), keyEquivalent: "u", action: { [weak self] in
+                            .init(title: String(localized: "Paste Username"), keyEquivalent: numberShortcut ?? "", modifierFlags: .control, action: { [weak self] in
                                 self?.pastePasswordVaultUsername(entry.id)
                             }),
-                            .init(title: String(localized: "Paste Password"), keyEquivalent: "p", action: { [weak self] in
+                            .init(title: String(localized: "Paste Password"), keyEquivalent: numberShortcut ?? "", modifierFlags: [], action: { [weak self] in
                                 self?.pastePasswordVaultPassword(entry.id)
                             })
                         ],
@@ -1905,14 +1917,14 @@ extension MainMenuPanelController {
                                 identifier: "mainMenuPasswordPasteUsernameButton",
                                 symbolName: "person.text.rectangle",
                                 title: String(localized: "Paste Username"),
-                                shortcutText: "⌥⌘U",
+                                shortcutText: usernameShortcut,
                                 action: { [weak self] in self?.pastePasswordVaultUsername(entry.id) }
                             ),
                             .init(
                                 identifier: "mainMenuPasswordPastePasswordButton",
                                 symbolName: "key.fill",
                                 title: String(localized: "Paste Password"),
-                                shortcutText: "⌥⌘P",
+                                shortcutText: numberShortcut,
                                 action: { [weak self] in self?.pastePasswordVaultPassword(entry.id) }
                             ),
                             .init(
@@ -1939,6 +1951,11 @@ extension MainMenuPanelController {
                     confirm: { [weak self] in self?.copyPasswordVaultEntry(entry.id) },
                     role: .passwordEntry(entry.id)
                 )
+                row.view.toolTip = [entry.title,
+                    numberShortcut.map { "\(String(localized: "Paste Password"))  \($0)" },
+                    usernameShortcut.map { "\(String(localized: "Paste Username"))  \($0)" }
+                ].compactMap { $0 }.joined(separator: "  ·  ")
+                row.view.setAccessibilityHelp(row.view.toolTip)
                 guard passwordVaultEditingEntryID == entry.id else { return [row] }
                 return [passwordVaultStepEditorRow()]
             }
@@ -2778,6 +2795,8 @@ extension MainMenuPanelController {
         visibleHistoryIDs.removeAll()
         visibleSnippetFolderIDs.removeAll()
         visibleSnippetIDs.removeAll()
+        visiblePasswordVaultFolderIDs.removeAll()
+        visiblePasswordVaultEntryIDs.removeAll()
         visibleMainMenuRowTitles.removeAll()
         currentSnippetFolderTitle = nil
     }
@@ -3497,7 +3516,37 @@ extension MainMenuPanelController {
             confirmSnippetSelection(visibleSnippetIDs[rowIndex])
             return true
         case .passwordVault:
-            return false
+            guard passwordVaultPage == .vault,
+                  passwordVaultEditorState == nil,
+                  passwordVaultFolderEditorState == nil else { return false }
+            switch passwordVaultDataSource?.state() {
+            case .unlocked, .readOnlyWarning:
+                break
+            default:
+                return false
+            }
+            if expandedPasswordVaultFolderID == nil && passwordVaultSearchQuery.isEmpty {
+                guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
+                    for: event,
+                    startsAtZero: startsAtZero,
+                    rowCount: visiblePasswordVaultFolderIDs.count
+                ) else { return false }
+                togglePasswordVaultFolder(visiblePasswordVaultFolderIDs[rowIndex])
+                return true
+            }
+            guard let rowIndex = HistoryMenuNumberShortcutMapper.rowIndex(
+                for: event,
+                startsAtZero: startsAtZero,
+                rowCount: visiblePasswordVaultEntryIDs.count,
+                allowedModifierFlags: .control
+            ) else { return false }
+            let entryID = visiblePasswordVaultEntryIDs[rowIndex]
+            if event.modifierFlags.contains(.control) {
+                pastePasswordVaultUsername(entryID)
+            } else {
+                pastePasswordVaultPassword(entryID)
+            }
+            return true
         }
     }
 }
@@ -3539,9 +3588,6 @@ extension MainMenuPanelController {
             return true
         }
         if handleSnippetDeleteShortcut(event) {
-            return true
-        }
-        if handlePasswordVaultPasteShortcut(event) {
             return true
         }
         if usesEmbeddedContent, selectedMode == .snippets {
@@ -3646,22 +3692,6 @@ extension MainMenuPanelController {
             return true
         case .none, .passwordEntry:
             return false
-        }
-    }
-
-    private func handlePasswordVaultPasteShortcut(_ event: NSEvent) -> Bool {
-        guard passwordVaultEditorState == nil,
-              passwordVaultFolderEditorState == nil,
-              selectedMode == .passwordVault,
-              let selectedKeyboardEntryIndex,
-              keyboardEntries.indices.contains(selectedKeyboardEntryIndex),
-              case let .passwordEntry(id) = keyboardEntries[selectedKeyboardEntryIndex].role else { return false }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.numericPad)
-        guard flags == [.command, .option] else { return false }
-        switch event.charactersIgnoringModifiers?.lowercased() {
-        case "u": pastePasswordVaultUsername(id); return true
-        case "p": pastePasswordVaultPassword(id); return true
-        default: return false
         }
     }
 
@@ -5045,6 +5075,7 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
     struct ContextAction {
         let title: String
         let keyEquivalent: String
+        let modifierFlags: NSEvent.ModifierFlags
         let action: () -> Void
     }
     struct QuickAction {
@@ -5300,7 +5331,7 @@ private final class MainMenuPanelRowView: NSControl, NSDraggingSource {
         let menu = NSMenu()
         for (index, action) in contextActions.enumerated() {
             let item = NSMenuItem(title: action.title, action: #selector(contextActionClicked(_:)), keyEquivalent: action.keyEquivalent)
-            item.keyEquivalentModifierMask = [.command, .option]
+            item.keyEquivalentModifierMask = action.modifierFlags
             item.tag = index
             item.target = self
             menu.addItem(item)

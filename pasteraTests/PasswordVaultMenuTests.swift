@@ -646,7 +646,7 @@ struct PasswordVaultMenuTests {
     }
 
     @Test("an unlocked folder exposes password creation after expanding in edit mode")
-    func folderShowsPasswordCreation() {
+    func folderShowsPasswordCreation() throws {
         let work = PasswordVaultFolder(id: UUID(), name: "Work", createdAt: .distantPast, updatedAt: .distantPast)
         let personal = PasswordVaultFolder(id: UUID(), name: "Personal", createdAt: .distantPast, updatedAt: .distantPast)
         let entry = PasswordVaultEntry(
@@ -661,27 +661,27 @@ struct PasswordVaultMenuTests {
         controller.toggleWorkspaceEditingForTesting()
         #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuContentCreatePasswordFolderButton"))
         #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuContentCreatePasswordButton"))
-        let rootCreateFrame = controller.mainMenuButtonFrameForTesting(
+        let rootCreateFrame = try #require(controller.mainMenuButtonFrameForTesting(
             identifier: "mainMenuContentCreatePasswordFolderButton"
-        )
-        let personalRowFrame = controller.mainMenuSnippetRowFrameForTesting(title: "Personal")
-        let personalImageFrame = controller.mainMenuRowImageFrameForTesting(title: "Personal")
-        #expect(rootCreateFrame?.maxY ?? .greatestFiniteMagnitude <= personalRowFrame?.minY ?? -.greatestFiniteMagnitude)
-        #expect(abs((rootCreateFrame?.minX ?? 0) - (personalImageFrame?.minX ?? 1)) < 1)
+        ))
+        let personalRowFrame = try #require(controller.mainMenuSnippetRowFrameForTesting(title: "Personal"))
+        let personalNumberFrame = try #require(controller.mainMenuRowItemNumberFrameForTesting(title: "Personal"))
+        #expect(rootCreateFrame.maxY <= personalRowFrame.minY)
+        #expect(abs(rootCreateFrame.minX - (personalRowFrame.minX + personalNumberFrame.minX)) < 1)
         controller.performMainMenuRowConfirmForTesting(title: "Work")
         #expect(!controller.mainMenuVisibleRowTitlesForTesting.contains(String(localized: "New Password")))
         #expect(controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuContentCreatePasswordButton"))
         #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuCreatePasswordInFolderButton"))
         #expect(!controller.mainMenuButtonIdentifiersForTesting.contains("mainMenuContentCreatePasswordFolderButton"))
-        let entryCreateFrame = controller.mainMenuButtonFrameForTesting(
+        let entryCreateFrame = try #require(controller.mainMenuButtonFrameForTesting(
             identifier: "mainMenuContentCreatePasswordButton"
-        )
-        let mailRowFrame = controller.mainMenuActionRowFrameForTesting(title: "Mail")
-        let mailImageFrame = controller.mainMenuRowImageFrameForTesting(title: "Mail")
-        let nextFolderFrame = controller.mainMenuSnippetRowFrameForTesting(title: "Personal")
-        #expect(entryCreateFrame?.maxY ?? .greatestFiniteMagnitude <= mailRowFrame?.minY ?? -.greatestFiniteMagnitude)
-        #expect(entryCreateFrame?.minY ?? -.greatestFiniteMagnitude >= nextFolderFrame?.maxY ?? .greatestFiniteMagnitude)
-        #expect(abs((entryCreateFrame?.minX ?? 0) - (mailImageFrame?.minX ?? 1)) < 1)
+        ))
+        let mailRowFrame = try #require(controller.mainMenuActionRowFrameForTesting(title: "Mail"))
+        let mailNumberFrame = try #require(controller.mainMenuRowItemNumberFrameForTesting(title: "Mail"))
+        let nextFolderFrame = try #require(controller.mainMenuSnippetRowFrameForTesting(title: "Personal"))
+        #expect(entryCreateFrame.maxY <= mailRowFrame.minY)
+        #expect(entryCreateFrame.minY >= nextFolderFrame.maxY)
+        #expect(abs(entryCreateFrame.minX - (mailRowFrame.minX + mailNumberFrame.minX)) < 1)
         try? controller.mainMenuSnapshotPNGForTesting().write(
             to: URL(fileURLWithPath: "/tmp/pastera-password-vault-child-create-button.png")
         )
@@ -1090,8 +1090,12 @@ struct PasswordVaultMenuTests {
         #expect(editor.value == "test-secret")
     }
 
-    @Test("selected password entry has separate username and password paste commands")
+    @Test("password quick actions and numeric shortcuts paste the corresponding field")
     func selectedEntryPasteShortcuts() throws {
+        let numberKey = Constants.UserDefaults.menuItemsTitleStartWithZero
+        let previousNumberSetting = AppEnvironment.current.defaults.object(forKey: numberKey)
+        AppEnvironment.current.defaults.set(false, forKey: numberKey)
+        defer { AppEnvironment.current.defaults.set(previousNumberSetting, forKey: numberKey) }
         let coachmarkKey = "kPasteraPasswordVaultQuickActionsCoachmarkShown"
         AppEnvironment.current.defaults.removeObject(forKey: coachmarkKey)
         defer { AppEnvironment.current.defaults.removeObject(forKey: coachmarkKey) }
@@ -1122,6 +1126,7 @@ struct PasswordVaultMenuTests {
         )
         controller.openPasswordVaultFromMainMenu()
         controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
+        defer { _ = controller.close() }
         controller.performMainMenuRowConfirmForTesting(title: "Work")
         controller.selectMainMenuItemForTesting(title: "Mail")
 
@@ -1146,6 +1151,10 @@ struct PasswordVaultMenuTests {
         #expect(controller.mainMenuRowContextMenuTitlesForTesting(title: "Mail").prefix(2) == [
             String(localized: "Paste Username"), String(localized: "Paste Password")
         ])
+        let rowHelp = try #require(controller.mainMenuRowToolTipForTesting(title: "Mail"))
+        #expect(rowHelp.contains("⌃1"))
+        #expect(rowHelp.contains(String(localized: "Paste Password")))
+        #expect(!rowHelp.contains("⇧↩"))
         controller.performMainMenuButtonClickForTesting(identifier: "mainMenuPasswordPasteUsernameButton")
         #expect(pastedUsername == 1)
         controller.show(at: NSPoint(x: 200, y: 200), pinned: true)
@@ -1163,8 +1172,11 @@ struct PasswordVaultMenuTests {
             try #require(keyEvent(keyCode: 32, characters: "u", modifiers: .command))
         ))
         #expect(pastedUsername == 0)
-        #expect(controller.handleMainMenuNavigationForTesting(
+        #expect(!controller.handleMainMenuNavigationForTesting(
             try #require(keyEvent(keyCode: 32, characters: "u", modifiers: [.option, .command]))
+        ))
+        #expect(controller.handleMainMenuNavigationForTesting(
+            try #require(keyEvent(keyCode: 18, characters: "1", modifiers: .control))
         ))
         #expect(pastedUsername == 1)
 
@@ -1174,8 +1186,11 @@ struct PasswordVaultMenuTests {
             try #require(keyEvent(keyCode: 35, characters: "p", modifiers: .command))
         ))
         #expect(pastedPassword == 0)
-        #expect(controller.handleMainMenuNavigationForTesting(
+        #expect(!controller.handleMainMenuNavigationForTesting(
             try #require(keyEvent(keyCode: 35, characters: "p", modifiers: [.option, .command]))
+        ))
+        #expect(controller.handleMainMenuNavigationForTesting(
+            try #require(keyEvent(keyCode: 18, characters: "1"))
         ))
         #expect(pastedPassword == 1)
 
